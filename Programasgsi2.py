@@ -4556,69 +4556,313 @@ def perfil():
     )
 
     inner = render_template_string("""
-    <div class="container mt-4">
+    <div class="perfil-shell">
 
-      <a href="/" class="btn btn-secondary mb-3 rounded-pill">⬅️ Volver</a>
+      <!-- HEADER SGSI -->
+      <div class="perfil-header-card">
+        <div class="perfil-header-overlay">
+          <div class="perfil-header-text">
+            <h3 class="perfil-title m-0">👤 Perfil de usuario</h3>
+            <div class="perfil-subtitle">
+              Administra tu foto de perfil y actualiza tu contraseña de acceso
+            </div>
+          </div>
+        </div>
+      </div>
 
-      <div class="card shadow-sm border-0 rounded-4">
+      <!-- BOTÓN VOLVER -->
+      <div class="perfil-header-actions">
+        <a href="/" class="btn perfil-btn-main rounded-pill px-4 fw-bold">⬅ Volver</a>
+      </div>
+
+      <div class="perfil-card">
         <div class="card-body">
 
-          <div class="d-flex align-items-center gap-3">
-            <img src="{{ avatar_url }}" alt="Foto"
-                 style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:2px solid #0d6efd;">
-            <div>
-              <h4 class="mb-0">👤 Perfil</h4>
-              <div class="text-muted small">Usuario: <b>{{ user.username }}</b></div>
-              <div class="text-muted small">Rol: <b>{{ user.role }}</b></div>
+          <!-- DATOS USUARIO -->
+          <div class="perfil-section-title">Información del usuario</div>
+
+          <div class="perfil-user-box mb-4">
+            <img src="{{ avatar_url }}" alt="Foto" class="perfil-avatar">
+
+            <div class="perfil-user-info">
+              <div class="perfil-user-name">👤 {{ user.username }}</div>
+              <div class="perfil-user-meta">Rol: <b>{{ user.role }}</b></div>
               {% if user.email %}
-                <div class="text-muted small">Correo: <b>{{ user.email }}</b></div>
+                <div class="perfil-user-meta">Correo: <b>{{ user.email }}</b></div>
               {% endif %}
             </div>
           </div>
 
-          <hr>
+          <!-- FOTO -->
+          <div class="perfil-section-title">🖼️ Cambiar foto</div>
 
-          <h6 class="mb-2">🖼️ Cambiar foto</h6>
-          <form method="POST" enctype="multipart/form-data">
+          <form method="POST" enctype="multipart/form-data" class="mb-4">
             <input type="hidden" name="accion" value="subir_foto">
-            <div class="row g-2 align-items-end">
-              <div class="col-md-6">
+
+            <div class="row g-3 align-items-end">
+              <div class="col-md-8">
+                <label class="form-label fw-semibold">Seleccionar imagen</label>
                 <input type="file" name="foto" class="form-control" accept="image/*" required>
               </div>
-              <div class="col-md-3">
-                <button class="btn btn-primary rounded-pill">Subir foto</button>
+              <div class="col-md-4 text-md-end">
+                <button class="btn btn-primary rounded-pill px-4 fw-semibold">Subir foto</button>
               </div>
             </div>
           </form>
 
-          <hr>
+          <!-- CONTRASEÑA -->
+          <div class="perfil-section-title">🔑 Cambiar contraseña</div>
 
-          <h6 class="mb-2">🔑 Cambiar contraseña</h6>
           <form method="POST">
             <input type="hidden" name="accion" value="cambiar_password">
 
-            <div class="row g-2">
+            <div class="row g-3">
               <div class="col-md-4">
-                <label class="form-label">Contraseña actual</label>
+                <label class="form-label fw-semibold">Contraseña actual</label>
                 <input type="password" name="password_actual" class="form-control" required>
               </div>
+
               <div class="col-md-4">
-                <label class="form-label">Nueva contraseña</label>
+                <label class="form-label fw-semibold">Nueva contraseña</label>
                 <input type="password" name="password_nueva" class="form-control" required>
-                <div class="text-muted small">Mínimo 10, 1 mayúscula, 1 especial</div>
+                <div class="text-muted small mt-1">Mínimo 10 caracteres, 1 mayúscula y 1 carácter especial</div>
               </div>
+
               <div class="col-md-4">
-                <label class="form-label">Confirmar</label>
+                <label class="form-label fw-semibold">Confirmar contraseña</label>
                 <input type="password" name="password_confirma" class="form-control" required>
               </div>
             </div>
 
-            <button class="btn btn-success rounded-pill mt-3">Guardar contraseña</button>
+            <div class="text-center text-md-start">
+              <button class="btn btn-success rounded-pill px-4 fw-semibold mt-4">Guardar contraseña</button>
+            </div>
           </form>
 
         </div>
       </div>
     </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .perfil-shell{
+        width:96%;
+        max-width:1200px;
+        margin:10px auto 30px auto;
+      }
+
+      /* =========================
+         HEADER SGSI
+         ========================= */
+      .perfil-header-card{
+        background:#3f86d6;
+        height:88px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        border-radius:18px;
+        box-shadow:0 12px 30px rgba(0,0,0,.30);
+        margin-bottom:14px;
+        overflow:hidden;
+      }
+
+      .perfil-header-overlay{
+        width:100%;
+        height:100%;
+        display:flex;
+        align-items:flex-start;
+        justify-content:center;
+        text-align:center;
+        background:rgba(0,0,0,.08);
+        padding:8px 24px 6px 24px;
+      }
+
+      .perfil-header-text{
+        max-width:1000px;
+        width:100%;
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        justify-content:flex-start;
+        transform:translateY(8px);
+      }
+
+      .perfil-title{
+        color:#ffffff !important;
+        font-weight:900;
+        font-size:1.38rem;
+        line-height:1.1;
+        text-shadow:0 4px 14px rgba(0,0,0,.45);
+        margin:0 !important;
+      }
+
+      .perfil-subtitle{
+        color:rgba(255,255,255,.96);
+        font-size:.82rem;
+        margin-top:4px;
+        line-height:1.15;
+      }
+
+      /* =========================
+         BOTONES
+         ========================= */
+      .perfil-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        margin-bottom:16px;
+        flex-wrap:wrap;
+      }
+
+      .perfil-btn-main{
+        background:#ffffff;
+        color:#000;
+        border:2px solid #ffffff;
+        border-radius:999px;
+        box-shadow:0 4px 10px rgba(0,0,0,.10);
+        padding:6px 18px;
+      }
+
+      .perfil-btn-main:hover{
+        background:#f3f4f6;
+        color:#000;
+      }
+
+      /* =========================
+         TARJETA PRINCIPAL
+         ========================= */
+      .perfil-card{
+        background:rgba(255,255,255,.93)!important;
+        border-radius:18px;
+        backdrop-filter:blur(6px);
+        box-shadow:0 10px 24px rgba(0,0,0,.18);
+        border:none;
+      }
+
+      .perfil-card .card-body{
+        padding:22px;
+      }
+
+      /* =========================
+         SECCIONES
+         ========================= */
+      .perfil-section-title{
+        font-weight:900;
+        font-size:1.02rem;
+        color:#1d4ed8;
+        padding-bottom:8px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+        margin-bottom:16px;
+      }
+
+      /* =========================
+         BLOQUE USUARIO
+         ========================= */
+      .perfil-user-box{
+        display:flex;
+        align-items:center;
+        gap:18px;
+        background:rgba(248,250,252,.92);
+        border:1px solid rgba(15,23,42,.06);
+        border-radius:16px;
+        padding:16px;
+      }
+
+      .perfil-avatar{
+        width:78px;
+        height:78px;
+        border-radius:50%;
+        object-fit:cover;
+        border:3px solid #3f86d6;
+        box-shadow:0 6px 16px rgba(0,0,0,.12);
+        flex:0 0 auto;
+      }
+
+      .perfil-user-info{
+        min-width:0;
+      }
+
+      .perfil-user-name{
+        font-size:1.05rem;
+        font-weight:900;
+        color:#1f2937;
+        line-height:1.2;
+        margin-bottom:4px;
+      }
+
+      .perfil-user-meta{
+        color:#6b7280;
+        font-size:.90rem;
+        line-height:1.35;
+      }
+
+      /* =========================
+         FORMULARIOS
+         ========================= */
+      .form-control,
+      .form-select{
+        border-radius:10px;
+        border:1px solid #cfd8e3;
+        min-height:42px;
+      }
+
+      .form-control:focus,
+      .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 0.2rem rgba(63,134,214,.18);
+      }
+
+      .btn{
+        border-radius:999px !important;
+      }
+
+      /* =========================
+         RESPONSIVE
+         ========================= */
+      @media (max-width:992px){
+        .perfil-shell{
+          width:98%;
+          margin:8px auto 24px auto;
+        }
+
+        .perfil-header-card{
+          height:84px;
+        }
+
+        .perfil-header-overlay{
+          padding:8px 16px 6px 16px;
+        }
+
+        .perfil-header-text{
+          transform:translateY(-1px);
+        }
+
+        .perfil-title{
+          font-size:1.20rem;
+        }
+
+        .perfil-subtitle{
+          font-size:.76rem;
+        }
+
+        .perfil-card .card-body{
+          padding:16px;
+        }
+
+        .perfil-user-box{
+          flex-direction:column;
+          align-items:flex-start;
+          text-align:left;
+        }
+      }
+    </style>
     """, user=user, avatar_url=avatar_url)
 
     return render_template_string(BASE, content=Markup(inner))
