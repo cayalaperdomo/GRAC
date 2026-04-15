@@ -203,7 +203,7 @@ OPENROUTER_MAX_TOKENS_SGSI = OPENROUTER_MAX_TOKENS
 #                                                    Configuración Jira (integrada en Python)
 # ==========================================================================================================================================
 
-JIRA_CRYPTO_SECRET = "SGSI_JIRA_SECRET_INTERNA_2026_CAMBIAR_ESTA_LLAVE"
+JIRA_CRYPTO_SECRET = os.getenv("JIRA_CRYPTO_SECRET", "dev-secret")
 
 # ==========================================
 # Cliente OpenRouter usando key cifrada
@@ -106299,6 +106299,22 @@ def historial():
     for r in runs:
         nivel = pci_resolver_nivel(r.nivel_promedio_general or 0)
 
+        if user.role == 'auditor':
+            boton_eliminar = ""
+        else:
+            company_name_safe = escape(r.company_name or '')
+            eliminar_url = url_for('madurez_pci.historial_eliminar', run_id=r.id)
+            boton_eliminar = f"""
+                <form method="POST"
+                      action="{eliminar_url}"
+                      class="m-0"
+                      onsubmit="return confirm('¿Seguro que deseas eliminar esta revisión PCI-DSS?\\n\\nConsecutivo: {company_name_safe}');">
+                  <button class="btn btn-sm btn-danger rounded-pill" type="submit">
+                    <i class="bi bi-trash3 me-1"></i>Eliminar
+                  </button>
+                </form>
+            """
+
         rows += f"""
         <tr>
           <td>{escape(r.fecha_calculo.strftime('%Y-%m-%d %H:%M')) if r.fecha_calculo else ''}</td>
@@ -106325,19 +106341,7 @@ def historial():
                 <i class="bi bi-file-earmark-pdf me-1"></i>PDF
               </a>
 
-              {""
-                if user.role == 'auditor' else
-                f'''
-                <form method="POST"
-                      action="{url_for('madurez_pci.historial_eliminar', run_id=r.id)}"
-                      class="m-0"
-                      onsubmit="return confirm('¿Seguro que deseas eliminar esta revisión PCI-DSS?\\n\\nConsecutivo: {escape(r.company_name or '')}');">
-                  <button class="btn btn-sm btn-danger rounded-pill" type="submit">
-                    <i class="bi bi-trash3 me-1"></i>Eliminar
-                  </button>
-                </form>
-                '''
-              }
+              {boton_eliminar}
             </div>
           </td>
         </tr>
