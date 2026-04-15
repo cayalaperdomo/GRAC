@@ -1,0 +1,10 @@
+{
+  "run_id": 1,
+  "target": "https://xss-game.appspot.com/",
+  "target_type": "url",
+  "estado": "ejecutando",
+  "total_findings": 10,
+  "created_vulns": 10,
+  "created_planes": 10,
+  "generated_at": "2026-03-10T16:00:51.520105"
+}

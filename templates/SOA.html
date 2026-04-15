@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4 text-center">Declaración de Aplicabilidad (SOA) - ISO 27001</h2>
+
+<table class="table table-striped table-bordered">
+    <thead class="table-dark">
+        <tr>
+            <th>Código</th>
+            <th>Control</th>
+            <th>Aplicable</th>
+            <th>Justificación</th>
+            <th>Estado</th>
+            <th>Acción</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for c in controles %}
+        <tr>
+            <form action="{{ url_for('update_soa', id=c.id) }}" method="post">
+                <td>{{ c.codigo }}</td>
+                <td>{{ c.nombre }}</td>
+                <td>
+                    <select name="aplicable" class="form-select">
+                        <option value="Sí" {% if c.aplicable == 'Sí' %}selected{% endif %}>Sí</option>
+                        <option value="No" {% if c.aplicable == 'No' %}selected{% endif %}>No</option>
+                    </select>
+                </td>
+                <td><input type="text" name="justificacion" class="form-control" value="{{ c.justificacion }}"></td>
+                <td>
+                    <select name="estado" class="form-select">
+                        <option value="No implementado" {% if c.estado == 'No implementado' %}selected{% endif %}>No implementado</option>
+                        <option value="En proceso" {% if c.estado == 'En proceso' %}selected{% endif %}>En proceso</option>
+                        <option value="Implementado" {% if c.estado == 'Implementado' %}selected{% endif %}>Implementado</option>
+                        <option value="En revisión" {% if c.estado == 'En revisión' %}selected{% endif %}>En revisión</option>
+                    </select>
+                </td>
+                <td><button type="submit" class="btn btn-success btn-sm">Guardar</button></td>
+            </form>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

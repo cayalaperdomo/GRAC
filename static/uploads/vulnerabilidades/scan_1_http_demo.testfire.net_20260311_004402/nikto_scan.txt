@@ -1,0 +1,89 @@
+- Nikto v2.1.6
+---------------------------------------------------------------------------
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_sitefiles
+V:Tue Mar 10 19:44:32 2026 - Loaded "Site Files" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_ssl
+V:Tue Mar 10 19:44:32 2026 - Loaded "SSL and cert checks" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_dishwasher
+V:Tue Mar 10 19:44:32 2026 - Loaded "dishwasher" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_paths
+V:Tue Mar 10 19:44:32 2026 - Loaded "Path Search" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_outdated
+V:Tue Mar 10 19:44:32 2026 - Loaded "Outdated" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_ms10_070
+V:Tue Mar 10 19:44:32 2026 - Loaded "ms10-070 Check" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_shellshock
+V:Tue Mar 10 19:44:32 2026 - Loaded "shellshock" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_cookies
+V:Tue Mar 10 19:44:32 2026 - Loaded "HTTP Cookie Internal IP" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_dictionary_attack
+V:Tue Mar 10 19:44:32 2026 - Loaded "Dictionary attack" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_parked
+V:Tue Mar 10 19:44:32 2026 - Loaded "Parked Detection" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_report_sqlg
+V:Tue Mar 10 19:44:32 2026 - Loaded "Generic SQL reports" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_put_del_test
+V:Tue Mar 10 19:44:32 2026 - Loaded "Put/Delete test" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_core
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_fileops
+V:Tue Mar 10 19:44:32 2026 - Loaded "File Operations" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_strutshock
+V:Tue Mar 10 19:44:32 2026 - Loaded "strutshock" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_embedded
+V:Tue Mar 10 19:44:32 2026 - Loaded "Embedded Detection" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_domino
+V:Tue Mar 10 19:44:32 2026 - Loaded "IBM/Lotus Domino Specific Tests" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_report_json
+V:Tue Mar 10 19:44:32 2026 - Loaded "JSON reports" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_siebel
+V:Tue Mar 10 19:44:32 2026 - Loaded "Siebel Checks" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_msgs
+V:Tue Mar 10 19:44:32 2026 - Loaded "Server Messages" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_robots
+V:Tue Mar 10 19:44:32 2026 - Loaded "Robots" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_apache_expect_xss
+V:Tue Mar 10 19:44:32 2026 - Loaded "Apache Expect XSS" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_tests
+V:Tue Mar 10 19:44:32 2026 - Loaded "Nikto Tests" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_report_xml
+V:Tue Mar 10 19:44:32 2026 - Loaded "Report as XML" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_report_text
+V:Tue Mar 10 19:44:32 2026 - Loaded "Text reports" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_docker_registry
+V:Tue Mar 10 19:44:32 2026 - Loaded "docker_registry" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_cgi
+V:Tue Mar 10 19:44:32 2026 - Loaded "CGI" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_drupal
+V:Tue Mar 10 19:44:32 2026 - Loaded "Drupal Specific Tests" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_origin_reflection
+V:Tue Mar 10 19:44:32 2026 - Loaded "CORS Origin Reflection" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_negotiate
+V:Tue Mar 10 19:44:32 2026 - Loaded "Negotiate" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_apacheusers
+V:Tue Mar 10 19:44:32 2026 - Loaded "Apache Users" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_headers
+V:Tue Mar 10 19:44:32 2026 - Loaded "HTTP Headers" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_multiple_index
+V:Tue Mar 10 19:44:32 2026 - Loaded "Multiple Index" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_favicon
+V:Tue Mar 10 19:44:32 2026 - Loaded "Favicon" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_clientaccesspolicy
+V:Tue Mar 10 19:44:32 2026 - Loaded "clientaccesspolicy.xml" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_dir_traversal
+V:Tue Mar 10 19:44:32 2026 - Loaded "Directory Traversal" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_report_html
+V:Tue Mar 10 19:44:32 2026 - Loaded "Report as HTML" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_auth
+V:Tue Mar 10 19:44:32 2026 - Loaded "Guess authentication" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_content_search
+V:Tue Mar 10 19:44:32 2026 - Loaded "Content Search" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_report_csv
+V:Tue Mar 10 19:44:32 2026 - Loaded "CSV reports" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_httpoptions
+V:Tue Mar 10 19:44:32 2026 - Loaded "HTTP Options" plugin.
+V:Tue Mar 10 19:44:32 2026 - Initialising plugin nikto_report_nbe
+V:Tue Mar 10 19:44:32 2026 - Loaded "NBE reports" plugin.
+V:Tue Mar 10 19:44:32 2026 - Getting targets
+V:Tue Mar 10 19:44:32 2026 - Opening reports (none, )
++ ERROR: Invalid IP: 
+

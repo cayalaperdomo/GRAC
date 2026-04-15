@@ -1,0 +1,22 @@
+[NMAP]
+STDOUT:
+Starting Nmap 7.92 ( https://nmap.org ) at 2026-03-10 12:00 -05
+Failed to resolve "demo.testfire.net".
+Nmap done: 0 IP addresses (0 hosts up) scanned in 20.31 seconds
+WARNING: No targets were specified, so 0 hosts scanned.
+STDERR:
+
+
+
+[NIKTO]
+STDOUT:
+
+STDERR:
+
+
+
+[NUCLEI]
+STDOUT:
+
+STDERR:
+

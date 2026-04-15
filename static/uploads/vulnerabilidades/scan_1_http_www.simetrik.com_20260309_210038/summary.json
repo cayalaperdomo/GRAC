@@ -1,0 +1,10 @@
+{
+  "run_id": 1,
+  "target": "http://www.simetrik.com",
+  "target_type": "url",
+  "estado": "ejecutando",
+  "total_findings": 0,
+  "created_vulns": 0,
+  "created_planes": 0,
+  "generated_at": "2026-03-09T21:00:38.600966"
+}

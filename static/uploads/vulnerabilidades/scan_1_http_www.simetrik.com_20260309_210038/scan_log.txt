@@ -1,0 +1,33 @@
+[NMAP]
+STDOUT:
+
+STDERR:
+ssh: connect to host 10.211.55.255 port 22: Permission denied
+
+
+
+[WHATWEB]
+STDOUT:
+
+STDERR:
+No se pudo traer salida de WhatWeb: ssh: connect to host 10.211.55.255 port 22: Permission denied
+scp: Connection closed
+
+
+
+[NIKTO]
+STDOUT:
+
+STDERR:
+No se pudo traer salida de Nikto: ssh: connect to host 10.211.55.255 port 22: Permission denied
+scp: Connection closed
+
+
+
+[TESTSSL]
+STDOUT:
+
+STDERR:
+No se pudo traer salida de testssl: ssh: connect to host 10.211.55.255 port 22: Permission denied
+scp: Connection closed
+

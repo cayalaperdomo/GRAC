@@ -1,0 +1,10 @@
+{
+  "run_id": 1,
+  "target": "http://demo.testfire.net",
+  "target_type": "url",
+  "estado": "ejecutando",
+  "total_findings": 158,
+  "created_vulns": 158,
+  "created_planes": 158,
+  "generated_at": "2026-03-11T01:12:51.084902"
+}

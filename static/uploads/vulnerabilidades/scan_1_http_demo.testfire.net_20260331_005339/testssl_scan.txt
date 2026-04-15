@@ -1,0 +1,24 @@
+
+#####################################################################
+  testssl version 3.2.2 from https://testssl.sh/
+
+  This program is free software. Distribution and modification under
+  GPLv2 permitted. USAGE w/o ANY WARRANTY. USE IT AT YOUR OWN RISK!
+
+  Please file bugs @ https://testssl.sh/bugs/
+#####################################################################
+
+  Using OpenSSL 3.0.3 (Jan 27 2026)  [~103 ciphers]
+  on kali-linux-2022-2:/usr/bin/openssl
+
+ Start 2026-03-30 19:57:43        -->> 65.61.137.117:443 (demo.testfire.net) <<--
+
+ rDNS (65.61.137.117):   --
+ Service detected:       HTTP
+
+ Testing protocols via sockets except NPN+ALPN 
+
+ SSLv2      not offered (OK)
+ SSLv3      not offered (OK)
+ TLS 1      offered (deprecated)
+ TLS 1.1    offered (deprecated)

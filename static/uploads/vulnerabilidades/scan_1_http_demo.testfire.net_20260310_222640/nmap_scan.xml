@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<?xml-stylesheet href="file:///usr/bin/../share/nmap/nmap.xsl" type="text/xsl"?>
+<!-- Nmap 7.92 scan initiated Tue Mar 10 17:28:12 2026 as: /usr/bin/nmap -n -Pn -sV -sC -p 80,443,8080 -T4 -&#45;max-retries 2 -&#45;host-timeout 10m -oX /tmp/nmap_scan.xml demo.testfire.net -->
+<nmaprun scanner="nmap" args="/usr/bin/nmap -n -Pn -sV -sC -p 80,443,8080 -T4 -&#45;max-retries 2 -&#45;host-timeout 10m -oX /tmp/nmap_scan.xml demo.testfire.net" start="1773181692" startstr="Tue Mar 10 17:28:12 2026" version="7.92" xmloutputversion="1.05">
+<scaninfo type="connect" protocol="tcp" numservices="3" services="80,443,8080"/>
+<verbose level="0"/>
+<debugging level="0"/>
+<host starttime="1773181692" endtime="1773181712"><status state="up" reason="user-set" reason_ttl="0"/>
+<address addr="65.61.137.117" addrtype="ipv4"/>
+<hostnames>
+<hostname name="demo.testfire.net" type="user"/>
+</hostnames>
+<ports><port protocol="tcp" portid="80"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="http" product="Apache Tomcat/Coyote JSP engine" version="1.1" method="probed" conf="10"><cpe>cpe:/a:apache:coyote_http_connector:1.1</cpe></service><script id="http-server-header" output="Apache-Coyote/1.1"><elem>Apache-Coyote/1.1</elem>
+</script><script id="http-title" output="Altoro Mutual"><elem key="title">Altoro Mutual</elem>
+</script></port>
+<port protocol="tcp" portid="443"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="http" product="Apache Tomcat/Coyote JSP engine" version="1.1" tunnel="ssl" method="probed" conf="10"><cpe>cpe:/a:apache:coyote_http_connector:1.1</cpe></service><script id="http-server-header" output="Apache-Coyote/1.1"><elem>Apache-Coyote/1.1</elem>
+</script><script id="ssl-date" output="2026-03-10T22:28:31+00:00; -1s from scanner time."><elem key="date">2026-03-10T22:28:31+00:00</elem>
+<elem key="delta">-1.0</elem>
+</script><script id="ssl-cert" output="Subject: commonName=demo.testfire.net&#xa;Subject Alternative Name: DNS:demo.testfire.net&#xa;Not valid before: 2025-05-21T00:00:00&#xa;Not valid after:  2026-06-21T23:59:59"><table key="subject">
+<elem key="commonName">demo.testfire.net</elem>
+</table>
+<table key="issuer">
+<elem key="commonName">Sectigo RSA Domain Validation Secure Server CA</elem>
+<elem key="countryName">GB</elem>
+<elem key="localityName">Salford</elem>
+<elem key="organizationName">Sectigo Limited</elem>
+<elem key="stateOrProvinceName">Greater Manchester</elem>
+</table>
+<table key="pubkey">
+<elem key="type">rsa</elem>
+<elem key="bits">2048</elem>
+<elem key="modulus">91EE624FC42D8C32959B220140DA0F2BF752D55F9D81E08AFD2382982D78450BCF7E6DA2E06888A532E466CEB1763F9E72CD29491C0E7B51127C1F1D34C25963C1B9029374FF52A522634FE4B10CF8A731DAF81D39336EAD0D9B41E0583CE528A78B2A620E1E80ECEE76CF0490E18535EB935BE8AD6103448B7BE9BADFF90B296C1C2036544BCA61644F8829C673B013BC5CB41555FEB336D1A0D7FD464CF1092CE19DAE245DF503677E45379324529937B1F769866317C62EF0132E563E6E8B511BE6FC622DCD89B2C3B37E18E373B2E3ADD3CC5C26BC3DA74594326F5397A5A8F4CB8C7F2BAA79F62DC07AC6781484C3FED2C300DE9EE03ACA43C68F8ED065</elem>
+<elem key="exponent">65537</elem>
+</table>
+<table key="extensions">
+<table>
+<elem key="name">X509v3 Authority Key Identifier</elem>
+<elem key="value">keyid:8D:8C:5E:C4:54:AD:8A:E1:77:E9:9B:F9:9B:05:E1:B8:01:8D:61:E1&#xa;</elem>
+</table>
+<table>
+<elem key="name">X509v3 Subject Key Identifier</elem>
+<elem key="value">0F:E6:E6:EB:BF:F0:80:ED:F6:F4:9B:83:2A:9A:3C:89:C5:DF:11:EC</elem>
+</table>
+<table>
+<elem key="name">X509v3 Key Usage</elem>
+<elem key="value">Digital Signature, Key Encipherment</elem>
+<elem key="critical">true</elem>
+</table>
+<table>
+<elem key="name">X509v3 Basic Constraints</elem>
+<elem key="value">CA:FALSE</elem>
+<elem key="critical">true</elem>
+</table>
+<table>
+<elem key="name">X509v3 Extended Key Usage</elem>
+<elem key="value">TLS Web Server Authentication, TLS Web Client Authentication</elem>
+</table>
+<table>
+<elem key="name">X509v3 Certificate Policies</elem>
+<elem key="value">Policy: 1.3.6.1.4.1.6449.1.2.2.7&#xa;  CPS: https://sectigo.com/CPS&#xa;Policy: 2.23.140.1.2.1&#xa;</elem>
+</table>
+<table>
+<elem key="name">Authority Information Access</elem>
+<elem key="value">CA Issuers - URI:http://crt.sectigo.com/SectigoRSADomainValidationSecureServerCA.crt&#xa;OCSP - URI:http://ocsp.sectigo.com&#xa;</elem>
+</table>
+<table>
+<elem key="name">CT Precertificate SCTs</elem>
+<elem key="value">Signed Certificate Timestamp:&#xa;    Version   : v1 (0x0)&#xa;    Log ID    : 96:97:64:BF:55:58:97:AD:F7:43:87:68:37:08:42:77:&#xa;                E9:F0:3A:D5:F6:A4:F3:36:6E:46:A4:3F:0F:CA:A9:C6&#xa;    Timestamp : May 21 13:41:21.760 2025 GMT&#xa;    Extensions: none&#xa;    Signature : ecdsa-with-SHA256&#xa;                30:46:02:21:00:98:85:D5:AA:E6:6F:2C:05:8A:56:AF:&#xa;                9F:08:B4:80:B8:17:2A:F7:8D:C0:1E:25:51:E3:F9:2B:&#xa;                C4:5F:79:9A:A7:02:21:00:F7:DB:5E:2C:A6:55:CC:BD:&#xa;                FF:2B:15:5A:2B:18:39:4E:1D:7C:1B:DC:10:22:C9:27:&#xa;                40:AD:91:4C:01:08:D6:34&#xa;Signed Certificate Timestamp:&#xa;    Version   : v1 (0x0)&#xa;    Log ID    : 19:86:D4:C7:28:AA:6F:FE:BA:03:6F:78:2A:4D:01:91:&#xa;                AA:CE:2D:72:31:0F:AE:CE:5D:70:41:2D:25:4C:C7:D4&#xa;    Timestamp : May 21 13:41:21.674 2025 GMT&#xa;    Extensions: none&#xa;    Signature : ecdsa-with-SHA256&#xa;                30:45:02:20:37:5E:1E:00:62:F7:3D:F6:77:E6:5C:EB:&#xa;                52:32:CD:92:D5:56:C7:5A:0E:E0:D3:35:86:7C:9D:64:&#xa;                46:1D:54:41:02:21:00:8A:5A:2F:53:A8:F8:25:38:AA:&#xa;                1D:EF:6A:BC:3F:2D:03:84:62:4F:2C:70:06:EA:3B:B1:&#xa;                80:51:B6:16:DF:BF:80&#xa;Signed Certificate Timestamp:&#xa;    Version   : v1 (0x0)&#xa;    Log ID    : 0E:57:94:BC:F3:AE:A9:3E:33:1B:2C:99:07:B3:F7:90:&#xa;                DF:9B:C2:3D:71:32:25:DD:21:A9:25:AC:61:C5:4E:21&#xa;    Timestamp : May 21 13:41:21.674 2025 GMT&#xa;    Extensions: none&#xa;    Signature : ecdsa-with-SHA256&#xa;                30:45:02:20:4E:7E:A3:94:3E:18:5D:F6:98:BC:4F:4F:&#xa;                FD:E9:50:1F:56:65:2C:F2:5E:CB:01:05:EB:DE:1C:61:&#xa;                CD:0A:2E:70:02:21:00:85:F6:83:5E:E3:6E:9B:27:59:&#xa;                3A:78:22:60:E6:CE:E5:40:28:3A:B3:A4:C5:25:F2:A7:&#xa;                12:ED:4E:C8:CE:D9:41</elem>
+</table>
+<table>
+<elem key="name">X509v3 Subject Alternative Name</elem>
+<elem key="value">DNS:demo.testfire.net</elem>
+</table>
+</table>
+<elem key="sig_algo">sha256WithRSAEncryption</elem>
+<table key="validity">
+<elem key="notBefore">2025-05-21T00:00:00</elem>
+<elem key="notAfter">2026-06-21T23:59:59</elem>
+</table>
+<elem key="md5">04a1277200693d65011dded8ccb0201c</elem>
+<elem key="sha1">a1e98d60388b84f4bbc550d7b61bb2b0cc8961fd</elem>
+<elem key="pem">-&#45;&#45;&#45;&#45;BEGIN CERTIFICATE-&#45;&#45;&#45;&#45;&#xa;MIIGLDCCBRSgAwIBAgIQCFC26PmXdevJdonrg/txbTANBgkqhkiG9w0BAQsFADCB&#xa;jzELMAkGA1UEBhMCR0IxGzAZBgNVBAgTEkdyZWF0ZXIgTWFuY2hlc3RlcjEQMA4G&#xa;A1UEBxMHU2FsZm9yZDEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMTcwNQYDVQQD&#xa;Ey5TZWN0aWdvIFJTQSBEb21haW4gVmFsaWRhdGlvbiBTZWN1cmUgU2VydmVyIENB&#xa;MB4XDTI1MDUyMTAwMDAwMFoXDTI2MDYyMTIzNTk1OVowHDEaMBgGA1UEAxMRZGVt&#xa;by50ZXN0ZmlyZS5uZXQwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCR&#xa;7mJPxC2MMpWbIgFA2g8r91LVX52B4Ir9I4KYLXhFC89+baLgaIilMuRmzrF2P55y&#xa;zSlJHA57URJ8Hx00wlljwbkCk3T/UqUiY0/ksQz4pzHa+B05M26tDZtB4Fg85Sin&#xa;iypiDh6A7O52zwSQ4YU165Nb6K1hA0SLe+m63/kLKWwcIDZUS8phZE+IKcZzsBO8&#xa;XLQVVf6zNtGg1/1GTPEJLOGdriRd9QNnfkU3kyRSmTex92mGYxfGLvATLlY+botR&#xa;G+b8Yi3NibLDs34Y43Oy463TzFwmvD2nRZQyb1OXpaj0y4x/K6p59i3AesZ4FITD&#xa;/tLDAN6e4DrKQ8aPjtBlAgMBAAGjggL0MIIC8DAfBgNVHSMEGDAWgBSNjF7EVK2K&#xa;4Xfpm/mbBeG4AY1h4TAdBgNVHQ4EFgQUD+bm67/wgO329JuDKpo8icXfEewwDgYD&#xa;VR0PAQH/BAQDAgWgMAwGA1UdEwEB/wQCMAAwHQYDVR0lBBYwFAYIKwYBBQUHAwEG&#xa;CCsGAQUFBwMCMEkGA1UdIARCMEAwNAYLKwYBBAGyMQECAgcwJTAjBggrBgEFBQcC&#xa;ARYXaHR0cHM6Ly9zZWN0aWdvLmNvbS9DUFMwCAYGZ4EMAQIBMIGEBggrBgEFBQcB&#xa;AQR4MHYwTwYIKwYBBQUHMAKGQ2h0dHA6Ly9jcnQuc2VjdGlnby5jb20vU2VjdGln&#xa;b1JTQURvbWFpblZhbGlkYXRpb25TZWN1cmVTZXJ2ZXJDQS5jcnQwIwYIKwYBBQUH&#xa;MAGGF2h0dHA6Ly9vY3NwLnNlY3RpZ28uY29tMIIBfwYKKwYBBAHWeQIEAgSCAW8E&#xa;ggFrAWkAdwCWl2S/VViXrfdDh2g3CEJ36fA61fak8zZuRqQ/D8qpxgAAAZbzE8bg&#xa;AAAEAwBIMEYCIQCYhdWq5m8sBYpWr58ItIC4Fyr3jcAeJVHj+SvEX3mapwIhAPfb&#xa;XiymVcy9/ysVWisYOU4dfBvcECLJJ0CtkUwBCNY0AHYAGYbUxyiqb/66A294Kk0B&#xa;karOLXIxD67OXXBBLSVMx9QAAAGW8xPGigAABAMARzBFAiA3Xh4AYvc99nfmXOtS&#xa;Ms2S1VbHWg7g0zWGfJ1kRh1UQQIhAIpaL1Oo+CU4qh3varw/LQOEYk8scAbqO7GA&#xa;UbYW37+AAHYADleUvPOuqT4zGyyZB7P3kN+bwj1xMiXdIaklrGHFTiEAAAGW8xPG&#xa;igAABAMARzBFAiBOfqOUPhhd9pi8T0/96VAfVmUs8l7LAQXr3hxhzQoucAIhAIX2&#xa;g17jbpsnWTp4ImDmzuVAKDqzpMUl8qcS7U7IztlBMBwGA1UdEQQVMBOCEWRlbW8u&#xa;dGVzdGZpcmUubmV0MA0GCSqGSIb3DQEBCwUAA4IBAQAcS7hS4Cg/m4LwdTjwydMl&#xa;o9bPEpcKxJcL6lMB06eK3qSKp0cvDSWLBRFxAM9PaxjKTzKuTBjExN1oYaTj2XN6&#xa;Z+qwKPgjS4gVuKV2bW1r9VjnL6KMcmQ+/Tp5D83duJG7hZjw+E6HjV1Ml0jdJmGN&#xa;SgxtYV6lrA4PNYA5zMTFYBr7ijLPANp7mwFpOhcF9B+1wO3gO5J7PTRKmEO9GjA6&#xa;3DEaVHrDH6onmoEDCfiCHFrLlr6xCtw44EbY9HDVw2mM8GFcKgrfQuEJjqW0JEpP&#xa;+caySon48gkx/FjOwrZEdxPajGZ7TTJgYYOZzDUorWfuZEbzFRtlqA7iWVlnHfK9&#xa;-&#45;&#45;&#45;&#45;END CERTIFICATE-&#45;&#45;&#45;&#45;&#xa;</elem>
+</script><script id="http-title" output="Altoro Mutual"><elem key="title">Altoro Mutual</elem>
+</script></port>
+<port protocol="tcp" portid="8080"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="http" product="Apache Tomcat/Coyote JSP engine" version="1.1" method="probed" conf="10"><cpe>cpe:/a:apache:coyote_http_connector:1.1</cpe></service><script id="http-server-header" output="Apache-Coyote/1.1"><elem>Apache-Coyote/1.1</elem>
+</script><script id="http-title" output="Altoro Mutual"><elem key="title">Altoro Mutual</elem>
+</script></port>
+</ports>
+<hostscript><script id="clock-skew" output="-1s"><elem key="mean">-1</elem>
+<elem key="stddev">0</elem>
+<elem key="median">-1</elem>
+<elem key="count">1</elem>
+</script></hostscript><times srtt="119538" rttvar="67602" to="389946"/>
+</host>
+<runstats><finished time="1773181712" timestr="Tue Mar 10 17:28:32 2026" summary="Nmap done at Tue Mar 10 17:28:32 2026; 1 IP address (1 host up) scanned in 20.24 seconds" elapsed="20.24" exit="success"/><hosts up="1" down="0" total="1"/>
+</runstats>
+</nmaprun>

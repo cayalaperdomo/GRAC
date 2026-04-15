@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<?xml-stylesheet href="file:///usr/bin/../share/nmap/nmap.xsl" type="text/xsl"?>
+<!-- Nmap 7.92 scan initiated Tue Mar 10 19:44:11 2026 as: /usr/bin/nmap -n -Pn -sV -sC -p 80,443,8080 -T4 -&#45;max-retries 2 -&#45;host-timeout 10m -oX /tmp/nmap_scan.xml demo.testfire.net -->
+<nmaprun scanner="nmap" args="/usr/bin/nmap -n -Pn -sV -sC -p 80,443,8080 -T4 -&#45;max-retries 2 -&#45;host-timeout 10m -oX /tmp/nmap_scan.xml demo.testfire.net" start="1773189851" startstr="Tue Mar 10 19:44:11 2026" version="7.92" xmloutputversion="1.05">
+<scaninfo type="connect" protocol="tcp" numservices="3" services="80,443,8080"/>
+<verbose level="0"/>
+<debugging level="0"/>
+<runstats><finished time="1773189871" timestr="Tue Mar 10 19:44:31 2026" summary="Nmap done at Tue Mar 10 19:44:31 2026; 0 IP addresses (0 hosts up) scanned in 20.28 seconds" elapsed="20.28" exit="success"/><hosts up="0" down="0" total="0"/>
+</runstats>
+</nmaprun>

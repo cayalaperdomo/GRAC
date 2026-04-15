@@ -1,0 +1,18 @@
+- Nikto v2.1.6
+---------------------------------------------------------------------------
++ Target IP:          18.221.110.137
++ Target Hostname:    www.simetrik.com
++ Target Port:        80
++ Message:            Multiple IP addresses found: 18.221.110.137, 3.12.37.199, 3.151.55.127
++ Start Time:         2026-03-09 21:02:04 (GMT-5)
+---------------------------------------------------------------------------
++ Server: awselb/2.0
++ The anti-clickjacking X-Frame-Options header is not present.
++ The X-XSS-Protection header is not defined. This header can hint to the user agent to protect against some forms of XSS
++ The X-Content-Type-Options header is not set. This could allow the user agent to render the content of the site in a different fashion to the MIME type
++ Root page / redirects to: https://www.simetrik.com:443/
++ No CGI Directories found (use '-C all' to force check all possible dirs)
++ 549 requests: 12 error(s) and 3 item(s) reported on remote host
++ End Time:           2026-03-09 21:03:09 (GMT-5) (65 seconds)
+---------------------------------------------------------------------------
++ 1 host(s) tested
