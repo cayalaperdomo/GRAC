@@ -87610,6 +87610,7 @@ def run_analysis_from_df(company_name: str, df: "pd.DataFrame") -> int:
         gaps_by_control_json=json.dumps(gaps_by_control, ensure_ascii=False),
         control_items_json=json.dumps(control_items, ensure_ascii=False),
         item_results_json=json.dumps(item_results, ensure_ascii=False),
+        control_ai_json="{}",
         item_ai_json="{}",
         radar_overall_b64=radar_overall_b64,
         radar_by_sheet_json=json.dumps(extra_graphs, ensure_ascii=False),
@@ -87732,15 +87733,12 @@ def analyze():
         excel_path=excel_path,
         chapter_results_json=json.dumps(chapter_results, ensure_ascii=False),
         gaps_json=json.dumps(gaps, ensure_ascii=False),
-
         control_results_json=json.dumps(control_results, ensure_ascii=False),
         gaps_by_control_json=json.dumps(gaps_by_control, ensure_ascii=False),
         control_items_json=json.dumps(control_items, ensure_ascii=False),
-
-         #✅ nuevo
         item_results_json=json.dumps(item_results, ensure_ascii=False),
-        item_ai_json="{}",  # empieza vacío
-
+        control_ai_json="{}",
+        item_ai_json="{}",
         radar_overall_b64=radar_overall_b64,
         radar_by_sheet_json=json.dumps(extra_graphs, ensure_ascii=False),
         executive_summary=None,
@@ -87792,7 +87790,22 @@ def generate_ai_control(run_id: int):
         return redirect(url_for("madurez.view_report", run_id=run.id))
 
     try:
-        ai_generate_control_analysis(run, control_id)
+        ctx = build_report_context(run)
+        control_items = ctx.get("control_items", {}) or {}
+
+        items = control_items.get(control_id, []) or []
+        kpi = compute_control_kpis(control_id, items)
+
+        data = ai_generate_control_analysis(run.company_name, control_id, kpi, items)
+
+        control_ai = json.loads(run.control_ai_json or "{}") if run.control_ai_json else {}
+        control_ai.setdefault(control_id, {})
+        control_ai[control_id]["estado_actual"] = (data.get("estado_actual") or "").strip()
+        control_ai[control_id]["estado_requerido"] = (data.get("estado_requerido") or "").strip()
+        control_ai[control_id]["plan_accion_sugerido"] = (data.get("plan_accion_sugerido") or "").strip()
+
+        run.control_ai_json = json.dumps(control_ai, ensure_ascii=False)
+
         db.session.commit()
         flash(f"✅ Análisis IA generado para el control {control_id}.", "success")
     except Exception as e:
@@ -87817,13 +87830,14 @@ def generate_ai_informe(run_id: int):
     run = AnalysisRun.query.get_or_404(run_id)
 
     try:
-        # Mantén aquí tu lógica actual real de generación IA
-        # ejemplo:
-        # generate_executive_summary_for_run(run)
-        # db.session.commit()
+        chapter_results = json.loads(run.chapter_results_json or "{}")
 
-        raw = generar_resumen_ejecutivo_ai(run)  # deja aquí tu función real
-        run.executive_summary = raw
+        data = ai_generate_executive_summary_from_domains(
+            company_name=run.company_name,
+            chapter_results=chapter_results
+        )
+
+        run.executive_summary = (data.get("executive_summary") or "").strip()
         db.session.commit()
 
         flash("✅ Resumen ejecutivo generado con IA.", "success")
