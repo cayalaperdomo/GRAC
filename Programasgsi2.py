@@ -989,7 +989,7 @@ def calcular_nist_desde_iso(iso_analysis_id):
         iso_pct_0_100[key] = round(pct, 2)
 
     # ✅ 2) Carga Excel de mapeo
-    mapping_path = os.path.join(BASE_DIR, "CSF20_to_ISO27001_Mapping_Categorias.xlsx")
+    mapping_path = os.path.join(BASE_DIR, "static/templates/CSF20_to_ISO27001_Mapping_Categorias.xlsx")
     if not os.path.exists(mapping_path):
         return {"detalle": {}, "nivel_general": 0, "error": f"No se encontró el Excel de mapeo en: {mapping_path}"}
 
