@@ -7759,16 +7759,16 @@ def menu():
       }
 
       .sgsi-leftnav-card{
-        background:#eef2f5;
-        border:1px solid #d3dae2;
-        border-radius:16px;
-        box-shadow:0 6px 16px rgba(0,0,0,.06);
-        padding:10px;
-        overflow:visible !important;
-        position:sticky;
-        top:10px;
-        z-index:7000;
-      }
+          background:rgba(63,134,214,.18);
+          border:1px solid rgba(255,255,255,.22);
+          border-radius:16px;
+          box-shadow:0 6px 16px rgba(0,0,0,.06);
+          padding:10px;
+          overflow:visible !important;
+          position:sticky;
+          top:10px;
+          z-index:7000;
+        }
 
       .sgsi-leftnav-header{
         display:flex;
@@ -7792,18 +7792,18 @@ def menu():
       }
 
       .sgsi-leftnav-title{
-        font-size:.95rem;
-        font-weight:900;
-        color:#1f2937;
-        line-height:1.1;
-      }
+          font-size:.95rem;
+          font-weight:900;
+          color:#000000 !important;
+          line-height:1.1;
+        }
 
       .sgsi-leftnav-subtitle{
-        margin-top:3px;
-        font-size:.76rem;
-        color:#5f6b7a;
-        line-height:1.2;
-      }
+          margin-top:3px;
+          font-size:.76rem;
+          color:#000000 !important;
+          line-height:1.2;
+        }
 
       .sgsi-leftnav-list{
         display:flex;
@@ -10233,7 +10233,23 @@ def declaracion_aplicabilidad():
     if filtro_implementado:
         query = query.filter(Control.implemented == filtro_implementado)
 
-    controles = query.order_by(Control.nr).all()
+    controles = query.all()
+
+    def ordenar_nr(control):
+        nr = (control.nr or "").strip()
+        partes = nr.split(".")
+        clave = []
+
+        for p in partes:
+            p = p.strip()
+            if p.isdigit():
+                clave.append(int(p))
+            else:
+                clave.append(p.lower())
+
+        return clave
+
+    controles = sorted(controles, key=ordenar_nr)
 
     rows = []
     for c in controles:
