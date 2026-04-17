@@ -52836,6 +52836,14 @@ def proveedores_detalle(id):
         except Exception:
             return str(v)
 
+    def yn_badge(v):
+        val = (v or '').strip().lower()
+        if val in ('sí', 'si'):
+            return Markup('<span class="badge badge-aprobado px-3 py-2">Sí</span>')
+        if val == 'no':
+            return Markup('<span class="badge badge-noaprob px-3 py-2">No</span>')
+        return Markup('<span class="badge bg-secondary px-3 py-2">—</span>')
+
     html = """
     <div class="provdet-shell">
 
@@ -52867,54 +52875,329 @@ def proveedores_detalle(id):
       <div class="provdet-card">
         <div class="provdet-card-body">
 
+          <!-- =========================
+               INFORMACIÓN GENERAL
+          ========================== -->
           <div class="provdet-section">
             <div class="provdet-section-title">Información general del proveedor</div>
             <div class="row g-3">
 
-              <div class="col-md-3"><div class="provdet-field"><div class="provdet-label">Fecha de registro por el área de seguridad</div><div class="provdet-value">{{ fmt_fecha(it.fecha_eval_seguridad) }}</div></div></div>
-              <div class="col-md-3"><div class="provdet-field"><div class="provdet-label">Nombre del Proveedor</div><div class="provdet-value provdet-value-lg">{{ it.nombre_proveedor or '—' }}</div></div></div>
-              <div class="col-md-3"><div class="provdet-field"><div class="provdet-label">Estatus del Proveedor</div><div class="provdet-value">{{ it.estatus_proveedor or '—' }}</div></div></div>
-              <div class="col-md-3"><div class="provdet-field"><div class="provdet-label">Área responsable del proveedor</div><div class="provdet-value">{{ it.area.area if it.area else '—' }}</div></div></div>
+              <div class="col-md-3">
+                <div class="provdet-field">
+                  <div class="provdet-label">Fecha de registro por el área de seguridad</div>
+                  <div class="provdet-value">{{ fmt_fecha(it.fecha_eval_seguridad) }}</div>
+                </div>
+              </div>
 
-              <div class="col-md-3"><div class="provdet-field"><div class="provdet-label">Responsable del área</div><div class="provdet-value">{{ it.responsable_area_nombre or '—' }}</div></div></div>
-              <div class="col-md-3"><div class="provdet-field"><div class="provdet-label">Cargo del responsable</div><div class="provdet-value">{{ it.responsable_area_cargo or '—' }}</div></div></div>
-              <div class="col-md-3"><div class="provdet-field"><div class="provdet-label">Nombre y cargo del evaluador</div><div class="provdet-value">{{ it.nombre_cargo_evaluador or '—' }}</div></div></div>
-              <div class="col-md-3"><div class="provdet-field"><div class="provdet-label">País de origen</div><div class="provdet-value">{{ it.pais_origen or '—' }}</div></div></div>
+              <div class="col-md-3">
+                <div class="provdet-field">
+                  <div class="provdet-label">Nombre del proveedor</div>
+                  <div class="provdet-value provdet-value-lg">{{ it.nombre_proveedor or '—' }}</div>
+                </div>
+              </div>
 
-              <div class="col-md-3"><div class="provdet-field"><div class="provdet-label">País de servicio</div><div class="provdet-value">{{ it.pais_servicio or '—' }}</div></div></div>
-              <div class="col-md-3"><div class="provdet-field"><div class="provdet-label">Estado / avance</div><div class="provdet-value">{{ it.estado_avance or '—' }}</div></div></div>
-              <div class="col-md-3"><div class="provdet-field"><div class="provdet-label">Estado del registro</div><div class="provdet-value">{{ it.estado_evaluacion or '—' }}</div></div></div>
-              <div class="col-md-3"><div class="provdet-field"><div class="provdet-label">Criticidad</div><div class="provdet-value">{{ it.criticidad_texto or '—' }} ({{ it.criticidad_pct or 0 }}%)</div></div></div>
+              <div class="col-md-3">
+                <div class="provdet-field">
+                  <div class="provdet-label">Estatus del proveedor</div>
+                  <div class="provdet-value">{{ it.estatus_proveedor or '—' }}</div>
+                </div>
+              </div>
 
-              <div class="col-md-3"><div class="provdet-field"><div class="provdet-label">Resultado evaluación</div><div class="provdet-value">{{ it.resultado_evaluacion or '—' }}</div></div></div>
-              <div class="col-md-3"><div class="provdet-field"><div class="provdet-label">Calificación total</div><div class="provdet-value">{{ it.calificacion_total or 0 }}</div></div></div>
-              <div class="col-md-3"><div class="provdet-field"><div class="provdet-label">¿Tiene certificación?</div><div class="provdet-value">{{ it.tiene_certificacion or '—' }}</div></div></div>
-              <div class="col-md-3"><div class="provdet-field"><div class="provdet-label">Número de certificaciones</div><div class="provdet-value">{{ it.num_certificaciones or 0 }}</div></div></div>
+              <div class="col-md-3">
+                <div class="provdet-field">
+                  <div class="provdet-label">Área responsable</div>
+                  <div class="provdet-value">{{ it.area.area if it.area else '—' }}</div>
+                </div>
+              </div>
 
-              <div class="col-md-12"><div class="provdet-field"><div class="provdet-label">Descripción del producto/servicio</div><div class="provdet-value">{{ it.desc_producto_servicio or '—' }}</div></div></div>
-              <div class="col-md-12"><div class="provdet-field"><div class="provdet-label">Nombre de las certificaciones</div><div class="provdet-value">{{ it.nombre_certificaciones or '—' }}</div></div></div>
-              <div class="col-md-12"><div class="provdet-field"><div class="provdet-label">Observaciones</div><div class="provdet-value">{{ it.observaciones or '—' }}</div></div></div>
+              <div class="col-md-4">
+                <div class="provdet-field">
+                  <div class="provdet-label">Nombre del responsable del área</div>
+                  <div class="provdet-value">{{ it.responsable_area_nombre or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="provdet-field">
+                  <div class="provdet-label">Cargo del responsable del área</div>
+                  <div class="provdet-value">{{ it.responsable_area_cargo or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="provdet-field">
+                  <div class="provdet-label">Nombre y cargo del evaluador</div>
+                  <div class="provdet-value">{{ it.nombre_cargo_evaluador or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-3">
+                <div class="provdet-field">
+                  <div class="provdet-label">País de origen</div>
+                  <div class="provdet-value">{{ it.pais_origen or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-3">
+                <div class="provdet-field">
+                  <div class="provdet-label">País de servicio</div>
+                  <div class="provdet-value">{{ it.pais_servicio or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-3">
+                <div class="provdet-field">
+                  <div class="provdet-label">Estado / avance</div>
+                  <div class="provdet-value">{{ it.estado_avance or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-3">
+                <div class="provdet-field">
+                  <div class="provdet-label">Estado del registro</div>
+                  <div class="provdet-value">{{ it.estado_evaluacion or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-12">
+                <div class="provdet-field">
+                  <div class="provdet-label">Descripción del producto / servicio</div>
+                  <div class="provdet-value provdet-value-lg">{{ it.desc_producto_servicio or '—' }}</div>
+                </div>
+              </div>
 
             </div>
           </div>
 
-          <div class="provdet-section mt-4">
-            <div class="provdet-section-title">Evidencias</div>
-            {% if it.evidencias %}
-              <div class="row g-3">
-                {% for ev in it.evidencias %}
-                <div class="col-md-6">
-                  <div class="provdet-file-card">
-                    <div class="provdet-file-meta">
-                      <div class="provdet-file-label">Archivo</div>
-                      <a class="provdet-file-name"
-                         href="{{ url_for('proveedores_evidencia_view', evi_id=ev.id, next='proveedores_detalle', reg_id=it.id) }}">
-                        {{ ev.original_name }}
-                      </a>
-                      <div class="provdet-file-size">{{ (ev.size or 0) // 1024 }} KB</div>
-                    </div>
+          <!-- =========================
+               CALIFICACIÓN DEL PROVEEDOR
+          ========================== -->
+          <div class="provdet-section">
+            <div class="provdet-section-title">Calificación del proveedor</div>
+            <div class="row g-3">
+
+              <div class="col-md-4">
+                <div class="provdet-field">
+                  <div class="provdet-label">¿Es transversal a toda la organización?</div>
+                  <div class="provdet-value d-flex justify-content-between align-items-center gap-2">
+                    <span>{{ yn_badge(it.es_transversal) }}</span>
+                    <span class="provdet-score">Valor: {{ it.valor_alcance or 0 }}%</span>
                   </div>
                 </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="provdet-field">
+                  <div class="provdet-label">¿Es esencial para la continuidad?</div>
+                  <div class="provdet-value d-flex justify-content-between align-items-center gap-2">
+                    <span>{{ yn_badge(it.es_esencial) }}</span>
+                    <span class="provdet-score">Valor: {{ it.valor_esencial or 0 }}%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="provdet-field">
+                  <div class="provdet-label">¿Tiene plan de continuidad?</div>
+                  <div class="provdet-value d-flex justify-content-between align-items-center gap-2">
+                    <span>{{ yn_badge(it.tiene_plan_cont) }}</span>
+                    <span class="provdet-score">Valor: {{ it.valor_plan_cont or 0 }}%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="provdet-field">
+                  <div class="provdet-label">¿Tiene plan de recuperación?</div>
+                  <div class="provdet-value d-flex justify-content-between align-items-center gap-2">
+                    <span>{{ yn_badge(it.tiene_plan_rec) }}</span>
+                    <span class="provdet-score">Valor: {{ it.valor_plan_rec or 0 }}%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="provdet-field">
+                  <div class="provdet-label">¿Existen alternativas en el mercado?</div>
+                  <div class="provdet-value d-flex justify-content-between align-items-center gap-2">
+                    <span>{{ yn_badge(it.existen_alternativas) }}</span>
+                    <span class="provdet-score">Valor: {{ it.valor_alternativas or 0 }}%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="provdet-field">
+                  <div class="provdet-label">Impacto en caso de falla</div>
+                  <div class="provdet-value d-flex justify-content-between align-items-center gap-2">
+                    <span class="badge bg-secondary px-3 py-2">{{ it.impacto_falla or '—' }}</span>
+                    <span class="provdet-score">Valor: {{ it.valor_impacto_falla or 0 }}%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="provdet-field">
+                  <div class="provdet-label">¿Existe plan de migración?</div>
+                  <div class="provdet-value d-flex justify-content-between align-items-center gap-2">
+                    <span>{{ yn_badge(it.existe_plan_migracion) }}</span>
+                    <span class="provdet-score">Valor: {{ it.valor_plan_migracion or 0 }}%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="provdet-field">
+                  <div class="provdet-label">¿Procesa / almacena información sensible?</div>
+                  <div class="provdet-value d-flex justify-content-between align-items-center gap-2">
+                    <span>{{ yn_badge(it.procesa_info_sensible) }}</span>
+                    <span class="provdet-score">Valor: {{ it.valor_info_sensible or 0 }}%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="provdet-field">
+                  <div class="provdet-label">¿Procesa / almacena datos personales?</div>
+                  <div class="provdet-value d-flex justify-content-between align-items-center gap-2">
+                    <span>{{ yn_badge(it.procesa_datos_personales) }}</span>
+                    <span class="provdet-score">Valor: {{ it.valor_datos_personales or 0 }}%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="provdet-field">
+                  <div class="provdet-label">¿Procesa / almacena información en la nube?</div>
+                  <div class="provdet-value d-flex justify-content-between align-items-center gap-2">
+                    <span>{{ yn_badge(it.procesa_info_nube) }}</span>
+                    <span class="provdet-score">Valor: {{ it.valor_nube or 0 }}%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="provdet-field">
+                  <div class="provdet-label">¿Incluye SLA definidos?</div>
+                  <div class="provdet-value d-flex justify-content-between align-items-center gap-2">
+                    <span>{{ yn_badge(it.incluye_sla) }}</span>
+                    <span class="provdet-score">Valor: {{ it.valor_sla or 0 }}%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="provdet-field text-center">
+                  <div class="provdet-label">Criticidad total</div>
+                  <div class="provdet-big-number">{{ it.criticidad_pct or 0 }}%</div>
+                  <div class="mt-2">
+                    <span class="badge {{ it.criticidad_color or 'bg-secondary' }} px-3 py-2">
+                      {{ it.criticidad_texto or '—' }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+
+              <div class="col-md-4">
+                <div class="provdet-field">
+                  <div class="provdet-label">¿Requiere formulario?</div>
+                  <div class="provdet-value d-flex justify-content-between align-items-center gap-2">
+                    <span>{{ yn_badge(it.requiere_formulario) }}</span>
+                    <span class="provdet-score">Puntos cert.: {{ it.puntos_certificacion or 0 }}%</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- =========================
+               REGISTRO DEL PROVEEDOR
+          ========================== -->
+          <div class="provdet-section">
+            <div class="provdet-section-title">Registro del proveedor</div>
+            <div class="row g-3">
+
+              <div class="col-md-3">
+                <div class="provdet-field">
+                  <div class="provdet-label">¿Tiene certificación?</div>
+                  <div class="provdet-value">{{ yn_badge(it.tiene_certificacion) }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-3">
+                <div class="provdet-field">
+                  <div class="provdet-label">Número de certificaciones</div>
+                  <div class="provdet-value">{{ it.num_certificaciones or 0 }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-3">
+                <div class="provdet-field">
+                  <div class="provdet-label">Puntos obtenidos en el formulario</div>
+                  <div class="provdet-value">{{ it.puntos_formulario or 0 }}%</div>
+                </div>
+              </div>
+
+              <div class="col-md-3">
+                <div class="provdet-field">
+                  <div class="provdet-label">Puntos por certificación</div>
+                  <div class="provdet-value">{{ it.puntos_certificacion or 0 }}%</div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="provdet-field text-center">
+                  <div class="provdet-label">Calificación total</div>
+                  <div class="provdet-big-number">{{ it.calificacion_total or 0 }}%</div>
+                  <div class="mt-2">
+                    <span class="badge {{ it.resultado_color or 'bg-secondary' }} px-3 py-2">
+                      {{ it.resultado_evaluacion or '—' }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-12">
+                <div class="provdet-field">
+                  <div class="provdet-label">Nombre de las certificaciones</div>
+                  <div class="provdet-value provdet-value-lg">{{ it.nombre_certificaciones or '—' }}</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- =========================
+               EVIDENCIAS
+          ========================== -->
+          <div class="provdet-section">
+            <div class="provdet-section-title">Evidencias</div>
+
+            {% if it.evidencias %}
+              <div class="provdet-ev-grid">
+                {% for ev in it.evidencias %}
+                  <div class="provdet-file-card">
+                    <div class="provdet-file-left">
+                      <div class="provdet-file-icon">PDF</div>
+                      <div class="provdet-file-meta">
+                        <div class="provdet-file-label">Archivo</div>
+                        <a class="provdet-file-name"
+                           href="{{ url_for('proveedores_evidencia_view', evi_id=ev.id, next='proveedores_detalle', reg_id=it.id) }}">
+                          {{ ev.original_name or ev.filename }}
+                        </a>
+                        <div class="provdet-file-size">
+                          {{ (ev.size / 1024)|round(1) if ev.size else 0 }} KB
+                        </div>
+                      </div>
+                    </div>
+
+                    <a href="{{ url_for('proveedores_evidencia_download', evi_id=ev.id) }}"
+                       class="btn btn-outline-primary rounded-pill px-3 fw-bold">
+                      Descargar
+                    </a>
+                  </div>
                 {% endfor %}
               </div>
             {% else %}
@@ -52922,11 +53205,14 @@ def proveedores_detalle(id):
             {% endif %}
           </div>
 
-          <div class="provdet-bottom-actions">
-            <a href="{{ url_for('proveedores_matriz') }}"
-               class="btn rounded-pill px-4 fw-bold provdet-cancel-btn">
-              Volver
-            </a>
+          <!-- =========================
+               OBSERVACIONES
+          ========================== -->
+          <div class="provdet-section">
+            <div class="provdet-section-title">Observaciones</div>
+            <div class="provdet-field">
+              <div class="provdet-value provdet-value-lg">{{ it.observaciones or '—' }}</div>
+            </div>
           </div>
 
         </div>
@@ -52934,37 +53220,290 @@ def proveedores_detalle(id):
     </div>
 
     <style>
-      body{background-image:url('/static/img/ccsgsi.jpg');background-size:cover;background-position:center;background-attachment:fixed;background-repeat:no-repeat;}
-      .provdet-shell{width:96%;max-width:1650px;margin:10px auto 30px auto;}
-      .provdet-header-card{background:#3f86d6;height:88px;display:flex;align-items:center;justify-content:center;border-radius:18px;box-shadow:0 12px 30px rgba(0,0,0,.30);margin-bottom:14px;overflow:hidden;}
-      .provdet-header-overlay{width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;background:rgba(0,0,0,.08);padding:8px 24px;}
-      .provdet-header-text{max-width:1200px;}
-      .provdet-title{color:#ffffff !important;font-weight:900;font-size:1.35rem;text-shadow:0 4px 14px rgba(0,0,0,.45);}
-      .provdet-subtitle{color:rgba(255,255,255,.96);font-size:.82rem;margin-top:4px;}
-      .provdet-header-actions{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;}
-      .provdet-back-btn{background:#ffffff;color:#000000;border:2px solid #ffffff;box-shadow:0 4px 10px rgba(0,0,0,.10);}
-      .provdet-back-btn:hover{background:#f3f4f6;color:#000000;border-color:#f3f4f6;}
-      .provdet-card{background:rgba(255,255,255,.93)!important;border-radius:18px;backdrop-filter:blur(6px);box-shadow:0 10px 24px rgba(0,0,0,.18);overflow:hidden;}
-      .provdet-card-body{padding:22px;}
-      .provdet-section-title{font-weight:900;font-size:1.02rem;color:#1d4ed8;padding-bottom:8px;border-bottom:2px solid rgba(59,130,246,.18);margin-bottom:10px;}
-      .provdet-field{background:#f8fafc!important;border:1px solid #dbe5f0!important;border-radius:14px!important;box-shadow:0 4px 10px rgba(0,0,0,.05);padding:14px 16px;margin-bottom:12px;height:100%;}
-      .provdet-label{font-weight:800;color:#1f2937;margin-bottom:4px;}
-      .provdet-value{color:#374151;white-space:pre-wrap;word-break:break-word;}
-      .provdet-value-lg{font-weight:700;}
-      .provdet-file-card{background:#f8fafc;border:1px solid #dbe5f0;border-radius:14px;padding:12px 14px;}
-      .provdet-file-meta{min-width:0;}
-      .provdet-file-label{font-size:.78rem;color:#64748b;font-weight:700;}
-      .provdet-file-name{display:block;font-size:.90rem;font-weight:700;color:#1d4ed8;text-decoration:none;word-break:break-word;}
-      .provdet-file-name:hover{text-decoration:underline;}
-      .provdet-file-size{font-size:.78rem;color:#6b7280;margin-top:2px;}
-      .provdet-empty-box{background:rgba(255,255,255,.75);border:1px dashed #cfd8e3;border-radius:14px;padding:18px;text-align:center;color:#6b7280;}
-      .provdet-bottom-actions{display:flex;justify-content:center;gap:12px;margin-top:26px;flex-wrap:wrap;}
-      .provdet-cancel-btn{background:#ffffff;color:#000000;border:2px solid #ffffff;box-shadow:0 4px 10px rgba(0,0,0,.10);}
-      .provdet-cancel-btn:hover{background:#f3f4f6;color:#000000;border-color:#f3f4f6;}
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .provdet-shell{
+        width:96%;
+        max-width:1500px;
+        margin:10px auto 30px auto;
+      }
+
+      .provdet-header-card{
+        background:#3f86d6;
+        height:88px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        border-radius:18px;
+        box-shadow:0 12px 30px rgba(0,0,0,.30);
+        margin-bottom:14px;
+        overflow:hidden;
+      }
+
+      .provdet-header-overlay{
+        width:100%;
+        height:100%;
+        display:flex;
+        align-items:flex-start;
+        justify-content:center;
+        text-align:center;
+        background:rgba(0,0,0,.08);
+        padding:8px 24px 6px 24px;
+      }
+
+      .provdet-header-text{
+        max-width:1100px;
+        width:100%;
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        justify-content:flex-start;
+        transform:translateY(8px);
+      }
+
+      .provdet-title{
+        color:#ffffff !important;
+        font-weight:900;
+        font-size:1.38rem;
+        line-height:1.10;
+        text-shadow:0 4px 14px rgba(0,0,0,.45);
+        margin:0 !important;
+      }
+
+      .provdet-subtitle{
+        color:rgba(255,255,255,.96);
+        font-size:.82rem;
+        margin-top:4px;
+        line-height:1.15;
+      }
+
+      .provdet-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:12px;
+        flex-wrap:wrap;
+        margin-bottom:16px;
+      }
+
+      .provdet-back-btn{
+        background:#ffffff;
+        color:#000000;
+        border:2px solid #ffffff;
+        box-shadow:0 4px 10px rgba(0,0,0,.10);
+      }
+
+      .provdet-back-btn:hover{
+        background:#f3f4f6;
+        color:#000000;
+        border-color:#f3f4f6;
+      }
+
+      .provdet-card{
+        background:rgba(255,255,255,.94)!important;
+        border-radius:18px;
+        backdrop-filter:blur(6px);
+        box-shadow:0 10px 24px rgba(0,0,0,.18);
+        overflow:hidden;
+      }
+
+      .provdet-card-body{
+        padding:22px;
+      }
+
+      .provdet-section{
+        margin-bottom:18px;
+      }
+
+      .provdet-section-title{
+        font-weight:900;
+        font-size:1.02rem;
+        color:#1d4ed8;
+        padding-bottom:8px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+        margin-bottom:14px;
+      }
+
+      .provdet-field{
+        background:#f8fafc;
+        border:1px solid #e5e7eb;
+        border-radius:14px;
+        padding:14px;
+        min-height:100%;
+      }
+
+      .provdet-label{
+        font-size:.82rem;
+        font-weight:800;
+        color:#334155;
+        margin-bottom:6px;
+      }
+
+      .provdet-value{
+        color:#0f172a;
+        font-size:.95rem;
+        white-space:pre-wrap;
+        word-break:break-word;
+      }
+
+      .provdet-value-lg{
+        min-height:72px;
+      }
+
+      .provdet-big-number{
+        font-size:1.8rem;
+        font-weight:900;
+        color:#0f172a;
+        line-height:1.1;
+      }
+
+      .provdet-score{
+        font-size:.82rem;
+        font-weight:800;
+        color:#475569;
+        white-space:nowrap;
+      }
+
+      .provdet-ev-grid{
+        display:grid;
+        grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));
+        gap:14px;
+      }
+
+      .provdet-file-card{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:12px;
+        background:#f8fafc;
+        border:1px solid #e5e7eb;
+        border-radius:14px;
+        padding:14px;
+      }
+
+      .provdet-file-left{
+        display:flex;
+        align-items:center;
+        gap:12px;
+        min-width:0;
+      }
+
+      .provdet-file-icon{
+        width:52px;
+        height:52px;
+        border-radius:12px;
+        background:#dc2626;
+        color:#fff;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-weight:900;
+        font-size:.85rem;
+        flex:0 0 auto;
+      }
+
+      .provdet-file-meta{
+        min-width:0;
+      }
+
+      .provdet-file-label{
+        font-size:.76rem;
+        color:#64748b;
+        font-weight:700;
+      }
+
+      .provdet-file-name{
+        display:block;
+        font-weight:800;
+        color:#0f172a;
+        text-decoration:none;
+        word-break:break-word;
+      }
+
+      .provdet-file-name:hover{
+        text-decoration:underline;
+      }
+
+      .provdet-file-size{
+        font-size:.76rem;
+        color:#64748b;
+        margin-top:3px;
+      }
+
+      .provdet-empty-box{
+        background:#f8fafc;
+        border:1px dashed #cbd5e1;
+        border-radius:14px;
+        padding:18px;
+        text-align:center;
+        color:#64748b;
+        font-weight:600;
+      }
+
+      .badge-verde-claro{ background:#d1fae5; color:#065f46; }
+      .badge-verde-oscuro{ background:#10b981; color:#fff; }
+      .badge-amarillo{ background:#fef3c7; color:#92400e; }
+      .badge-rojo{ background:#fee2e2; color:#991b1b; }
+      .badge-aprobado{ background:#dcfce7; color:#166534; }
+      .badge-revision{ background:#fef3c7; color:#92400e; }
+      .badge-noaprob{ background:#fee2e2; color:#991b1b; }
+
+      .btn.rounded-pill{
+        border-radius:999px !important;
+      }
+
+      @media (max-width:992px){
+        .provdet-shell{
+          width:98%;
+          margin:8px auto 24px auto;
+        }
+
+        .provdet-header-card{
+          height:84px;
+        }
+
+        .provdet-header-overlay{
+          padding:8px 16px 6px 16px;
+        }
+
+        .provdet-header-text{
+          transform:translateY(-1px);
+        }
+
+        .provdet-title{
+          font-size:1.20rem;
+          line-height:1.08;
+        }
+
+        .provdet-subtitle{
+          font-size:.76rem;
+          line-height:1.12;
+        }
+
+        .provdet-card-body{
+          padding:16px;
+        }
+
+        .provdet-file-card{
+          flex-direction:column;
+          align-items:flex-start;
+        }
+      }
     </style>
     """
 
-    inner = render_template_string(html, it=it, read_only=read_only, fmt_fecha=fmt_fecha)
+    inner = render_template_string(
+        html,
+        it=it,
+        read_only=read_only,
+        fmt_fecha=fmt_fecha,
+        yn_badge=yn_badge
+    )
     return render_template_string(BASE, content=Markup(inner))
 
 
