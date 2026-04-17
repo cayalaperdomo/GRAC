@@ -51618,7 +51618,12 @@ def _render_proveedor_form(item=None, areas=None, paises=None, cfg=None, is_edit
             <div class="row g-3">
 
               <div class="col-12">
-                <div class="provform-section-title">Información general del proveedor</div>
+                <div class="provform-section-box">
+                  <div class="provform-section-title">Información general del proveedor</div>
+                  <div class="provform-section-subtitle">
+                    Datos básicos del proveedor, área responsable, evaluador, ubicación, descripción del servicio y estado del registro.
+                  </div>
+                </div>
               </div>
 
               <div class="col-md-3">
@@ -51705,7 +51710,12 @@ def _render_proveedor_form(item=None, areas=None, paises=None, cfg=None, is_edit
               </div>
 
               <div class="col-12">
-                <div class="provform-section-title">Calificación del proveedor</div>
+                <div class="provform-section-box">
+                  <div class="provform-section-title">Calificación del proveedor</div>
+                  <div class="provform-section-subtitle">
+                    Criterios de criticidad y evaluación del proveedor: transversalidad, continuidad, recuperación, alternativas, impacto, migración, información sensible, datos personales, nube y SLA.
+                  </div>
+                </div>
               </div>
 
               <div class="col-md-3">
@@ -51815,7 +51825,12 @@ def _render_proveedor_form(item=None, areas=None, paises=None, cfg=None, is_edit
               </div>
 
               <div class="col-12">
-                <div class="provform-section-title">Registro del proveedor</div>
+                <div class="provform-section-box">
+                  <div class="provform-section-title">Registro del proveedor</div>
+                  <div class="provform-section-subtitle">
+                    Registro de certificaciones, cantidad, nombres, puntos del formulario, cálculo automático de la calificación total y resultado de evaluación.
+                  </div>
+                </div>
               </div>
 
               <div class="col-md-3">
@@ -51855,7 +51870,12 @@ def _render_proveedor_form(item=None, areas=None, paises=None, cfg=None, is_edit
               </div>
 
               <div class="col-12">
-                <div class="provform-section-title">Evidencias y observaciones</div>
+                <div class="provform-section-box">
+                  <div class="provform-section-title">Evidencias y observaciones</div>
+                  <div class="provform-section-subtitle">
+                    Adjunta soportes en PDF y registra observaciones complementarias sobre el proveedor, el análisis efectuado y los hallazgos identificados.
+                  </div>
+                </div>
               </div>
 
               {% if is_edit %}
@@ -51921,7 +51941,6 @@ def _render_proveedor_form(item=None, areas=None, paises=None, cfg=None, is_edit
     </div>
 
     <style>
-
     body{
       background-image:url('/static/img/ccsgsi.jpg');
       background-size:cover;
@@ -52002,7 +52021,33 @@ def _render_proveedor_form(item=None, areas=None, paises=None, cfg=None, is_edit
       padding:22px;
     }
 
-    .form-control{
+    .provform-section-box{
+      background:linear-gradient(135deg, rgba(63,134,214,.12), rgba(90,163,234,.10));
+      border:1px solid rgba(63,134,214,.18);
+      border-left:6px solid #3f86d6;
+      border-radius:14px;
+      padding:12px 14px;
+      margin-top:6px;
+      margin-bottom:4px;
+      box-shadow:0 6px 14px rgba(0,0,0,.06);
+    }
+
+    .provform-section-title{
+      font-size:1rem;
+      font-weight:900;
+      color:#1d4ed8;
+      line-height:1.1;
+      margin-bottom:4px;
+    }
+
+    .provform-section-subtitle{
+      font-size:.82rem;
+      color:#475569;
+      line-height:1.35;
+    }
+
+    .form-control,
+    .form-select{
       border-radius:10px;
     }
 
@@ -52011,6 +52056,7 @@ def _render_proveedor_form(item=None, areas=None, paises=None, cfg=None, is_edit
       justify-content:center;
       gap:12px;
       margin-top:25px;
+      flex-wrap:wrap;
     }
 
     .provform-cancel-btn{
@@ -52018,6 +52064,13 @@ def _render_proveedor_form(item=None, areas=None, paises=None, cfg=None, is_edit
       border:2px solid #fff;
     }
 
+    .badge-verde-claro{ background:#d1fae5; color:#065f46; }
+    .badge-verde-oscuro{ background:#10b981; color:#fff; }
+    .badge-amarillo{ background:#fef3c7; color:#92400e; }
+    .badge-rojo{ background:#fee2e2; color:#991b1b; }
+    .badge-aprobado{ background:#dcfce7; color:#166534; }
+    .badge-revision{ background:#fef3c7; color:#92400e; }
+    .badge-noaprob{ background:#fee2e2; color:#991b1b; }
     </style>
 
     <script>
