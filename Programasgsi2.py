@@ -88741,6 +88741,8 @@ def view_report(run_id: int):
 
             cai = (control_ai.get(cid) or {}) if isinstance(control_ai, dict) else {}
 
+            safe_id = re.sub(r"[^a-zA-Z0-9_]+", "_", f"{grp}_{cid}")
+
             estado_actual = (cai.get("estado_actual") or "").strip()
             estado_req    = (cai.get("estado_requerido") or "").strip()
             plan_sug      = (cai.get("plan_accion_sugerido") or "").strip()
@@ -88776,11 +88778,11 @@ def view_report(run_id: int):
 
             if read_only:
                 control_edit_form = """
-                <div class="card card-soft p-3 mt-3 border border-secondary-subtle">
-                  <div class="fw-bold mb-2">✍️ Editar análisis por control</div>
-                  <div class="alert alert-secondary mb-0">
-                    El perfil Auditor solo tiene permisos de consulta. La edición está bloqueada.
-                  </div>
+                <div class="mt-3">
+                  <button class="btn btn-sm btn-secondary pill" type="button" disabled
+                          title="El perfil Auditor solo tiene permisos de consulta">
+                    ✏️ Editar análisis (Control)
+                  </button>
                 </div>
                 """
                 btn_ai_control = """
@@ -88791,7 +88793,16 @@ def view_report(run_id: int):
                 """
             else:
                 control_edit_form = f"""
-                <div class="card card-soft p-3 mt-3">
+                <div class="mt-3">
+                  <button type="button"
+                          class="btn btn-sm btn-outline-primary pill"
+                          id="btnEditControl_{safe_id}"
+                          onclick="toggleControlEdit('{safe_id}', true)">
+                    ✏️ Editar análisis (Control)
+                  </button>
+                </div>
+
+                <div class="card card-soft p-3 mt-3 d-none" id="editCard_{safe_id}">
                   <div class="fw-bold mb-2">✍️ Editar análisis por control</div>
 
                   <form method="POST" action="{url_for('madurez.save_control_ai', run_id=run.id, control_id=cid)}">
@@ -88810,7 +88821,14 @@ def view_report(run_id: int):
                       <textarea class="form-control" name="plan_accion_sugerido" rows="6">{pa_safe}</textarea>
                     </div>
 
-                    <button class="btn btn-sm btn-success pill" type="submit">💾 Guardar edición (Control)</button>
+                    <div class="d-flex flex-wrap gap-2">
+                      <button class="btn btn-sm btn-success pill" type="submit">💾 Guardar edición (Control)</button>
+                      <button type="button"
+                              class="btn btn-sm btn-outline-secondary pill"
+                              onclick="toggleControlEdit('{safe_id}', false)">
+                        ↩️ Cancelar
+                      </button>
+                    </div>
                   </form>
                 </div>
                 """
@@ -88839,7 +88857,6 @@ def view_report(run_id: int):
             """
 
             tabla = render_control_items_table(items_c)
-            safe_id = re.sub(r"[^a-zA-Z0-9_]+", "_", f"{grp}_{cid}")
 
             chap_inner += f"""
             <div class="accordion-item">
@@ -89529,6 +89546,25 @@ def view_report(run_id: int):
         </div>
       </div>
     </div>
+    """
+
+    content += """
+    <script>
+      function toggleControlEdit(safeId, show) {
+        const card = document.getElementById("editCard_" + safeId);
+        const btn = document.getElementById("btnEditControl_" + safeId);
+
+        if (!card) return;
+
+        if (show) {
+          card.classList.remove("d-none");
+          if (btn) btn.classList.add("d-none");
+        } else {
+          card.classList.add("d-none");
+          if (btn) btn.classList.remove("d-none");
+        }
+      }
+    </script>
     """
 
     return render_template_string(BASE, title=f"Informe – {run.company_name}", content=content)
