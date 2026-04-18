@@ -49167,10 +49167,61 @@ def rfc_view(id):
 #                                                               Módulo Gestión de Incidentes
 # ============================================================================================================================================
 
+import os
 import sqlite3
 from datetime import datetime
 from flask import request, redirect, url_for, flash, render_template_string
 from markupsafe import Markup
+
+# ==========================
+# DB INCIDENTES SQLITE (instance/incidentes.db)
+# ==========================
+os.makedirs(app.instance_path, exist_ok=True)
+INCIDENTES_DB_PATH = os.path.join(app.instance_path, "incidentes.db")
+
+def get_incidentes_db_connection():
+    conn = sqlite3.connect(INCIDENTES_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_incidentes_db():
+    os.makedirs(app.instance_path, exist_ok=True)
+
+    conn = sqlite3.connect(INCIDENTES_DB_PATH)
+    c = conn.cursor()
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS registro_incidentes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha_alerta TEXT,
+            nombre_alerta TEXT,
+            descripcion_alerta TEXT,
+            id_incidente TEXT,
+            clasificacion_incidente TEXT,
+            cargo_responsable TEXT,
+            atacante TEXT,
+            ubicacion_atacante TEXT,
+            tipo_recurso_afectado TEXT,
+            nombre_recurso_id TEXT,
+            estado TEXT,
+            fecha_cierre TEXT,
+            descripcion_cierre TEXT,
+            principio TEXT,
+            prioridad TEXT,
+            se_requiere_contencion TEXT,
+            fecha_hora_contencion TEXT,
+            descripcion_contencion TEXT,
+            se_requiere_recuperacion TEXT,
+            fecha_hora_recuperacion TEXT,
+            descripcion_recuperacion TEXT
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+# Crear la base y tabla si no existen
+init_incidentes_db()
 
 # ==========================
 # ENTRADA DIRECTA — INCIDENTES
@@ -49207,7 +49258,7 @@ def incidentes_nuevo():
         return redirect(url_for('incidentes_matriz'))
 
     if request.method == 'POST':
-        conn = sqlite3.connect('sgsi.db')
+        conn = get_incidentes_db_connection()
         c = conn.cursor()
 
         raw_fecha_alerta = request.form.get('fecha_alerta') or None
@@ -49768,7 +49819,7 @@ def incidentes_matriz():
 
     solo_lectura = (user.role == 'auditor')
 
-    conn = sqlite3.connect('sgsi.db')
+    conn = get_incidentes_db_connection()
     c = conn.cursor()
 
     eliminar_id = request.args.get('eliminar')
@@ -50314,8 +50365,7 @@ def incidentes_detalle(id):
 
     solo_lectura = (user.role == 'auditor')
 
-    conn = sqlite3.connect('sgsi.db')
-    conn.row_factory = sqlite3.Row
+    conn = get_incidentes_db_connection()
     c = conn.cursor()
     c.execute("""
         SELECT
@@ -50639,8 +50689,7 @@ def incidentes_editar(id):
         flash("No tiene permiso para editar incidentes.", "danger")
         return redirect(url_for('incidentes_matriz'))
 
-    conn = sqlite3.connect('sgsi.db')
-    conn.row_factory = sqlite3.Row
+    conn = get_incidentes_db_connection()
     c = conn.cursor()
 
     c.execute("""
@@ -70944,6 +70993,64 @@ def cuestionarios_proveedores_eliminar(cuestionario_id):
 #                                                       Módulo de Métricas
 # ==========================================================================================================================================
 
+import os
+import sqlite3
+from datetime import datetime
+from flask import request, redirect, url_for, flash, render_template_string
+from markupsafe import Markup
+
+# ==========================
+# DB INCIDENTES SQLITE (instance/incidentes.db)
+# ==========================
+os.makedirs(app.instance_path, exist_ok=True)
+INCIDENTES_DB_PATH = os.path.join(app.instance_path, "incidentes.db")
+
+def get_incidentes_db_connection():
+    conn = sqlite3.connect(INCIDENTES_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_incidentes_db():
+    os.makedirs(app.instance_path, exist_ok=True)
+
+    conn = sqlite3.connect(INCIDENTES_DB_PATH)
+    c = conn.cursor()
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS registro_incidentes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha_alerta TEXT,
+            nombre_alerta TEXT,
+            descripcion_alerta TEXT,
+            id_incidente TEXT,
+            clasificacion_incidente TEXT,
+            cargo_responsable TEXT,
+            atacante TEXT,
+            ubicacion_atacante TEXT,
+            tipo_recurso_afectado TEXT,
+            nombre_recurso_id TEXT,
+            estado TEXT,
+            fecha_cierre TEXT,
+            descripcion_cierre TEXT,
+            principio TEXT,
+            prioridad TEXT,
+            se_requiere_contencion TEXT,
+            fecha_hora_contencion TEXT,
+            descripcion_contencion TEXT,
+            se_requiere_recuperacion TEXT,
+            fecha_hora_recuperacion TEXT,
+            descripcion_recuperacion TEXT
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+# Crear la base y tabla si no existen
+init_incidentes_db()
+
+
+
 #========================
 # Modelos
 #========================
@@ -71516,13 +71623,68 @@ Datos:
 
 
 def cargar_incidente_por_id(incidente_id: int):
-    conn = sqlite3.connect('sgsi.db')
-    conn.row_factory = sqlite3.Row
+    init_incidentes_db()
+    conn = get_incidentes_db_connection()
     c = conn.cursor()
     c.execute("SELECT * FROM registro_incidentes WHERE id = ?", (incidente_id,))
     row = c.fetchone()
     conn.close()
     return row
+
+def listar_incidentes_metricas():
+    init_incidentes_db()
+    conn = get_incidentes_db_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT *
+        FROM registro_incidentes
+        ORDER BY id DESC
+    """)
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def listar_incidentes_metricas_filtrados(
+    nombre_alerta: str = "",
+    clasificacion_incidente: str = "",
+    prioridad: str = "",
+    estado: str = ""
+):
+    init_incidentes_db()
+    conn = get_incidentes_db_connection()
+    c = conn.cursor()
+
+    query = """
+        SELECT *
+        FROM registro_incidentes
+        WHERE 1=1
+    """
+    params = []
+
+    if (nombre_alerta or "").strip():
+        query += " AND nombre_alerta LIKE ?"
+        params.append(f"%{nombre_alerta.strip()}%")
+
+    if (clasificacion_incidente or "").strip():
+        query += " AND clasificacion_incidente = ?"
+        params.append(clasificacion_incidente.strip())
+
+    if (prioridad or "").strip():
+        query += " AND prioridad = ?"
+        params.append(prioridad.strip())
+
+    if (estado or "").strip():
+        query += " AND estado = ?"
+        params.append(estado.strip())
+
+    query += " ORDER BY id DESC"
+
+    c.execute(query, tuple(params))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
 
 
 def analizar_metrica_incidente_ia(metrica: "MetricaIncidente", eta_objetivo: float | None = None) -> str:
@@ -74289,8 +74451,8 @@ def metricas_incidente_matriz():
     # ==========================
     # Leer incidentes desde SQLite
     # ==========================
-    conn = sqlite3.connect('sgsi.db')
-    conn.row_factory = sqlite3.Row
+    init_incidentes_db()
+    conn = get_incidentes_db_connection()
     c = conn.cursor()
 
     sql = """
@@ -74850,8 +75012,8 @@ def metricas_incidente_detalle(incidente_id):
         flash("No tiene permiso para ver el detalle del incidente.", "danger")
         return redirect(url_for('menu'))
 
-    conn = sqlite3.connect('sgsi.db')
-    conn.row_factory = sqlite3.Row
+    init_incidentes_db()
+    conn = get_incidentes_db_connection()
     c = conn.cursor()
 
     c.execute("""
