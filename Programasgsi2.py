@@ -6709,7 +6709,7 @@ def _dashboard_incidentes_chart():
             conteos["Bajo"] += 1
 
     try:
-        db_path = os.path.join(app.instance_path, "sgsi.db")
+        db_path = INCIDENTES_DB_PATH
         columnas = _obtener_columnas_sqlite(db_path, "registro_incidentes")
 
         posibles_columnas = [
