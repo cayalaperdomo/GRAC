@@ -7501,7 +7501,7 @@ def menu():
                 <i class="bi bi-list-ul"></i>
               </div>
               <div class="sgsi-leftnav-header-text">
-                <div class="sgsi-leftnav-title">Menú principal</div>
+                <div class="text-blank sgsi-leftnav-title">Menú principal</div>
                 <div class="sgsi-leftnav-subtitle">Acceso a módulos</div>
               </div>
             </div>
@@ -7759,10 +7759,10 @@ def menu():
       }
 
       .sgsi-leftnav-card{
-          background:rgba(63,134,214,.18);
-          border:1px solid rgba(255,255,255,.22);
+          background: linear-gradient(180deg, #2f6fb6 0%, #1f4e8c 100%);
+          border:1px solid rgba(255,255,255,.25);
           border-radius:16px;
-          box-shadow:0 6px 16px rgba(0,0,0,.06);
+          box-shadow:0 10px 25px rgba(0,0,0,.25);
           padding:10px;
           overflow:visible !important;
           position:sticky;
@@ -7794,14 +7794,14 @@ def menu():
       .sgsi-leftnav-title{
           font-size:.95rem;
           font-weight:900;
-          color:#000000 !important;
+          color:#ffffff !important;
           line-height:1.1;
         }
 
-      .sgsi-leftnav-subtitle{
+        .sgsi-leftnav-subtitle{
           margin-top:3px;
           font-size:.76rem;
-          color:#000000 !important;
+          color:#ffffff !important;
           line-height:1.2;
         }
 
