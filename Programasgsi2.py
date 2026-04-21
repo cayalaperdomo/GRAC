@@ -10283,6 +10283,22 @@ def declaracion_aplicabilidad():
           </div>
 
           <!-- =========================
+               BOTONES CENTRADOS ARRIBA
+          ========================== -->
+          <div class="soa-top-actions-centered">
+            {% if not read_only %}
+              <button class="btn btn-success rounded-pill px-4 fw-bold"
+                      type="submit"
+                      form="soa-main-form">
+                Guardar
+              </button>
+            {% endif %}
+            <a class="btn rounded-pill px-4 fw-bold soa-back-btn" href="/">
+              Volver al Menú Principal
+            </a>
+          </div>
+
+          <!-- =========================
                FILTROS
           ========================== -->
           <div class="soa-filters-card">
@@ -10322,7 +10338,7 @@ def declaracion_aplicabilidad():
           <!-- =========================
                TABLA
           ========================== -->
-          <form method="post" enctype="multipart/form-data">
+          <form id="soa-main-form" method="post" enctype="multipart/form-data">
             <div class="soa-table-card">
               <div class="soa-table-card-body">
 
@@ -10416,20 +10432,6 @@ def declaracion_aplicabilidad():
                 </div>
 
               </div>
-            </div>
-
-            <!-- =========================
-                 BOTONES
-            ========================== -->
-            <div class="soa-bottom-actions">
-              {% if not read_only %}
-                <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
-                  Guardar
-                </button>
-              {% endif %}
-              <a class="btn rounded-pill px-4 fw-bold soa-back-btn" href="/">
-                Volver al Menú Principal
-              </a>
             </div>
 
             <script>
@@ -10558,6 +10560,15 @@ def declaracion_aplicabilidad():
             text-shadow: 0 2px 8px rgba(0,0,0,.35);
           }
 
+          .soa-top-actions-centered {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 14px;
+            flex-wrap: wrap;
+          }
+
           .soa-filters-card,
           .soa-table-card {
             background: rgba(255,255,255,.94);
@@ -10599,7 +10610,6 @@ def declaracion_aplicabilidad():
             padding: 16px;
           }
 
-          /* MATRIZ ESTÁTICA */
           .soa-table-static {
             border: 1px solid rgba(0,0,0,.08);
             border-radius: 16px;
@@ -10675,14 +10685,6 @@ def declaracion_aplicabilidad():
             white-space: nowrap;
           }
 
-          .soa-bottom-actions {
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            margin-top: 18px;
-            flex-wrap: wrap;
-          }
-
           .soa-back-btn {
             background: #ffffff;
             color: #000000;
@@ -10741,6 +10743,11 @@ def declaracion_aplicabilidad():
             .soa-filters-body,
             .soa-table-card-body {
               padding: 12px;
+            }
+
+            .soa-top-actions-centered {
+              justify-content: center;
+              gap: 10px;
             }
 
             .soa-matriz {
