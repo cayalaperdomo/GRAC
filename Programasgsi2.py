@@ -26,6 +26,7 @@ import pandas as pd
 from markupsafe import Markup, escape
 from werkzeug.utils import secure_filename
 from io import BytesIO
+from collections import Counter
 import unicodedata
 import smtplib
 from reportlab.lib.utils import ImageReader
@@ -6666,6 +6667,17 @@ def _dashboard_riesgos_residuales_chart():
         subtitle="Distribución por nivel"
     )
 
+def _obtener_columnas_sqlite(db_path, tabla):
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute(f"PRAGMA table_info({tabla})")
+        cols = [row[1] for row in cur.fetchall()]
+        conn.close()
+        return cols
+    except Exception as e:
+        print(f"ERROR obteniendo columnas de {tabla}: {e}")
+        return []
 
 def _dashboard_incidentes_chart():
     buckets = ["Bajo", "Medio", "Alto", "Crítico"]
@@ -6697,21 +6709,42 @@ def _dashboard_incidentes_chart():
             conteos["Bajo"] += 1
 
     try:
-        conn = sqlite3.connect("sgsi.db")
+        db_path = os.path.join(app.instance_path, "sgsi.db")
+        columnas = _obtener_columnas_sqlite(db_path, "registro_incidentes")
+
+        posibles_columnas = [
+            "clasificacion_incidente",
+            "clasificacion",
+            "criticidad",
+            "nivel",
+            "tipo_incidente",
+            "categoria_incidente"
+        ]
+
+        columna_real = next((c for c in posibles_columnas if c in columnas), None)
+
+        if not columna_real:
+            print("ERROR DASHBOARD INCIDENTES: no existe una columna válida en registro_incidentes. Columnas encontradas:", columnas)
+            return _dashboard_empty_chart(
+                "Incidentes por clasificación",
+                "No se encontró columna de clasificación en registro_incidentes"
+            )
+
+        conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
 
-        c.execute("""
-            SELECT clasificacion_incidente
+        c.execute(f"""
+            SELECT {columna_real}
             FROM registro_incidentes
-            WHERE clasificacion_incidente IS NOT NULL
-              AND TRIM(clasificacion_incidente) <> ''
+            WHERE {columna_real} IS NOT NULL
+              AND TRIM({columna_real}) <> ''
         """)
         rows = c.fetchall()
         conn.close()
 
         for row in rows:
-            acumular_clasificacion(row["clasificacion_incidente"])
+            acumular_clasificacion(row[columna_real])
 
     except Exception as e:
         print("ERROR DASHBOARD INCIDENTES:", str(e))
