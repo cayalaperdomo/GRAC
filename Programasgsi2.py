@@ -9,6 +9,7 @@ import os, io, csv
 from sqlalchemy import text
 import pyotp
 import json
+import html
 import qrcode
 import datetime as datetime_module
 import qrcode
@@ -22,6 +23,7 @@ from datetime import datetime
 from datetime import datetime as dt
 from flask import Flask, render_template_string, request, redirect, url_for, session, flash
 from flask import abort
+import re
 import pandas as pd
 from markupsafe import Markup, escape
 from werkzeug.utils import secure_filename
@@ -209,13 +211,29 @@ JIRA_CRYPTO_SECRET = os.getenv("JIRA_CRYPTO_SECRET", "dev-secret")
 # ==========================================
 # Cliente OpenRouter usando key cifrada
 # ==========================================
+# ==========================================
+# Cliente IA dinámico (OpenRouter / Ollama)
+# ==========================================
 def get_openrouter_client():
+    """
+    Mantiene el mismo nombre para NO romper módulos existentes,
+    pero internamente decide si usar OpenRouter u Ollama.
+    """
+    provider = (get_ai_provider() or "openrouter").strip().lower()
+
+    if provider == "ollama":
+        return {
+            "provider": "ollama",
+            "base_url": (get_ollama_base_url() or "http://localhost:11434").rstrip("/"),
+            "model": (get_ollama_model() or "llama3.1").strip()
+        }
+
     api_key = get_openrouter_api_key()
 
     if not api_key:
         raise RuntimeError("No existe OPENROUTER_API_KEY configurada en Administración.")
 
-    return OpenAI(
+    client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=api_key,
         default_headers={
@@ -223,6 +241,88 @@ def get_openrouter_client():
             "X-Title": "SGSI Flask App"
         }
     )
+
+    return {
+        "provider": "openrouter",
+        "client": client,
+        "model": (os.environ.get("OPENROUTER_MODEL") or OPENROUTER_MODEL or "deepseek/deepseek-chat")
+    }
+
+def ai_text_general(prompt: str, system_prompt: str | None = None, temperature: float = 0.2, max_tokens: int = 350) -> str:
+    """
+    Helper general de IA para todo el SGSI.
+    Usa OpenRouter u Ollama según la configuración activa.
+    """
+    ai_cfg = get_openrouter_client()
+    provider = ai_cfg.get("provider")
+
+    if provider == "ollama":
+        base_url = (ai_cfg.get("base_url") or "").rstrip("/")
+        model = (ai_cfg.get("model") or "").strip()
+
+        if not base_url:
+            raise RuntimeError("No hay OLLAMA_BASE_URL configurada en Administración.")
+        if not model:
+            raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
+
+        full_prompt = prompt
+        if system_prompt:
+            full_prompt = f"{system_prompt}\n\n{prompt}"
+
+        print("DEBUG IA GENERAL - provider activo: ollama")
+        print("DEBUG IA GENERAL - OLLAMA URL:", f"{base_url}/api/generate")
+        print("DEBUG IA GENERAL - OLLAMA MODEL:", model)
+        print("DEBUG IA GENERAL - PROMPT PREVIEW:", full_prompt[:500])
+
+        resp = requests.post(
+            f"{base_url}/api/generate",
+            json={
+                "model": model,
+                "prompt": full_prompt,
+                "stream": False,
+                "options": {
+                    "temperature": temperature
+                }
+            },
+            timeout=300
+        )
+        resp.raise_for_status()
+
+        data = resp.json() or {}
+        print("DEBUG IA GENERAL - OLLAMA RESPONSE JSON:", str(data)[:1500])
+
+        texto = (data.get("response") or "").strip()
+
+        if not texto:
+            texto = (data.get("message") or "").strip()
+
+        if not texto:
+            raise RuntimeError(f"Ollama respondió sin contenido. Respuesta: {str(data)[:500]}")
+
+        return texto
+
+    print("DEBUG IA GENERAL - provider activo: openrouter")
+
+    client = ai_cfg["client"]
+    model_name = ai_cfg.get("model") or OPENROUTER_MODEL or "deepseek/deepseek-chat"
+    max_tokens_safe = min(int(max_tokens or 350), 350)
+
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    resp = client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens_safe
+    )
+
+    texto = (resp.choices[0].message.content or "").strip()
+    if not texto:
+        raise RuntimeError("OpenRouter respondió sin contenido.")
+    return texto
 
 
 # === MAPAS Y FUNCIÓN PARA CALCULAR RIESGO ===
@@ -4104,11 +4204,46 @@ def extraer_respuestas_desde_excel(path_xlsx):
 
     return respuestas
 
-def chat_ai(prompt: str, model: str = "openai/gpt-4o-mini") -> str:
-    client = get_openrouter_client()  # ✅ clave dinámica desde Administración/BD
+def chat_ai(prompt: str, model: str = None) -> str:
+    """
+    Mantiene la misma firma para no romper módulos existentes,
+    pero usa el proveedor activo configurado en Administración.
+    """
+    ai_cfg = get_openrouter_client()
+    provider = ai_cfg.get("provider")
+
+    if provider == "ollama":
+        base_url = ai_cfg.get("base_url", "").rstrip("/")
+        ollama_model = ai_cfg.get("model") or get_ollama_model() or "llama3.1"
+
+        if not base_url:
+            raise RuntimeError("No existe OLLAMA_BASE_URL configurada en Administración.")
+        if not ollama_model:
+            raise RuntimeError("No existe OLLAMA_MODEL configurado en Administración.")
+
+        resp = requests.post(
+            f"{base_url}/api/generate",
+            json={
+                "model": ollama_model,
+                "prompt": f"Responde en español, claro y accionable.\n\n{prompt}",
+                "stream": False,
+                "options": {
+                    "temperature": 0.2
+                }
+            },
+            timeout=300
+        )
+        resp.raise_for_status()
+
+        data = resp.json() or {}
+        return (data.get("response") or "").strip()
+
+    # OpenRouter
+    client = ai_cfg["client"]
+    model_name = model or ai_cfg.get("model") or OPENROUTER_MODEL or "deepseek/deepseek-chat"
 
     resp = client.chat.completions.create(
-        model=model,
+        model=model_name,
         messages=[
             {"role": "system", "content": "Responde en español, claro y accionable."},
             {"role": "user", "content": prompt},
@@ -7394,7 +7529,7 @@ MENU_SECTIONS = [
                     }
                 ]
             },
-            {"label": "OpenRouter API Key", "desc": "Configurar llave cifrada para IA (solo admin).", "href": "/admin/openrouter_key", "icon": "bi-key-fill", "btn": "btn-warning text-dark", "admin_only": True},
+            {"label": "Configuración AI", "desc": "Configurar llave cifrada para IA (solo admin).", "href": "/admin/openrouter_key", "icon": "bi-key-fill", "btn": "btn-warning text-dark", "admin_only": True},
             {"label": "Gestión de Usuarios", "href": "/usuarios", "icon": "bi-people", "btn": "btn-success", "module": "Gestión de Usuarios"},
             {"label": "Logs de Auditoría", "href": "/admin/logs_auditoria", "icon": "bi-journal-text", "btn": "btn-dark", "admin_only": True},
             {"label": "Chat con Asistente", "href": "/chatgpt_view", "icon": "bi-chat-dots", "btn": "btn-info text-white", "module": "Chat con Asistente"},
@@ -9902,6 +10037,63 @@ def get_openrouter_api_key() -> str:
         return v
     return (os.environ.get("OPENROUTER_API_KEY") or "").strip()
 
+def get_ai_provider() -> str:
+    """
+    Proveedor activo de IA:
+    - openrouter
+    - ollama
+    """
+    v = get_system_secret("AI_PROVIDER")
+    if v:
+        return v.strip().lower()
+    return "openrouter"
+
+
+def get_ollama_base_url() -> str:
+    """
+    URL base de Ollama.
+    """
+    v = get_system_secret("OLLAMA_BASE_URL")
+    if v:
+        return v.strip()
+    return (os.environ.get("OLLAMA_BASE_URL") or "http://localhost:11434").strip()
+
+
+def get_ollama_model() -> str:
+    """
+    Modelo por defecto de Ollama.
+    """
+    v = get_system_secret("OLLAMA_MODEL")
+    if v:
+        return v.strip()
+    return (os.environ.get("OLLAMA_MODEL") or "llama3.1").strip()
+
+def get_ollama_models(base_url: str | None = None) -> list[str]:
+    """
+    Consulta los modelos disponibles en Ollama.
+    Devuelve una lista de nombres de modelos.
+    """
+    import requests
+
+    try:
+        url_base = (base_url or get_ollama_base_url() or "http://localhost:11434").strip().rstrip("/")
+        resp = requests.get(f"{url_base}/api/tags", timeout=8)
+        resp.raise_for_status()
+
+        data = resp.json() or {}
+        models = data.get("models", []) or []
+
+        nombres = []
+        for m in models:
+            nombre = (m.get("name") or "").strip()
+            if nombre:
+                nombres.append(nombre)
+
+        return nombres
+    except Exception as e:
+        print("ERROR consultando modelos de Ollama:", str(e))
+        return []
+
 #==================================
 # Fin del Cifrado Key
 #==================================
@@ -9912,30 +10104,70 @@ def get_openrouter_api_key() -> str:
 def admin_openrouter_key():
     user = User.query.get(session.get("user_id"))
     if not user or user.role != "admin":
-        flash("No tiene permiso para configurar la llave de OpenRouter.", "danger")
+        flash("No tiene permiso para configurar los proveedores de IA.", "danger")
         return redirect(url_for("menu"))
 
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
 
-        if action == "clear":
+        if action == "clear_openrouter":
             delete_system_secret("OPENROUTER_API_KEY")
-            flash("✅ Llave eliminada.", "success")
+            flash("✅ API Key de OpenRouter eliminada.", "success")
             return redirect(url_for("admin_openrouter_key"))
 
-        api_key = (request.form.get("api_key") or "").strip()
-        if not api_key:
-            flash("⚠️ Debes ingresar una API Key.", "warning")
+        if action == "clear_ollama":
+            delete_system_secret("OLLAMA_BASE_URL")
+            delete_system_secret("OLLAMA_MODEL")
+            flash("✅ Configuración de Ollama eliminada.", "success")
             return redirect(url_for("admin_openrouter_key"))
 
-        if not api_key.startswith("sk-or-"):
-            flash("⚠️ La key no parece ser de OpenRouter (debe iniciar con sk-or-). Aun así se guardará.", "warning")
+        provider = (request.form.get("ai_provider") or "openrouter").strip().lower()
+        if provider not in ("openrouter", "ollama"):
+            provider = "openrouter"
 
-        set_system_secret("OPENROUTER_API_KEY", api_key)
-        flash("✅ Llave guardada (cifrada) correctamente.", "success")
-        return redirect(url_for("admin_openrouter_key"))
+        set_system_secret("AI_PROVIDER", provider)
 
-    has_key = bool(get_system_secret("OPENROUTER_API_KEY"))
+        openrouter_api_key = (request.form.get("api_key") or "").strip()
+        ollama_base_url = (request.form.get("ollama_base_url") or "").strip()
+        ollama_model = (request.form.get("ollama_model") or "").strip()
+
+        if provider == "openrouter":
+            if openrouter_api_key:
+                if not openrouter_api_key.startswith("sk-or-"):
+                    flash("⚠️ La key no parece ser de OpenRouter (debe iniciar con sk-or-). Aun así se guardará.", "warning")
+                set_system_secret("OPENROUTER_API_KEY", openrouter_api_key)
+
+            if not get_system_secret("OPENROUTER_API_KEY"):
+                flash("⚠️ Debes ingresar una API Key de OpenRouter.", "warning")
+                return redirect(url_for("admin_openrouter_key"))
+
+            flash("✅ Configuración de OpenRouter guardada correctamente.", "success")
+            return redirect(url_for("admin_openrouter_key"))
+
+        if provider == "ollama":
+            if not ollama_base_url:
+                ollama_base_url = "http://localhost:11434"
+
+            if not ollama_model:
+                ollama_model = get_ollama_model() or "llama3.1"
+
+            set_system_secret("OLLAMA_BASE_URL", ollama_base_url)
+            set_system_secret("OLLAMA_MODEL", ollama_model)
+
+            flash("✅ Configuración de Ollama guardada correctamente.", "success")
+            return redirect(url_for("admin_openrouter_key"))
+
+    ai_provider = get_ai_provider()
+    has_openrouter_key = bool(get_system_secret("OPENROUTER_API_KEY"))
+    ollama_base_url = get_ollama_base_url()
+    ollama_model = get_ollama_model()
+    ollama_models = get_ollama_models(ollama_base_url)
+    has_ollama = bool(ollama_base_url and ollama_model)
+
+    options_ollama = "".join(
+        f"<option value='{m}' {'selected' if ollama_model == m else ''}>{m}</option>"
+        for m in ollama_models
+    )
 
     content = f"""
     <div class="openrouter-shell">
@@ -9944,10 +10176,10 @@ def admin_openrouter_key():
       <div class="openrouter-header-card">
         <div class="openrouter-header-overlay">
           <div class="openrouter-header-text">
-            <h3 class="openrouter-title m-0">🔑 OpenRouter API Key</h3>
+            <h3 class="openrouter-title m-0">🤖 Configuración de Inteligencia Artificial</h3>
             <div class="openrouter-subtitle">
-              Configura la llave de acceso a OpenRouter para habilitar
-              los módulos de inteligencia artificial integrados en el SGSI.
+              Administra el proveedor de IA del SGSI y configura OpenRouter u Ollama
+              sin afectar los módulos actuales del sistema.
             </div>
           </div>
         </div>
@@ -9965,49 +10197,115 @@ def admin_openrouter_key():
       <div class="openrouter-card p-4">
 
         <div class="openrouter-section-title">
-          Configuración de API Key
-        </div>
-
-        <div class="d-flex justify-content-between align-items-center flex-wrap mb-3">
-          <div class="fw-bold">Estado</div>
-          {"<span class='badge bg-success'>Configurada</span>" if has_key else "<span class='badge bg-secondary'>No configurada</span>"}
+          Configuración general del proveedor de IA
         </div>
 
         <form method="POST">
 
-          <label class="form-label fw-semibold">OpenRouter API Key</label>
+          <label class="form-label fw-semibold">Proveedor activo</label>
+          <select name="ai_provider" id="ai_provider" class="form-select mb-3" onchange="toggleAiSections()">
+            <option value="openrouter" {"selected" if ai_provider == "openrouter" else ""}>OpenRouter</option>
+            <option value="ollama" {"selected" if ai_provider == "ollama" else ""}>Ollama</option>
+          </select>
 
-          <input type="password"
-                 name="api_key"
-                 class="form-control"
-                 placeholder="sk-or-..."
-                 autocomplete="off">
-
-          <div class="text-muted small mt-2">
-            La clave se almacenará cifrada y no se mostrará nuevamente por seguridad.
+          <div class="d-flex justify-content-between align-items-center flex-wrap mb-3">
+            <div class="fw-bold">Proveedor actual</div>
+            <span class="badge bg-primary">{ai_provider.upper()}</span>
           </div>
 
-          <div class="d-flex justify-content-center flex-wrap gap-2 mt-4">
+          <!-- =========================
+               OPENROUTER
+          ========================= -->
+          <div id="openrouter_section">
+            <div class="openrouter-section-title mt-4">
+              OpenRouter
+            </div>
 
-            <button class="btn btn-primary rounded-pill px-5" type="submit">
-              Guardar
-            </button>
+            <div class="d-flex justify-content-between align-items-center flex-wrap mb-3">
+              <div class="fw-bold">Estado OpenRouter</div>
+              {"<span class='badge bg-success'>Configurada</span>" if has_openrouter_key else "<span class='badge bg-secondary'>No configurada</span>"}
+            </div>
 
-            <button class="btn btn-outline-danger rounded-pill px-4"
-                    type="submit"
-                    name="action"
-                    value="clear"
-                    onclick="return confirm('¿Eliminar la llave guardada?');">
-              Eliminar
-            </button>
+            <label class="form-label fw-semibold">OpenRouter API Key</label>
+            <input type="password"
+                   name="api_key"
+                   class="form-control"
+                   placeholder="sk-or-..."
+                   autocomplete="off">
 
+            <div class="text-muted small mt-2">
+              La clave se almacenará cifrada y no se mostrará nuevamente por seguridad.
+            </div>
+
+            <div class="d-flex justify-content-center flex-wrap gap-2 mt-4">
+              <button class="btn btn-primary rounded-pill px-5" type="submit">
+                Guardar configuración
+              </button>
+
+              <button class="btn btn-outline-danger rounded-pill px-4"
+                      type="submit"
+                      name="action"
+                      value="clear_openrouter"
+                      onclick="return confirm('¿Eliminar la API Key guardada de OpenRouter?');">
+                Eliminar API Key
+              </button>
+            </div>
+          </div>
+
+          <!-- =========================
+               OLLAMA
+          ========================= -->
+          <div id="ollama_section">
+            <div class="openrouter-section-title mt-4">
+              Ollama
+            </div>
+
+            <div class="d-flex justify-content-between align-items-center flex-wrap mb-3">
+              <div class="fw-bold">Estado Ollama</div>
+              {"<span class='badge bg-success'>Configurado</span>" if has_ollama else "<span class='badge bg-secondary'>No configurado</span>"}
+            </div>
+
+            <label class="form-label fw-semibold">URL base de Ollama</label>
+            <input type="text"
+                   name="ollama_base_url"
+                   class="form-control"
+                   placeholder="http://localhost:11434"
+                   value="{ollama_base_url}">
+
+            <div class="text-muted small mt-2">
+              Dirección del servicio de Ollama.
+            </div>
+
+            <label class="form-label fw-semibold mt-3">Modelo de Ollama</label>
+            <select name="ollama_model" class="form-select">
+              <option value="">Seleccione un modelo...</option>
+              {options_ollama}
+            </select>
+
+            <div class="text-muted small mt-2">
+              {"Modelos detectados desde Ollama." if ollama_models else "No se pudieron cargar modelos desde Ollama. Verifique que Ollama esté activo y que la URL base sea correcta."}
+            </div>
+
+            <div class="d-flex justify-content-center flex-wrap gap-2 mt-4">
+              <button class="btn btn-primary rounded-pill px-5" type="submit">
+                Guardar configuración
+              </button>
+
+              <button class="btn btn-outline-danger rounded-pill px-4"
+                      type="submit"
+                      name="action"
+                      value="clear_ollama"
+                      onclick="return confirm('¿Eliminar la configuración guardada de Ollama?');">
+                Eliminar configuración
+              </button>
+            </div>
           </div>
 
         </form>
 
         <div class="alert alert-info small mt-4 mb-0">
-          Esta llave será utilizada por los módulos de IA mediante
-          <b>get_openrouter_api_key()</b> y <b>_ai_text(prompt)</b>.
+          Esta pantalla solo agrega la configuración de Ollama y del proveedor activo.
+          Las funciones actuales que usan <b>get_openrouter_api_key()</b> seguirán funcionando sin cambios.
         </div>
 
       </div>
@@ -10029,9 +10327,6 @@ def admin_openrouter_key():
         margin:10px auto 30px auto;
       }}
 
-      /* =========================
-         HEADER ESTÁNDAR SGSI
-         ========================= */
       .openrouter-header-card {{
         background:#3f86d6;
         height:88px;
@@ -10048,7 +10343,7 @@ def admin_openrouter_key():
         width:100%;
         height:100%;
         display:flex;
-        align-items:flex-start;  /* 🔥 clave */
+        align-items:flex-start;
         justify-content:center;
         text-align:center;
         background:rgba(0,0,0,.08);
@@ -10062,7 +10357,7 @@ def admin_openrouter_key():
         flex-direction:column;
         align-items:center;
         justify-content:flex-start;
-        transform:translateY(8px); /* 🔥 ajuste fino */
+        transform:translateY(8px);
       }}
 
       .openrouter-title {{
@@ -10081,9 +10376,6 @@ def admin_openrouter_key():
         line-height:1.15;
       }}
 
-      /* =========================
-         BOTONES
-         ========================= */
       .openrouter-header-actions {{
         display:flex;
         justify-content:center;
@@ -10104,9 +10396,6 @@ def admin_openrouter_key():
         color:#000;
       }}
 
-      /* =========================
-         CARD
-         ========================= */
       .openrouter-card {{
         background:rgba(255,255,255,.93)!important;
         border-radius:18px;
@@ -10118,9 +10407,6 @@ def admin_openrouter_key():
         padding:1.5rem !important;
       }}
 
-      /* =========================
-         TÍTULOS DE SECCIÓN
-         ========================= */
       .openrouter-section-title {{
         font-weight:900;
         font-size:1.02rem;
@@ -10130,9 +10416,6 @@ def admin_openrouter_key():
         margin-bottom:18px;
       }}
 
-      /* =========================
-         FORMULARIOS
-         ========================= */
       .form-control,
       .form-select {{
         border-radius:10px;
@@ -10150,22 +10433,17 @@ def admin_openrouter_key():
         box-shadow:0 0 0 0.2rem rgba(63,134,214,.18);
       }}
 
-      /* =========================
-         BOTONES INTERNOS
-         ========================= */
       .btn.rounded-pill {{
         border-radius:999px !important;
       }}
 
       .openrouter-card .btn-primary,
-      .openrouter-card .btn-outline-secondary {{
+      .openrouter-card .btn-outline-secondary,
+      .openrouter-card .btn-outline-danger {{
         box-shadow:0 4px 10px rgba(0,0,0,.08);
         font-weight:600;
       }}
 
-      /* =========================
-         RESPONSIVE
-         ========================= */
       @media (max-width:992px){{
         .openrouter-shell {{
           width:98%;
@@ -10195,6 +10473,26 @@ def admin_openrouter_key():
         }}
       }}
     </style>
+
+    <script>
+      function toggleAiSections() {{
+        const provider = document.getElementById('ai_provider')?.value || 'openrouter';
+        const openrouterSection = document.getElementById('openrouter_section');
+        const ollamaSection = document.getElementById('ollama_section');
+
+        if (provider === 'ollama') {{
+          if (openrouterSection) openrouterSection.style.display = 'none';
+          if (ollamaSection) ollamaSection.style.display = 'block';
+        }} else {{
+          if (openrouterSection) openrouterSection.style.display = 'block';
+          if (ollamaSection) ollamaSection.style.display = 'none';
+        }}
+      }}
+
+      document.addEventListener('DOMContentLoaded', function() {{
+        toggleAiSections();
+      }});
+    </script>
     """
     return render_template_string(BASE, content=Markup(content))
 
@@ -58824,54 +59122,162 @@ def html_escape(v):
     return escape(v or "")
 
 
-def sugerir_remediacion_ai(hallazgo: dict) -> dict:
-    fallback = {
-        "accion_correctiva": hallazgo.get("recomendacion_base") or "Aplicar corrección técnica, validar nuevamente y documentar evidencia de cierre.",
-        "prioridad": prioridad_desde_clasificacion(hallazgo.get("severidad")),
-        "recursos_necesarios": "Equipo técnico de infraestructura, seguridad o desarrollo según corresponda."
+# ==========================
+# Helpers IA - Remediación
+# ==========================
+
+def _texto_limpio_para_ai(x):
+    return (str(x or "").strip()
+            .replace("\r\n", "\n")
+            .replace("\r", "\n"))
+
+def _es_ruido_hallazgo_scan(hallazgo: dict) -> bool:
+    txt = " ".join([
+        _texto_limpio_para_ai(hallazgo.get("titulo")),
+        _texto_limpio_para_ai(hallazgo.get("descripcion")),
+        _texto_limpio_para_ai(hallazgo.get("evidencia")),
+    ]).lower()
+
+    patrones_ruido = [
+        "initialising plugin",
+        "initializing plugin",
+        "loading plugin",
+        "nikto_ssl",
+        "starting scan",
+        "plugin",
+        "debug:",
+        "trace:",
+        "scan started",
+        "scan completed"
+    ]
+
+    return any(p in txt for p in patrones_ruido)
+
+def _fallback_remediacion_segura(hallazgo: dict) -> dict:
+    severidad = (hallazgo.get("severidad") or "").strip().lower()
+    prioridad = "Media"
+
+    if severidad in ("crítica", "critica", "critical"):
+        prioridad = "Crítica"
+    elif severidad in ("alta", "high"):
+        prioridad = "Alta"
+    elif severidad in ("baja", "low"):
+        prioridad = "Baja"
+
+    titulo = (hallazgo.get("titulo") or "hallazgo detectado").strip()
+
+    return {
+        "accion_correctiva": (
+            f"Validar técnicamente el hallazgo '{titulo}', confirmar su impacto real, "
+            f"aplicar la corrección correspondiente en el activo afectado, "
+            f"ejecutar una nueva verificación y documentar la evidencia de cierre."
+        ),
+        "prioridad": prioridad,
+        "recursos_necesarios": (
+            "Equipo técnico responsable del activo, apoyo de seguridad de la información "
+            "y evidencia técnica de validación/cierre."
+        )
     }
 
+def sugerir_remediacion_ai(hallazgo: dict) -> dict:
+    fallback = _fallback_remediacion_segura(hallazgo)
+
     try:
-        client = get_openrouter_client()
+        # Si el “hallazgo” realmente es ruido del escáner, no mandar a IA
+        if _es_ruido_hallazgo_scan(hallazgo):
+            print("DEBUG REMEDIACION AI - hallazgo detectado como ruido técnico, usando fallback.")
+            return fallback
+
+        provider = (get_ai_provider() or "openrouter").strip().lower()
+        print("DEBUG REMEDIACION AI - provider activo:", provider)
+
+        titulo = _texto_limpio_para_ai(hallazgo.get("titulo"))
+        descripcion = _texto_limpio_para_ai(hallazgo.get("descripcion"))
+        fuente = _texto_limpio_para_ai(hallazgo.get("fuente"))
+        severidad = _texto_limpio_para_ai(hallazgo.get("severidad"))
+        cve = _texto_limpio_para_ai(hallazgo.get("cve"))
+        cvss = _texto_limpio_para_ai(hallazgo.get("cvss"))
+        puerto = _texto_limpio_para_ai(hallazgo.get("puerto"))
+        servicio = _texto_limpio_para_ai(hallazgo.get("servicio"))
+        evidencia = _texto_limpio_para_ai(hallazgo.get("evidencia"))
 
         prompt = f"""
-Eres un consultor senior de ciberseguridad.
-Debes proponer una remediación puntual, accionable y breve en español para un hallazgo técnico.
+CONTEXTO DEFENSIVO:
+Estoy gestionando un programa de remediación de vulnerabilidades en una organización.
+Necesito una recomendación DEFENSIVA para corregir un hallazgo detectado por herramientas de seguridad.
+No estoy pidiendo explotación, ataque ni instrucciones ofensivas.
 
-Título: {hallazgo.get('titulo')}
-Descripción: {hallazgo.get('descripcion')}
-Fuente: {hallazgo.get('fuente')}
-Severidad: {hallazgo.get('severidad')}
-CVE: {hallazgo.get('cve')}
-CVSS: {hallazgo.get('cvss')}
-Puerto: {hallazgo.get('puerto')}
-Servicio: {hallazgo.get('servicio')}
-Evidencia: {hallazgo.get('evidencia')}
+Hallazgo:
+- Título: {titulo}
+- Descripción: {descripcion}
+- Fuente: {fuente}
+- Severidad: {severidad}
+- CVE: {cve}
+- CVSS: {cvss}
+- Puerto: {puerto}
+- Servicio: {servicio}
+- Evidencia: {evidencia}
 
-Responde SOLO JSON válido con:
-accion_correctiva, prioridad, recursos_necesarios
-"""
+Devuelve SOLO JSON válido con esta estructura exacta:
+{{
+  "accion_correctiva": "texto",
+  "prioridad": "Crítica|Alta|Media|Baja",
+  "recursos_necesarios": "texto"
+}}
 
-        resp = client.chat.completions.create(
-            model=OPENROUTER_MODEL_SGSI,
-            messages=[{"role": "user", "content": prompt}],
+Reglas:
+- Responder en español.
+- Enfoque 100% defensivo.
+- No incluir explicación adicional fuera del JSON.
+- Si la evidencia es limitada, dar una remediación conservadora y segura.
+""".strip()
+
+        raw = ai_text_general(
+            prompt=prompt,
+            system_prompt="Eres un consultor senior de ciberseguridad defensiva. Responde solo JSON válido.",
             temperature=0.2,
-            max_tokens=350
+            max_tokens=300
         )
 
-        raw = (resp.choices[0].message.content or "").strip()
+        print("DEBUG REMEDIACION AI RAW:", (raw or "")[:1500])
+
+        if not raw:
+            return fallback
+
+        # Si Ollama rechaza por política o responde texto libre, usar fallback
+        rechazo = [
+            "no puedo proporcionar asistencia",
+            "no puedo ayudar",
+            "i can't help",
+            "i cannot help",
+            "malicios",
+            "dañinas",
+            "harmful"
+        ]
+        raw_l = raw.lower()
+        if any(p in raw_l for p in rechazo):
+            print("DEBUG REMEDIACION AI - respuesta rechazada por modelo, usando fallback.")
+            return fallback
 
         m = re.search(r"\{.*\}", raw, re.S)
         if not m:
+            print("DEBUG REMEDIACION AI - no vino JSON válido, usando fallback.")
             return fallback
 
         data = json.loads(m.group(0))
+
+        accion = (data.get("accion_correctiva") or "").strip()
+        prioridad = (data.get("prioridad") or "").strip()
+        recursos = (data.get("recursos_necesarios") or "").strip()
+
         return {
-            "accion_correctiva": data.get("accion_correctiva") or fallback["accion_correctiva"],
-            "prioridad": data.get("prioridad") or fallback["prioridad"],
-            "recursos_necesarios": data.get("recursos_necesarios") or fallback["recursos_necesarios"]
+            "accion_correctiva": accion or fallback["accion_correctiva"],
+            "prioridad": prioridad or fallback["prioridad"],
+            "recursos_necesarios": recursos or fallback["recursos_necesarios"]
         }
-    except Exception:
+
+    except Exception as e:
+        print("DEBUG REMEDIACION AI ERROR:", str(e))
         return fallback
 
 def ejecutar_comando_scan(run_id, cfg, cmd_local, remote_cmd=None):
@@ -63260,36 +63666,90 @@ def vuln_scan_delete(run_id):
 
     run = VulnerabilityScanRun.query.get_or_404(run_id)
 
-    if run.estado == "ejecutando":
+    if run.estado in ("pendiente", "ejecutando"):
         flash("No puede eliminar una corrida mientras está en ejecución. Debe detenerla primero.", "danger")
         return redirect(url_for('vuln_scan_runs'))
 
-    # borrar archivos físicos
-    for path in [run.archivo_resumen_json, run.archivo_reporte_pdf, run.archivo_log]:
-        try:
-            if path and os.path.exists(path):
-                os.remove(path)
-        except Exception:
-            pass
+    # Guardar rutas antes de borrar DB
+    paths_to_delete = [
+        run.archivo_resumen_json,
+        run.archivo_reporte_pdf,
+        run.archivo_log,
+    ]
 
-    # borrar directorio si existe
+    base_dir = None
     try:
         if run.archivo_log:
             base_dir = os.path.dirname(run.archivo_log)
-            if base_dir and os.path.isdir(base_dir):
-                shutil.rmtree(base_dir, ignore_errors=True)
     except Exception:
-        pass
+        base_dir = None
 
-    # borrar hallazgos asociados
-    hallazgos = VulnerabilityScanFinding.query.filter_by(run_id=run.id).all()
-    for h in hallazgos:
-        db.session.delete(h)
+    # Reintentos por bloqueo SQLite
+    max_retries = 5
+    last_error = None
 
-    db.session.delete(run)
-    db.session.commit()
+    for attempt in range(max_retries):
+        try:
+            # MUY IMPORTANTE: limpiar cualquier transacción previa fallida
+            db.session.rollback()
 
-    flash("Corrida de escaneo eliminada correctamente.", "success")
+            # Volver a cargar la corrida en sesión limpia
+            run = VulnerabilityScanRun.query.get(run_id)
+            if not run:
+                flash("La corrida ya había sido eliminada.", "info")
+                return redirect(url_for('vuln_scan_runs'))
+
+            # Marcar como eliminando para evitar operaciones concurrentes lógicas
+            run.current_stage = "Eliminando corrida"
+            run.current_tool = None
+            run.cancel_requested = True
+            run.active_pid = None
+            run.active_command = None
+            db.session.commit()
+
+            db.session.rollback()
+
+            # Borrado masivo de hallazgos asociados
+            VulnerabilityScanFinding.query.filter_by(run_id=run_id).delete(synchronize_session=False)
+
+            # Si tienes otras tablas hijas ligadas al run_id, aquí puedes agregarlas igual
+            # Ejemplo:
+            # ThreatModelFinding.query.filter_by(scan_run_id=run_id).delete(synchronize_session=False)
+
+            db.session.commit()
+            db.session.rollback()
+
+            # Borrar corrida principal
+            run = VulnerabilityScanRun.query.get(run_id)
+            if run:
+                db.session.delete(run)
+                db.session.commit()
+
+            # Borrar archivos físicos solo después del commit exitoso
+            for path in paths_to_delete:
+                try:
+                    if path and os.path.exists(path):
+                        os.remove(path)
+                except Exception:
+                    pass
+
+            # Borrar directorio si existe
+            try:
+                if base_dir and os.path.isdir(base_dir):
+                    shutil.rmtree(base_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+            flash("Corrida de escaneo eliminada correctamente.", "success")
+            return redirect(url_for('vuln_scan_runs'))
+
+        except Exception as e:
+            last_error = e
+            print(f"DEBUG DELETE SCAN intento {attempt + 1}/{max_retries}: {e}")
+            db.session.rollback()
+            time.sleep(1.2)
+
+    flash(f"No se pudo eliminar la corrida por bloqueo de base de datos: {last_error}", "danger")
     return redirect(url_for('vuln_scan_runs'))
 
 # ==========================
@@ -63873,6 +64333,48 @@ def plan_remediacion_menu():
         return redirect(url_for('menu'))
 
     return redirect(url_for('plan_remediacion_matriz'))
+
+@app.route('/plan_remediacion/ai_sugerir/<int:vuln_id>', methods=['GET'])
+@login_required
+def plan_remediacion_ai_sugerir(vuln_id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede generar acciones correctivas con IA.", "danger")
+        return redirect(url_for('plan_remediacion_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Plan de Remediación"):
+        flash("No tiene permiso para usar IA en plan de remediación.", "danger")
+        return redirect(url_for('plan_remediacion_matriz'))
+
+    vuln = VulnerabilidadRegistro.query.get_or_404(vuln_id)
+
+    hallazgo = {
+        "titulo": vuln.codigo or "Hallazgo sin código",
+        "descripcion": vuln.descripcion_vulnerabilidad or "",
+        "fuente": getattr(vuln, "fuente", "") or "",
+        "severidad": getattr(vuln, "clasificacion", "") or "",
+        "cve": getattr(vuln, "cve", "") or "",
+        "cvss": str(getattr(vuln, "cvss", "") or ""),
+        "puerto": getattr(vuln, "puerto", "") or "",
+        "servicio": getattr(vuln, "servicio", "") or "",
+        "evidencia": getattr(vuln, "observaciones", "") or "",
+        "recomendacion_base": ""
+    }
+
+    sug = sugerir_remediacion_ai(hallazgo)
+    print("DEBUG REMEDIACION SUGERIDA:", sug)
+
+    flash("✅ Sugerencia de remediación generada con IA.", "success")
+    return redirect(url_for(
+        'plan_remediacion_new',
+        vulnerabilidad_id=vuln.id,
+        accion_correctiva_ai=sug.get("accion_correctiva", ""),
+        prioridad_ai=sug.get("prioridad", ""),
+        recursos_ai=sug.get("recursos_necesarios", ""),
+        responsable_ai=(getattr(vuln, "responsable", "") or "")
+    ))
+
 # ==========================
 # Agregar Remediación
 # ==========================
@@ -63888,10 +64390,16 @@ def plan_remediacion_new():
     if user.role != 'admin' and not verificar_permiso(user, "Plan de Remediación"):
         flash("No tiene permiso para agregar registro de plan de remediación.", "danger")
         return redirect(url_for('plan_remediacion_matriz'))
-    
+
     vulnerabilidades = VulnerabilidadRegistro.query.order_by(
         VulnerabilidadRegistro.codigo.asc()
     ).all()
+
+    vuln_id_prefill = request.args.get('vulnerabilidad_id', type=int)
+    accion_correctiva_ai = (request.args.get('accion_correctiva_ai') or '').strip()
+    prioridad_ai = (request.args.get('prioridad_ai') or '').strip()
+    recursos_ai = (request.args.get('recursos_ai') or '').strip()
+    responsable_ai = (request.args.get('responsable_ai') or '').strip()
 
     if request.method == 'POST':
         vuln_id = request.form.get('vulnerabilidad_id', type=int)
@@ -63918,7 +64426,7 @@ def plan_remediacion_new():
             except ValueError:
                 flash("Fecha de remediación inválida.", "danger")
                 return redirect(url_for('plan_remediacion_new'))
-            
+
         if not all([vuln_id, accion_correctiva, responsable, prioridad, estado]):
             flash("Campos obligatorios: ID Vulnerabilidad, Acción Correctiva, Responsable, Prioridad y Estado.", "danger")
             return redirect(url_for('plan_remediacion_new'))
@@ -63980,10 +64488,10 @@ def plan_remediacion_new():
 
               <div class="col-md-4">
                 <label class="form-label">ID de Vulnerabilidad</label>
-                <select name="vulnerabilidad_id" class="form-select" required>
+                <select name="vulnerabilidad_id" id="vulnerabilidad_id" class="form-select" required>
                   <option value="">-- Seleccione --</option>
                   {% for v in vulnerabilidades %}
-                    <option value="{{ v.id }}">
+                    <option value="{{ v.id }}" {% if vuln_id_prefill == v.id %}selected{% endif %}>
                       {{ v.codigo }} — {{ (v.descripcion_vulnerabilidad or '')[:60] }}
                     </option>
                   {% endfor %}
@@ -63992,22 +64500,32 @@ def plan_remediacion_new():
 
               <div class="col-md-8">
                 <label class="form-label">Acción Correctiva</label>
-                <textarea name="accion_correctiva" class="form-control" rows="2" required></textarea>
+                <textarea name="accion_correctiva" class="form-control" rows="2" required>{{ accion_correctiva_ai }}</textarea>
+              </div>
+
+              <div class="col-md-12">
+                <div class="d-flex justify-content-center">
+                  <button type="button"
+                          class="btn btn-primary rounded-pill px-4 fw-bold"
+                          onclick="generarAccionAI()">
+                    🤖 Generar acción correctiva con IA
+                  </button>
+                </div>
               </div>
 
               <div class="col-md-4">
                 <label class="form-label">Responsable</label>
-                <input name="responsable" class="form-control" required>
+                <input name="responsable" class="form-control" value="{{ responsable_ai }}" required>
               </div>
 
               <div class="col-md-4">
                 <label class="form-label">Prioridad</label>
                 <select name="prioridad" class="form-select" required>
                   <option value="">-- Seleccione --</option>
-                  <option value="Crítica">Crítica</option>
-                  <option value="Alta">Alta</option>
-                  <option value="Media">Media</option>
-                  <option value="Baja">Baja</option>
+                  <option value="Crítica" {% if prioridad_ai == 'Crítica' %}selected{% endif %}>Crítica</option>
+                  <option value="Alta" {% if prioridad_ai == 'Alta' %}selected{% endif %}>Alta</option>
+                  <option value="Media" {% if prioridad_ai == 'Media' %}selected{% endif %}>Media</option>
+                  <option value="Baja" {% if prioridad_ai == 'Baja' %}selected{% endif %}>Baja</option>
                 </select>
               </div>
 
@@ -64023,7 +64541,7 @@ def plan_remediacion_new():
 
               <div class="col-md-12">
                 <label class="form-label">Recursos Necesarios</label>
-                <textarea name="recursos_necesarios" class="form-control" rows="2"></textarea>
+                <textarea name="recursos_necesarios" class="form-control" rows="2">{{ recursos_ai }}</textarea>
               </div>
 
               <div class="col-md-4">
@@ -64053,6 +64571,17 @@ def plan_remediacion_new():
         </div>
       </div>
     </div>
+
+    <script>
+      function generarAccionAI() {
+        const vulnId = document.getElementById('vulnerabilidad_id').value;
+        if (!vulnId) {
+          alert('Seleccione primero la vulnerabilidad.');
+          return;
+        }
+        window.location.href = "/plan_remediacion/ai_sugerir/" + vulnId;
+      }
+    </script>
 
     <style>
       body{
@@ -64220,7 +64749,15 @@ def plan_remediacion_new():
       }
     </style>
     """
-    inner = render_template_string(html, vulnerabilidades=vulnerabilidades)
+    inner = render_template_string(
+        html,
+        vulnerabilidades=vulnerabilidades,
+        vuln_id_prefill=vuln_id_prefill,
+        accion_correctiva_ai=accion_correctiva_ai,
+        prioridad_ai=prioridad_ai,
+        recursos_ai=recursos_ai,
+        responsable_ai=responsable_ai
+    )
     return render_template_string(BASE, content=Markup(inner))
 
 # ==========================
@@ -68641,24 +69178,12 @@ Responde EXCLUSIVAMENTE en JSON válido con esta estructura:
 }}
     """.strip()
 
-    client = get_openrouter_client()
-
-    resp = client.chat.completions.create(
-        model=os.getenv("AI_MODEL_CUESTIONARIO", "openai/gpt-4o-mini"),
-        messages=[
-            {"role": "system", "content": "Responde SOLO JSON válido. No incluyas texto adicional."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.0,
-        max_tokens=700,   # ✅ importante
-        response_format={"type": "json_object"},
+    data = _ai_json_proponentes(
+        prompt=prompt,
+        system_prompt="Responde SOLO JSON válido. No incluyas texto adicional.",
+        max_tokens=700,
+        openrouter_model_env=os.getenv("AI_MODEL_CUESTIONARIO", "openai/gpt-4o-mini")
     )
-
-    contenido = (resp.choices[0].message.content or "").strip()
-    if not contenido:
-        raise ValueError("La IA devolvió una respuesta vacía al evaluar el cuestionario.")
-
-    data = json.loads(contenido)
 
     if "score" not in data or "explanation" not in data:
         raise ValueError(f"JSON incompleto IA cuestionario: {data}")
@@ -68667,7 +69192,6 @@ Responde EXCLUSIVAMENTE en JSON válido con esta estructura:
         "score": float(data["score"]),
         "explanation": (data["explanation"] or "").strip()
     }
-
 
 def evaluar_reputacion_web_ia(nombre_proveedor: str, sitio_web: str | None = None) -> dict:
     prompt = f"""
@@ -68680,7 +69204,7 @@ Tareas:
 1. Describe las PRINCIPALES VENTAJAS del proveedor desde la perspectiva de ciberseguridad, cumplimiento y confiabilidad.
 2. Describe los PRINCIPALES RIESGOS de ciberseguridad y cumplimiento que podrían existir con un proveedor de este tipo.
 3. Indica qué CERTIFICACIONES DE SEGURIDAD relevantes (por ejemplo ISO 27001, SOC 2, etc.) tiene el proveedor
-   según información pública disponible. Si no se encuentran certificaciones claras, indícalo explícitamente.
+   según información disponible. Si no se encuentran certificaciones claras, indícalo explícitamente.
 4. Indica qué CLIENTES o SECTORES relevantes atiende el proveedor (por ejemplo banca, gobierno, salud, etc.).
    Si no se identifican clientes públicos, dilo de forma explícita.
 5. Resume INFORMACIÓN GENERAL DE LA COMPAÑÍA: tipo de servicios, tamaño aproximado (si se infiere), años en el mercado
@@ -68700,33 +69224,15 @@ Responde SOLO en JSON válido con esta estructura:
 }}
     """.strip()
 
-    client = get_openrouter_client()
-    resp = client.chat.completions.create(
-        model=os.getenv("AI_MODEL_REPUTACION", "openai/gpt-4o-mini"),
-        messages=[
-            {"role": "system", "content": "Responde SOLO JSON válido. No incluyas texto adicional."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.0,
-        max_tokens=900,   # ✅ importante
-        response_format={"type": "json_object"},
+    data = _ai_json_proponentes(
+        prompt=prompt,
+        system_prompt="Responde SOLO JSON válido. No incluyas texto adicional.",
+        max_tokens=900,
+        openrouter_model_env=os.getenv("AI_MODEL_REPUTACION", "openai/gpt-4o-mini")
     )
 
-    contenido = (resp.choices[0].message.content or "").strip()
-
-    if not contenido:
-        raise ValueError("La IA devolvió una respuesta vacía al evaluar la reputación del proveedor.")
-
-    try:
-        data = json.loads(contenido)
-    except json.JSONDecodeError as e:
-        print(">>> Respuesta bruta OpenRouter (reputación):")
-        print(contenido)
-        raise ValueError(f"La IA devolvió un JSON inválido al evaluar la reputación: {e}")
-
     if "score" not in data:
-        print(">>> JSON recibido (reputación):", data)
-        raise ValueError("La IA devolvió un JSON sin la clave 'score'.")
+        raise ValueError(f"La IA devolvió un JSON sin la clave 'score': {data}")
 
     ventajas = data.get("ventajas", "No se identificaron ventajas específicas en la información disponible.")
     riesgos = data.get("riesgos", "No se identificaron riesgos específicos en la información disponible.")
@@ -68736,11 +69242,11 @@ Responde SOLO en JSON válido con esta estructura:
     )
     clientes = data.get(
         "clientes",
-        "No se identificó información pública clara sobre clientes o sectores atendidos."
+        "No se identificó información clara sobre clientes o sectores atendidos."
     )
     info_compania = data.get(
         "informacion_compania",
-        "No se encontró información pública detallada sobre la compañía."
+        "No se encontró información detallada sobre la compañía."
     )
 
     explicacion = (
@@ -68763,6 +69269,117 @@ def limitar_texto_ia(texto: str, max_chars: int = 12000) -> str:
     if len(texto) <= max_chars:
         return texto
     return texto[:max_chars] + "\n\n[Texto truncado por límite de longitud]"
+
+# =========================================
+# Helpers IA - Cuestionarios de Proponentes
+# =========================================
+
+def _extraer_json_objeto_desde_texto(raw: str) -> dict:
+    texto = (raw or "").strip()
+    if not texto:
+        raise ValueError("La IA devolvió una respuesta vacía.")
+
+    # intento directo
+    try:
+        data = json.loads(texto)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+
+    # fallback: extraer primer bloque JSON
+    m = re.search(r"\{.*\}", texto, re.S)
+    if not m:
+        raise ValueError(f"No se encontró un objeto JSON válido en la respuesta IA: {texto[:500]}")
+
+    data = json.loads(m.group(0))
+    if not isinstance(data, dict):
+        raise ValueError("La IA no devolvió un objeto JSON.")
+    return data
+
+
+def _ai_json_proponentes(prompt: str,
+                         system_prompt: str = "Responde SOLO JSON válido. No incluyas texto adicional.",
+                         max_tokens: int = 700,
+                         openrouter_model_env: str = "openai/gpt-4o-mini") -> dict:
+    """
+    Helper IA para este módulo.
+    Soporta OpenRouter y Ollama.
+    Devuelve SIEMPRE dict.
+    """
+    provider = (get_ai_provider() or "openrouter").strip().lower()
+    
+
+    # =========================
+    # OLLAMA
+    # =========================
+    if provider == "ollama":
+        base_url = (get_ollama_base_url() or "http://localhost:11434").strip().rstrip("/")
+        model = (get_ollama_model() or "llama3.1").strip()
+
+        if not base_url:
+            raise RuntimeError("No hay OLLAMA_BASE_URL configurada en Administración.")
+        if not model:
+            raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
+
+        full_prompt = f"{system_prompt}\n\n{prompt}".strip()
+
+        resp = requests.post(
+            f"{base_url}/api/generate",
+            json={
+                "model": model,
+                "prompt": full_prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.0
+                }
+            },
+            timeout=300
+        )
+        resp.raise_for_status()
+
+        payload = resp.json() or {}
+
+        raw = (payload.get("response") or "").strip()
+        if not raw:
+            raw = (payload.get("message") or "").strip()
+
+        if not raw:
+            raise ValueError(f"Ollama respondió sin contenido. Payload: {str(payload)[:500]}")
+        return _extraer_json_objeto_desde_texto(raw)
+
+    # =========================
+    # OPENROUTER
+    # =========================
+    api_key = get_openrouter_api_key()
+    if not api_key:
+        raise RuntimeError("No hay OPENROUTER_API_KEY configurada en Administración.")
+
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key
+    )
+
+    model_name = os.getenv("AI_MODEL_CUESTIONARIO", openrouter_model_env)
+    max_tokens_safe = min(int(max_tokens or 700), 900)
+
+    resp = client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.0,
+        max_tokens=max_tokens_safe,
+        response_format={"type": "json_object"},
+    )
+
+    raw = (resp.choices[0].message.content or "").strip()
+    if not raw:
+        raise ValueError("OpenRouter devolvió una respuesta vacía.")
+
+
+    return _extraer_json_objeto_desde_texto(raw)
 
 
 def calcular_puntaje_total(puntaje_cuestionario: float,
@@ -73567,6 +74184,100 @@ def build_trend_text_dominant(trend_rows):
         "residual": " | ".join(residual) if residual else "Sin datos",
     }
 
+# =========================================
+# HELPER IA MÉTRICAS (OpenRouter / Ollama)
+# =========================================
+def ai_text_metricas(prompt: str,
+                     system_prompt: str = "Responde en español, de forma ejecutiva, clara y profesional.",
+                     temperature: float = 0.3,
+                     max_tokens: int = 500,
+                     openrouter_model: str = "openai/gpt-4.1-mini") -> str:
+    """
+    Helper único para métricas.
+    Usa el proveedor configurado en Administración:
+    - openrouter
+    - ollama
+    """
+    provider = (get_ai_provider() or "openrouter").strip().lower()
+    print("DEBUG IA METRICAS - provider activo:", provider)
+
+    # =========================
+    # OLLAMA
+    # =========================
+    if provider == "ollama":
+        base_url = (get_ollama_base_url() or "http://localhost:11434").strip().rstrip("/")
+        model = (get_ollama_model() or "llama3.1").strip()
+
+        if not base_url:
+            raise RuntimeError("No hay OLLAMA_BASE_URL configurada en Administración.")
+        if not model:
+            raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
+
+        full_prompt = f"{system_prompt}\n\n{prompt}".strip()
+
+        print("DEBUG IA METRICAS - OLLAMA URL:", f"{base_url}/api/generate")
+        print("DEBUG IA METRICAS - OLLAMA MODEL:", model)
+        print("DEBUG IA METRICAS - PROMPT PREVIEW:", full_prompt[:1000])
+
+        resp = requests.post(
+            f"{base_url}/api/generate",
+            json={
+                "model": model,
+                "prompt": full_prompt,
+                "stream": False,
+                "options": {
+                    "temperature": temperature
+                }
+            },
+            timeout=300
+        )
+        resp.raise_for_status()
+
+        payload = resp.json() or {}
+        print("DEBUG IA METRICAS - OLLAMA RESPONSE JSON:", str(payload)[:1500])
+
+        texto = (payload.get("response") or "").strip()
+        if not texto:
+            texto = (payload.get("message") or "").strip()
+
+        if not texto:
+            raise RuntimeError(f"Ollama respondió sin contenido. Payload: {str(payload)[:500]}")
+
+        return texto
+
+    # =========================
+    # OPENROUTER
+    # =========================
+    api_key = (get_openrouter_api_key() or "").strip()
+    if not api_key:
+        raise RuntimeError("No hay OPENROUTER_API_KEY configurada en Administración.")
+
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://openrouter.ai/api/v1"
+    )
+
+    resp = client.chat.completions.create(
+        model=openrouter_model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=temperature,
+        max_tokens=max_tokens
+    )
+
+    texto = (
+        resp.choices[0].message.content.strip()
+        if resp and resp.choices and resp.choices[0].message.content
+        else ""
+    )
+
+    if not texto:
+        raise RuntimeError("OpenRouter respondió sin contenido.")
+
+    return texto
+
 @app.route("/metricas/riesgos/tendencia/ai", methods=["POST"])
 @login_required
 def metricas_riesgos_tendencia_ai():
@@ -73625,23 +74336,32 @@ def metricas_riesgos_tendencia_ai():
 
     try:
         prompt = f"""
-Eres un analista de riesgos. Redacta un análisis corto y ejecutivo de tendencia.
+Eres un analista senior de riesgos. Redacta un análisis ejecutivo de tendencia, profesional y claro.
 
 Período analizado: {tendencia}
 
-Debes producir 2 párrafos claros y concisos:
-
-1) Tendencia del riesgo INHERENTE, basada en el NIVEL DOMINANTE por período.
-2) Tendencia del riesgo RESIDUAL, basada en el NIVEL DOMINANTE por período.
+Debes producir:
+1. Un párrafo sobre la tendencia del riesgo INHERENTE, basado en el NIVEL DOMINANTE por período.
+2. Un párrafo sobre la tendencia del riesgo RESIDUAL, basado en el NIVEL DOMINANTE por período.
+3. Una conclusión final de una sola línea.
 
 Datos base (nivel dominante y totales por período):
 INHERENTE: {base["inherente"]}
 RESIDUAL: {base["residual"]}
 
-Incluye una conclusión final de una sola línea.
-No inventes datos ni supongas causas no evidenciadas.
+Reglas:
+- No inventes datos.
+- No inventes causas no evidenciadas.
+- Usa lenguaje ejecutivo.
+- Responde en máximo 3 párrafos.
 """
-        text_ai = (chat_ai(prompt, model="openai/gpt-4o-mini") or "").strip()
+        text_ai = ai_text_metricas(
+            prompt=prompt,
+            system_prompt="Eres un experto en métricas de riesgos corporativos. Responde en español con enfoque ejecutivo.",
+            temperature=0.3,
+            max_tokens=500,
+            openrouter_model="openai/gpt-4.1-mini"
+        ).strip()
 
         cfg.tendencia_ai_text = text_ai
         cfg.tendencia_ai_updated_at = datetime.utcnow()
@@ -74374,26 +75094,7 @@ def metricas_riesgos():
 # =========================
 
 def generar_analisis_incidente_ai(m, eta_objetivo, tiempos_por_clas):
-    from openai import OpenAI
-
     try:
-        # ✅ Tomar la llave guardada en tu módulo de administración
-        api_key = get_system_secret("OPENROUTER_API_KEY")
-        # si ya tienes helper, también puedes usar:
-        # api_key = get_openrouter_api_key()
-
-        if not api_key:
-            return (
-                "No fue posible generar el análisis automático porque no está "
-                "configurada la llave OPENROUTER_API_KEY."
-            )
-
-        # ✅ Cliente OpenAI SDK apuntando a OpenRouter
-        client = OpenAI(
-            api_key=api_key,
-            base_url="https://openrouter.ai/api/v1"
-        )
-
         meta_clas = tiempos_por_clas.get(m.clasificacion or "", {}) if tiempos_por_clas else {}
 
         objetivo_mtcd = meta_clas.get("mtcd_horas")
@@ -74429,28 +75130,13 @@ Instrucciones:
 5. Responde en máximo 2 párrafos.
 """
 
-        respuesta = client.chat.completions.create(
-            # ✅ modelo por OpenRouter
-            model="openai/gpt-4.1-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Eres un experto en métricas e incidentes de seguridad."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
+        texto = ai_text_metricas(
+            prompt=prompt,
+            system_prompt="Eres un experto en métricas e incidentes de seguridad. Responde en español, de forma ejecutiva y profesional.",
             temperature=0.3,
-            max_tokens=350
-        )
-
-        texto = (
-            respuesta.choices[0].message.content.strip()
-            if respuesta and respuesta.choices and respuesta.choices[0].message.content
-            else ""
-        )
+            max_tokens=350,
+            openrouter_model="openai/gpt-4.1-mini"
+        ).strip()
 
         return texto or "No fue posible generar un análisis automático para este incidente."
 
@@ -76462,7 +77148,28 @@ def metricas_vulnerabilidades():
         }
 
         try:
-            analisis_ia = analizar_metricas_vuln_ia(datos_metricas)
+             
+            analisis_ia = ai_text_metricas(prompt = f"""
+        Eres un experto en gestión de vulnerabilidades y ciberseguridad.
+
+        Analiza las siguientes métricas del año {datos_metricas["anio"]} y genera un resumen ejecutivo claro, profesional y útil para dirección.
+
+        Incluye:
+        1. Evaluación del cumplimiento de SLA.
+        2. Principales problemas identificados.
+        3. Riesgos operativos derivados.
+        4. Evaluación del backlog (vulnerabilidades abiertas vencidas).
+        5. Conclusión ejecutiva clara.
+
+        DATOS:
+        {datos_metricas}
+
+        REGLAS:
+        - No inventes información.
+        - No uses lenguaje condicional.
+        - Redacción ejecutiva.
+        - Máximo 4 párrafos.
+        """)
             analisis_vuln_manual_map = session.get('analisis_vuln_manual_map', {})
             analisis_vuln_manual_map[str(year)] = analisis_ia or ""
             session['analisis_vuln_manual_map'] = analisis_vuln_manual_map
@@ -77315,17 +78022,49 @@ def metricas_vulnerabilidades_ver_analisis(codigo):
 
         try:
             if modo == "cerrada":
-                reg.analisis = analizar_vulnerabilidad_cerrada_fuera_sla_ia(
-                    vuln, sla_dias, dias_cierre, cierre_eff
-                )
+                reg.analisis = ai_text_metricas(prompt=f"""
+            Eres un experto en gestión de vulnerabilidades.
+
+            Analiza esta vulnerabilidad cerrada:
+
+            Código: {vuln.codigo}
+            Clasificación: {vuln.clasificacion}
+            Días de cierre: {dias_cierre}
+            SLA: {sla_dias}
+
+            Debes:
+            1. Indicar si hubo incumplimiento del SLA.
+            2. Explicar el impacto operativo.
+            3. Identificar la causa probable sin inventar información.
+            4. Dar una recomendación concreta.
+
+            Máximo 2 párrafos.
+            """)
             else:
-                reg.analisis = analizar_vulnerabilidad_por_codigo_ia(
-                    vuln, sla_dias, dias_abierta
-                )
+                reg.analisis = ai_text_metricas(prompt=f"""
+            Eres un experto en gestión de vulnerabilidades.
+
+            Analiza esta vulnerabilidad abierta:
+
+            Código: {vuln.codigo}
+            Clasificación: {vuln.clasificacion}
+            Responsable: {vuln.responsable}
+            Días abierta: {dias_abierta}
+            SLA: {sla_dias}
+
+            Debes:
+            1. Evaluar si está fuera de SLA.
+            2. Explicar el impacto operativo.
+            3. Indicar el riesgo asociado al retraso.
+            4. Dar una recomendación puntual.
+
+            Máximo 2 párrafos.
+            """)
 
             reg.analisis = (reg.analisis or "").strip()
             db.session.commit()
             flash("Análisis generado correctamente con IA.", "success")
+
         except Exception as e:
             db.session.rollback()
             flash(f"No se pudo generar el análisis con IA: {e}", "danger")
@@ -77751,8 +78490,8 @@ def generar_analisis_cultura_resumen_ai(year: int, registros: list) -> str:
     """
     Genera un resumen ejecutivo anual de la métrica de cultura
     a partir de los registros mensuales calculados en memoria.
+    Compatible con Ollama / OpenRouter usando ai_text_metricas.
     """
-
     if not registros:
         return "No hay datos suficientes para generar un análisis de cultura."
 
@@ -77808,11 +78547,16 @@ Instrucciones:
 4. Propón recomendaciones concretas.
 
 Responde en ESPAÑOL, en máximo 10 líneas, texto corrido, sin viñetas ni títulos.
-    """.strip()
+""".strip()
 
     try:
-        # Usa el helper OpenRouter existente en su código
-        texto = (_ai_text(prompt, max_tokens=700) or "").strip()
+        texto = ai_text_metricas(
+            prompt=prompt,
+            system_prompt="Eres un experto en cultura de seguridad, formación y métricas de concientización. Responde en español, con enfoque ejecutivo y profesional.",
+            temperature=0.3,
+            max_tokens=700,
+            openrouter_model="openai/gpt-4.1-mini"
+        ).strip()
 
         if not texto:
             texto = "No se pudo generar automáticamente el análisis de cultura."
@@ -77990,7 +78734,7 @@ def obtener_periodos_cultura_desde_plan_cf():
 def analizar_metricas_cultura_ia(registro: "MetricasCultura") -> str:
     """
     Genera un análisis ejecutivo mensual de la métrica de cultura
-    usando IA, en función de los valores del registro.
+    usando IA, compatible con Ollama / OpenRouter.
     """
     nombre_mes = {
         1: "enero", 2: "febrero", 3: "marzo", 4: "abril",
@@ -78014,25 +78758,32 @@ Actividades SI ejecutadas: {registro.actividades_ejecutadas}
 Meta alcanzada de actividades (%): {registro.meta_actividades:.2f}
 Resultado de la meta u objetivo general (%): {registro.resultado_meta_general:.2f}
 
-Escribe un ANÁLISIS MENSUAL DE LA MÉTRICA, en máximo 10 líneas, en español, donde incluyas:
-- Lectura general del resultado del mes
-- Si las metas de formación y actividades se ven cumplidas o no
-- Riesgos o brechas relevantes
-- Recomendaciones concretas para el siguiente mes.
+Escribe un análisis mensual de la métrica, en máximo 10 líneas, en español, donde incluyas:
+- lectura general del resultado del mes
+- si las metas de formación y actividades se ven cumplidas o no
+- riesgos o brechas relevantes
+- recomendaciones concretas para el siguiente mes
 
-Responde sólo con texto corrido (uno o dos párrafos, sin viñetas ni títulos).
-    """.strip()
+Responde solo con texto corrido, en uno o dos párrafos, sin viñetas ni títulos.
+""".strip()
 
-    resp = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-    )
+    try:
+        texto = ai_text_metricas(
+            prompt=prompt,
+            system_prompt="Eres un experto en cultura de seguridad y métricas de concientización. Responde en español, de forma ejecutiva, clara y profesional.",
+            temperature=0.2,
+            max_tokens=500,
+            openrouter_model="openai/gpt-4.1-mini"
+        ).strip()
 
-    texto = resp.choices[0].message.content.strip() if resp.choices else ""
-    if not texto:
-        texto = "No se pudo generar automáticamente el análisis mensual de la métrica. Por favor, edítalo manualmente."
-    return texto
+        if not texto:
+            texto = "No se pudo generar automáticamente el análisis mensual de la métrica. Por favor, edítalo manualmente."
+
+        return texto
+
+    except Exception as e:
+        print("Error al generar análisis mensual IA de cultura:", e)
+        return f"No se pudo generar automáticamente el análisis mensual de la métrica. Detalle: {e}"
 
 def recalcular_metricas_cultura(
     personas_contratadas: int,
@@ -81748,37 +82499,42 @@ def gap_from_maturity_pct(pct_madurez: float) -> dict:
 
 def ensure_control_ai_fields(data: dict, kpi: dict = None) -> dict:
     """
-    Garantiza que estado_actual, estado_requerido y plan_accion_sugerido existan y NO estén vacíos.
-    Aplica hardening y resumen del plan. Si faltan, mete fallbacks.
+    Garantiza que estado_actual, estado_requerido y plan_accion_sugerido
+    existan y tengan contenido suficiente, sin crear campos adicionales.
     """
     if not isinstance(data, dict):
         data = {}
 
     ea = harden_no_conditionals(to_text(data.get("estado_actual")).strip())
     er = harden_no_conditionals(to_text(data.get("estado_requerido")).strip())
-    pa_raw = harden_no_conditionals(to_text(data.get("plan_accion_sugerido")).strip())
-    pa = summarize_plan_action(pa_raw)
+    pa = harden_no_conditionals(to_text(data.get("plan_accion_sugerido")).strip())
 
     if not ea:
-        ea = "El control presenta ejecución parcial con brechas registradas; se requiere trazabilidad de evidencia, revisión periódica y cierre de pendientes aplicables."
+        ea = (
+            "El control presenta implementación parcial con evidencia disponible en varios requisitos evaluados. "
+            "Sin embargo, aún existen brechas en consistencia operativa, seguimiento periódico y trazabilidad "
+            "de los aspectos que no están completamente cerrados."
+        )
+
     if not er:
-        er = "El control debe operar con proceso definido, responsable asignado, evidencias verificables, revisión periódica y medición mediante indicadores, asegurando mejora continua."
+        er = (
+            "El control debe operar con un proceso definido, evidencia verificable, revisión periódica, "
+            "seguimiento de brechas y sostenibilidad en el tiempo, asegurando que todos los requisitos "
+            "aplicables se mantengan cubiertos de forma consistente."
+        )
+
     if not pa:
         pa = (
-            "Definir y documentar el proceso del control, cerrar brechas (NO/PARCIAL/SIN_MARCAR) con evidencia verificable "
-            "y establecer revisión periódica con medición y seguimiento."
+            "1. Formalizar y documentar el proceso asociado al control con responsables y criterios de revisión.\n"
+            "2. Cerrar las brechas identificadas en estados PARCIAL, NO y SIN_MARCAR mediante evidencia verificable.\n"
+            "3. Establecer seguimiento periódico con revisión de vigencia, resultados y oportunidades de mejora."
         )
-    out = {
+
+    return {
         "estado_actual": ea,
         "estado_requerido": er,
         "plan_accion_sugerido": pa
     }
-
-    # Si traía error, lo conservamos (no afecta los campos obligatorios)
-    if isinstance(data.get("error"), str) and data.get("error").strip():
-        out["error"] = data["error"].strip()
-
-    return out
 
 def rl_pct_chip_cell(pct: float, label: str, style, chip_w=0.10*inch):
     """
@@ -83167,16 +83923,27 @@ def normalize_plan_response(raw: str) -> dict:
     return {"action_plan": cleaned}
 
 
-def get_openai_client() -> OpenAI:
+def get_openai_client():
     """
-    Cliente OpenAI apuntando a OpenRouter.
-    La API Key se obtiene desde BD cifrada (SystemSecret) y fallback a ENV OPENROUTER_API_KEY.
+    Mantiene el mismo nombre para no romper el módulo,
+    pero ahora devuelve configuración dinámica para:
+    - OpenRouter
+    - Ollama
     """
+    provider = (get_ai_provider() or "openrouter").strip().lower()
+
+    if provider == "ollama":
+        return {
+            "provider": "ollama",
+            "base_url": (get_ollama_base_url() or "http://localhost:11434").strip().rstrip("/"),
+            "model": (get_ollama_model() or "llama3.1").strip()
+        }
+
     api_key = (get_openrouter_api_key() or "").strip()
     if not api_key:
         raise RuntimeError("No hay OPENROUTER_API_KEY configurada. Ve a Administración → OpenRouter API Key.")
 
-    return OpenAI(
+    client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=api_key,
         default_headers={
@@ -83184,6 +83951,12 @@ def get_openai_client() -> OpenAI:
             "X-Title": "SGSI ISO 27001 Analyzer"
         }
     )
+
+    return {
+        "provider": "openrouter",
+        "client": client,
+        "model": "openai/gpt-4o-mini"
+    }
 
 def openai_call_with_retry(
     client: OpenAI, *, model: str, messages: list, response_format: dict,
@@ -83209,8 +83982,171 @@ def openai_call_with_retry(
             raise
     raise last_err
 
+def ai_json_iso(prompt: str,
+                system_prompt: str = "Devuelve SOLO JSON válido. No agregues texto fuera del JSON.",
+                model_openrouter: str = "openai/gpt-4o-mini",
+                max_tokens: int = None) -> dict:
+    """
+    Helper IA para ISO 27001.
+    Devuelve siempre dict JSON usando:
+    - OpenRouter
+    - Ollama
+    """
+    cfg = get_openai_client()
+    provider = cfg.get("provider")
+
+    print("DEBUG IA ISO - provider activo:", provider)
+
+    # =========================
+    # OLLAMA
+    # =========================
+    if provider == "ollama":
+        base_url = (cfg.get("base_url") or "").rstrip("/")
+        model = (cfg.get("model") or "").strip()
+
+        if not base_url:
+            raise RuntimeError("No hay OLLAMA_BASE_URL configurada en Administración.")
+        if not model:
+            raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
+
+        full_prompt = f"{system_prompt}\n\n{prompt}".strip()
+
+        print("DEBUG IA ISO - OLLAMA URL:", f"{base_url}/api/generate")
+        print("DEBUG IA ISO - OLLAMA MODEL:", model)
+        print("DEBUG IA ISO - PROMPT PREVIEW:", full_prompt[:1000])
+
+        resp = requests.post(
+            f"{base_url}/api/generate",
+            json={
+                "model": model,
+                "prompt": full_prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.2
+                }
+            },
+            timeout=300
+        )
+        resp.raise_for_status()
+
+        payload = resp.json() or {}
+        print("DEBUG IA ISO - OLLAMA RESPONSE JSON:", str(payload)[:1500])
+
+        raw = (payload.get("response") or "").strip()
+        if not raw:
+            raw = (payload.get("message") or "").strip()
+
+        if not raw:
+            raise RuntimeError(f"Ollama respondió sin contenido. Payload: {str(payload)[:500]}")
+
+        print("DEBUG IA ISO - RAW:", raw[:1500])
+        return normalize_plan_response(raw)
+
+    # =========================
+    # OPENROUTER
+    # =========================
+    client = cfg["client"]
+    model_name = cfg.get("model") or model_openrouter
+
+    resp = openai_call_with_retry(
+        client,
+        model=model_name,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.2,
+        max_tokens=max_tokens
+    )
+
+    raw = (resp.choices[0].message.content or "").strip() or "{}"
+    print("DEBUG IA ISO - OPENROUTER RAW:", raw[:1500])
+    return normalize_plan_response(raw)
+
+def ai_json_iso_generic(prompt: str,
+                        system_prompt: str = "Devuelve SOLO JSON válido. No agregues texto fuera del JSON.",
+                        model_openrouter: str = "openai/gpt-4o-mini",
+                        max_tokens: int = None) -> dict:
+    """
+    Helper IA genérico para ISO 27001.
+    Devuelve un dict JSON y soporta:
+    - OpenRouter
+    - Ollama
+    """
+    cfg = get_openai_client()
+    provider = cfg.get("provider")
+
+    print("DEBUG IA ISO GENERIC - provider activo:", provider)
+
+    # =========================
+    # OLLAMA
+    # =========================
+    if provider == "ollama":
+        base_url = (cfg.get("base_url") or "").rstrip("/")
+        model = (cfg.get("model") or "").strip()
+
+        if not base_url:
+            raise RuntimeError("No hay OLLAMA_BASE_URL configurada en Administración.")
+        if not model:
+            raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
+
+        full_prompt = f"{system_prompt}\n\n{prompt}".strip()
+
+        print("DEBUG IA ISO GENERIC - OLLAMA URL:", f"{base_url}/api/generate")
+        print("DEBUG IA ISO GENERIC - OLLAMA MODEL:", model)
+        print("DEBUG IA ISO GENERIC - PROMPT PREVIEW:", full_prompt[:1200])
+
+        resp = requests.post(
+            f"{base_url}/api/generate",
+            json={
+                "model": model,
+                "prompt": full_prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.2
+                }
+            },
+            timeout=300
+        )
+        resp.raise_for_status()
+
+        payload = resp.json() or {}
+        print("DEBUG IA ISO GENERIC - OLLAMA RESPONSE JSON:", str(payload)[:1500])
+
+        raw = (payload.get("response") or "").strip()
+        if not raw:
+            raw = (payload.get("message") or "").strip()
+
+        if not raw:
+            raise RuntimeError(f"Ollama respondió sin contenido. Payload: {str(payload)[:500]}")
+
+        print("DEBUG IA ISO GENERIC - RAW:", raw[:1500])
+        return _extraer_json_objeto(raw)
+
+    # =========================
+    # OPENROUTER
+    # =========================
+    client = cfg["client"]
+    model_name = cfg.get("model") or model_openrouter
+
+    resp = openai_call_with_retry(
+        client,
+        model=model_name,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.2,
+        max_tokens=max_tokens
+    )
+
+    raw = (resp.choices[0].message.content or "").strip() or "{}"
+    print("DEBUG IA ISO GENERIC - OPENROUTER RAW:", raw[:1500])
+    return _extraer_json_objeto(raw)
+
 def ai_generate_report_and_plan(company_name: str, chapter_results: dict, control_results: dict) -> dict:
-    client = get_openai_client()
     resumen_cap = "\n".join(
         [f"- {k}: {v.get('pct',0)}%" for k, v in chapter_results.items()]
     )
@@ -83220,21 +84156,47 @@ def ai_generate_report_and_plan(company_name: str, chapter_results: dict, contro
          for cid, v in list(control_results.items())[:200]]
     )
 
-    prompt = f"""..."""  # tu prompt
-    prompt += "\n\nIMPORTANT: Return ONLY valid JSON."
+    prompt = f"""
+Eres un consultor experto en ISO/IEC 27001:2022 y sistemas de gestión de seguridad de la información.
+
+Organización evaluada: {company_name}
+
+Resumen por capítulo:
+{resumen_cap}
+
+Resumen por controles:
+{resumen_ctrl}
+
+Tareas:
+1. Genera un executive_summary claro, ejecutivo y sin lenguaje condicional.
+2. Genera un report con análisis ejecutivo de fortalezas, brechas y enfoque de mejora.
+3. Genera un action_plan con acciones ejecutables y verificables.
+
+Devuelve SOLO JSON válido con esta estructura:
+{{
+  "executive_summary": "texto",
+  "report": "texto",
+  "action_plan": [
+    {{
+      "fase": "0-30|31-60|61-90|90+",
+      "capitulo": "Contexto|Liderazgo|Planificación|Soporte|Operación|Evaluación de desempeño|Mejora|Anexo A",
+      "requisito": "Requisito ISO 27001:2022 (ej: 6.1, 10.2, A.5.1, etc.) o 'Dominio' si aplica",
+      "accion": "Acción detallada, ejecutable, verificable",
+      "evidencia": "Evidencia verificable esperada",
+      "responsable": "Rol responsable",
+      "prioridad": "Alta|Media|Baja"
+    }}
+  ]
+}}
+    """.strip()
 
     try:
-        resp = client.chat.completions.create(
-            model="open/gpt-4.1-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            response_format={"type": "json_object"},
+        data = ai_json_iso(
+            prompt=prompt,
+            system_prompt="Devuelve SOLO JSON válido. No agregues texto fuera del JSON.",
+            model_openrouter="open/gpt-4.1-mini",
+            max_tokens=OPENROUTER_MAX_TOKENS
         )
-
-        raw = (resp.choices[0].message.content or "").strip() or "{}"
-
-        # ✅ robusto: si viene lista, lo normaliza a dict
-        data = normalize_plan_response(raw)
 
         data["executive_summary"] = harden_no_conditionals(to_text(data.get("executive_summary")))
         data["report"] = harden_no_conditionals(to_text(data.get("report")))
@@ -83251,15 +84213,13 @@ def ai_generate_report_and_plan(company_name: str, chapter_results: dict, contro
         return data
 
     except AuthenticationError:
-        raise RuntimeError("API Key inválida o no autorizada (401). Revisa tu OPENAI_API_KEY.")
+        raise RuntimeError("API Key inválida o no autorizada (401). Revisa tu OPENROUTER_API_KEY.")
     except OpenAIError as e:
         if "rate_limit" in str(e).lower() or "429" in str(e):
             raise RuntimeError("⚠️ Límite de uso de IA alcanzado (429). El informe base y el PDF siguen funcionando.")
         raise RuntimeError(f"Error OpenAI: {e}")
     except Exception as e:
-        # ✅ nunca rompe por 'raw' porque siempre existe
-        snippet = raw[:800] if isinstance(raw, str) else str(raw)
-        raise RuntimeError(f"Error procesando respuesta IA: {e}. Respuesta cruda (parcial): {snippet}")
+        raise RuntimeError(f"Error procesando respuesta IA ISO 27001: {e}")
 
 def build_controls_prompt_summary(control_results: dict, top_n: int = 60, annex_top_n: int = 25) -> str:
     """
@@ -83368,7 +84328,7 @@ IMPORTANT: Return ONLY valid JSON.
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
             response_format={"type": "json_object"},
-            max_tokens=3500,   # ✅ clave: obliga respuesta larga
+            max_tokens=16500,   # ✅ clave: obliga respuesta larga
         )
         raw = (resp.choices[0].message.content or "{}").strip() or "{}"
 
@@ -83537,66 +84497,281 @@ def ai_generate_executive_summary_from_domains(company_name: str, chapter_result
     Genera SOLO:
       - executive_summary (texto)
     Basado SOLO en chapter_results (dominios/capítulos). NO usa control_results.
-    """
-    client = get_openai_client()
-    raw = "{}"
+    Compatible con OpenRouter y Ollama.
 
-    # SOLO capítulos / dominios
+    Si la IA falla, devuelve un resumen ejecutivo automático y útil
+    para no bloquear el flujo.
+    """
     resumen_cap = "\n".join(
         [f"- {k}: {v.get('pct', 0)}% (Brecha {v.get('brecha_pct', 0)}% - {v.get('brecha_nivel','')})"
          for k, v in (chapter_results or {}).items()]
     )
 
     prompt = f"""
-Actúa como consultor senior ISO/IEC 27001:2022 y auditor líder.
+Actúa como consultor senior ISO/IEC 27001:2022, auditor líder y asesor de alta dirección.
 
 Empresa: {company_name}
 
-Tienes resultados de madurez y brecha por DOMINIO/CAPÍTULO (calculados por el sistema).
-Debes generar SOLO un "Resumen ejecutivo" claro (NO técnico excesivo), orientado a dirección.
+Dispones únicamente de resultados de madurez y brecha por DOMINIO/CAPÍTULO del SGSI.
+Debes generar un RESUMEN EJECUTIVO AMPLIO, DETALLADO y ORIENTADO A DIRECCIÓN.
 
-REGLAS:
-- BASARTE ÚNICAMENTE en los resultados por capítulo/dominio (NO uses controles).
-- NO inventes hechos específicos del cliente (herramientas, documentos reales, tecnologías exactas).
-- Redacción verificable (Se evidencia / Se requiere / Se mantiene / Se revisa / Se mide).
-- NO uses lenguaje condicional (no “podría”, “quizás”, “sería”, etc).
-- No incluyas “Plan de acción” ni “Informe detallado”.
+OBJETIVO
+El resumen debe explicar con profundidad:
+1. El panorama general del nivel de madurez del SGSI.
+2. Qué dominios muestran mayor fortaleza y por qué eso es relevante.
+3. Qué dominios presentan mayores brechas y qué implicaciones tienen.
+4. Cómo esas brechas afectan gobierno, operación, cumplimiento, evidencia y mejora continua.
+5. Qué prioridades estratégicas debe considerar la dirección.
+6. Una conclusión ejecutiva clara sobre el estado global del SGSI.
+
+REGLAS OBLIGATORIAS
+- BASARTE ÚNICAMENTE en los resultados por capítulo/dominio.
+- NO inventar hechos específicos del cliente.
+- NO inventar herramientas, documentos, incidentes ni tecnologías concretas.
+- NO usar lenguaje condicional.
+- NO incluir plan de acción detallado.
+- NO incluir markdown.
+- NO incluir tablas.
+- NO incluir texto fuera del JSON.
 
 ENTRADAS (capítulos / dominios):
 {resumen_cap if resumen_cap else "N/A"}
 
-Devuelve SOLO JSON válido con esta estructura EXACTA:
+FORMATO ACEPTADO DE RESPUESTA
 
+OPCIÓN 1:
 {{
-  "executive_summary": "texto en 2–5 párrafos, con 3–6 bullets finales de hallazgos clave"
+  "executive_summary": "texto amplio, detallado y ejecutivo"
 }}
 
-IMPORTANT: Return ONLY valid JSON.
+OPCIÓN 2:
+{{
+  "panorama_general": "...",
+  "fortalezas": "... o {{...}}",
+  "brechas": "... o {{...}}",
+  "implicaciones": "... o {{...}}",
+  "prioridades": "... o {{...}}",
+  "conclusion": "... o {{...}}",
+  "hallazgos_clave": ["...", "..."]
+}}
 """.strip()
 
+    def _clean_text(txt) -> str:
+        return harden_no_conditionals(to_text(txt)).strip()
+
+    def _dict_to_text_block(obj) -> str:
+        """
+        Convierte dict/list/str a texto limpio, sin mostrar llaves JSON.
+        """
+        if obj is None:
+            return ""
+
+        if isinstance(obj, str):
+            return _clean_text(obj)
+
+        if isinstance(obj, (int, float)):
+            return str(obj)
+
+        if isinstance(obj, list):
+            out = []
+            for x in obj:
+                txt = _dict_to_text_block(x)
+                if txt:
+                    if "\n" in txt:
+                        out.append(txt)
+                    elif txt.startswith(("•", "-", "–")):
+                        out.append(txt)
+                    else:
+                        out.append(f"• {txt}")
+            return "\n".join([x for x in out if x.strip()]).strip()
+
+        if isinstance(obj, dict):
+            out = []
+            for k, v in obj.items():
+                val = _dict_to_text_block(v)
+                if not val:
+                    continue
+
+                key_txt = _clean_text(str(k)).replace("_", " ").strip().capitalize()
+
+                # si es texto simple, lo presentamos elegante
+                if "\n" not in val and not val.startswith("•"):
+                    out.append(f"{key_txt}: {val}")
+                else:
+                    out.append(f"{key_txt}:\n{val}")
+            return "\n".join([x for x in out if x.strip()]).strip()
+
+        return _clean_text(obj)
+
+    def _get_first(data: dict, *keys):
+        for k in keys:
+            if k in data:
+                return data.get(k)
+        return None
+
+    def _compose_executive_summary_from_sections(data: dict) -> str:
+        sections = []
+
+        panorama = _dict_to_text_block(_get_first(data, "panorama_general"))
+        if panorama:
+            sections.append(panorama)
+
+        fortalezas = _dict_to_text_block(_get_first(
+            data,
+            "lectura_ejecutiva_de_fortalezas",
+            "fortalezas"
+        ))
+        if fortalezas:
+            sections.append("Fortalezas relevantes:\n" + fortalezas)
+
+        brechas = _dict_to_text_block(_get_first(
+            data,
+            "lectura_ejecutiva_de_brechas",
+            "brechas"
+        ))
+        if brechas:
+            sections.append("Brechas relevantes:\n" + brechas)
+
+        implicaciones = _dict_to_text_block(_get_first(
+            data,
+            "implicaciones_para_dirección_y_sostenibilidad_del_sistema",
+            "implicaciones"
+        ))
+        if implicaciones:
+            sections.append("Implicaciones para la dirección y la sostenibilidad del sistema:\n" + implicaciones)
+
+        prioridades = _dict_to_text_block(_get_first(
+            data,
+            "prioridades_estratégicas_de_intervención",
+            "prioridades"
+        ))
+        if prioridades:
+            sections.append("Prioridades estratégicas de intervención:\n" + prioridades)
+
+        conclusion = _dict_to_text_block(_get_first(
+            data,
+            "conclusión_ejecutiva_final",
+            "conclusion"
+        ))
+        if conclusion:
+            sections.append("Conclusión ejecutiva:\n" + conclusion)
+
+        hallazgos = _dict_to_text_block(_get_first(data, "hallazgos_clave"))
+        if hallazgos:
+            sections.append("Hallazgos clave:\n" + hallazgos)
+
+        return "\n\n".join([s for s in sections if s.strip()]).strip()
+
+    def _fallback_executive_summary(company_name: str, chapter_results: dict) -> str:
+        rows = []
+        for k, v in (chapter_results or {}).items():
+            try:
+                pct = float(v.get("pct", 0) or 0)
+            except Exception:
+                pct = 0.0
+            try:
+                gap_pct = float(v.get("brecha_pct", 0) or 0)
+            except Exception:
+                gap_pct = 0.0
+
+            rows.append({
+                "capitulo": k,
+                "pct": pct,
+                "gap_pct": gap_pct,
+                "gap_level": (v.get("brecha_nivel") or "").strip()
+            })
+
+        if not rows:
+            return (
+                f"Para la organización {company_name}, no se encontraron datos suficientes por capítulo "
+                f"para construir el resumen ejecutivo del SGSI."
+            )
+
+        rows_sorted_best = sorted(rows, key=lambda x: x["pct"], reverse=True)
+        rows_sorted_worst = sorted(rows, key=lambda x: x["pct"])
+
+        top_strengths = rows_sorted_best[:3]
+        top_gaps = rows_sorted_worst[:4]
+
+        overall = round(sum(r["pct"] for r in rows) / max(1, len(rows)), 2)
+
+        strengths_txt = ", ".join([f"{r['capitulo']} ({r['pct']}%)" for r in top_strengths])
+        gaps_txt = ", ".join([f"{r['capitulo']} ({r['pct']}%)" for r in top_gaps])
+
+        bullets = []
+        bullets.append(f"• Madurez promedio estimada del SGSI: {overall}%.")
+        bullets.append(f"• Dominios con mayor solidez: {strengths_txt}.")
+        bullets.append(f"• Dominios con mayores brechas: {gaps_txt}.")
+        bullets.append("• Las principales prioridades se concentran en fortalecer gobierno, operación, soporte y seguimiento.")
+        bullets.append("• La sostenibilidad del SGSI depende de mantener evidencia verificable, revisión periódica y cierre de brechas.")
+
+        texto = f"""
+El análisis ejecutivo del SGSI para {company_name} evidencia un nivel de madurez promedio de {overall}%, lo que refleja un sistema con bases implementadas y avances relevantes en varios dominios, aunque todavía con brechas que requieren atención prioritaria para consolidar su sostenibilidad.
+
+Desde una perspectiva directiva, los dominios con mejor desempeño son {strengths_txt}. Esto indica que la organización ya cuenta con capacidades relevantes en componentes esenciales del sistema, lo que representa una base favorable para sostener el cumplimiento y fortalecer la mejora continua.
+
+No obstante, los capítulos con menor nivel de madurez son {gaps_txt}. Estas brechas muestran que aún existen debilidades que afectan la consistencia operativa del SGSI y que pueden limitar la eficacia del modelo de gobierno, la trazabilidad de la evidencia, el seguimiento del desempeño y la consolidación del enfoque de mejora.
+
+En términos ejecutivos, estas diferencias de madurez indican que el sistema no debe evaluarse únicamente por sus fortalezas visibles, sino por la capacidad de operar de forma homogénea en todos los dominios relevantes. Cuando persisten brechas en capítulos clave, la organización puede mantener componentes bien estructurados, pero todavía con limitaciones para demostrar sostenibilidad, control y mejora continua de manera integral.
+
+Para la dirección, la prioridad debe centrarse en cerrar las brechas de los dominios con menor desempeño, reforzar la disciplina de seguimiento y asegurar que las actividades del SGSI mantengan evidencia verificable, revisión periódica y control efectivo sobre su evolución. Esto es particularmente importante para sostener la capacidad de respuesta, el cumplimiento y la gobernanza del sistema.
+
+En conclusión, el SGSI presenta una base de madurez relevante, pero aún requiere una intervención focalizada en los dominios más rezagados para asegurar un nivel de desempeño más equilibrado y sostenible. La dirección debe orientar sus esfuerzos a cerrar brechas, fortalecer la consistencia del sistema y mantener una visión integral de cumplimiento, operación y mejora continua.
+
+Hallazgos clave:
+{chr(10).join(bullets)}
+        """.strip()
+
+        return harden_no_conditionals(texto)
+
     try:
-        resp = openai_call_with_retry(
-            client,
-            model=OPENROUTER_MODEL_SGSI,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            response_format={"type": "json_object"},
+        data = ai_json_iso_generic(
+            prompt=prompt,
+            system_prompt=(
+                "Devuelve SOLO JSON válido. "
+                "Genera un resumen ejecutivo amplio, detallado y orientado a dirección. "
+                "No agregues texto fuera del JSON."
+            ),
+            model_openrouter=OPENROUTER_MODEL_SGSI,
+            max_tokens=3200
         )
-        raw = (resp.choices[0].message.content or "{}").strip() or "{}"
-        data = json.loads(raw)
-        data["executive_summary"] = harden_no_conditionals(to_text(data.get("executive_summary")))
-        return data
 
+        if not isinstance(data, dict):
+            data = {}
 
-    except AuthenticationError:
-        raise RuntimeError("API Key inválida o no autorizada (401). Revisa tu OPENAI_API_KEY.")
-    except OpenAIError as e:
-        if "rate_limit" in str(e).lower() or "429" in str(e):
-            raise RuntimeError("⚠️ Límite de uso de IA alcanzado (429). El informe base y el PDF siguen funcionando.")
-        raise RuntimeError(f"Error OpenAI: {e}")
+        summary = (
+            _clean_text(data.get("executive_summary"))
+            or _clean_text(data.get("resumen_ejecutivo"))
+            or _clean_text(data.get("summary"))
+            or _clean_text(data.get("resumen"))
+            or _clean_text(data.get("texto"))
+        )
+
+        if not summary:
+            summary = _compose_executive_summary_from_sections(data)
+
+        if not summary and isinstance(data, dict):
+            bloques = []
+            for _, v in data.items():
+                txt = _dict_to_text_block(v)
+                if txt and len(txt) > 40:
+                    bloques.append(txt)
+            summary = "\n\n".join(bloques).strip()
+
+        summary = harden_no_conditionals(summary)
+
+        if not summary:
+            summary = _fallback_executive_summary(company_name, chapter_results)
+
+        return {
+            "executive_summary": summary
+        }
+
     except Exception as e:
-        snippet = raw[:800] if isinstance(raw, str) else str(raw)
-        raise RuntimeError(f"Error procesando respuesta IA: {e}. Respuesta cruda (parcial): {snippet}")
+        print("DEBUG RESUMEN EJECUTIVO IA ERROR:", str(e))
+        return {
+            "executive_summary": _fallback_executive_summary(company_name, chapter_results)
+        }
 
 def ai_generate_item_analysis(company_name: str, control_id: str, item_block: dict) -> dict:
     """
@@ -83678,187 +84853,188 @@ Devuelve SOLO JSON válido con esta estructura exacta:
     except Exception as e:
         return {"items": {}, "error": str(e)}
     
-def ai_generate_control_analysis(company_name: str, control_id: str, kpi: dict, items: list) -> dict:
+def ai_generate_control_analysis(run, control_id: str, kpi: dict = None, items: list = None):
     """
-    IA por CONTROL basada en Preguntas/Requisitos del control (soporte).
-    Devuelve:
-      - estado_actual
-      - estado_requerido
-      - plan_accion_sugerido (resumido, sin 0–30/30–60/60–90)
+    Genera análisis IA por control y lo guarda en run.control_ai_json.
+    Compatible con OpenRouter y Ollama.
+    El análisis profundo se concentra SOLO en:
+    - estado_actual
+    - estado_requerido
+    - plan_accion_sugerido
     """
-    client = get_openai_client()
-    raw = "{}"
+    if not run:
+        raise RuntimeError("No se encontró la corrida de análisis ISO.")
 
-    cid = (control_id or "").strip().upper()
-    cfg = CONTROL_STRATEGY.get(cid, {})
+    control_id = (control_id or "").strip().upper()
+    if not control_id:
+        raise RuntimeError("No se recibió el control a procesar.")
 
-    intent = cfg.get("intent", "Asegurar la implementación efectiva del control según ISO/IEC 27001:2022.")
-    must_have = cfg.get("must_have", [])
-    evidence = cfg.get("evidence", [])
-    roles = cfg.get("roles", [])
-    cadence = cfg.get("cadence", "")
-    kpis_cfg = cfg.get("kpis", [])
+    if kpi is None or items is None:
+        ctx = build_report_context(run)
+        control_items = ctx.get("control_items", {}) or {}
+        items = control_items.get(control_id, []) or []
+        kpi = compute_control_kpis(control_id, items)
 
-    c = (kpi.get("counts") or {})
-    no = int(c.get("NO", 0) or 0)
-    parcial = int(c.get("PARCIAL", 0) or 0)
-    sm = int(c.get("SIN_MARCAR", 0) or 0)
+    if not isinstance(items, list):
+        items = []
+
+    if not isinstance(kpi, dict):
+        kpi = {}
+
+    soporte = build_control_support_text(items, max_lines=80)
+    pct = float(kpi.get("pct", 0) or 0)
+    madurez = (kpi.get("madurez") or "").strip()
+    group = (kpi.get("group") or "").strip()
     total = int(kpi.get("total", 0) or 0)
-    mad = (kpi.get("madurez") or "").strip()
-    optimo = is_control_optimo(kpi)
-
-    # ✅ Ajuste: menos soporte si hay demasiadas preguntas
-    n = len(items or [])
-    max_lines = 25 if n > 120 else 40 if n > 60 else 60
-    soporte = build_control_support_text(items, max_lines=max_lines)
+    done = int(kpi.get("done", 0) or 0)
+    counts = kpi.get("counts") or {}
 
     prompt = f"""
-Actúa como consultor senior ISO/IEC 27001:2022 y auditor líder.
+Eres un consultor senior y auditor líder experto en ISO/IEC 27001:2022 y SGSI.
 
-Empresa: {company_name}
-Control: {cid} - {control_title(cid)}
+Debes generar un análisis PROFUNDO del control evaluado, pero SOLO usando estos tres campos:
+- estado_actual
+- estado_requerido
+- plan_accion_sugerido
 
-INTENCIÓN del control:
-- {intent}
-
-COMPONENTES mínimos esperados (must-have):
-{json.dumps(must_have, ensure_ascii=False, indent=2)}
-
-EVIDENCIAS típicas esperables:
-{json.dumps(evidence, ensure_ascii=False, indent=2)}
-
-ROLES típicos:
-{json.dumps(roles, ensure_ascii=False, indent=2)}
-
-CADENCIA esperada:
-{cadence}
-
-MÉTRICAS típicas:
-{json.dumps(kpis_cfg, ensure_ascii=False, indent=2)}
-
-SEÑALES del instrumento (NO repitas porcentajes en el texto final):
+DATOS DEL CONTROL
+- Organización: {run.company_name}
+- Control: {control_id}
+- Grupo: {group}
+- Nivel de madurez: {madurez}
+- Porcentaje de cumplimiento: {pct:.2f}%
+- Cumplidas: {done}
 - Total aplicables: {total}
-- Pendientes: NO={no}, PARCIAL={parcial}, SIN_MARCAR={sm}
-- Nivel según parámetros: {mad}
-- Control se considera Óptimo: {"SI" if optimo else "NO"}
+- Conteos: SI={counts.get("SI",0)}, PARCIAL={counts.get("PARCIAL",0)}, NO={counts.get("NO",0)}, SIN_MARCAR={counts.get("SIN_MARCAR",0)}
 
-SOPORTE (Preguntas / requisitos del control con su estado y notas):
+DETALLE DE SOPORTE
 {soporte}
 
-OBJETIVO:
-Genera 3 bloques auditoría-ready y verificables, basados principalmente en el SOPORTE:
+INSTRUCCIONES OBLIGATORIAS
+1. El estado_actual debe ser profundo, técnico y explicativo.
+2. El estado_actual debe describir qué está implementado, qué está parcial, qué brechas persisten y qué implicación tienen.
+3. El estado_requerido debe ser profundo, técnico y orientado a auditoría.
+4. El estado_requerido debe explicar cómo debe operar el control en un nivel sólido u óptimo.
+5. El plan_accion_sugerido debe ser detallado y venir numerado, mínimo 3 pasos y máximo 6.
+6. No uses markdown.
+7. No incluyas texto fuera del JSON.
+8. No uses lenguaje condicional.
+9. No respondas con etiquetas cortas como “Gestionado”, “Implementado” o frases de una sola línea.
 
-1) "estado_actual":
-   - Describe el estado real del control con base en las preguntas/requisitos y su estado.
-   - Indica qué está implementado y qué no está cerrado (NO/PARCIAL/SIN_MARCAR).
-   - No inventes herramientas, documentos o tecnologías del cliente.
+EXTENSIÓN ESPERADA
+- estado_actual: entre 80 y 180 palabras
+- estado_requerido: entre 80 y 180 palabras
+- plan_accion_sugerido: entre 3 y 6 acciones numeradas
 
-2) "estado_requerido":
-   - Define cómo debe operar el control para considerarse sólido/óptimo:
-     proceso + responsable + evidencia verificable + revisión periódica + medición.
-   - Si el control ya es Óptimo, define el estado requerido a mantener (vigencia, control de cambios, revisión y métricas).
-
-3) "plan_accion_sugerido":
-   - Debe ser EXTENSO y DETALLADO (NO resumido).
-   - Mínimo 12 acciones y máximo 20 acciones (a nivel de control, no por ítem).
-   - Cada acción en una línea nueva, con este formato EXACTO:
-     "Acción: ... | Evidencia: ... | Responsable: ... | Cadencia: ... | Métrica: ..."
-   - Mínimo 900 caracteres en total (si no alcanzas, agrega más acciones o más detalle).
-   - Prohibido: tiempos 0–30 / 30–60 / 60–90.
-   - NO inventes documentos/herramientas reales del cliente; usa evidencia genérica verificable.
-
-   
-REGLAS:
-- NO inventes hechos concretos del cliente.
-- Redacta en modo auditoría verificable: Se debe / Se requiere / Se evidencia / Se mantiene / Se revisa / Se mide.
-- Evita lenguaje condicional.
-
-Devuelve SOLO JSON válido con EXACTAMENTE esta estructura:
+Devuelve SOLO JSON válido con esta estructura exacta:
 {{
-  "estado_actual": "texto",
-  "estado_requerido": "texto",
-  "plan_accion_sugerido": "texto"
+  "estado_actual": "texto profundo",
+  "estado_requerido": "texto profundo",
+  "plan_accion_sugerido": "1. ...\\n2. ...\\n3. ..."
 }}
-"""
-    prompt += "\n\nIMPORTANT: Return ONLY valid JSON."
+""".strip()
 
-    try:
-        resp = openai_call_with_retry(
-            client,
-            model=OPENROUTER_MODEL_SGSI,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
+    provider = (get_ai_provider() or "openrouter").strip().lower()
+    print("DEBUG IA ISO CONTROL - provider activo:", provider)
+    print("DEBUG IA ISO CONTROL - control:", control_id)
+    print("DEBUG IA ISO CONTROL - prompt preview:", prompt[:2000])
+
+    raw = ""
+
+    # =========================
+    # OLLAMA
+    # =========================
+    if provider == "ollama":
+        base_url = (get_ollama_base_url() or "http://localhost:11434").strip().rstrip("/")
+        model = (get_ollama_model() or "llama3.1").strip()
+
+        if not base_url:
+            raise RuntimeError("No hay OLLAMA_BASE_URL configurada en Administración.")
+        if not model:
+            raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
+
+        print("DEBUG IA ISO CONTROL - OLLAMA URL:", f"{base_url}/api/generate")
+        print("DEBUG IA ISO CONTROL - OLLAMA MODEL:", model)
+
+        resp = requests.post(
+            f"{base_url}/api/generate",
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.15
+                }
+            },
+            timeout=300
+        )
+        resp.raise_for_status()
+
+        payload = resp.json() or {}
+        print("DEBUG IA ISO CONTROL - OLLAMA RESPONSE JSON:", str(payload)[:2000])
+
+        raw = (payload.get("response") or "").strip()
+        if not raw:
+            raw = (payload.get("message") or "").strip()
+
+        if not raw:
+            raise RuntimeError(f"Ollama respondió sin contenido. Payload: {str(payload)[:500]}")
+
+    # =========================
+    # OPENROUTER
+    # =========================
+    else:
+        api_key = (get_openrouter_api_key() or "").strip()
+        if not api_key:
+            raise RuntimeError("No hay OPENROUTER_API_KEY configurada en Administración.")
+
+        client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+            default_headers={
+                "HTTP-Referer": "https://sgsi.local",
+                "X-Title": "SGSI ISO 27001 Analyzer"
+            }
+        )
+
+        resp = client.chat.completions.create(
+            model="openai/gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": "Devuelve SOLO JSON válido. No agregues texto fuera del JSON."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.15,
+            max_tokens=1800,
             response_format={"type": "json_object"},
         )
 
-        raw = (resp.choices[0].message.content or "{}").strip() or "{}"
-        data = json.loads(raw)
+        raw = (resp.choices[0].message.content or "").strip()
+        if not raw:
+            raise RuntimeError("OpenRouter respondió sin contenido.")
 
-        # Reparación si viene incompleto (SIN tiempos)
-        if not control_ai_is_complete(data):
-            repair_prompt = f"""
-La respuesta JSON fue incompleta o con campos vacíos.
+    print("DEBUG IA ISO CONTROL - RAW:", raw[:2000])
 
-Devuelve SOLO JSON válido con EXACTAMENTE estas llaves y texto NO vacío:
-{{
-  "estado_actual": "texto",
-  "estado_requerido": "texto",
-  "plan_accion_sugerido": "texto"
-}}
+    data = _extraer_json_objeto(raw)
+    data = ensure_control_ai_fields(data, kpi)
 
-REGLAS:
-- Basado en este SOPORTE:
-{soporte}
-- NO inventes herramientas/documentos del cliente.
-- Redacción auditoría: Se debe / Se requiere / Se evidencia / Se mantiene / Se revisa / Se mide.
-- plan_accion_sugerido: EXTENSO (12 a 20 acciones), en líneas separadas, con formato:
-  "Acción: ... | Evidencia: ... | Responsable: ... | Cadencia: ... | Métrica: ..."
-- Mínimo 900 caracteres.
-- Sin tiempos 0–30 / 30–60 / 60–90.
+    print("DEBUG IA ISO CONTROL - DATA FINAL:", data)
 
-Reescribe completo para el Control {cid} - {control_title(cid)}.
-"""
-            try:
-                resp2 = openai_call_with_retry(
-                    client,
-                    model=OPENROUTER_MODEL_SGSI,
-                    messages=[{"role": "user", "content": repair_prompt}],
-                    temperature=0.2,
-                    response_format={"type": "json_object"},
-                    max_tokens=3500,
-                )
-                raw2 = (resp2.choices[0].message.content or "{}").strip() or "{}"
-                data2 = json.loads(raw2)
-                if isinstance(data2, dict):
-                    data = data2
-            except Exception:
-                pass
+    actual = {}
+    try:
+        actual = json.loads(run.control_ai_json or "{}")
+        if not isinstance(actual, dict):
+            actual = {}
+    except Exception:
+        actual = {}
 
-        # Normaliza y resume plan
-        ea = harden_no_conditionals(to_text(data.get("estado_actual")).strip())
-        er = harden_no_conditionals(to_text(data.get("estado_requerido")).strip())
-        pa_raw = harden_no_conditionals(to_text(data.get("plan_accion_sugerido")).strip())
-        data["estado_actual"] = ea
-        data["estado_requerido"] = er
-        data["plan_accion_sugerido"] = pa_raw
+    actual[control_id] = {
+        "estado_actual": data.get("estado_actual", ""),
+        "estado_requerido": data.get("estado_requerido", ""),
+        "plan_accion_sugerido": data.get("plan_accion_sugerido", "")
+    }
 
-        return ensure_control_ai_fields(data, kpi=kpi)
-
-    except AuthenticationError as e:
-        data = {"estado_actual": "", "estado_requerido": "", "plan_accion_sugerido": "", "error": "API Key inválida o no autorizada (401). Revisa OPENAI_API_KEY."}
-        return ensure_control_ai_fields(data, kpi=kpi)
-
-    except OpenAIError as e:
-        msg = str(e)
-        if "rate_limit" in msg.lower() or "429" in msg:
-            msg = "Límite de uso alcanzado (429). Intenta más tarde o reduce frecuencia."
-        data = {"estado_actual": "", "estado_requerido": "", "plan_accion_sugerido": "", "error": msg}
-        return ensure_control_ai_fields(data, kpi=kpi)
-
-    except Exception as e:
-        data = {"estado_actual": "", "estado_requerido": "", "plan_accion_sugerido": "", "error": f"Error inesperado: {e}"}
-        return ensure_control_ai_fields(data, kpi=kpi)
-    
+    run.control_ai_json = json.dumps(actual, ensure_ascii=False)
+    return actual[control_id] 
 
 def build_unified_control_analysis(cid: str, kpi: dict, items: list) -> dict:
     """
@@ -86478,7 +87654,7 @@ def _translate_to_es_cached(text: str) -> str:
                 {"role": "system", "content": "Eres un traductor profesional EN->ES para ciberseguridad. Traduce fielmente, sin agregar texto extra."},
                 {"role": "user", "content": t}
             ],
-            max_tokens=800
+            max_tokens=1200
         )
         out = (resp.choices[0].message.content or "").strip()
         if out:
@@ -88578,7 +89754,7 @@ def generate_ai_control(run_id: int):
 
     run = AnalysisRun.query.get_or_404(run_id)
 
-    control_id = (request.form.get("control_id") or "").strip().upper()
+    control_id = (request.form.get("control_id") or request.args.get("control_id") or "").strip().upper()
     if not control_id:
         flash("No se recibió el control a procesar.", "warning")
         return redirect(url_for("madurez.view_report", run_id=run.id))
@@ -88590,20 +89766,24 @@ def generate_ai_control(run_id: int):
         items = control_items.get(control_id, []) or []
         kpi = compute_control_kpis(control_id, items)
 
-        data = ai_generate_control_analysis(run.company_name, control_id, kpi, items)
+        print("DEBUG ISO CONTROL - run_id:", run.id)
+        print("DEBUG ISO CONTROL - control_id:", control_id)
+        print("DEBUG ISO CONTROL - items:", len(items))
+        print("DEBUG ISO CONTROL - pct:", kpi.get("pct"))
+        print("DEBUG ISO CONTROL - madurez:", kpi.get("madurez"))
 
-        control_ai = json.loads(run.control_ai_json or "{}") if run.control_ai_json else {}
-        control_ai.setdefault(control_id, {})
-        control_ai[control_id]["estado_actual"] = (data.get("estado_actual") or "").strip()
-        control_ai[control_id]["estado_requerido"] = (data.get("estado_requerido") or "").strip()
-        control_ai[control_id]["plan_accion_sugerido"] = (data.get("plan_accion_sugerido") or "").strip()
+        ai_generate_control_analysis(run, control_id, kpi, items)
 
-        run.control_ai_json = json.dumps(control_ai, ensure_ascii=False)
-
+        db.session.add(run)
         db.session.commit()
+
+        print("DEBUG ISO CONTROL - item_ai_json guardado OK")
         flash(f"✅ Análisis IA generado para el control {control_id}.", "success")
+
     except Exception as e:
         db.session.rollback()
+        print("DEBUG ISO CONTROL - ERROR:", str(e))
+        traceback.print_exc()
         flash(f"❌ Error generando IA para el control {control_id}: {e}", "danger")
 
     return redirect(url_for("madurez.view_report", run_id=run.id))
@@ -93291,6 +94471,56 @@ NIST_STATUS_SCORE = {
 def _normalizar_texto(v):
     return (v or "").replace("\r\n", "\n").replace("\r", "\n").strip()
 
+def _nist_limpiar_texto_rico_guardado(texto: str) -> str:
+    """
+    Limpia respuestas IA guardadas en NIST:
+    - quita JSON envolvente si viene {"informe_ejecutivo": "..."}
+    - quita fences ```json
+    - convierte <br> a saltos reales
+    - elimina tags HTML como <b>
+    """
+    txt = (texto or "").strip()
+    if not txt:
+        return ""
+
+    txt = txt.replace("\r\n", "\n").replace("\r", "\n")
+    txt = html.unescape(txt)
+    txt = txt.replace("```json", "").replace("```", "").strip()
+
+    # Si viene como JSON, extraer informe_ejecutivo
+    try:
+        obj = json.loads(txt)
+        if isinstance(obj, dict):
+            val = (obj.get("informe_ejecutivo") or "").strip()
+            if val:
+                txt = val
+    except Exception:
+        try:
+            start = txt.find("{")
+            end = txt.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                obj = json.loads(txt[start:end+1])
+                if isinstance(obj, dict):
+                    val = (obj.get("informe_ejecutivo") or "").strip()
+                    if val:
+                        txt = val
+        except Exception:
+            pass
+
+    txt = html.unescape(txt)
+    txt = re.sub(r"<\s*br\s*/?\s*>", "\n", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"<[^>]+>", "", txt)
+
+    # Quitar llaves sueltas si quedaron por JSON mal guardado
+    txt = re.sub(r'^\s*\{\s*"?informe_ejecutivo"?\s*:\s*"?', "", txt, flags=re.IGNORECASE)
+    txt = re.sub(r'"?\s*\}\s*$', "", txt)
+
+    txt = re.sub(r"[ \t]+\n", "\n", txt)
+    txt = re.sub(r"\n[ \t]+", "\n", txt)
+    txt = re.sub(r"\n{3,}", "\n\n", txt)
+
+    return txt.strip()
+
 def _contar_respuestas_run_nist(run_id: int) -> int:
     if not run_id:
         return 0
@@ -93342,11 +94572,58 @@ def _build_plan_accion_texto(plan_list) -> str:
 
     return "\n\n".join(lines).strip()
 
+def _normalizar_plan_accion_nist_texto(texto_raw: str) -> str:
+    """
+    Convierte JSON crudo del análisis NIST a texto legible.
+    Si ya viene como texto, lo devuelve igual.
+    """
+    txt = (texto_raw or "").strip()
+    if not txt:
+        return ""
+
+    # Quitar fences tipo ```json ... ```
+    txt = txt.replace("```json", "").replace("```", "").strip()
+
+    obj = _extraer_json_objeto(txt)
+
+    if isinstance(obj, dict):
+        estado_actual = _normalizar_texto(obj.get("estado_actual") or "")
+        estado_requerido = _normalizar_texto(obj.get("estado_requerido") or "")
+
+        plan_list = None
+        if isinstance(obj.get("plan_accion"), list):
+            plan_list = obj.get("plan_accion")
+        elif isinstance(obj.get("plan"), list):
+            plan_list = obj.get("plan")
+        elif isinstance(obj.get("acciones"), list):
+            plan_list = obj.get("acciones")
+
+        plan_txt = _build_plan_accion_texto(plan_list or [])
+
+        # PRIORIDAD: mostrar SOLO el plan convertido si existe
+        if plan_txt:
+            return plan_txt.strip()
+
+        # Si no hay lista, mostrar bloques útiles
+        bloques = []
+        if estado_actual:
+            bloques.append(f"Estado actual:\n{estado_actual}")
+        if estado_requerido:
+            bloques.append(f"Estado requerido:\n{estado_requerido}")
+
+        if bloques:
+            return "\n\n".join(bloques).strip()
+
+    return txt
+
 
 def _extraer_json_objeto(raw: str) -> dict:
     raw = (raw or "").strip()
     if not raw:
         return {}
+
+    # quitar fences tipo ```json ... ```
+    raw = raw.replace("```json", "").replace("```", "").strip()
 
     try:
         return json.loads(raw)
@@ -93715,30 +94992,133 @@ CONTEXTO
 EVIDENCIAS (preguntas, estado e información adicional)
 {joined}
 
-INSTRUCCIONES
-1) Devuelve SOLAMENTE JSON válido (sin texto extra).
-2) Debes devolver exactamente estas llaves:
-   - "estado_actual": string
-   - "estado_requerido": string
-   - "plan_accion": array de objetos con:
-        * "accion": string
-        * "prioridad": "Alta" | "Media" | "Baja"
-        * "responsable_sugerido": string
-        * "plazo": string
-        * "evidencia_esperada": string
+INSTRUCCIONES OBLIGATORIAS
+1) Devuelve SOLAMENTE JSON válido.
+2) No devuelvas markdown.
+3) No devuelvas texto antes ni después del JSON.
+4) Debes devolver SIEMPRE estas tres llaves:
+   - "estado_actual"
+   - "estado_requerido"
+   - "plan_accion"
+5) "estado_actual" y "estado_requerido" deben ser textos obligatorios, no vacíos.
+6) "plan_accion" debe ser un arreglo, aunque sea con 1 elemento.
+7) Si falta evidencia, igual debes llenar "estado_actual" y "estado_requerido" explicándolo claramente.
+
+FORMATO EXACTO DE SALIDA
+{{
+  "estado_actual": "texto obligatorio",
+  "estado_requerido": "texto obligatorio",
+  "plan_accion": [
+    {{
+      "accion": "texto",
+      "prioridad": "Alta",
+      "responsable_sugerido": "texto",
+      "plazo": "texto",
+      "evidencia_esperada": "texto"
+    }}
+  ]
+}}
 
 REGLAS
 - Usa explícitamente la información adicional escrita por el usuario cuando exista.
 - No inventes herramientas específicas si no aparecen.
 - Si hay muchos "NO" o "PARCIAL", prioriza quick wins y controles base.
-- Si no hay suficiente evidencia, dilo en "estado_actual" sin inventar.
+- Si no hay suficiente evidencia, dilo en "estado_actual" y plantea "estado_requerido" de forma objetiva.
 """.strip()
 
+
+def _nist_ai_text_openrouter(prompt: str, max_tokens: int = 1400) -> str:
+    """
+    Helper EXCLUSIVO para OpenRouter en NIST.
+    No toca Ollama.
+    Evita colisiones con otros módulos que también usan _ai_text.
+    """
+    api_key = get_openrouter_api_key()
+    if not api_key:
+        raise RuntimeError("No hay OpenRouter API Key configurada. Ve a Administración → OpenRouter API Key.")
+
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key
+    )
+
+    max_tokens_safe = max(600, min(int(max_tokens or 1400), 2200))
+
+    resp = client.chat.completions.create(
+        model="deepseek/deepseek-chat",
+        temperature=0.2,
+        max_tokens=max_tokens_safe,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Eres un consultor experto en ciberseguridad, PCI-DSS, ISO 27001 y NIST CSF 2.0. "
+                    "Debes responder únicamente con JSON válido, sin markdown, sin comentarios, "
+                    "sin texto adicional antes o después del JSON."
+                )
+            },
+            {"role": "user", "content": prompt},
+        ],
+    )
+
+    texto = (resp.choices[0].message.content or "").strip()
+    if not texto:
+        raise RuntimeError("OpenRouter respondió sin contenido.")
+
+    print("DEBUG NIST OPENROUTER - longitud:", len(texto))
+    print("DEBUG NIST OPENROUTER - preview:", texto[:500])
+
+    return texto
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_MODEL = "deepseek/deepseek-chat"
 
 def _ai_text(prompt: str, max_tokens: int = 900) -> str:
+    """
+    Helper central de IA para NIST.
+    Respeta el proveedor configurado en Administración:
+    - openrouter
+    - ollama
+    """
+    provider = (get_ai_provider() or "openrouter").strip().lower()
+
+    # =========================
+    # OLLAMA
+    # =========================
+    if provider == "ollama":
+        base_url = (get_ollama_base_url() or "http://localhost:11434").strip().rstrip("/")
+        model = (get_ollama_model() or "llama3.1").strip()
+
+        if not base_url:
+            raise RuntimeError("No hay OLLAMA_BASE_URL configurada en Administración.")
+        if not model:
+            raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
+
+        resp = requests.post(
+            f"{base_url}/api/generate",
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.2
+                }
+            },
+            timeout=300
+        )
+        resp.raise_for_status()
+
+        data = resp.json() or {}
+        texto = (data.get("response") or "").strip()
+
+        if not texto:
+            raise RuntimeError("Ollama respondió sin contenido.")
+        return texto
+
+    # =========================
+    # OPENROUTER
+    # =========================
     api_key = get_openrouter_api_key()
     if not api_key:
         raise RuntimeError("No hay OpenRouter API Key configurada. Ve a Administración → OpenRouter API Key.")
@@ -93748,23 +95128,31 @@ def _ai_text(prompt: str, max_tokens: int = 900) -> str:
         api_key=api_key
     )
 
+    max_tokens_safe = max(300, min(int(max_tokens or 900), 2000))
+
     resp = client.chat.completions.create(
         model=OPENROUTER_MODEL,
         temperature=0.2,
-        max_tokens=max_tokens,
+        max_tokens=max_tokens_safe,
+        response_format={"type": "json_object"},
         messages=[
             {
                 "role": "system",
                 "content": (
                     "Eres un consultor experto en ciberseguridad, PCI-DSS, ISO 27001 y NIST CSF 2.0. "
-                    "Responde de forma concreta, ejecutiva y accionable."
+                    "Debes responder únicamente con JSON válido, sin markdown, sin comentarios, "
+                    "sin texto adicional antes o después del JSON."
                 )
             },
             {"role": "user", "content": prompt},
         ],
     )
 
-    return (resp.choices[0].message.content or "").strip()
+    texto = (resp.choices[0].message.content or "").strip()
+    if not texto:
+        raise RuntimeError("OpenRouter respondió sin contenido.")
+
+    return texto
 
 def _nist_prompt_informe_ejecutivo(run: "NistMadurezRun", resumen: dict) -> str:
     partes = []
@@ -93918,17 +95306,17 @@ def plan_trabajo_generar(run_id: int):
     prompt = _nist_prompt_plan_trabajo(run, resumen)
 
     try:
-        raw = _ai_text(prompt, max_tokens=1600)
+        raw = _nist_ai_text_openrouter(prompt, max_tokens=1800)
     except Exception as e:
         flash(f"❌ Error llamando IA para el plan de trabajo: {e}", "danger")
         return redirect(url_for("madurez_nist.detalle", run_id=run.id))
 
-    plan_texto = raw
+    plan_texto = ""
     try:
         obj = _extraer_json_objeto(raw)
-        plan_list = obj.get("plan_trabajo", [])
+        plan_list = obj.get("plan_trabajo", []) if isinstance(obj, dict) else []
 
-        if isinstance(plan_list, list):
+        if isinstance(plan_list, list) and plan_list:
             lines = []
             for i, it in enumerate(plan_list, start=1):
                 frente = (it.get("frente") or "").strip()
@@ -93939,22 +95327,26 @@ def plan_trabajo_generar(run_id: int):
                 entregable = (it.get("entregable") or "").strip()
 
                 lines.append(
-                    f"{i}. Frente: {frente}\n"
-                    f"   Actividad: {actividad}\n"
-                    f"   Prioridad: {prioridad}\n"
-                    f"   Responsable sugerido: {responsable}\n"
-                    f"   Plazo: {plazo}\n"
-                    f"   Entregable: {entregable}"
+                    f"{i}. Frente: {frente or 'Sin definir'}\n"
+                    f"   Actividad: {actividad or 'Sin definir'}\n"
+                    f"   Prioridad: {prioridad or 'Sin definir'}\n"
+                    f"   Responsable sugerido: {responsable or 'Sin definir'}\n"
+                    f"   Plazo: {plazo or 'Sin definir'}\n"
+                    f"   Entregable: {entregable or 'Sin definir'}"
                 )
 
-            plan_texto = "\n\n".join(lines)
-
+            plan_texto = "\n\n".join(lines).strip()
     except Exception:
-        pass
+        plan_texto = ""
+
+    if plan_texto and plan_texto.strip().startswith("{"):
+        plan_texto = ""
+
+    if not plan_texto:
+        plan_texto = "No se pudo generar correctamente el plan de trabajo. Regenera el análisis."
 
     run.plan_trabajo_ai = plan_texto
-    if not (run.plan_trabajo_editado or "").strip():
-        run.plan_trabajo_editado = plan_texto
+    run.plan_trabajo_editado = plan_texto
 
     db.session.commit()
     flash("✅ Plan de trabajo generado con IA.", "success")
@@ -94049,6 +95441,62 @@ def _extraer_json_objeto(raw: str) -> dict:
 
     return {}
 
+def _extraer_valor_json_texto(raw: str, clave: str) -> str:
+    """
+    Extrae un valor de texto desde un JSON crudo o semiformado.
+    Soporta respuestas con ```json ... ``` y JSON incompleto.
+    """
+    txt = (raw or "").strip()
+    if not txt:
+        return ""
+
+    txt = txt.replace("```json", "").replace("```", "").strip()
+
+    obj = _extraer_json_objeto(txt)
+    if isinstance(obj, dict):
+        return _normalizar_texto(obj.get(clave) or "")
+
+    try:
+        patron = rf'"{re.escape(clave)}"\s*:\s*"((?:[^"\\]|\\.)*)"'
+        m = re.search(patron, txt, re.DOTALL)
+        if m:
+            val = m.group(1)
+            val = val.encode("utf-8").decode("unicode_escape")
+            return _normalizar_texto(val)
+    except Exception:
+        pass
+
+    return ""
+
+def _nist_ai_text_categoria(prompt: str, max_tokens: int = 1600) -> str:
+    provider = (get_ai_provider() or "openrouter").strip().lower()
+
+    if provider == "ollama":
+        return _ai_text(prompt, max_tokens=max_tokens)
+
+    return _nist_ai_text_openrouter(prompt, max_tokens=max_tokens)
+
+def _nist_extraer_json_objeto_categoria(raw: str) -> dict:
+    txt = (raw or "").strip()
+    if not txt:
+        return {}
+
+    txt = txt.replace("```json", "").replace("```", "").strip()
+
+    try:
+        return json.loads(txt)
+    except Exception:
+        pass
+
+    try:
+        start = txt.find("{")
+        end = txt.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(txt[start:end+1])
+    except Exception:
+        pass
+
+    return {}
 
 # ================
 # Pagina Principal
@@ -96117,7 +97565,8 @@ def detalle(run_id: int):
         resumen = {}
 
     def _nl2br(s: str) -> str:
-        return (s or "").replace("\n", "<br>")
+        txt = _nist_limpiar_texto_rico_guardado(s or "")
+        return txt.replace("\n", "<br>")
 
     # =========================
     # Radar por función
@@ -96125,9 +97574,13 @@ def detalle(run_id: int):
     radar_labels, radar_values = nist_pct_por_funcion(resumen, NIST_FUNC_ORDER)
     radar_b64 = nist_radar_b64(radar_labels, radar_values, title="Radar por Función")
 
-    informe_ai = (run.informe_ejecutivo_ai or "").strip()
-    informe_editado = (run.informe_ejecutivo_editado or "").strip()
-    informe_mostrar = informe_editado or informe_ai
+    informe_ai = _nist_limpiar_texto_rico_guardado(run.informe_ejecutivo_ai or "")
+    informe_editado = _nist_limpiar_texto_rico_guardado(run.informe_ejecutivo_editado or "")
+    informe_mostrar = informe_editado if informe_editado else informe_ai
+
+    print("DEBUG NIST DETALLE - informe_ai:", informe_ai[:250] if informe_ai else "VACIO")
+    print("DEBUG NIST DETALLE - informe_editado:", informe_editado[:250] if informe_editado else "VACIO")
+    print("DEBUG NIST DETALLE - informe_mostrar:", informe_mostrar[:250] if informe_mostrar else "VACIO")
 
     nivel_general = nist_nivel_visual_por_pct(run.pct_general)
     nivel_general_texto = (nivel_general.get("nivel") or "").strip()
@@ -97043,12 +98496,6 @@ def analisis_categoria(run_id: int, func: str, cat_code: str):
 
     run = NistMadurezRun.query.get_or_404(run_id)
 
-    # =========================================================
-    # REGLA CORRECTA:
-    # - admin: entra siempre
-    # - auditor: entra siempre en modo lectura
-    # - otros perfiles: solo si la revisión es suya
-    # =========================================================
     if user.role not in ("admin", "auditor"):
         if run.user_id and run.user_id != user.id:
             flash("No tiene permiso para acceder a esta revisión.", "danger")
@@ -97061,7 +98508,6 @@ def analisis_categoria(run_id: int, func: str, cat_code: str):
 
     modo_edicion = request.args.get("editar", "0") == "1"
 
-    # Auditor: siempre solo lectura
     if read_only and modo_edicion:
         return redirect(
             url_for(
@@ -97072,7 +98518,6 @@ def analisis_categoria(run_id: int, func: str, cat_code: str):
             )
         )
 
-    # Cargar resumen para obtener pct y nombre categoría
     try:
         resumen = json.loads(run.resumen_json or "{}")
     except Exception:
@@ -97082,7 +98527,6 @@ def analisis_categoria(run_id: int, func: str, cat_code: str):
     pct = float(d.get("pct", 0) or 0)
     cat_nombre = (d.get("categoria") or "").strip()
 
-    # Buscar análisis existente
     ana = (
         NistMadurezCategoriaAnalisis.query
         .filter_by(run_id=run.id, funcion=func_u, categoria_codigo=cat_u)
@@ -97103,7 +98547,9 @@ def analisis_categoria(run_id: int, func: str, cat_code: str):
 
         estado_actual = (request.form.get("estado_actual") or "").strip()
         estado_req    = (request.form.get("estado_requerido") or "").strip()
-        plan_editado  = (request.form.get("plan_accion_editado") or "").strip()
+        plan_editado  = _normalizar_plan_accion_nist_texto(
+            (request.form.get("plan_accion_editado") or "").strip()
+        )
 
         if not ana:
             ana = NistMadurezCategoriaAnalisis(
@@ -97130,8 +98576,14 @@ def analisis_categoria(run_id: int, func: str, cat_code: str):
 
     estado_actual = (ana.estado_actual if ana else "") or ""
     estado_requerido = (ana.estado_requerido if ana else "") or ""
-    plan_ai = (ana.plan_accion_ai if ana else "") or ""
-    plan_editado = (ana.plan_accion_editado if ana else "") or ""
+
+    plan_ai = _normalizar_plan_accion_nist_texto(
+        (ana.plan_accion_ai if ana else "") or ""
+    )
+    plan_editado = _normalizar_plan_accion_nist_texto(
+        (ana.plan_accion_editado if ana else "") or ""
+    )
+
     plan_mostrar = plan_editado or plan_ai
 
     if read_only:
@@ -97189,7 +98641,7 @@ def analisis_categoria(run_id: int, func: str, cat_code: str):
               <textarea class="form-control nistana-textarea"
                         name="plan_accion_editado"
                         rows="12"
-                        placeholder="Puedes ajustar aquí el plan de acción...">{escape(plan_editado)}</textarea>
+                        placeholder="Puedes ajustar aquí el plan de acción...">{escape(plan_mostrar)}</textarea>
 
               <div class="d-flex justify-content-center mt-3">
                 <button class="btn btn-primary rounded-pill px-5 fw-bold" type="submit">
@@ -97596,33 +99048,28 @@ def analisis_categoria(run_id: int, func: str, cat_code: str):
 # GENERAR ANÁLISIS IA POR CATEGORÍA
 # =========================================================
 
-@nist_madurez_bp.route("/detalle/<int:run_id>/analisis/generar/<string:func>/<string:cat_code>", methods=["POST"])
+@nist_madurez_bp.route("/detalle/<int:run_id>/analisis/<string:func>/<string:cat_code>/generar", methods=["POST"])
 @login_required
 def analisis_categoria_generar(run_id: int, func: str, cat_code: str):
     user = User.query.get(session.get("user_id"))
 
     if user.role == "auditor":
-        flash("El perfil Auditor no puede generar análisis por categoría con IA.", "danger")
-        return redirect(url_for(
-            "madurez_nist.analisis_categoria",
-            run_id=run_id,
-            func=(func or "").upper().strip(),
-            cat_code=(cat_code or "").upper().strip()
-        ))
+        flash("El perfil Auditor no puede generar análisis con IA.", "danger")
+        return redirect(url_for("madurez_nist.analisis_categoria", run_id=run_id, func=func, cat_code=cat_code))
 
     if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de Madurez NIST CSF 2.0"):
-        flash("No tiene permiso para generar análisis por categoría del módulo NIST CSF 2.0.", "danger")
+        flash("No tiene permiso para generar análisis del módulo NIST CSF 2.0.", "danger")
         return redirect(url_for('menu'))
 
     run = NistMadurezRun.query.get_or_404(run_id)
 
     if user.role not in ("admin", "auditor"):
         if run.user_id and run.user_id != user.id:
-            flash("No tiene permiso para generar análisis sobre esta revisión.", "danger")
+            flash("No tiene permiso para generar IA sobre esta revisión.", "danger")
             return redirect(url_for("madurez_nist.historial"))
 
     func_u = (func or "").upper().strip()
-    cat_u = (cat_code or "").upper().strip()
+    cat_u  = (cat_code or "").upper().strip()
 
     try:
         resumen = json.loads(run.resumen_json or "{}")
@@ -97636,31 +99083,51 @@ def analisis_categoria_generar(run_id: int, func: str, cat_code: str):
     items = _nist_get_items_categoria(run.id, func_u, cat_u)
 
     if not items:
-        flash("⚠️ Esta categoría no tiene preguntas respondidas, por eso no se puede analizar.", "warning")
+        flash("⚠️ Esta categoría no tiene preguntas respondidas.", "warning")
         return redirect(url_for("madurez_nist.analisis_categoria", run_id=run.id, func=func_u, cat_code=cat_u))
 
     prompt = _nist_ai_prompt_categoria(func_u, cat_u, cat_nombre, pct, items)
 
     try:
-        raw = _ai_text(prompt, max_tokens=1400)
+        raw = _nist_ai_text_categoria(prompt, max_tokens=1600)
     except Exception as e:
         flash(f"❌ Error llamando IA para el análisis de categoría: {e}", "danger")
         return redirect(url_for("madurez_nist.analisis_categoria", run_id=run.id, func=func_u, cat_code=cat_u))
 
-    obj = _extraer_json_objeto(raw)
+    obj = _nist_extraer_json_objeto_categoria(raw)
 
-    estado_actual = _normalizar_texto(obj.get("estado_actual") if isinstance(obj, dict) else "")
-    estado_requerido = _normalizar_texto(obj.get("estado_requerido") if isinstance(obj, dict) else "")
-    plan_ai = _build_plan_accion_texto(obj.get("plan_accion", [])) if isinstance(obj, dict) else ""
+    estado_actual = _normalizar_texto(obj.get("estado_actual") or "") if isinstance(obj, dict) else ""
+    estado_requerido = _normalizar_texto(obj.get("estado_requerido") or "") if isinstance(obj, dict) else ""
+    plan_accion_ai = _build_plan_accion_texto(obj.get("plan_accion", [])) if isinstance(obj, dict) else ""
 
-    if not estado_actual and not estado_requerido and not plan_ai:
-        plan_ai = raw.strip()
+    if not estado_actual:
+        estado_actual = _extraer_valor_json_texto(raw, "estado_actual")
+
+    if not estado_requerido:
+        estado_requerido = _extraer_valor_json_texto(raw, "estado_requerido")
+
+    if not plan_accion_ai:
+        plan_accion_ai = _normalizar_plan_accion_nist_texto(raw)
+
+    # Nunca guardar el JSON crudo
+    if plan_accion_ai and plan_accion_ai.strip().startswith("{"):
+        plan_accion_ai = ""
+
+    if not estado_actual:
+        estado_actual = "No se pudo interpretar correctamente el estado actual generado por la IA. Se recomienda regenerar el análisis."
+
+    if not estado_requerido:
+        estado_requerido = "No se pudo interpretar correctamente el estado requerido generado por la IA. Se recomienda regenerar el análisis."
+
+    if not plan_accion_ai:
+        plan_accion_ai = "No se pudo generar correctamente el plan de acción. Regenera el análisis."
 
     ana = (
         NistMadurezCategoriaAnalisis.query
         .filter_by(run_id=run.id, funcion=func_u, categoria_codigo=cat_u)
         .first()
     )
+
     if not ana:
         ana = NistMadurezCategoriaAnalisis(
             run_id=run.id,
@@ -97669,16 +99136,18 @@ def analisis_categoria_generar(run_id: int, func: str, cat_code: str):
         )
         db.session.add(ana)
 
-    ana.estado_actual = estado_actual or ana.estado_actual
-    ana.estado_requerido = estado_requerido or ana.estado_requerido
-    ana.plan_accion_ai = plan_ai
-
-    if not (ana.plan_accion_editado or "").strip():
-        ana.plan_accion_editado = plan_ai
+    ana.estado_actual = estado_actual
+    ana.estado_requerido = estado_requerido
+    ana.plan_accion_ai = plan_accion_ai
+    ana.plan_accion_editado = plan_accion_ai
 
     db.session.commit()
 
-    flash("✅ Análisis generado por IA y guardado correctamente.", "success")
+    print("DEBUG NIST ESTADO ACTUAL:", estado_actual[:250])
+    print("DEBUG NIST ESTADO REQUERIDO:", estado_requerido[:250])
+    print("DEBUG NIST PLAN:", plan_accion_ai[:250])
+
+    flash("✅ Análisis generado correctamente con IA.", "success")
     return redirect(url_for("madurez_nist.analisis_categoria", run_id=run.id, func=func_u, cat_code=cat_u))
 
 @nist_madurez_bp.route("/detalle/<int:run_id>/informe-ejecutivo/editar", methods=["GET", "POST"])
@@ -97916,18 +99385,42 @@ def informe_ejecutivo_generar(run_id: int):
         flash(f"❌ Error llamando IA para el informe ejecutivo: {e}", "danger")
         return redirect(url_for("madurez_nist.detalle", run_id=run.id))
 
-    informe_ai = raw
+    informe_ai = ""
+
     try:
         obj = _extraer_json_objeto(raw)
-        informe_ai = (obj.get("informe_ejecutivo") or "").strip() or raw
+        if isinstance(obj, dict):
+            informe_ai = (obj.get("informe_ejecutivo") or "").strip()
     except Exception:
-        informe_ai = raw
+        informe_ai = ""
+
+    if not informe_ai:
+        informe_ai = raw or ""
+
+    informe_ai = _nist_limpiar_texto_rico_guardado(informe_ai)
+
+    if not informe_ai:
+        flash("⚠️ La IA no devolvió un informe ejecutivo válido.", "warning")
+        return redirect(url_for("madurez_nist.detalle", run_id=run.id))
 
     run.informe_ejecutivo_ai = informe_ai
-    if not (run.informe_ejecutivo_editado or "").strip():
-        run.informe_ejecutivo_editado = informe_ai
+    run.informe_ejecutivo_editado = informe_ai
 
     db.session.commit()
+    flash("✅ Informe ejecutivo generado con IA.", "success")
+    return redirect(url_for("madurez_nist.detalle", run_id=run.id))
+
+    print("DEBUG NIST INFORME - extraído:", informe_ai[:300])
+
+    # IMPORTANTE: sincronizar siempre ambos campos
+    run.informe_ejecutivo_ai = informe_ai
+    run.informe_ejecutivo_editado = informe_ai
+
+    db.session.commit()
+
+    print("DEBUG NIST INFORME - guardado AI:", (run.informe_ejecutivo_ai or "")[:300])
+    print("DEBUG NIST INFORME - guardado EDITADO:", (run.informe_ejecutivo_editado or "")[:300])
+
     flash("✅ Informe ejecutivo generado con IA.", "success")
     return redirect(url_for("madurez_nist.detalle", run_id=run.id))
 
@@ -99434,6 +100927,165 @@ REGLAS
 - No inventes herramientas específicas.
 """.strip()
 
+# =====================================================================
+# HELPERS IA EXCLUSIVOS — PROTECCIÓN DE DATOS PERSONALES
+# No tocan Ollama ni el helper global _ai_text
+# =====================================================================
+
+def _gdpr_extraer_json_objeto(raw: str) -> dict:
+    raw = (raw or "").strip()
+    if not raw:
+        return {}
+
+    # Limpia fences tipo ```json ... ```
+    raw = raw.replace("```json", "").replace("```", "").strip()
+
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+
+    try:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(raw[start:end+1])
+    except Exception:
+        pass
+
+    return {}
+
+
+def _gdpr_ai_text_openrouter(prompt: str, max_tokens: int = 1200) -> str:
+    """
+    Helper exclusivo para el módulo de Protección de Datos Personales.
+    Usa SOLO OpenRouter.
+    No toca Ollama ni el helper global _ai_text.
+    """
+    api_key = get_openrouter_api_key()
+    if not api_key:
+        raise RuntimeError("No hay OpenRouter API Key configurada. Ve a Administración → OpenRouter API Key.")
+
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key
+    )
+
+    max_tokens_safe = max(400, min(int(max_tokens or 1200), 2200))
+
+    resp = client.chat.completions.create(
+        model="deepseek/deepseek-chat",
+        temperature=0.2,
+        max_tokens=max_tokens_safe,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Eres un consultor senior en privacidad, protección de datos personales, GDPR y PIMS. "
+                    "Debes responder únicamente con JSON válido, sin markdown, sin comentarios "
+                    "y sin texto adicional antes o después del JSON."
+                )
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+    )
+
+    texto = (resp.choices[0].message.content or "").strip()
+
+    print(f"DEBUG GDPR OPENROUTER - longitud respuesta: {len(texto)}")
+    print(f"DEBUG GDPR OPENROUTER - preview: {texto[:500]}")
+
+    if not texto:
+        raise RuntimeError("OpenRouter respondió sin contenido.")
+
+    return texto
+
+
+def _gdpr_plan_trabajo_a_texto(plan_list) -> str:
+    if not isinstance(plan_list, list):
+        return ""
+
+    lines = []
+    for i, it in enumerate(plan_list, start=1):
+        if not isinstance(it, dict):
+            continue
+
+        frente = (it.get("frente") or "").strip()
+        actividad = (it.get("actividad") or "").strip()
+        prioridad = (it.get("prioridad") or "").strip()
+        responsable = (it.get("responsable_sugerido") or "").strip()
+        plazo = (it.get("plazo") or "").strip()
+        entregable = (it.get("entregable") or "").strip()
+
+        lines.append(
+            f"{i}. Frente: {frente or 'Sin definir'}\n"
+            f"   Actividad: {actividad or 'Sin definir'}\n"
+            f"   Prioridad: {prioridad or 'Sin definir'}\n"
+            f"   Responsable sugerido: {responsable or 'Sin definir'}\n"
+            f"   Plazo: {plazo or 'Sin definir'}\n"
+            f"   Entregable: {entregable or 'Sin definir'}"
+        )
+
+    return "\n\n".join(lines).strip()
+
+def _gdpr_normalizar_texto_plano_guardado(texto: str) -> str:
+    """
+    Limpia texto guardado para evitar que se muestren tags como <b>, <br>, etc.
+    Lo deja en texto plano con saltos reales.
+    """
+    txt = (texto or "")
+    if not txt:
+        return ""
+
+    # Normalizar saltos de línea
+    txt = txt.replace("\r\n", "\n").replace("\r", "\n")
+
+    # Desescapar HTML si viene como &lt;b&gt; o &lt;br&gt;
+    txt = html.unescape(txt)
+
+    # Convertir <br> a saltos reales
+    txt = re.sub(r"<\s*br\s*/?\s*>", "\n", txt, flags=re.IGNORECASE)
+
+    # Quitar tags HTML restantes, por ejemplo <b>, </b>, <strong>, etc.
+    txt = re.sub(r"<[^>]+>", "", txt)
+
+    # Limpiar espacios alrededor de saltos
+    txt = re.sub(r"[ \t]+\n", "\n", txt)
+    txt = re.sub(r"\n[ \t]+", "\n", txt)
+
+    # Compactar líneas vacías excesivas
+    txt = re.sub(r"\n{3,}", "\n\n", txt)
+
+    return txt.strip()
+
+def _gdpr_plan_accion_a_texto(plan_list) -> str:
+    if not isinstance(plan_list, list):
+        return ""
+
+    lines = []
+    for i, it in enumerate(plan_list, start=1):
+        if not isinstance(it, dict):
+            continue
+
+        accion = (it.get("accion") or "").strip()
+        prioridad = (it.get("prioridad") or "").strip()
+        responsable = (it.get("responsable_sugerido") or "").strip()
+        plazo = (it.get("plazo") or "").strip()
+        evidencia = (it.get("evidencia_esperada") or "").strip()
+
+        lines.append(
+            f"{i}. Acción: {accion or 'Sin definir'}\n"
+            f"   Prioridad: {prioridad or 'Sin definir'}\n"
+            f"   Responsable sugerido: {responsable or 'Sin definir'}\n"
+            f"   Plazo: {plazo or 'Sin definir'}\n"
+            f"   Evidencia esperada: {evidencia or 'Sin definir'}"
+        )
+
+    return "\n\n".join(lines).strip()
 
 def _extraer_json_objeto(raw: str) -> dict:
     raw = (raw or "").strip()
@@ -99905,7 +101557,7 @@ def _gdpr_ai_prompt_dominio(dominio: str, pct: float, items: list[dict]):
 
         bullets.append(linea)
 
-    joined = "\n".join(bullets)
+    joined = "\n".join(bullets) if bullets else "- Sin evidencias registradas."
 
     return f"""
 Eres un consultor experto en privacidad, protección de datos personales, GDPR y programas PIMS.
@@ -99915,25 +101567,41 @@ CONTEXTO
 - Dominio: {dominio}
 - Cumplimiento actual: {pct:.2f}%
 
-EVIDENCIAS (preguntas y estado)
+EVIDENCIAS (preguntas, estado y comentarios)
 {joined}
 
-INSTRUCCIONES
-1) Devuelve SOLAMENTE JSON válido (sin texto adicional).
-2) Debes devolver exactamente estas llaves:
-   - "estado_actual": string
-   - "estado_requerido": string
-   - "plan_accion": array de objetos con:
-        * "accion": string
-        * "prioridad": "Alta" | "Media" | "Baja"
-        * "responsable_sugerido": string
-        * "plazo": string
-        * "evidencia_esperada": string
+INSTRUCCIONES OBLIGATORIAS
+1) Devuelve SOLAMENTE JSON válido.
+2) No devuelvas markdown.
+3) No devuelvas texto antes ni después del JSON.
+4) Debes devolver SIEMPRE estas tres llaves:
+   - "estado_actual"
+   - "estado_requerido"
+   - "plan_accion"
+5) "estado_actual" y "estado_requerido" deben ser textos obligatorios, no vacíos.
+6) "plan_accion" debe ser un arreglo, aunque sea con 1 elemento.
+7) Si falta evidencia, igual debes llenar "estado_actual" y "estado_requerido" explicándolo claramente.
+
+FORMATO EXACTO DE SALIDA
+{{
+  "estado_actual": "texto obligatorio",
+  "estado_requerido": "texto obligatorio",
+  "plan_accion": [
+    {{
+      "accion": "texto",
+      "prioridad": "Alta",
+      "responsable_sugerido": "texto",
+      "plazo": "texto",
+      "evidencia_esperada": "texto"
+    }}
+  ]
+}}
 
 REGLAS
 - Usa lenguaje ejecutivo, claro y accionable.
 - Prioriza brechas reales derivadas de SI / PARCIAL / NO.
 - No inventes herramientas específicas si no aparecen en la evidencia.
+- Si la evidencia es insuficiente, debes decirlo claramente en "estado_actual" y aun así proponer un "estado_requerido".
 """.strip()
 
 # =====================================================================
@@ -102058,10 +103726,14 @@ def plan_trabajo_editar(run_id: int):
         return redirect(url_for('menu'))
 
     run = DatosMadurezRun.query.get_or_404(run_id)
-    texto_actual = (run.plan_trabajo_editado or run.plan_trabajo_ai or "").strip()
+    texto_actual = _gdpr_normalizar_texto_plano_guardado(
+        run.plan_trabajo_editado or run.plan_trabajo_ai or ""
+    )
 
     if request.method == "POST":
-        texto = (request.form.get("plan_trabajo") or "").strip()
+        texto = _gdpr_normalizar_texto_plano_guardado(
+            (request.form.get("plan_trabajo") or "").strip()
+        )
         run.plan_trabajo_editado = texto
         db.session.commit()
         flash("✅ Plan de trabajo actualizado.", "success")
@@ -102295,6 +103967,11 @@ def plan_trabajo_generar(run_id: int):
 
     run = DatosMadurezRun.query.get_or_404(run_id)
 
+    if user.role not in ("admin", "auditor"):
+        if run.user_id and run.user_id != user.id:
+            flash("No tiene permiso para generar IA sobre esta revisión.", "danger")
+            return redirect(url_for("madurez_datos.historial"))
+
     try:
         resumen = json.loads(run.resumen_json or "{}")
     except Exception:
@@ -102307,43 +103984,33 @@ def plan_trabajo_generar(run_id: int):
     prompt = _gdpr_prompt_plan_trabajo(run, resumen)
 
     try:
-        raw = _ai_text(prompt, max_tokens=1600)
+        raw = _ai_text(prompt, max_tokens=1800)
     except Exception as e:
         flash(f"❌ Error llamando IA para el plan de trabajo: {e}", "danger")
         return redirect(url_for("madurez_datos.detalle", run_id=run.id))
 
-    plan_texto = raw
+    plan_texto = ""
+
     try:
-        obj = _extraer_json_objeto(raw)
-        plan_list = obj.get("plan_trabajo", [])
-
-        if isinstance(plan_list, list):
-            lines = []
-            for i, it in enumerate(plan_list, start=1):
-                frente = (it.get("frente") or "").strip()
-                actividad = (it.get("actividad") or "").strip()
-                prioridad = (it.get("prioridad") or "").strip()
-                responsable = (it.get("responsable_sugerido") or "").strip()
-                plazo = (it.get("plazo") or "").strip()
-                entregable = (it.get("entregable") or "").strip()
-
-                lines.append(
-                    f"{i}. Frente: {frente}\n"
-                    f"   Actividad: {actividad}\n"
-                    f"   Prioridad: {prioridad}\n"
-                    f"   Responsable sugerido: {responsable}\n"
-                    f"   Plazo: {plazo}\n"
-                    f"   Entregable: {entregable}"
-                )
-
-            plan_texto = "\n\n".join(lines)
-
+        obj = _gdpr_extraer_json_objeto(raw)
+        if isinstance(obj, dict):
+            plan_texto = _gdpr_plan_trabajo_a_texto(obj.get("plan_trabajo", []))
     except Exception:
-        pass
+        plan_texto = ""
 
+    if not plan_texto:
+        plan_texto = (raw or "").strip()
+
+    # LIMPIAR HTML/TAGS ANTES DE GUARDAR
+    plan_texto = _gdpr_normalizar_texto_plano_guardado(plan_texto)
+
+    if not plan_texto:
+        flash("⚠️ La IA no devolvió contenido para el plan de trabajo.", "warning")
+        return redirect(url_for("madurez_datos.detalle", run_id=run.id))
+
+    # sincronizar ambos campos para que se vea limpio de inmediato
     run.plan_trabajo_ai = plan_texto
-    if not (run.plan_trabajo_editado or "").strip():
-        run.plan_trabajo_editado = plan_texto
+    run.plan_trabajo_editado = plan_texto
 
     db.session.commit()
     flash("✅ Plan de trabajo generado con IA.", "success")
@@ -102779,6 +104446,11 @@ def analisis_dominio_generar(run_id: int, dominio: str):
     run = DatosMadurezRun.query.get_or_404(run_id)
     dominio_txt = (dominio or "").strip()
 
+    if user.role not in ("admin", "auditor"):
+        if run.user_id and run.user_id != user.id:
+            flash("No tiene permiso para generar IA sobre esta revisión.", "danger")
+            return redirect(url_for("madurez_datos.historial"))
+
     try:
         resumen = json.loads(run.resumen_json or "{}")
     except Exception:
@@ -102795,42 +104467,27 @@ def analisis_dominio_generar(run_id: int, dominio: str):
     prompt = _gdpr_ai_prompt_dominio(dominio_txt, pct, items)
 
     try:
-        raw = _ai_text(prompt, max_tokens=1100)
+        raw = _ai_text(prompt, max_tokens=1800)
     except Exception as e:
         flash(f"❌ Error llamando IA: {e}", "danger")
         return redirect(url_for("madurez_datos.analisis_dominio", run_id=run.id, dominio=dominio_txt))
 
-    estado_actual = ""
-    estado_requerido = ""
-    plan_ai = raw or ""
+    print("DEBUG GDPR DOMINIO RAW:", raw[:500])
 
-    try:
-        obj = _extraer_json_objeto(raw)
-        estado_actual = (obj.get("estado_actual") or "").strip()
-        estado_requerido = (obj.get("estado_requerido") or "").strip()
+    obj = _gdpr_extraer_json_objeto(raw)
 
-        plan_list = obj.get("plan_accion", [])
-        if isinstance(plan_list, list):
-            lines = []
-            for i, it in enumerate(plan_list, start=1):
-                accion = (it.get("accion") or "").strip()
-                prioridad = (it.get("prioridad") or "").strip()
-                resp = (it.get("responsable_sugerido") or "").strip()
-                plazo = (it.get("plazo") or "").strip()
-                evid = (it.get("evidencia_esperada") or "").strip()
+    estado_actual = (obj.get("estado_actual") or "").strip() if isinstance(obj, dict) else ""
+    estado_requerido = (obj.get("estado_requerido") or "").strip() if isinstance(obj, dict) else ""
+    plan_ai = _gdpr_plan_accion_a_texto(obj.get("plan_accion", [])) if isinstance(obj, dict) else ""
 
-                lines.append(
-                    f"{i}. Acción: {accion}\n"
-                    f"   Prioridad: {prioridad}\n"
-                    f"   Responsable sugerido: {resp}\n"
-                    f"   Plazo: {plazo}\n"
-                    f"   Evidencia esperada: {evid}"
-                )
+    if not estado_actual:
+        estado_actual = "No se pudo interpretar correctamente el estado actual generado por la IA. Se recomienda regenerar el análisis."
 
-            plan_ai = "\n\n".join(lines)
+    if not estado_requerido:
+        estado_requerido = "No se pudo interpretar correctamente el estado requerido generado por la IA. Se recomienda regenerar el análisis."
 
-    except Exception:
-        pass
+    if not plan_ai or plan_ai.strip().startswith("{"):
+        plan_ai = "No se pudo generar correctamente el plan de acción. Regenera el análisis."
 
     ana = (
         DatosMadurezDominioAnalisis.query
@@ -102842,11 +104499,10 @@ def analisis_dominio_generar(run_id: int, dominio: str):
         ana = DatosMadurezDominioAnalisis(run_id=run.id, dominio=dominio_txt)
         db.session.add(ana)
 
-    if estado_actual:
-        ana.estado_actual = estado_actual
-    if estado_requerido:
-        ana.estado_requerido = estado_requerido
+    ana.estado_actual = estado_actual
+    ana.estado_requerido = estado_requerido
     ana.plan_accion_ai = plan_ai
+    ana.plan_accion_editado = plan_ai
 
     db.session.commit()
 
@@ -102877,7 +104533,8 @@ def detalle(run_id):
         return escape(x or "")
 
     def _nl2br(s: str) -> str:
-        return (s or "").replace("\n", "<br>")
+        txt = _gdpr_normalizar_texto_plano_guardado(s or "")
+        return txt.replace("\n", "<br>")
 
     nivel_general = gdpr_nivel_visual_por_pct(run.pct_general)
     nivel_general_texto = (nivel_general.get("nivel") or "").strip()
@@ -102885,13 +104542,20 @@ def detalle(run_id):
 
     radar_b64 = generar_radar_datos_base64(resumen)
 
-    informe_ai = (run.informe_ejecutivo_ai or "").strip()
-    informe_editado = (run.informe_ejecutivo_editado or "").strip()
-    informe_mostrar = informe_editado or informe_ai
+    informe_ai = _gdpr_normalizar_texto_plano_guardado(run.informe_ejecutivo_ai or "")
+    informe_editado = _gdpr_normalizar_texto_plano_guardado(run.informe_ejecutivo_editado or "")
+    informe_mostrar = informe_editado if informe_editado else informe_ai
 
-    plan_ai = (run.plan_trabajo_ai or "").strip()
-    plan_editado = (run.plan_trabajo_editado or "").strip()
-    plan_mostrar = plan_editado or plan_ai
+    plan_ai = _gdpr_normalizar_texto_plano_guardado(run.plan_trabajo_ai or "")
+    plan_editado = _gdpr_normalizar_texto_plano_guardado(run.plan_trabajo_editado or "")
+    plan_mostrar = plan_editado if plan_editado else plan_ai
+
+    print("DEBUG GDPR DETALLE - informe_ai:", informe_ai[:250] if informe_ai else "VACIO")
+    print("DEBUG GDPR DETALLE - informe_editado:", informe_editado[:250] if informe_editado else "VACIO")
+    print("DEBUG GDPR DETALLE - informe_mostrar:", informe_mostrar[:250] if informe_mostrar else "VACIO")
+    print("DEBUG GDPR DETALLE - plan_ai:", plan_ai[:250] if plan_ai else "VACIO")
+    print("DEBUG GDPR DETALLE - plan_editado:", plan_editado[:250] if plan_editado else "VACIO")
+    print("DEBUG GDPR DETALLE - plan_mostrar:", plan_mostrar[:250] if plan_mostrar else "VACIO")
 
     pdf_btn = ""
     try:
@@ -103002,7 +104666,7 @@ def detalle(run_id):
           </div>
 
           <div class="datares-exec-box mt-3">
-            {f'<div class="datares-exec-text">{_nl2br(esc(plan_mostrar))}</div>' if plan_mostrar else '''
+            {f'<div class="datares-exec-text">{_nl2br(plan_mostrar)}</div>' if plan_mostrar else '''
               <div class="text-center py-4">
                 <div class="mb-2" style="font-size:2rem;">🗂️</div>
                 <div class="fw-bold text-black">Aún no hay plan de trabajo</div>
@@ -103368,6 +105032,11 @@ def informe_ejecutivo_generar(run_id: int):
 
     run = DatosMadurezRun.query.get_or_404(run_id)
 
+    if user.role not in ("admin", "auditor"):
+        if run.user_id and run.user_id != user.id:
+            flash("No tiene permiso para generar IA sobre esta revisión.", "danger")
+            return redirect(url_for("madurez_datos.historial"))
+
     try:
         resumen = json.loads(run.resumen_json or "{}")
     except Exception:
@@ -103380,23 +105049,37 @@ def informe_ejecutivo_generar(run_id: int):
     prompt = _gdpr_prompt_informe_ejecutivo(run, resumen)
 
     try:
-        raw = _ai_text(prompt, max_tokens=1200)
+        raw = _ai_text(prompt, max_tokens=1400)
     except Exception as e:
         flash(f"❌ Error llamando IA para el informe ejecutivo: {e}", "danger")
         return redirect(url_for("madurez_datos.detalle", run_id=run.id))
 
-    informe_ai = raw
+    informe_ai = ""
     try:
-        obj = _extraer_json_objeto(raw)
-        informe_ai = (obj.get("informe_ejecutivo") or "").strip() or raw
+        obj = _gdpr_extraer_json_objeto(raw)
+        if isinstance(obj, dict):
+            informe_ai = (obj.get("informe_ejecutivo") or "").strip()
     except Exception:
-        informe_ai = raw
+        informe_ai = ""
 
+    if not informe_ai:
+        informe_ai = (raw or "").strip()
+
+    if not informe_ai:
+        flash("⚠️ La IA no devolvió contenido para el informe ejecutivo.", "warning")
+        return redirect(url_for("madurez_datos.detalle", run_id=run.id))
+
+    print("DEBUG GDPR DETALLE - informe extraído:", informe_ai[:300])
+
+    # IMPORTANTE: sincronizar SIEMPRE ambos campos
     run.informe_ejecutivo_ai = informe_ai
-    if not (run.informe_ejecutivo_editado or "").strip():
-        run.informe_ejecutivo_editado = informe_ai
+    run.informe_ejecutivo_editado = informe_ai
 
     db.session.commit()
+
+    print("DEBUG GDPR DETALLE - guardado AI:", (run.informe_ejecutivo_ai or "")[:300])
+    print("DEBUG GDPR DETALLE - guardado EDITADO:", (run.informe_ejecutivo_editado or "")[:300])
+
     flash("✅ Informe ejecutivo generado con IA.", "success")
     return redirect(url_for("madurez_datos.detalle", run_id=run.id))
 
@@ -104448,6 +106131,8 @@ def _extraer_json_objeto(raw: str) -> dict:
     if not raw:
         return {}
 
+    raw = raw.replace("```json", "").replace("```", "").strip()
+
     try:
         return json.loads(raw)
     except Exception:
@@ -104462,6 +106147,107 @@ def _extraer_json_objeto(raw: str) -> dict:
         pass
 
     return {}
+
+# =========================
+# AI helper PCI (OpenRouter / Ollama)
+# =========================
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_MODEL = "deepseek/deepseek-chat"
+
+def _ai_text(prompt: str, max_tokens: int = 900) -> str:
+    """
+    Helper central de IA para PCI-DSS.
+    Soporta OpenRouter y Ollama.
+    """
+    provider = (get_ai_provider() or "openrouter").strip().lower()
+    print("DEBUG IA PCI - provider activo:", provider)
+
+    # =====================================================
+    # OLLAMA
+    # =====================================================
+    if provider == "ollama":
+        base_url = (get_ollama_base_url() or "http://localhost:11434").strip().rstrip("/")
+        model = (get_ollama_model() or "llama3.1").strip()
+
+        if not base_url:
+            raise RuntimeError("No hay OLLAMA_BASE_URL configurada en Administración.")
+        if not model:
+            raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
+
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.2
+            }
+        }
+
+        print("DEBUG IA PCI - OLLAMA URL:", f"{base_url}/api/generate")
+        print("DEBUG IA PCI - OLLAMA MODEL:", model)
+        print("DEBUG IA PCI - PROMPT PREVIEW:", (prompt or "")[:500])
+
+        resp = requests.post(
+            f"{base_url}/api/generate",
+            json=payload,
+            timeout=300
+        )
+        resp.raise_for_status()
+
+        data = resp.json() or {}
+        print("DEBUG IA PCI - OLLAMA RESPONSE JSON:", str(data)[:1500])
+
+        texto = (data.get("response") or "").strip()
+
+        # Fallback adicional
+        if not texto:
+            texto = (data.get("message") or "").strip()
+
+        if not texto:
+            raise RuntimeError(
+                "Ollama respondió sin contenido. "
+                f"Respuesta recibida: {str(data)[:500]}"
+            )
+
+        return texto
+
+    # =====================================================
+    # OPENROUTER
+    # =====================================================
+    api_key = get_openrouter_api_key()
+    if not api_key:
+        raise RuntimeError("No hay OpenRouter API Key configurada. Ve a Administración → OpenRouter API Key.")
+
+    client = OpenAI(
+        base_url=OPENROUTER_BASE_URL,
+        api_key=api_key
+    )
+
+    max_tokens_safe = max(700, min(int(max_tokens or 1200), 2200))
+
+    resp = client.chat.completions.create(
+        model=OPENROUTER_MODEL,
+        temperature=0.2,
+        max_tokens=max_tokens_safe,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Eres un consultor experto en PCI-DSS. "
+                    "Debes responder únicamente con JSON válido, sin markdown, "
+                    "sin ```json, sin HTML, sin <br>, sin <b>, y sin texto adicional."
+                )
+            },
+            {"role": "user", "content": prompt},
+        ],
+    )
+
+    texto = (resp.choices[0].message.content or "").strip()
+    if not texto:
+        raise RuntimeError("OpenRouter respondió sin contenido.")
+    return texto
 
 # =========================
 # Importación instrumento PCI-DSS
@@ -104668,23 +106454,45 @@ def informe_ejecutivo_generar_pci(run_id: int):
     prompt = _pci_prompt_informe_ejecutivo(run, resultados)
 
     try:
-        raw = _ai_text(prompt, max_tokens=1200)
+        raw = _ai_text(prompt, max_tokens=500)
     except Exception as e:
         flash(f"❌ Error llamando IA para el informe ejecutivo: {e}", "danger")
         return redirect(url_for("madurez_pci.resultado", run_id=run.id))
 
-    informe_ai = raw
+    if not (raw or "").strip():
+        flash("⚠️ Ollama no devolvió contenido para el informe ejecutivo.", "warning")
+        return redirect(url_for("madurez_pci.resultado", run_id=run.id))
+
+    informe_ai = raw.strip()
+
     try:
         obj = _extraer_json_objeto(raw)
-        informe_ai = (obj.get("informe_ejecutivo") or "").strip() or raw
-    except Exception:
-        informe_ai = raw
+        if isinstance(obj, dict):
+            informe_extraido = (obj.get("informe_ejecutivo") or "").strip()
+            if informe_extraido:
+                informe_ai = informe_extraido
+    except Exception as e:
+        print("DEBUG PCI INFORME JSON ERROR:", e)
+
+    if not informe_ai.strip():
+        flash("⚠️ La respuesta de IA no trajo un informe ejecutivo válido.", "warning")
+        return redirect(url_for("madurez_pci.resultado", run_id=run.id))
+
+    # Normalizar antes de guardar
+    informe_ai = pci_normalizar_texto_rico_guardado(informe_ai)
 
     run.informe_ejecutivo_ai = informe_ai
-    if not (run.informe_ejecutivo_editado or "").strip():
-        run.informe_ejecutivo_editado = informe_ai
 
+    # IMPORTANTE:
+    # para que se vea inmediatamente en pantalla, sincronizamos también el editado
+    run.informe_ejecutivo_editado = informe_ai
+
+    db.session.add(run)
+    db.session.flush()
     db.session.commit()
+    db.session.refresh(run)
+
+
     flash("✅ Informe ejecutivo PCI-DSS generado con IA.", "success")
     return redirect(url_for("madurez_pci.resultado", run_id=run.id))
 
@@ -104733,14 +106541,28 @@ def run_analysis_from_pci_run(pci_run_id: int):
     preguntas_detalle = []
 
     if df.empty:
-        ar = PciAnalysisRun(
-            pci_run_id=run.id,
-            company_name=run.company_name,
-            nivel_promedio_general=0,
-            resultados_json=json.dumps({}, ensure_ascii=False),
-            preguntas_json=json.dumps([], ensure_ascii=False)
+        ar = (
+            PciAnalysisRun.query
+            .filter_by(pci_run_id=run.id)
+            .order_by(PciAnalysisRun.id.desc())
+            .first()
         )
-        db.session.add(ar)
+
+        if not ar:
+            ar = PciAnalysisRun(
+                pci_run_id=run.id,
+                company_name=run.company_name,
+                nivel_promedio_general=0,
+                resultados_json=json.dumps({}, ensure_ascii=False),
+                preguntas_json=json.dumps([], ensure_ascii=False)
+            )
+            db.session.add(ar)
+        else:
+            ar.company_name = run.company_name
+            ar.nivel_promedio_general = 0
+            ar.resultados_json = json.dumps({}, ensure_ascii=False)
+            ar.preguntas_json = json.dumps([], ensure_ascii=False)
+
         db.session.commit()
         return ar.id
 
@@ -104786,14 +106608,32 @@ def run_analysis_from_pci_run(pci_run_id: int):
         2
     ) if resultados else 0
 
-    ar = PciAnalysisRun(
-        pci_run_id=run.id,
-        company_name=run.company_name,
-        nivel_promedio_general=promedio_general,
-        resultados_json=json.dumps(resultados, ensure_ascii=False),
-        preguntas_json=json.dumps(preguntas_detalle, ensure_ascii=False)
+    # ==========================================
+    # REUTILIZAR EL ÚLTIMO ANÁLISIS EN VEZ DE CREAR UNO NUEVO
+    # ==========================================
+    ar = (
+        PciAnalysisRun.query
+        .filter_by(pci_run_id=run.id)
+        .order_by(PciAnalysisRun.id.desc())
+        .first()
     )
-    db.session.add(ar)
+
+    if not ar:
+        ar = PciAnalysisRun(
+            pci_run_id=run.id,
+            company_name=run.company_name
+        )
+        db.session.add(ar)
+
+    ar.company_name = run.company_name
+    ar.nivel_promedio_general = promedio_general
+    ar.resultados_json = json.dumps(resultados, ensure_ascii=False)
+    ar.preguntas_json = json.dumps(preguntas_detalle, ensure_ascii=False)
+
+    # IMPORTANTE:
+    # No tocar informe_ejecutivo_editado ni plan_trabajo_editado
+    # para no perder lo que el usuario haya ajustado manualmente.
+
     db.session.commit()
     return ar.id
 
@@ -105122,6 +106962,28 @@ def cargar_ai_pci_por_run(analysis_run_id: int) -> dict:
         }
     return out
 
+def pci_normalizar_texto_rico_guardado(texto: str) -> str:
+    txt = (texto or "")
+    if not txt:
+        return ""
+
+    txt = txt.replace("\r\n", "\n").replace("\r", "\n")
+    txt = html.unescape(txt)
+
+    txt = txt.replace("```json", "").replace("```", "").strip()
+
+    # Convertir <br> reales o escapados en saltos reales
+    txt = re.sub(r"<\s*br\s*/?\s*>", "\n", txt, flags=re.IGNORECASE)
+
+    # Quitar cualquier otro tag HTML: <b>, </b>, <strong>, etc.
+    txt = re.sub(r"<[^>]+>", "", txt)
+
+    txt = re.sub(r"[ \t]+\n", "\n", txt)
+    txt = re.sub(r"\n[ \t]+", "\n", txt)
+    txt = re.sub(r"\n{3,}", "\n\n", txt)
+
+    return txt.strip()
+
 # =========================
 # Resultado y Tablero
 # =========================
@@ -105220,19 +107082,20 @@ def resultado(run_id):
     except Exception:
         resultados = {}
 
-    informe_ai = (run.informe_ejecutivo_ai or "").strip()
-    informe_editado = (run.informe_ejecutivo_editado or "").strip()
-    informe_mostrar = informe_editado or informe_ai
+    informe_ai = pci_normalizar_texto_rico_guardado(run.informe_ejecutivo_ai or "")
+    informe_editado = pci_normalizar_texto_rico_guardado(run.informe_ejecutivo_editado or "")
+    informe_mostrar = informe_editado if informe_editado != "" else informe_ai
 
-    plan_ai = (run.plan_trabajo_ai or "").strip()
-    plan_editado = (run.plan_trabajo_editado or "").strip()
-    plan_mostrar = plan_editado or plan_ai
+    plan_ai = pci_normalizar_texto_rico_guardado(run.plan_trabajo_ai or "")
+    plan_editado = pci_normalizar_texto_rico_guardado(run.plan_trabajo_editado or "")
+    plan_mostrar = plan_editado if plan_editado != "" else plan_ai
 
     def esc(x):
         return escape(x or "")
 
     def nl2br(x):
-        return (escape(x or "")).replace("\n", "<br>")
+        txt = pci_normalizar_texto_rico_guardado(x or "")
+        return txt.replace("\n", "<br>")
 
     tarjetas = []
 
@@ -107945,7 +109808,11 @@ def plan_trabajo_editar_pci(run_id: int):
 def plan_trabajo_generar_pci(run_id: int):
     user = User.query.get(session.get("user_id"))
 
-    if user.role not in ("admin", "auditor") and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
+    if user.role == "auditor":
+        flash("El perfil Auditor no puede generar el plan de trabajo con IA.", "danger")
+        return redirect(url_for("madurez_pci.resultado", run_id=run_id))
+
+    if user.role != "admin" and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
         flash("No tiene permiso para generar el plan de trabajo de PCI-DSS.", "danger")
         return redirect(url_for("menu"))
 
@@ -107963,41 +109830,48 @@ def plan_trabajo_generar_pci(run_id: int):
     prompt = _pci_prompt_plan_trabajo(run, resultados)
 
     try:
-        raw = _ai_text(prompt, max_tokens=1600)
+        raw = _ai_text(prompt, max_tokens=1800)
     except Exception as e:
         flash(f"❌ Error llamando IA para el plan de trabajo: {e}", "danger")
         return redirect(url_for("madurez_pci.resultado", run_id=run.id))
 
-    plan_ai = raw
-    try:
-        obj = _extraer_json_objeto(raw)
-        plan_list = obj.get("plan_trabajo", [])
+    obj = _extraer_json_objeto(raw)
 
+    plan_ai = ""
+    if isinstance(obj, dict):
+        plan_list = obj.get("plan_trabajo", [])
         if isinstance(plan_list, list):
             lines = []
             for i, it in enumerate(plan_list, start=1):
-                frente = (it.get("frente") or "").strip()
-                actividad = (it.get("actividad") or "").strip()
-                prioridad = (it.get("prioridad") or "").strip()
-                responsable = (it.get("responsable_sugerido") or "").strip()
-                plazo = (it.get("plazo") or "").strip()
-                entregable = (it.get("entregable") or "").strip()
+                if not isinstance(it, dict):
+                    continue
+
+                frente = pci_normalizar_texto_rico_guardado(it.get("frente") or "")
+                actividad = pci_normalizar_texto_rico_guardado(it.get("actividad") or "")
+                prioridad = pci_normalizar_texto_rico_guardado(it.get("prioridad") or "")
+                responsable = pci_normalizar_texto_rico_guardado(it.get("responsable_sugerido") or "")
+                plazo = pci_normalizar_texto_rico_guardado(it.get("plazo") or "")
+                entregable = pci_normalizar_texto_rico_guardado(it.get("entregable") or "")
 
                 lines.append(
-                    f"{i}. Frente: {frente}\n"
-                    f"   Actividad: {actividad}\n"
-                    f"   Prioridad: {prioridad}\n"
-                    f"   Responsable sugerido: {responsable}\n"
-                    f"   Plazo: {plazo}\n"
-                    f"   Entregable: {entregable}"
+                    f"{i}. Frente: {frente or 'Sin definir'}\n"
+                    f"   Actividad: {actividad or 'Sin definir'}\n"
+                    f"   Prioridad: {prioridad or 'Sin definir'}\n"
+                    f"   Responsable sugerido: {responsable or 'Sin definir'}\n"
+                    f"   Plazo: {plazo or 'Sin definir'}\n"
+                    f"   Entregable: {entregable or 'Sin definir'}"
                 )
-            plan_ai = "\n\n".join(lines)
-    except Exception:
-        pass
+
+            plan_ai = "\n\n".join(lines).strip()
+
+    plan_ai = pci_normalizar_texto_rico_guardado(plan_ai)
+
+    if not plan_ai:
+        flash("⚠️ La IA respondió, pero no devolvió un plan_trabajo JSON válido. Regenera nuevamente.", "warning")
+        return redirect(url_for("madurez_pci.resultado", run_id=run.id))
 
     run.plan_trabajo_ai = plan_ai
-    if not (run.plan_trabajo_editado or "").strip():
-        run.plan_trabajo_editado = plan_ai
+    run.plan_trabajo_editado = plan_ai
 
     db.session.commit()
     flash("✅ Plan de trabajo PCI-DSS generado con IA.", "success")
@@ -108008,7 +109882,11 @@ def plan_trabajo_generar_pci(run_id: int):
 def informe_ejecutivo_editar_pci(run_id: int):
     user = User.query.get(session.get("user_id"))
 
-    if user.role not in ("admin", "auditor") and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
+    if user.role == "auditor":
+        flash("El perfil Auditor no puede editar el informe ejecutivo.", "danger")
+        return redirect(url_for("madurez_pci.resultado", run_id=run_id))
+
+    if user.role != "admin" and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
         flash("No tiene permiso para editar el informe ejecutivo PCI-DSS.", "danger")
         return redirect(url_for("menu"))
 
@@ -108017,8 +109895,23 @@ def informe_ejecutivo_editar_pci(run_id: int):
 
     if request.method == "POST":
         texto = (request.form.get("informe_ejecutivo") or "").strip()
+
+        print("=== DEBUG EDITAR INFORME PCI ===")
+        print("run_id:", run.id)
+        print("texto recibido:", texto[:500])
+        print("antes run.informe_ejecutivo_editado:", (run.informe_ejecutivo_editado or "")[:500])
+
         run.informe_ejecutivo_editado = texto
+        db.session.add(run)
+        db.session.flush()
         db.session.commit()
+
+        # Recargar desde BD para validar que sí quedó guardado
+        db.session.refresh(run)
+
+        print("despues run.informe_ejecutivo_editado:", (run.informe_ejecutivo_editado or "")[:500])
+        print("=== FIN DEBUG EDITAR INFORME PCI ===")
+
         flash("✅ Informe ejecutivo PCI-DSS actualizado.", "success")
         return redirect(url_for("madurez_pci.resultado", run_id=run.id))
 
@@ -108047,9 +109940,13 @@ def informe_ejecutivo_editar_pci(run_id: int):
         <form method="POST">
           <div class="pciexec-section-title">Informe ejecutivo editable</div>
 
+          <div class="text-muted small mb-3">
+            Ajusta el contenido del informe ejecutivo y guarda los cambios.
+          </div>
+
           <textarea name="informe_ejecutivo"
                     class="form-control pciexec-textarea"
-                    rows="18"
+                    rows="20"
                     placeholder="Escribe o ajusta aquí el informe ejecutivo...">{escape(texto_actual)}</textarea>
 
           <div class="d-flex justify-content-center mt-4">
@@ -108069,20 +109966,118 @@ def informe_ejecutivo_editar_pci(run_id: int):
         background-attachment:fixed;
         background-repeat:no-repeat;
       }}
-      .pciexec-shell {{ width:96%; max-width:1450px; margin:10px auto 30px auto; }}
-      .pciexec-header-card {{ background:#3f86d6; height:88px; display:flex; align-items:center; justify-content:center; border-radius:18px; box-shadow:0 12px 30px rgba(0,0,0,.30); margin-bottom:14px; overflow:hidden; }}
-      .pciexec-header-overlay {{ width:100%; height:100%; display:flex; align-items:flex-start; justify-content:center; text-align:center; background:rgba(0,0,0,.08); padding:8px 24px 6px 24px; }}
-      .pciexec-header-text {{ width:100%; display:flex; flex-direction:column; align-items:center; justify-content:flex-start; transform:translateY(8px); }}
-      .pciexec-title {{ color:#fff !important; font-weight:900; font-size:1.38rem; }}
-      .pciexec-subtitle {{ color:rgba(255,255,255,.96); font-size:.82rem; margin-top:4px; }}
-      .pciexec-header-actions {{ display:flex; justify-content:center; gap:10px; margin-bottom:16px; flex-wrap:wrap; }}
-      .pciexec-btn-main {{ background:#ffffff; color:#000; border:2px solid #ffffff; box-shadow:0 4px 10px rgba(0,0,0,.10); }}
-      .pciexec-card {{ background:rgba(255,255,255,.93)!important; border-radius:18px; backdrop-filter:blur(6px); box-shadow:0 10px 24px rgba(0,0,0,.18); }}
-      .pciexec-section-title {{ font-weight:900; font-size:1.02rem; color:#1d4ed8; padding-bottom:8px; border-bottom:2px solid rgba(59,130,246,.18); margin-bottom:16px; }}
-      .pciexec-textarea {{ min-height:420px; border-radius:14px; border:1px solid #cfd8e3; resize:vertical; }}
+
+      .pciexec-shell {{
+        width:96%;
+        max-width:1500px;
+        margin:10px auto 30px auto;
+      }}
+
+      .pciexec-header-card {{
+        background:#3f86d6;
+        height:88px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        border-radius:18px;
+        box-shadow:0 12px 30px rgba(0,0,0,.30);
+        margin-bottom:14px;
+        overflow:hidden;
+      }}
+
+      .pciexec-header-overlay {{
+        width:100%;
+        height:100%;
+        display:flex;
+        align-items:flex-start;
+        justify-content:center;
+        text-align:center;
+        background:rgba(0,0,0,.08);
+        padding:8px 24px 6px 24px;
+      }}
+
+      .pciexec-header-text {{
+        width:100%;
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        justify-content:flex-start;
+        transform:translateY(8px);
+      }}
+
+      .pciexec-title {{
+        color:#fff !important;
+        font-weight:900;
+        font-size:1.38rem;
+        line-height:1.10;
+        text-shadow:0 4px 14px rgba(0,0,0,.45);
+      }}
+
+      .pciexec-subtitle {{
+        color:rgba(255,255,255,.96);
+        font-size:.82rem;
+        margin-top:4px;
+        line-height:1.15;
+      }}
+
+      .pciexec-header-actions {{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        margin-bottom:16px;
+        flex-wrap:wrap;
+      }}
+
+      .pciexec-btn-main {{
+        background:#ffffff;
+        color:#000;
+        border:2px solid #ffffff;
+        box-shadow:0 4px 10px rgba(0,0,0,.10);
+      }}
+
+      .pciexec-btn-main:hover {{
+        background:#f3f4f6;
+        color:#000;
+      }}
+
+      .pciexec-card {{
+        background:rgba(255,255,255,.93)!important;
+        border-radius:18px;
+        backdrop-filter:blur(6px);
+        box-shadow:0 10px 24px rgba(0,0,0,.18);
+      }}
+
+      .pciexec-card.p-4 {{
+        padding:1.5rem !important;
+      }}
+
+      .pciexec-section-title {{
+        font-weight:900;
+        font-size:1.02rem;
+        color:#1d4ed8;
+        padding-bottom:8px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+        margin-bottom:16px;
+      }}
+
+      .pciexec-textarea {{
+        min-height:420px;
+        border-radius:14px;
+        border:1px solid #cfd8e3;
+        resize:vertical;
+      }}
+
+      .pciexec-textarea:focus {{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 0.2rem rgba(63,134,214,.18);
+      }}
+
+      .btn.rounded-pill {{
+        border-radius:999px !important;
+      }}
     </style>
     """
-    return render_template_string(BASE, title="Editar Informe Ejecutivo PCI-DSS", content=content)
+    return render_template_string(BASE, title="Editar Informe Ejecutivo PCI", content=content)
 
 
 
@@ -109035,6 +111030,14 @@ def listas_restrictivas_home():
         </div>
       </div>
 
+       </div>
+          <div class="text-center mt-3">
+            <a href="{{ url_for('menu') }}" class="btn btn-light rounded-pill px-4 fw-bold">
+              Volver al Menú Principal
+            </a>
+          </div>
+      </div>
+
       <div class="row g-3 mb-3">
         <div class="col-md-4">
           <div class="lr-kpi-card">
@@ -109149,12 +111152,6 @@ def listas_restrictivas_home():
           <div class="alert alert-info mb-0">No existen consultas registradas todavía.</div>
           {% endif %}
         </div>
-      </div>
-
-      <div class="text-center mt-3">
-        <a href="{{ url_for('menu') }}" class="btn btn-light rounded-pill px-4 fw-bold">
-          Volver al Menú Principal
-        </a>
       </div>
     </div>
 
