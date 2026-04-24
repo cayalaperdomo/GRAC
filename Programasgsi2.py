@@ -448,6 +448,7 @@ SGSI_PROGRESS_GLOBAL = """
 (function () {
     let sgsiProgressValue = 0;
     let sgsiProgressTimer = null;
+    let sgsiUserAction = false;
 
     function setSGSIProgress(percent) {
         const bar = document.getElementById("sgsiProgressBar");
@@ -506,7 +507,8 @@ SGSI_PROGRESS_GLOBAL = """
             clearInterval(sgsiProgressTimer);
             sgsiProgressTimer = null;
             setSGSIProgress(0);
-        }, 450);
+            sgsiUserAction = false;
+        }, 350);
     }
 
     window.showSGSIProgress = showSGSIProgress;
@@ -518,6 +520,8 @@ SGSI_PROGRESS_GLOBAL = """
 
         if (!form || form.dataset.noProgress === "true") return;
 
+        sgsiUserAction = true;
+
         showSGSIProgress(
             form.dataset.progressText || "Generando y procesando información..."
         );
@@ -525,8 +529,8 @@ SGSI_PROGRESS_GLOBAL = """
 
     document.addEventListener("click", function (e) {
         const btn = e.target.closest("button, a, input[type='submit']");
-        if (!btn) return;
 
+        if (!btn) return;
         if (btn.dataset.noProgress === "true") return;
 
         const tag = btn.tagName.toLowerCase();
@@ -540,10 +544,15 @@ SGSI_PROGRESS_GLOBAL = """
                 href.startsWith("#") ||
                 href.startsWith("javascript:") ||
                 btn.target === "_blank" ||
-                btn.hasAttribute("download")
+                btn.hasAttribute("download") ||
+                btn.classList.contains("dropdown-toggle") ||
+                btn.getAttribute("data-bs-toggle") ||
+                btn.getAttribute("data-toggle")
             ) {
                 return;
             }
+
+            sgsiUserAction = true;
 
             showSGSIProgress(
                 btn.dataset.progressText || "Cargando información..."
@@ -551,6 +560,8 @@ SGSI_PROGRESS_GLOBAL = """
         }
 
         if (btn.type === "submit") {
+            sgsiUserAction = true;
+
             showSGSIProgress(
                 btn.dataset.progressText || "Ejecutando proceso..."
             );
@@ -561,15 +572,19 @@ SGSI_PROGRESS_GLOBAL = """
 
     if (originalFetch) {
         window.fetch = function () {
-            showSGSIProgress("Consultando información...");
+            const debeMostrar = sgsiUserAction === true;
+
+            if (debeMostrar) {
+                showSGSIProgress("Consultando información...");
+            }
 
             return originalFetch.apply(this, arguments)
                 .then(function (response) {
-                    hideSGSIProgress();
+                    if (debeMostrar) hideSGSIProgress();
                     return response;
                 })
                 .catch(function (error) {
-                    hideSGSIProgress();
+                    if (debeMostrar) hideSGSIProgress();
                     throw error;
                 });
         };
@@ -577,6 +592,7 @@ SGSI_PROGRESS_GLOBAL = """
 
     window.addEventListener("pageshow", function () {
         const overlay = document.getElementById("sgsiProgressOverlay");
+
         if (overlay) {
             overlay.style.display = "none";
         }
@@ -584,6 +600,7 @@ SGSI_PROGRESS_GLOBAL = """
         clearInterval(sgsiProgressTimer);
         sgsiProgressTimer = null;
         setSGSIProgress(0);
+        sgsiUserAction = false;
     });
 })();
 </script>
