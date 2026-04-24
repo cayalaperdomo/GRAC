@@ -2,7 +2,8 @@
 # Aplicación Flask autocontenida: Declaración de Aplicabilidad ISO 27001:2022 (todo en un archivo)
 # Requisitos: pip install flask flask_sqlalchemy
 
-from flask import Flask, request, redirect, url_for, render_template_string, send_file, flash, session, Blueprint
+#from flask import Flask, request, redirect, url_for, render_template_string, send_file, flash, session, Blueprint
+from flask import Flask, request, redirect, url_for, render_template_string, send_file, flash, session, Blueprint, make_response
 from flask_sqlalchemy import SQLAlchemy
 from passlib.hash import ldap_salted_sha1 as ssha
 import os, io, csv
@@ -269,11 +270,6 @@ def ai_text_general(prompt: str, system_prompt: str | None = None, temperature: 
         if system_prompt:
             full_prompt = f"{system_prompt}\n\n{prompt}"
 
-        print("DEBUG IA GENERAL - provider activo: ollama")
-        print("DEBUG IA GENERAL - OLLAMA URL:", f"{base_url}/api/generate")
-        print("DEBUG IA GENERAL - OLLAMA MODEL:", model)
-        print("DEBUG IA GENERAL - PROMPT PREVIEW:", full_prompt[:500])
-
         resp = requests.post(
             f"{base_url}/api/generate",
             json={
@@ -289,7 +285,6 @@ def ai_text_general(prompt: str, system_prompt: str | None = None, temperature: 
         resp.raise_for_status()
 
         data = resp.json() or {}
-        print("DEBUG IA GENERAL - OLLAMA RESPONSE JSON:", str(data)[:1500])
 
         texto = (data.get("response") or "").strip()
 
@@ -300,8 +295,6 @@ def ai_text_general(prompt: str, system_prompt: str | None = None, temperature: 
             raise RuntimeError(f"Ollama respondió sin contenido. Respuesta: {str(data)[:500]}")
 
         return texto
-
-    print("DEBUG IA GENERAL - provider activo: openrouter")
 
     client = ai_cfg["client"]
     model_name = ai_cfg.get("model") or OPENROUTER_MODEL or "deepseek/deepseek-chat"
@@ -362,6 +355,265 @@ def calcular_riesgo(probabilidad_txt, impacto_txt):
 
 
 app = Flask(__name__)
+# ============================================================
+# BARRA DE PROGRESO GLOBAL SGSI - PARA TODOS LOS PROCESOS
+# ============================================================
+
+SGSI_PROGRESS_GLOBAL = """
+<style>
+#sgsiProgressOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 999999;
+    background: rgba(8, 24, 48, .62);
+    backdrop-filter: blur(5px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
+
+.sgsi-progress-card {
+    width: min(460px, 92vw);
+    background: rgba(255,255,255,.96);
+    border-radius: 22px;
+    padding: 28px 30px;
+    box-shadow: 0 18px 45px rgba(0,0,0,.35);
+    text-align: center;
+    border: 1px solid rgba(255,255,255,.55);
+}
+
+.sgsi-progress-title {
+    font-size: 1.2rem;
+    font-weight: 800;
+    color: #1d4f8f;
+    margin-bottom: 8px;
+}
+
+.sgsi-progress-text {
+    font-size: .94rem;
+    color: #526173;
+    margin-bottom: 18px;
+}
+
+.sgsi-progress-percent {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #1d4f8f;
+    margin-bottom: 8px;
+}
+
+.sgsi-progress-bar-wrap {
+    height: 16px;
+    background: #e8eef7;
+    border-radius: 999px;
+    overflow: hidden;
+    box-shadow: inset 0 2px 5px rgba(0,0,0,.10);
+}
+
+.sgsi-progress-bar {
+    width: 0%;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #2f6fb6 0%, #3f86d6 55%, #5aa3ea 100%);
+    transition: width .35s ease;
+}
+
+.sgsi-progress-footer {
+    margin-top: 14px;
+    font-size: .82rem;
+    color: #6c7a89;
+}
+</style>
+
+<div id="sgsiProgressOverlay">
+    <div class="sgsi-progress-card">
+        <div class="sgsi-progress-title">Procesando solicitud</div>
+        <div class="sgsi-progress-text" id="sgsiProgressText">
+            Por favor espera mientras el sistema ejecuta el proceso...
+        </div>
+
+        <div class="sgsi-progress-percent" id="sgsiProgressPercent">0%</div>
+
+        <div class="sgsi-progress-bar-wrap">
+            <div class="sgsi-progress-bar" id="sgsiProgressBar"></div>
+        </div>
+
+        <div class="sgsi-progress-footer">
+            SGSI — Arkyntech GRAC
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    let sgsiProgressValue = 0;
+    let sgsiProgressTimer = null;
+
+    function setSGSIProgress(percent) {
+        const bar = document.getElementById("sgsiProgressBar");
+        const label = document.getElementById("sgsiProgressPercent");
+
+        sgsiProgressValue = Math.max(0, Math.min(100, percent));
+
+        if (bar) {
+            bar.style.width = sgsiProgressValue + "%";
+        }
+
+        if (label) {
+            label.innerText = Math.round(sgsiProgressValue) + "%";
+        }
+    }
+
+    function startSGSIProgressAuto() {
+        clearInterval(sgsiProgressTimer);
+
+        sgsiProgressTimer = setInterval(function () {
+            if (sgsiProgressValue < 55) {
+                setSGSIProgress(sgsiProgressValue + 5);
+            } else if (sgsiProgressValue < 80) {
+                setSGSIProgress(sgsiProgressValue + 3);
+            } else if (sgsiProgressValue < 95) {
+                setSGSIProgress(sgsiProgressValue + 1);
+            }
+        }, 500);
+    }
+
+    function showSGSIProgress(message) {
+        const overlay = document.getElementById("sgsiProgressOverlay");
+        const text = document.getElementById("sgsiProgressText");
+
+        if (!overlay) return;
+
+        if (text && message) {
+            text.innerText = message;
+        }
+
+        overlay.style.display = "flex";
+        setSGSIProgress(3);
+        startSGSIProgressAuto();
+    }
+
+    function hideSGSIProgress() {
+        setSGSIProgress(100);
+
+        setTimeout(function () {
+            const overlay = document.getElementById("sgsiProgressOverlay");
+
+            if (overlay) {
+                overlay.style.display = "none";
+            }
+
+            clearInterval(sgsiProgressTimer);
+            sgsiProgressTimer = null;
+            setSGSIProgress(0);
+        }, 450);
+    }
+
+    window.showSGSIProgress = showSGSIProgress;
+    window.hideSGSIProgress = hideSGSIProgress;
+    window.setSGSIProgress = setSGSIProgress;
+
+    document.addEventListener("submit", function (e) {
+        const form = e.target;
+
+        if (!form || form.dataset.noProgress === "true") return;
+
+        showSGSIProgress(
+            form.dataset.progressText || "Generando y procesando información..."
+        );
+    }, true);
+
+    document.addEventListener("click", function (e) {
+        const btn = e.target.closest("button, a, input[type='submit']");
+        if (!btn) return;
+
+        if (btn.dataset.noProgress === "true") return;
+
+        const tag = btn.tagName.toLowerCase();
+
+        if (tag === "a") {
+            const href = btn.getAttribute("href") || "";
+
+            if (
+                !href ||
+                href === "#" ||
+                href.startsWith("#") ||
+                href.startsWith("javascript:") ||
+                btn.target === "_blank" ||
+                btn.hasAttribute("download")
+            ) {
+                return;
+            }
+
+            showSGSIProgress(
+                btn.dataset.progressText || "Cargando información..."
+            );
+        }
+
+        if (btn.type === "submit") {
+            showSGSIProgress(
+                btn.dataset.progressText || "Ejecutando proceso..."
+            );
+        }
+    }, true);
+
+    const originalFetch = window.fetch;
+
+    if (originalFetch) {
+        window.fetch = function () {
+            showSGSIProgress("Consultando información...");
+
+            return originalFetch.apply(this, arguments)
+                .then(function (response) {
+                    hideSGSIProgress();
+                    return response;
+                })
+                .catch(function (error) {
+                    hideSGSIProgress();
+                    throw error;
+                });
+        };
+    }
+
+    window.addEventListener("pageshow", function () {
+        const overlay = document.getElementById("sgsiProgressOverlay");
+        if (overlay) {
+            overlay.style.display = "none";
+        }
+
+        clearInterval(sgsiProgressTimer);
+        sgsiProgressTimer = null;
+        setSGSIProgress(0);
+    });
+})();
+</script>
+"""
+
+
+@app.after_request
+def inject_sgsi_progress_bar(response):
+    try:
+        content_type = response.headers.get("Content-Type", "")
+
+        if "text/html" not in content_type:
+            return response
+
+        html = response.get_data(as_text=True)
+
+        if not html or "sgsiProgressOverlay" in html:
+            return response
+
+        if "</body>" in html:
+            html = html.replace("</body>", SGSI_PROGRESS_GLOBAL + "\\n</body>")
+        else:
+            html += SGSI_PROGRESS_GLOBAL
+
+        response.set_data(html)
+        response.headers["Content-Length"] = str(len(response.get_data()))
+    except Exception as e:
+        print("No se pudo inyectar barra de progreso SGSI:", repr(e))
+
+    return response
 
 # ============================================================================================================================================
 #                                                               LOGS DE AUDITORÍA - DB INDEPENDIENTE
@@ -59185,11 +59437,10 @@ def sugerir_remediacion_ai(hallazgo: dict) -> dict:
     try:
         # Si el “hallazgo” realmente es ruido del escáner, no mandar a IA
         if _es_ruido_hallazgo_scan(hallazgo):
-            print("DEBUG REMEDIACION AI - hallazgo detectado como ruido técnico, usando fallback.")
+
             return fallback
 
         provider = (get_ai_provider() or "openrouter").strip().lower()
-        print("DEBUG REMEDIACION AI - provider activo:", provider)
 
         titulo = _texto_limpio_para_ai(hallazgo.get("titulo"))
         descripcion = _texto_limpio_para_ai(hallazgo.get("descripcion"))
@@ -59239,7 +59490,6 @@ Reglas:
             max_tokens=300
         )
 
-        print("DEBUG REMEDIACION AI RAW:", (raw or "")[:1500])
 
         if not raw:
             return fallback
@@ -59256,7 +59506,7 @@ Reglas:
         ]
         raw_l = raw.lower()
         if any(p in raw_l for p in rechazo):
-            print("DEBUG REMEDIACION AI - respuesta rechazada por modelo, usando fallback.")
+
             return fallback
 
         m = re.search(r"\{.*\}", raw, re.S)
@@ -59277,7 +59527,7 @@ Reglas:
         }
 
     except Exception as e:
-        print("DEBUG REMEDIACION AI ERROR:", str(e))
+
         return fallback
 
 def ejecutar_comando_scan(run_id, cfg, cmd_local, remote_cmd=None):
@@ -69328,19 +69578,34 @@ def _ai_json_proponentes(prompt: str,
             f"{base_url}/api/generate",
             json={
                 "model": model,
-                "prompt": full_prompt,
-                "stream": False,
+                "prompt": prompt,
+                "stream": True,
                 "options": {
-                    "temperature": 0.0
+                    "temperature": 0.15,
+                    "num_predict": 900
                 }
             },
-            timeout=300
+            stream=True,
+            timeout=(15, 600)
         )
         resp.raise_for_status()
 
-        payload = resp.json() or {}
+        raw = ""
 
-        raw = (payload.get("response") or "").strip()
+        for line in resp.iter_lines():
+            if not line:
+                continue
+
+            try:
+                chunk = json.loads(line.decode("utf-8"))
+                raw += chunk.get("response", "")
+
+                if chunk.get("done"):
+                    break
+            except Exception:
+                continue
+
+        raw = raw.strip()
         if not raw:
             raw = (payload.get("message") or "").strip()
 
@@ -74214,10 +74479,6 @@ def ai_text_metricas(prompt: str,
             raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
 
         full_prompt = f"{system_prompt}\n\n{prompt}".strip()
-
-        print("DEBUG IA METRICAS - OLLAMA URL:", f"{base_url}/api/generate")
-        print("DEBUG IA METRICAS - OLLAMA MODEL:", model)
-        print("DEBUG IA METRICAS - PROMPT PREVIEW:", full_prompt[:1000])
 
         resp = requests.post(
             f"{base_url}/api/generate",
@@ -84011,10 +84272,6 @@ def ai_json_iso(prompt: str,
 
         full_prompt = f"{system_prompt}\n\n{prompt}".strip()
 
-        print("DEBUG IA ISO - OLLAMA URL:", f"{base_url}/api/generate")
-        print("DEBUG IA ISO - OLLAMA MODEL:", model)
-        print("DEBUG IA ISO - PROMPT PREVIEW:", full_prompt[:1000])
-
         resp = requests.post(
             f"{base_url}/api/generate",
             json={
@@ -84030,7 +84287,6 @@ def ai_json_iso(prompt: str,
         resp.raise_for_status()
 
         payload = resp.json() or {}
-        print("DEBUG IA ISO - OLLAMA RESPONSE JSON:", str(payload)[:1500])
 
         raw = (payload.get("response") or "").strip()
         if not raw:
@@ -84061,7 +84317,7 @@ def ai_json_iso(prompt: str,
     )
 
     raw = (resp.choices[0].message.content or "").strip() or "{}"
-    print("DEBUG IA ISO - OPENROUTER RAW:", raw[:1500])
+
     return normalize_plan_response(raw)
 
 def ai_json_iso_generic(prompt: str,
@@ -84093,10 +84349,6 @@ def ai_json_iso_generic(prompt: str,
 
         full_prompt = f"{system_prompt}\n\n{prompt}".strip()
 
-        print("DEBUG IA ISO GENERIC - OLLAMA URL:", f"{base_url}/api/generate")
-        print("DEBUG IA ISO GENERIC - OLLAMA MODEL:", model)
-        print("DEBUG IA ISO GENERIC - PROMPT PREVIEW:", full_prompt[:1200])
-
         resp = requests.post(
             f"{base_url}/api/generate",
             json={
@@ -84112,7 +84364,6 @@ def ai_json_iso_generic(prompt: str,
         resp.raise_for_status()
 
         payload = resp.json() or {}
-        print("DEBUG IA ISO GENERIC - OLLAMA RESPONSE JSON:", str(payload)[:1500])
 
         raw = (payload.get("response") or "").strip()
         if not raw:
@@ -84121,7 +84372,6 @@ def ai_json_iso_generic(prompt: str,
         if not raw:
             raise RuntimeError(f"Ollama respondió sin contenido. Payload: {str(payload)[:500]}")
 
-        print("DEBUG IA ISO GENERIC - RAW:", raw[:1500])
         return _extraer_json_objeto(raw)
 
     # =========================
@@ -84143,7 +84393,7 @@ def ai_json_iso_generic(prompt: str,
     )
 
     raw = (resp.choices[0].message.content or "").strip() or "{}"
-    print("DEBUG IA ISO GENERIC - OPENROUTER RAW:", raw[:1500])
+
     return _extraer_json_objeto(raw)
 
 def ai_generate_report_and_plan(company_name: str, chapter_results: dict, control_results: dict) -> dict:
@@ -84935,9 +85185,6 @@ Devuelve SOLO JSON válido con esta estructura exacta:
 """.strip()
 
     provider = (get_ai_provider() or "openrouter").strip().lower()
-    print("DEBUG IA ISO CONTROL - provider activo:", provider)
-    print("DEBUG IA ISO CONTROL - control:", control_id)
-    print("DEBUG IA ISO CONTROL - prompt preview:", prompt[:2000])
 
     raw = ""
 
@@ -84952,9 +85199,6 @@ Devuelve SOLO JSON válido con esta estructura exacta:
             raise RuntimeError("No hay OLLAMA_BASE_URL configurada en Administración.")
         if not model:
             raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
-
-        print("DEBUG IA ISO CONTROL - OLLAMA URL:", f"{base_url}/api/generate")
-        print("DEBUG IA ISO CONTROL - OLLAMA MODEL:", model)
 
         resp = requests.post(
             f"{base_url}/api/generate",
@@ -84971,7 +85215,6 @@ Devuelve SOLO JSON válido con esta estructura exacta:
         resp.raise_for_status()
 
         payload = resp.json() or {}
-        print("DEBUG IA ISO CONTROL - OLLAMA RESPONSE JSON:", str(payload)[:2000])
 
         raw = (payload.get("response") or "").strip()
         if not raw:
@@ -85011,8 +85254,6 @@ Devuelve SOLO JSON válido con esta estructura exacta:
         raw = (resp.choices[0].message.content or "").strip()
         if not raw:
             raise RuntimeError("OpenRouter respondió sin contenido.")
-
-    print("DEBUG IA ISO CONTROL - RAW:", raw[:2000])
 
     data = _extraer_json_objeto(raw)
     data = ensure_control_ai_fields(data, kpi)
@@ -89766,18 +90007,11 @@ def generate_ai_control(run_id: int):
         items = control_items.get(control_id, []) or []
         kpi = compute_control_kpis(control_id, items)
 
-        print("DEBUG ISO CONTROL - run_id:", run.id)
-        print("DEBUG ISO CONTROL - control_id:", control_id)
-        print("DEBUG ISO CONTROL - items:", len(items))
-        print("DEBUG ISO CONTROL - pct:", kpi.get("pct"))
-        print("DEBUG ISO CONTROL - madurez:", kpi.get("madurez"))
-
         ai_generate_control_analysis(run, control_id, kpi, items)
 
         db.session.add(run)
         db.session.commit()
 
-        print("DEBUG ISO CONTROL - item_ai_json guardado OK")
         flash(f"✅ Análisis IA generado para el control {control_id}.", "success")
 
     except Exception as e:
@@ -95066,9 +95300,6 @@ def _nist_ai_text_openrouter(prompt: str, max_tokens: int = 1400) -> str:
     if not texto:
         raise RuntimeError("OpenRouter respondió sin contenido.")
 
-    print("DEBUG NIST OPENROUTER - longitud:", len(texto))
-    print("DEBUG NIST OPENROUTER - preview:", texto[:500])
-
     return texto
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -97578,10 +97809,6 @@ def detalle(run_id: int):
     informe_editado = _nist_limpiar_texto_rico_guardado(run.informe_ejecutivo_editado or "")
     informe_mostrar = informe_editado if informe_editado else informe_ai
 
-    print("DEBUG NIST DETALLE - informe_ai:", informe_ai[:250] if informe_ai else "VACIO")
-    print("DEBUG NIST DETALLE - informe_editado:", informe_editado[:250] if informe_editado else "VACIO")
-    print("DEBUG NIST DETALLE - informe_mostrar:", informe_mostrar[:250] if informe_mostrar else "VACIO")
-
     nivel_general = nist_nivel_visual_por_pct(run.pct_general)
     nivel_general_texto = (nivel_general.get("nivel") or "").strip()
     nivel_general_nombre = nivel_general_texto.split(":", 1)[1].strip() if ":" in nivel_general_texto else nivel_general_texto
@@ -99143,10 +99370,6 @@ def analisis_categoria_generar(run_id: int, func: str, cat_code: str):
 
     db.session.commit()
 
-    print("DEBUG NIST ESTADO ACTUAL:", estado_actual[:250])
-    print("DEBUG NIST ESTADO REQUERIDO:", estado_requerido[:250])
-    print("DEBUG NIST PLAN:", plan_accion_ai[:250])
-
     flash("✅ Análisis generado correctamente con IA.", "success")
     return redirect(url_for("madurez_nist.analisis_categoria", run_id=run.id, func=func_u, cat_code=cat_u))
 
@@ -99410,16 +99633,12 @@ def informe_ejecutivo_generar(run_id: int):
     flash("✅ Informe ejecutivo generado con IA.", "success")
     return redirect(url_for("madurez_nist.detalle", run_id=run.id))
 
-    print("DEBUG NIST INFORME - extraído:", informe_ai[:300])
-
     # IMPORTANTE: sincronizar siempre ambos campos
     run.informe_ejecutivo_ai = informe_ai
     run.informe_ejecutivo_editado = informe_ai
 
     db.session.commit()
 
-    print("DEBUG NIST INFORME - guardado AI:", (run.informe_ejecutivo_ai or "")[:300])
-    print("DEBUG NIST INFORME - guardado EDITADO:", (run.informe_ejecutivo_editado or "")[:300])
 
     flash("✅ Informe ejecutivo generado con IA.", "success")
     return redirect(url_for("madurez_nist.detalle", run_id=run.id))
@@ -104472,8 +104691,6 @@ def analisis_dominio_generar(run_id: int, dominio: str):
         flash(f"❌ Error llamando IA: {e}", "danger")
         return redirect(url_for("madurez_datos.analisis_dominio", run_id=run.id, dominio=dominio_txt))
 
-    print("DEBUG GDPR DOMINIO RAW:", raw[:500])
-
     obj = _gdpr_extraer_json_objeto(raw)
 
     estado_actual = (obj.get("estado_actual") or "").strip() if isinstance(obj, dict) else ""
@@ -104549,13 +104766,6 @@ def detalle(run_id):
     plan_ai = _gdpr_normalizar_texto_plano_guardado(run.plan_trabajo_ai or "")
     plan_editado = _gdpr_normalizar_texto_plano_guardado(run.plan_trabajo_editado or "")
     plan_mostrar = plan_editado if plan_editado else plan_ai
-
-    print("DEBUG GDPR DETALLE - informe_ai:", informe_ai[:250] if informe_ai else "VACIO")
-    print("DEBUG GDPR DETALLE - informe_editado:", informe_editado[:250] if informe_editado else "VACIO")
-    print("DEBUG GDPR DETALLE - informe_mostrar:", informe_mostrar[:250] if informe_mostrar else "VACIO")
-    print("DEBUG GDPR DETALLE - plan_ai:", plan_ai[:250] if plan_ai else "VACIO")
-    print("DEBUG GDPR DETALLE - plan_editado:", plan_editado[:250] if plan_editado else "VACIO")
-    print("DEBUG GDPR DETALLE - plan_mostrar:", plan_mostrar[:250] if plan_mostrar else "VACIO")
 
     pdf_btn = ""
     try:
@@ -105069,16 +105279,11 @@ def informe_ejecutivo_generar(run_id: int):
         flash("⚠️ La IA no devolvió contenido para el informe ejecutivo.", "warning")
         return redirect(url_for("madurez_datos.detalle", run_id=run.id))
 
-    print("DEBUG GDPR DETALLE - informe extraído:", informe_ai[:300])
-
     # IMPORTANTE: sincronizar SIEMPRE ambos campos
     run.informe_ejecutivo_ai = informe_ai
     run.informe_ejecutivo_editado = informe_ai
 
     db.session.commit()
-
-    print("DEBUG GDPR DETALLE - guardado AI:", (run.informe_ejecutivo_ai or "")[:300])
-    print("DEBUG GDPR DETALLE - guardado EDITADO:", (run.informe_ejecutivo_editado or "")[:300])
 
     flash("✅ Informe ejecutivo generado con IA.", "success")
     return redirect(url_for("madurez_datos.detalle", run_id=run.id))
@@ -106161,7 +106366,7 @@ def _ai_text(prompt: str, max_tokens: int = 900) -> str:
     Soporta OpenRouter y Ollama.
     """
     provider = (get_ai_provider() or "openrouter").strip().lower()
-    print("DEBUG IA PCI - provider activo:", provider)
+
 
     # =====================================================
     # OLLAMA
@@ -106184,9 +106389,6 @@ def _ai_text(prompt: str, max_tokens: int = 900) -> str:
             }
         }
 
-        print("DEBUG IA PCI - OLLAMA URL:", f"{base_url}/api/generate")
-        print("DEBUG IA PCI - OLLAMA MODEL:", model)
-        print("DEBUG IA PCI - PROMPT PREVIEW:", (prompt or "")[:500])
 
         resp = requests.post(
             f"{base_url}/api/generate",
@@ -106196,7 +106398,6 @@ def _ai_text(prompt: str, max_tokens: int = 900) -> str:
         resp.raise_for_status()
 
         data = resp.json() or {}
-        print("DEBUG IA PCI - OLLAMA RESPONSE JSON:", str(data)[:1500])
 
         texto = (data.get("response") or "").strip()
 
@@ -106465,14 +106666,14 @@ def informe_ejecutivo_generar_pci(run_id: int):
 
     informe_ai = raw.strip()
 
-    try:
-        obj = _extraer_json_objeto(raw)
-        if isinstance(obj, dict):
-            informe_extraido = (obj.get("informe_ejecutivo") or "").strip()
-            if informe_extraido:
-                informe_ai = informe_extraido
-    except Exception as e:
-        print("DEBUG PCI INFORME JSON ERROR:", e)
+
+    obj = _extraer_json_objeto(raw)
+    if isinstance(obj, dict):
+        informe_extraido = (obj.get("informe_ejecutivo") or "").strip()
+        if informe_extraido:
+            informe_ai = informe_extraido
+
+
 
     if not informe_ai.strip():
         flash("⚠️ La respuesta de IA no trajo un informe ejecutivo válido.", "warning")
