@@ -270,32 +270,36 @@ def ai_text_general(prompt: str, system_prompt: str | None = None, temperature: 
         if system_prompt:
             full_prompt = f"{system_prompt}\n\n{prompt}"
 
-        resp = requests.post(
-            f"{base_url}/api/generate",
-            json={
-                "model": model,
-                "prompt": full_prompt,
-                "stream": False,
-                "options": {
-                    "temperature": temperature
-                }
-            },
-            timeout=300
-        )
-        resp.raise_for_status()
+        try:
+            resp = requests.post(
+                f"{base_url}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": full_prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": temperature
+                    }
+                },
+                timeout=300
+            )
+            resp.raise_for_status()
 
-        data = resp.json() or {}
+            data = resp.json() or {}
 
-        texto = (data.get("response") or "").strip()
+            texto = (data.get("response") or "").strip()
 
-        if not texto:
-            texto = (data.get("message") or "").strip()
+            if not texto:
+                texto = (data.get("message") or "").strip()
 
-        if not texto:
-            raise RuntimeError(f"Ollama respondió sin contenido. Respuesta: {str(data)[:500]}")
+            if not texto:
+                raise RuntimeError(f"Ollama respondió sin contenido. Respuesta: {str(data)[:500]}")
 
-        return texto
+            return texto
 
+        finally:
+            liberar_memoria_ollama_seguro()
+            
     client = ai_cfg["client"]
     model_name = ai_cfg.get("model") or OPENROUTER_MODEL or "deepseek/deepseek-chat"
     max_tokens_safe = min(int(max_tokens or 350), 350)
@@ -335,6 +339,32 @@ mapa_impacto = {
     "Mayor": 4,
     "Catastrófico o Crítico": 5
 }
+
+def liberar_memoria_ollama_seguro():
+    """
+    Libera memoria del modelo activo en Ollama sin eliminarlo del disco.
+    Funciona para TODOS los módulos.
+    """
+    try:
+        if (get_ai_provider() or "").lower() != "ollama":
+            return
+
+        modelo = (get_ollama_model() or "").strip()
+        if not modelo:
+            return
+
+        import subprocess
+        subprocess.run(
+            ["ollama", "stop", modelo],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        print(f"🧠 Ollama liberado en memoria: {modelo}")
+
+    except Exception as e:
+        print("⚠️ Error liberando memoria Ollama:", repr(e))
 
 def calcular_riesgo(probabilidad_txt, impacto_txt):
     prob = mapa_probabilidad.get(probabilidad_txt, 0)
@@ -538,11 +568,18 @@ SGSI_PROGRESS_GLOBAL = """
         if (tag === "a") {
             const href = btn.getAttribute("href") || "";
 
+            const hrefLower = href.toLowerCase();
+
             if (
                 !href ||
                 href === "#" ||
                 href.startsWith("#") ||
                 href.startsWith("javascript:") ||
+                hrefLower.includes(".pdf") ||
+                hrefLower.includes("pdf") ||
+                hrefLower.includes("reporte") ||
+                hrefLower.includes("descargar") ||
+                hrefLower.includes("download") ||
                 btn.target === "_blank" ||
                 btn.hasAttribute("download") ||
                 btn.classList.contains("dropdown-toggle") ||
@@ -69529,13 +69566,23 @@ Responde SOLO en JSON válido con esta estructura:
         "explanation": explicacion
     }
 
-def limitar_texto_ia(texto: str, max_chars: int = 12000) -> str:
+def limitar_texto_ia(texto: str, max_chars_ollama: int = 3000, max_chars_openrouter: int = 12000) -> str:
     if not texto:
         return ""
+
     texto = texto.strip()
+
+    provider = (get_ai_provider() or "openrouter").lower()
+
+    if provider == "ollama":
+        max_chars = max_chars_ollama
+    else:
+        max_chars = max_chars_openrouter
+
     if len(texto) <= max_chars:
         return texto
-    return texto[:max_chars] + "\n\n[Texto truncado por límite de longitud]"
+
+    return texto[:max_chars] + "\n\n[Texto truncado para optimizar consumo de IA]"
 
 # =========================================
 # Helpers IA - Cuestionarios de Proponentes
@@ -69591,44 +69638,37 @@ def _ai_json_proponentes(prompt: str,
 
         full_prompt = f"{system_prompt}\n\n{prompt}".strip()
 
-        resp = requests.post(
-            f"{base_url}/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": True,
-                "options": {
-                    "temperature": 0.15,
-                    "num_predict": 900
-                }
-            },
-            stream=True,
-            timeout=(15, 600)
-        )
-        resp.raise_for_status()
+        try:
+            resp = requests.post(
+                f"{base_url}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": full_prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.1,
+                        "num_predict": 350,
+                        "num_ctx": 2048,
+                        "keep_alive": 0
+                    }
+                },
+                timeout=(10, 180)
+            )
+            resp.raise_for_status()
 
-        raw = ""
+            data = resp.json() or {}
+            raw = (data.get("response") or "").strip()
 
-        for line in resp.iter_lines():
-            if not line:
-                continue
+            if not raw:
+                raise ValueError(f"Ollama respondió sin contenido. Respuesta: {str(data)[:500]}")
 
+            return _extraer_json_objeto_desde_texto(raw)
+
+        finally:
             try:
-                chunk = json.loads(line.decode("utf-8"))
-                raw += chunk.get("response", "")
-
-                if chunk.get("done"):
-                    break
+                liberar_memoria_ollama_seguro()
             except Exception:
-                continue
-
-        raw = raw.strip()
-        if not raw:
-            raw = (payload.get("message") or "").strip()
-
-        if not raw:
-            raise ValueError(f"Ollama respondió sin contenido. Payload: {str(payload)[:500]}")
-        return _extraer_json_objeto_desde_texto(raw)
+                pass
 
     # =========================
     # OPENROUTER
@@ -69880,7 +69920,7 @@ def cuestionarios_proveedores():
                     # =========================================================
                     # 2) IA SOBRE EL CUESTIONARIO (OPCIONAL, NO DEBE TUMBAR TODO)
                     # =========================================================
-                    texto_q = limitar_texto_ia((c.texto_normalizado or "").strip(), max_chars=8000)
+                    texto_q = limitar_texto_ia((c.texto_normalizado or "").strip())
                     if texto_q:
                         try:
                             ia_q = evaluar_cuestionario_ia(texto_q)
@@ -70065,7 +70105,7 @@ def cuestionarios_proveedores():
         <div class="propia-card-body">
           <div class="propia-section-title">Cargar nuevo cuestionario</div>
 
-          <form method="post" enctype="multipart/form-data">
+          <form method="post" enctype="multipart/form-data" data-no-progress="true">
             <input type="hidden" name="accion" value="subir">
 
             <div class="row g-3">
@@ -70157,7 +70197,7 @@ def cuestionarios_proveedores():
             se calculará el puntaje de cada uno según sus respuestas y se estimará su reputación con IA.
           </p>
 
-          <form method="post" id="form-evaluar-proveedores">
+          <form method="post" id="form-evaluar-proveedores" data-no-progress="true">
             <input type="hidden" name="accion" value="evaluar">
 
             <div class="row g-3">
@@ -70230,24 +70270,47 @@ def cuestionarios_proveedores():
 
           if (form && cont && bar) {
             form.addEventListener('submit', function() {
+              if (window.hideSGSIProgress) {
+                window.hideSGSIProgress();
+              }
+
               cont.style.display = 'block';
 
               let progress = 10;
               bar.style.width = progress + '%';
               bar.setAttribute('aria-valuenow', progress);
+              bar.innerText = progress + '%';
 
               const interval = setInterval(function() {
                 progress += 5;
+
                 if (progress >= 95) {
                   progress = 95;
+                  clearInterval(interval);
                 }
+
                 bar.style.width = progress + '%';
                 bar.setAttribute('aria-valuenow', progress);
-              }, 500);
+                bar.innerText = progress + '%';
+              }, 600);
             });
           }
+
+          window.addEventListener('pageshow', function() {
+            if (cont) cont.style.display = 'none';
+
+            if (bar) {
+              bar.style.width = '10%';
+              bar.setAttribute('aria-valuenow', '10');
+              bar.innerText = '';
+            }
+
+            if (window.hideSGSIProgress) {
+              window.hideSGSIProgress();
+            }
+          });
         });
-      </script>
+        </script>
 
       <style>
       body{
@@ -95087,17 +95150,20 @@ def nist_radar_b64(labels: list[str], values: list[float], title: str = "Radar N
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 def _nist_build_pdf_run(run: "NistMadurezRun") -> io.BytesIO:
-    # Cargar resumen
     try:
         resumen = json.loads(run.resumen_json or "{}")
     except Exception:
         resumen = {}
 
-    # Radar (igual que en tu detalle)
     radar_labels, radar_values = nist_pct_por_funcion(resumen, NIST_FUNC_ORDER)
-    radar_b64 = nist_radar_b64(radar_labels, radar_values, title="Radar por Función (Capítulo general)")
+    radar_b64 = nist_radar_b64(
+        radar_labels,
+        radar_values,
+        title="Radar por Función - NIST CSF 2.0"
+    )
 
     buf = io.BytesIO()
+
     doc = SimpleDocTemplate(
         buf,
         pagesize=landscape(A4),
@@ -95105,84 +95171,307 @@ def _nist_build_pdf_run(run: "NistMadurezRun") -> io.BytesIO:
         rightMargin=1.2 * cm,
         topMargin=1.0 * cm,
         bottomMargin=1.0 * cm,
-        title="NIST CSF 2.0 - Revisión"
+        title="NIST CSF 2.0 - Informe Ejecutivo"
     )
 
     styles = getSampleStyleSheet()
+
+    styles.add(ParagraphStyle(
+        name="SGSI_Title",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        textColor=colors.white,
+        alignment=TA_CENTER,
+        spaceAfter=8
+    ))
+
+    styles.add(ParagraphStyle(
+        name="SGSI_Section",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        textColor=colors.HexColor("#1d4f8f"),
+        spaceBefore=10,
+        spaceAfter=8
+    ))
+
+    styles.add(ParagraphStyle(
+        name="SGSI_Normal",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8.5,
+        leading=11,
+        textColor=colors.HexColor("#1f2937"),
+        spaceAfter=5
+    ))
+
+    styles.add(ParagraphStyle(
+        name="SGSI_Small",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=7.5,
+        leading=9,
+        textColor=colors.HexColor("#374151"),
+        spaceAfter=4
+    ))
+
+    def pdf_escape(v):
+        return html.escape(str(v or ""))
+
+    def nivel_color(pct):
+        try:
+            pct = float(pct or 0)
+        except Exception:
+            pct = 0
+
+        if pct >= 81:
+            return colors.HexColor("#198754")
+        if pct >= 61:
+            return colors.HexColor("#0d6efd")
+        if pct >= 41:
+            return colors.HexColor("#ffc107")
+        if pct >= 21:
+            return colors.HexColor("#fd7e14")
+        return colors.HexColor("#dc3545")
+
+    def nivel_nombre_corto(nivel_txt):
+        txt = str(nivel_txt or "")
+        if ":" in txt:
+            txt = txt.split(":", 1)[1].strip()
+        if "(" in txt:
+            txt = txt.split("(", 1)[0].strip()
+        return txt or "No definido"
+
+    def nivel_badge_pdf(pct, nivel_data):
+        c = nivel_color(pct)
+        score = nivel_data.get("score", 0)
+        nombre = nivel_nombre_corto(nivel_data.get("nivel", ""))
+
+        badge = Table(
+            [[
+                "",
+                Paragraph(
+                    f"<b>Nivel {score}</b> - {pdf_escape(nombre)}",
+                    styles["SGSI_Small"]
+                )
+            ]],
+            colWidths=[0.28 * cm, 4.25 * cm]
+        )
+
+        badge.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, 0), c),
+            ("BOX", (0, 0), (0, 0), 0.25, c),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 2),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]))
+
+        return badge
+
+    def add_section(title):
+        table = Table(
+            [[Paragraph(pdf_escape(title), styles["SGSI_Title"])]],
+            colWidths=[26.8 * cm]
+        )
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#3f86d6")),
+            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#1d4f8f")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 8))
+
+    def add_text_block(texto):
+        texto = _nist_limpiar_texto_rico_guardado(texto or "")
+        if not texto:
+            story.append(Paragraph("No hay información registrada.", styles["SGSI_Normal"]))
+            return
+
+        for parrafo in re.split(r"\n\s*\n", texto):
+            parrafo = parrafo.strip()
+            if parrafo:
+                story.append(Paragraph(pdf_escape(parrafo), styles["SGSI_Normal"]))
+
     story = []
 
-    # Header
-    story.append(Paragraph("NIST CSF 2.0 — Reporte de Revisión", styles["Title"]))
-    story.append(Spacer(1, 6))
+    # =========================
+    # ENCABEZADO
+    # =========================
+    add_section("NIST CSF 2.0 - Informe de Madurez")
 
-    story.append(Paragraph(f"<b>Consecutivo:</b> {escape(run.consecutivo)}", styles["Normal"]))
-    story.append(Paragraph(f"<b>Fecha:</b> {run.created_at.strftime('%Y-%m-%d %H:%M')}", styles["Normal"]))
-    story.append(Paragraph(f"<b>Nivel general (%):</b> {run.pct_general:.2f}%", styles["Normal"]))
     nivel_general = nist_nivel_visual_por_pct(run.pct_general)
-    story.append(Paragraph(
-        f"<b>Madurez:</b> {escape(nivel_general.get('nivel',''))} (Nivel {nivel_general.get('score',0)})",
-        styles["Normal"]
-    ))
+    nivel_nombre = nivel_nombre_corto(nivel_general.get("nivel", ""))
+
+    resumen_tbl = Table([
+        ["Consecutivo", pdf_escape(run.consecutivo)],
+        ["Fecha", run.created_at.strftime("%Y-%m-%d %H:%M")],
+        [
+            "Cumplimiento general",
+            f"{run.pct_general:.2f}% - Nivel {nivel_general.get('score', 0)} ({pdf_escape(nivel_nombre)})"
+        ],
+        ["Nivel de madurez", pdf_escape(nivel_general.get("nivel", ""))]
+    ], colWidths=[5.2 * cm, 21.6 * cm])
+
+    resumen_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f1fb")),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+
+    story.append(resumen_tbl)
+    story.append(Spacer(1, 12))
+
+    # =========================
+    # INFORME EJECUTIVO
+    # =========================
+    story.append(Paragraph("Informe Ejecutivo", styles["SGSI_Section"]))
+
+    informe_exec = (
+        run.informe_ejecutivo_editado
+        or run.informe_ejecutivo_ai
+        or ""
+    ).strip()
+
+    add_text_block(informe_exec)
     story.append(Spacer(1, 10))
 
-    # Radar como imagen
+    # =========================
+    # RADAR / ARAÑA
+    # =========================
+    story.append(Paragraph("Radar por Función NIST CSF 2.0", styles["SGSI_Section"]))
+
     if radar_b64:
         try:
             radar_png = base64.b64decode(radar_b64)
             img_buf = io.BytesIO(radar_png)
-            img = RLImage(img_buf, width=12.5*cm, height=12.0*cm)  # tamaño controlado
-            story.append(Paragraph("Radar por Capítulo General (Funciones)", styles["Heading2"]))
-            story.append(Spacer(1, 4))
+            img = RLImage(img_buf, width=11.5 * cm, height=11.0 * cm)
             story.append(img)
-            story.append(Spacer(1, 12))
-        except Exception:
-            pass
+            story.append(Spacer(1, 10))
+        except Exception as e:
+            story.append(
+                Paragraph(
+                    f"No se pudo renderizar el radar: {pdf_escape(e)}",
+                    styles["SGSI_Normal"]
+                )
+            )
 
-    # Tabla detalle (Función / Categoría)
-    story.append(Paragraph("Detalle por Función y Categoría", styles["Heading2"]))
-    story.append(Spacer(1, 6))
+    # =========================
+    # TABLA GENERAL CON COLORIMETRÍA TIPO ISO
+    # =========================
+    story.append(Paragraph("Detalle por Función y Categoría", styles["SGSI_Section"]))
 
-    data = [["Función", "Categoría", "Nombre", "% Cumplimiento", "Nivel", "Items"]]
+    data = [[
+        "Función",
+        "Categoría",
+        "Nombre",
+        "% Cumplimiento",
+        "Nivel de madurez",
+        "Items"
+    ]]
 
     for func in NIST_FUNC_ORDER:
         cats = (resumen or {}).get(func, {}) or {}
         if not cats:
             continue
+
         for cat_code, d in cats.items():
             pct = float(d.get("pct", 0) or 0)
             nivel_data = nist_nivel_visual_por_pct(pct)
+
             data.append([
-                func,
-                cat_code,
-                (d.get("categoria") or ""),
-                f"{pct:.2f}%",
-                f"Nivel {nivel_data.get('score', 0)}",
-                str(int(d.get("total", 0) or 0))
+                Paragraph(pdf_escape(func), styles["SGSI_Small"]),
+                Paragraph(pdf_escape(cat_code), styles["SGSI_Small"]),
+                Paragraph(pdf_escape(d.get("categoria") or ""), styles["SGSI_Small"]),
+                Paragraph(f"{pct:.2f}%", styles["SGSI_Small"]),
+                nivel_badge_pdf(pct, nivel_data),
+                Paragraph(str(int(d.get("total", 0) or 0)), styles["SGSI_Small"])
             ])
 
     tbl = Table(
         data,
-        colWidths=[3.2*cm, 3.0*cm, 12.0*cm, 3.2*cm, 3.0*cm, 2.2*cm]
+        colWidths=[2.7 * cm, 2.8 * cm, 10.3 * cm, 3.0 * cm, 5.0 * cm, 2.0 * cm],
+        repeatRows=1
     )
 
     tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#f1f3f5")),
-        ("TEXTCOLOR", (0,0), (-1,0), colors.black),
-        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-        ("FONTSIZE", (0,0), (-1,0), 9),
-        ("FONTSIZE", (0,1), (-1,-1), 8),
-        ("GRID", (0,0), (-1,-1), 0.25, colors.lightgrey),
-        ("VALIGN", (0,0), (-1,-1), "TOP"),
-        ("ALIGN", (3,1), (3,-1), "RIGHT"),
-        ("ALIGN", (4,1), (5,-1), "CENTER"),
-        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#fbfcfd")]),
-        ("BOTTOMPADDING", (0,0), (-1,0), 6),
-        ("TOPPADDING", (0,0), (-1,0), 6),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3f86d6")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 8),
+        ("FONTSIZE", (0, 1), (-1, -1), 7.2),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (3, 1), (3, -1), "CENTER"),
+        ("ALIGN", (5, 1), (5, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]))
 
     story.append(tbl)
-    doc.build(story)
 
+    # =========================
+    # ANÁLISIS POR CATEGORÍA
+    # =========================
+    analisis_rows = NistMadurezCategoriaAnalisis.query.filter_by(
+        run_id=run.id
+    ).order_by(
+        NistMadurezCategoriaAnalisis.funcion.asc(),
+        NistMadurezCategoriaAnalisis.categoria_codigo.asc()
+    ).all()
+
+    if analisis_rows:
+        story.append(PageBreak())
+        add_section("Análisis Ejecutivo por Categoría")
+
+        for a in analisis_rows:
+            titulo_cat = f"{a.funcion} - {a.categoria_codigo}"
+            story.append(Paragraph(pdf_escape(titulo_cat), styles["SGSI_Section"]))
+
+            estado_actual = _normalizar_texto(a.estado_actual or "")
+            estado_requerido = _normalizar_texto(a.estado_requerido or "")
+            plan_accion = _normalizar_plan_accion_nist_texto(
+                a.plan_accion_editado or a.plan_accion_ai or ""
+            )
+
+            bloque = Table([
+                [
+                    Paragraph("<b>Estado actual</b>", styles["SGSI_Small"]),
+                    Paragraph(pdf_escape(estado_actual or "No registrado."), styles["SGSI_Small"])
+                ],
+                [
+                    Paragraph("<b>Estado requerido</b>", styles["SGSI_Small"]),
+                    Paragraph(pdf_escape(estado_requerido or "No registrado."), styles["SGSI_Small"])
+                ],
+                [
+                    Paragraph("<b>Plan de acción</b>", styles["SGSI_Small"]),
+                    Paragraph(pdf_escape(plan_accion or "No registrado."), styles["SGSI_Small"])
+                ],
+            ], colWidths=[4.2 * cm, 22.6 * cm])
+
+            bloque.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f1fb")),
+                ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")),
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]))
+
+            story.append(bloque)
+            story.append(Spacer(1, 10))
+
+    doc.build(story)
     buf.seek(0)
     return buf
 
@@ -98367,24 +98656,11 @@ def detalle(run_id: int):
 @login_required
 def detalle_pdf(run_id: int):
     run = NistMadurezRun.query.get_or_404(run_id)
-    pdf_buf = _nist_build_pdf_run(run)
-
-    informe_exec = (run.informe_ejecutivo_editado or run.informe_ejecutivo_ai or "").strip()
-    if informe_exec:
-        story.append(Paragraph("Informe Ejecutivo", styles["Heading2"]))
-        story.append(Spacer(1, 4))
-        for par in informe_exec.split("\n"):
-            par = par.strip()
-            if par:
-                story.append(Paragraph(escape(par), styles["Normal"]))
-                story.append(Spacer(1, 4))
-        story.append(Spacer(1, 8))
-
-    
 
     filename = f"NIST_CSF2_{(run.consecutivo or 'revision').replace(' ', '_')}.pdf"
+
     return send_file(
-        pdf_buf,
+        _nist_build_pdf_run(run),
         mimetype="application/pdf",
         as_attachment=True,
         download_name=filename
@@ -102038,6 +102314,357 @@ def generar_gdpr_velocimetro_base64(label: str, pct: float, nivel: str, color: s
         return None
     return base64.b64encode(b).decode("utf-8")
 
+def _gdpr_build_pdf_run(run: "DatosMadurezRun") -> io.BytesIO:
+    try:
+        resumen = json.loads(run.resumen_json or "{}")
+    except Exception:
+        resumen = {}
+
+    radar_png = generar_radar_datos_png_bytes(resumen)
+
+    buf = io.BytesIO()
+
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=landscape(A4),
+        leftMargin=1.2 * cm,
+        rightMargin=1.2 * cm,
+        topMargin=1.0 * cm,
+        bottomMargin=1.0 * cm,
+        title="Protección de Datos Personales - Informe Ejecutivo"
+    )
+
+    styles = getSampleStyleSheet()
+
+    styles.add(ParagraphStyle(
+        name="GDPR_Title",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        textColor=colors.white,
+        alignment=TA_CENTER,
+        spaceAfter=8
+    ))
+
+    styles.add(ParagraphStyle(
+        name="GDPR_Section",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        textColor=colors.HexColor("#1d4f8f"),
+        spaceBefore=10,
+        spaceAfter=8
+    ))
+
+    styles.add(ParagraphStyle(
+        name="GDPR_Normal",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8.5,
+        leading=11,
+        textColor=colors.HexColor("#1f2937"),
+        spaceAfter=5
+    ))
+
+    styles.add(ParagraphStyle(
+        name="GDPR_Small",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=7.5,
+        leading=9,
+        textColor=colors.HexColor("#374151"),
+        spaceAfter=4
+    ))
+
+    def pdf_escape(v):
+        return html.escape(str(v or ""))
+
+    def nivel_color(pct):
+        try:
+            pct = float(pct or 0)
+        except Exception:
+            pct = 0
+
+        if pct >= 81:
+            return colors.HexColor("#198754")
+        if pct >= 61:
+            return colors.HexColor("#0d6efd")
+        if pct >= 41:
+            return colors.HexColor("#ffc107")
+        if pct >= 21:
+            return colors.HexColor("#fd7e14")
+        return colors.HexColor("#dc3545")
+
+    def nivel_nombre_corto(nivel_txt):
+        txt = str(nivel_txt or "")
+        if ":" in txt:
+            txt = txt.split(":", 1)[1].strip()
+        if "(" in txt:
+            txt = txt.split("(", 1)[0].strip()
+        return txt or "No definido"
+
+    def nivel_badge_pdf(pct, nivel_data):
+        c = nivel_color(pct)
+        score = nivel_data.get("score", 0)
+        nombre = nivel_nombre_corto(nivel_data.get("nivel", ""))
+
+        badge = Table(
+            [[
+                "",
+                Paragraph(
+                    f"<b>Nivel {score}</b> - {pdf_escape(nombre)}",
+                    styles["GDPR_Small"]
+                )
+            ]],
+            colWidths=[0.28 * cm, 4.25 * cm]
+        )
+
+        badge.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, 0), c),
+            ("BOX", (0, 0), (0, 0), 0.25, c),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 2),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]))
+
+        return badge
+
+    def add_section(title):
+        table = Table(
+            [[Paragraph(pdf_escape(title), styles["GDPR_Title"])]],
+            colWidths=[26.8 * cm]
+        )
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#3f86d6")),
+            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#1d4f8f")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 8))
+
+    def add_text_block(texto):
+        texto = _gdpr_normalizar_texto_plano_guardado(texto or "")
+        if not texto:
+            story.append(Paragraph("No hay información registrada.", styles["GDPR_Normal"]))
+            return
+
+        for parrafo in re.split(r"\n\s*\n", texto):
+            parrafo = parrafo.strip()
+            if parrafo:
+                story.append(Paragraph(pdf_escape(parrafo), styles["GDPR_Normal"]))
+
+    def normalizar_plan_dominio(texto_raw):
+        txt = (texto_raw or "").strip()
+        if not txt:
+            return ""
+
+        txt = txt.replace("```json", "").replace("```", "").strip()
+
+        try:
+            obj = json.loads(txt)
+        except Exception:
+            obj = _extraer_json_objeto(txt)
+
+        if isinstance(obj, dict):
+            plan = obj.get("plan_accion") or obj.get("plan") or obj.get("acciones")
+            if isinstance(plan, list):
+                return _gdpr_plan_accion_a_texto(plan)
+
+        return _gdpr_normalizar_texto_plano_guardado(txt)
+
+    story = []
+
+    # =========================
+    # ENCABEZADO
+    # =========================
+    add_section("Protección de Datos Personales - Informe de Madurez")
+
+    nivel_general = gdpr_nivel_visual_por_pct(run.pct_general)
+    nivel_nombre = nivel_nombre_corto(nivel_general.get("nivel", ""))
+
+    resumen_tbl = Table([
+        ["Consecutivo", pdf_escape(run.consecutivo)],
+        ["Fecha", run.created_at.strftime("%Y-%m-%d %H:%M")],
+        [
+            "Cumplimiento general",
+            f"{run.pct_general:.2f}% - Nivel {nivel_general.get('score', 0)} ({pdf_escape(nivel_nombre)})"
+        ],
+        ["Nivel de madurez", pdf_escape(nivel_general.get("nivel", ""))]
+    ], colWidths=[5.2 * cm, 21.6 * cm])
+
+    resumen_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f1fb")),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+
+    story.append(resumen_tbl)
+    story.append(Spacer(1, 12))
+
+    # =========================
+    # INFORME EJECUTIVO
+    # =========================
+    story.append(Paragraph("Informe Ejecutivo", styles["GDPR_Section"]))
+
+    informe_exec = (
+        run.informe_ejecutivo_editado
+        or run.informe_ejecutivo_ai
+        or ""
+    ).strip()
+
+    add_text_block(informe_exec)
+    story.append(Spacer(1, 10))
+
+    # =========================
+    # RADAR / ARAÑA
+    # =========================
+    story.append(Paragraph("Radar por Dominio", styles["GDPR_Section"]))
+
+    if radar_png:
+        try:
+            img_buf = io.BytesIO(radar_png)
+            img = RLImage(img_buf, width=12.5 * cm, height=10.5 * cm)
+            story.append(img)
+            story.append(Spacer(1, 10))
+        except Exception as e:
+            story.append(
+                Paragraph(
+                    f"No se pudo renderizar el radar: {pdf_escape(e)}",
+                    styles["GDPR_Normal"]
+                )
+            )
+
+    # =========================
+    # TABLA GENERAL CON COLORIMETRÍA TIPO ISO
+    # =========================
+    story.append(Paragraph("Detalle por Dominio", styles["GDPR_Section"]))
+
+    data = [[
+        "Dominio",
+        "% Cumplimiento",
+        "Nivel de madurez",
+        "Items",
+        "Brecha"
+    ]]
+
+    for dominio, d in (resumen or {}).items():
+        try:
+            pct = float(d.get("pct", 0) or 0)
+        except Exception:
+            pct = 0.0
+
+        total = int(d.get("total", 0) or 0)
+        brecha = max(0.0, 100.0 - pct)
+        nivel_data = gdpr_nivel_visual_por_pct(pct)
+
+        data.append([
+            Paragraph(pdf_escape(dominio), styles["GDPR_Small"]),
+            Paragraph(f"{pct:.2f}%", styles["GDPR_Small"]),
+            nivel_badge_pdf(pct, nivel_data),
+            Paragraph(str(total), styles["GDPR_Small"]),
+            Paragraph(f"{brecha:.2f}%", styles["GDPR_Small"])
+        ])
+
+    tbl = Table(
+        data,
+        colWidths=[12.0 * cm, 3.2 * cm, 5.4 * cm, 2.2 * cm, 3.0 * cm],
+        repeatRows=1
+    )
+
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3f86d6")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 8),
+        ("FONTSIZE", (0, 1), (-1, -1), 7.2),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (1, 1), (1, -1), "CENTER"),
+        ("ALIGN", (3, 1), (4, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+
+    story.append(tbl)
+
+    # =========================
+    # ANÁLISIS POR DOMINIO
+    # =========================
+    analisis_rows = DatosMadurezDominioAnalisis.query.filter_by(
+        run_id=run.id
+    ).order_by(
+        DatosMadurezDominioAnalisis.dominio.asc()
+    ).all()
+
+    if analisis_rows:
+        story.append(PageBreak())
+        add_section("Análisis Ejecutivo por Dominio")
+
+        for a in analisis_rows:
+            story.append(Paragraph(pdf_escape(a.dominio), styles["GDPR_Section"]))
+
+            estado_actual = _gdpr_normalizar_texto_plano_guardado(a.estado_actual or "")
+            estado_requerido = _gdpr_normalizar_texto_plano_guardado(a.estado_requerido or "")
+            plan_accion = normalizar_plan_dominio(
+                a.plan_accion_editado or a.plan_accion_ai or ""
+            )
+
+            bloque = Table([
+                [
+                    Paragraph("<b>Estado actual</b>", styles["GDPR_Small"]),
+                    Paragraph(pdf_escape(estado_actual or "No registrado."), styles["GDPR_Small"])
+                ],
+                [
+                    Paragraph("<b>Estado requerido</b>", styles["GDPR_Small"]),
+                    Paragraph(pdf_escape(estado_requerido or "No registrado."), styles["GDPR_Small"])
+                ],
+                [
+                    Paragraph("<b>Plan de acción</b>", styles["GDPR_Small"]),
+                    Paragraph(pdf_escape(plan_accion or "No registrado."), styles["GDPR_Small"])
+                ],
+            ], colWidths=[4.2 * cm, 22.6 * cm])
+
+            bloque.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f1fb")),
+                ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")),
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]))
+
+            story.append(bloque)
+            story.append(Spacer(1, 10))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf
+
+
+@madurez_datos_bp.route("/detalle/<int:run_id>/pdf", methods=["GET"])
+@login_required
+def detalle_pdf(run_id: int):
+    run = DatosMadurezRun.query.get_or_404(run_id)
+
+    filename = f"Proteccion_Datos_{(run.consecutivo or 'revision').replace(' ', '_')}.pdf"
+
+    return send_file(
+        _gdpr_build_pdf_run(run),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=filename
+    )
+
 # =====================================================================
 # IMPORTACIÓN DEL INSTRUMENTO DESDE EXCEL
 # =====================================================================
@@ -103501,10 +104128,17 @@ def historial():
           <td class="text-end">
             <div class="d-flex justify-content-end gap-2 flex-wrap">
               <a class="btn btn-sm btn-outline-primary rounded-pill"
-                 href="{url_for('madurez_datos.detalle', run_id=r.id)}">
-                Ver detalle
+                   href="{url_for('madurez_datos.detalle', run_id=r.id)}">
+                  Ver detalle
               </a>
-              {delete_btn}
+
+              <a class="btn btn-sm btn-outline-danger rounded-pill"
+                   href="{url_for('madurez_datos.detalle_pdf_datos', run_id=r.id)}"
+                   data-no-progress="true">
+                  📄 PDF
+              </a>
+
+                {delete_btn}
             </div>
           </td>
         </tr>
@@ -103716,6 +104350,21 @@ def historial():
     """
 
     return render_template_string(BASE, title="Historial Protección de Datos", content=content)
+
+@madurez_datos_bp.route("/detalle/<int:run_id>/pdf", methods=["GET"], endpoint="detalle_pdf_datos")
+@login_required
+def detalle_pdf_datos(run_id: int):
+    run = DatosMadurezRun.query.get_or_404(run_id)
+
+    filename = f"Proteccion_Datos_{(run.consecutivo or 'revision').replace(' ', '_')}.pdf"
+
+    return send_file(
+        _gdpr_build_pdf_run(run),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=filename
+    )
+
 
 # =========================
 # ELIMINAR RUN
@@ -104888,7 +105537,6 @@ def detalle(run_id):
                 <i class="bi bi-pencil-square me-2"></i>Editar
               </a>
 
-              {pdf_btn}
             </div>
           </div>
 
@@ -105742,122 +106390,6 @@ def exportar_pdf(run_id):
         mimetype="application/pdf"
     )
 
-# ==========
-# PDF
-# ==========
-
-@madurez_datos_bp.route("/detalle/<int:run_id>/pdf", methods=["GET"])
-@login_required
-def detalle_pdf(run_id):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de madurez protección de datos personales"):
-        flash("No tiene permiso para exportar este resultado.", "danger")
-        return redirect(url_for('menu'))
-
-    run = DatosMadurezRun.query.get_or_404(run_id)
-
-    try:
-        resumen = json.loads(run.resumen_json or "{}")
-        if not isinstance(resumen, dict):
-            resumen = {}
-    except Exception:
-        resumen = {}
-
-    nivel_general = gdpr_nivel_visual_por_pct(run.pct_general or 0)
-    radar_png = generar_radar_datos_png_bytes(resumen)
-    niveles_png = generar_velocimetro_niveles_png_bytes(resumen)
-
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=letter,
-        rightMargin=30,
-        leftMargin=30,
-        topMargin=30,
-        bottomMargin=30
-    )
-
-    styles = getSampleStyleSheet()
-    elements = []
-
-    title_style = ParagraphStyle(
-        "TituloGDPR",
-        parent=styles["Heading1"],
-        fontSize=16,
-        leading=20,
-        textColor=colors.HexColor("#1d4ed8"),
-        spaceAfter=12
-    )
-
-    normal = styles["Normal"]
-
-    elements.append(Paragraph("Resultado — Protección de Datos Personales", title_style))
-    elements.append(Paragraph(f"<b>Consecutivo:</b> {escape(run.consecutivo or '')}", normal))
-    elements.append(Paragraph(f"<b>ID:</b> {run.id}", normal))
-    elements.append(Paragraph(f"<b>Estado:</b> {escape(run.estado or '')}", normal))
-    elements.append(Paragraph(f"<b>Progreso:</b> {run.progreso_pct}%", normal))
-    elements.append(Paragraph(f"<b>% General:</b> {run.pct_general:.2f}%", normal))
-    elements.append(Paragraph(f"<b>Madurez:</b> {escape(nivel_general['nivel'])}", normal))
-    elements.append(Spacer(1, 12))
-
-    if radar_png:
-        img = Image(io.BytesIO(radar_png), width=440, height=360)
-        elements.append(Paragraph("Radar de Madurez por Dominio", styles["Heading3"]))
-        elements.append(img)
-        elements.append(Spacer(1, 12))
-
-    if niveles_png:
-        elements.append(Paragraph("Distribución de dominios por nivel de madurez", styles["Heading3"]))
-        elements.append(Spacer(1, 6))
-
-        img_niv = Image(io.BytesIO(niveles_png), width=430, height=145)
-        img_niv.hAlign = "CENTER"
-
-        t_niv = Table([[img_niv]], colWidths=[500])
-        t_niv.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.white),
-            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#d1d5db")),
-            ("INNERPADDING", (0, 0), (-1, -1), 8),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ]))
-        elements.append(t_niv)
-        elements.append(Spacer(1, 14))
-
-    table_data = [["Dominio", "%", "Nivel", "Preguntas"]]
-    for dominio, data in resumen.items():
-        pct = float(data.get("pct", 0) or 0)
-        total = int(data.get("total", 0) or 0)
-        niv = gdpr_nivel_visual_por_pct(pct)
-        table_data.append([
-            dominio,
-            f"{pct:.2f}%",
-            niv["nivel"],
-            str(total)
-        ])
-
-    table = Table(table_data, colWidths=[180, 70, 180, 60])
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dbeafe")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#111827")),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
-        ("BACKGROUND", (0, 1), (-1, -1), colors.white),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
-    ]))
-    elements.append(Paragraph("Resumen por dominio", styles["Heading3"]))
-    elements.append(table)
-
-    doc.build(elements)
-    buffer.seek(0)
-
-    return Response(
-        buffer.getvalue(),
-        mimetype="application/pdf",
-        headers={"Content-Disposition": f"inline; filename=resultado_datos_personales_{run.id}.pdf"}
-    )
 
 # ==========================================================================================================================================
 #                                           Fin Módulo de Madurez Protección de Datos Personales
@@ -105890,20 +106422,20 @@ PCI_BLOCK_ORDER = [
 ]
 
 PCI_BLOCK_TITLES = {
-    "REQ-1": "Requerimiento 1",
-    "REQ-2": "Requerimiento 2",
-    "REQ-3": "Requerimiento 3",
-    "REQ-4": "Requerimiento 4",
-    "REQ-5": "Requerimiento 5",
-    "REQ-6": "Requerimiento 6",
-    "REQ-7": "Requerimiento 7",
-    "REQ-8": "Requerimiento 8",
-    "REQ-9": "Requerimiento 9",
-    "REQ-10": "Requerimiento 10",
-    "REQ-11": "Requerimiento 11",
-    "REQ-12": "Requerimiento 12",
-    "A1": "Apéndice A1",
-    "A2": "Apéndice A2",
+    "REQ-1": "Requerimiento 1 — Instalar y mantener controles de seguridad de red",
+    "REQ-2": "Requerimiento 2 — Aplicar configuraciones seguras a todos los componentes del sistema",
+    "REQ-3": "Requerimiento 3 — Proteger los datos de cuenta almacenados",
+    "REQ-4": "Requerimiento 4 — Proteger los datos de titulares de tarjeta mediante criptografía robusta durante la transmisión",
+    "REQ-5": "Requerimiento 5 — Proteger todos los sistemas y redes contra software malicioso",
+    "REQ-6": "Requerimiento 6 — Desarrollar y mantener sistemas y software seguros",
+    "REQ-7": "Requerimiento 7 — Restringir el acceso a datos de cuenta según la necesidad de conocer",
+    "REQ-8": "Requerimiento 8 — Identificar usuarios y autenticar el acceso a componentes del sistema",
+    "REQ-9": "Requerimiento 9 — Restringir el acceso físico a los datos de titulares de tarjeta",
+    "REQ-10": "Requerimiento 10 — Registrar y monitorear todo acceso a componentes del sistema y datos de titulares de tarjeta",
+    "REQ-11": "Requerimiento 11 — Probar regularmente la seguridad de sistemas y redes",
+    "REQ-12": "Requerimiento 12 — Mantener una política de seguridad de la información",
+    "A1": "Apéndice A1 — Requisitos adicionales para proveedores de servicios multi-tenant",
+    "A2": "Apéndice A2 — Requisitos adicionales para entidades que usan SSL/TLS temprano"
 }
 
 def pci_block_title(code: str) -> str:
@@ -107168,17 +107700,34 @@ def generar_pci_velocimetro_base64(label: str, pct: float, nivel: str, color: st
     return base64.b64encode(b).decode("utf-8")
 
 def cargar_ai_pci_por_run(analysis_run_id: int) -> dict:
-    rows = PciControlAiAnalysis.query.filter_by(analysis_run_id=analysis_run_id).all()
-    out = {}
-    for r in rows:
-        out[(r.bloque_codigo or "").strip().upper()] = {
-            "id": r.id,
-            "bloque_nombre": r.bloque_nombre or "",
-            "estado_actual": r.estado_actual or "",
-            "estado_requerido": r.estado_requerido or "",
-            "plan_accion": r.plan_accion or "",
-        }
-    return out
+    """
+    Carga análisis IA por requerimiento PCI si existe el modelo.
+    Si el modelo no existe, retorna vacío para que el PDF no falle.
+    """
+    try:
+        if "PciControlAiAnalysis" not in globals():
+            return {}
+
+        rows = PciControlAiAnalysis.query.filter_by(
+            analysis_run_id=analysis_run_id
+        ).all()
+
+        out = {}
+
+        for r in rows:
+            out[(r.bloque_codigo or "").strip().upper()] = {
+                "id": r.id,
+                "bloque_nombre": r.bloque_nombre or "",
+                "estado_actual": r.estado_actual or "",
+                "estado_requerido": r.estado_requerido or "",
+                "plan_accion": r.plan_accion or "",
+            }
+
+        return out
+
+    except Exception as e:
+        print("No se pudo cargar análisis IA PCI por bloque:", repr(e))
+        return {}
 
 def pci_normalizar_texto_rico_guardado(texto: str) -> str:
     txt = (texto or "")
@@ -107874,238 +108423,296 @@ def resultado_bloque_preguntas(run_id, bloque_codigo):
 def exportar_pdf(run_id):
     run = PciAnalysisRun.query.get_or_404(run_id)
 
-    informe_exec = (run.informe_ejecutivo_editado or run.informe_ejecutivo_ai or "").strip()
-    if informe_exec:
-        story.append(Paragraph("Informe Ejecutivo", styles["Heading2"]))
-        story.append(Spacer(1, 4))
-        for par in informe_exec.split("\n"):
-            par = par.strip()
-            if par:
-                story.append(Paragraph(xml_escape(par), normal_style))
-                story.append(Spacer(1, 4))
-        story.append(Spacer(1, 8))
-
-
     try:
         resultados = json.loads(run.resultados_json or "{}")
     except Exception:
         resultados = {}
 
-    try:
-        preguntas_detalle = json.loads(run.preguntas_json or "[]")
-    except Exception:
-        preguntas_detalle = []
-
-
-    # Agrupar detalle por bloque
-    detalle_por_bloque = {}
-    for p in preguntas_detalle:
-        code = (p.get("bloque_codigo") or "").strip().upper()
-        if not code:
-            continue
-        detalle_por_bloque.setdefault(code, []).append(p)
-
-    logo_path = get_company_logo_path(run.company_name)
-
     buf = io.BytesIO()
+
     doc = SimpleDocTemplate(
         buf,
-        pagesize=A4,
-        rightMargin=30,
-        leftMargin=30,
-        topMargin=30,
-        bottomMargin=30
+        pagesize=landscape(A4),
+        leftMargin=1.2 * cm,
+        rightMargin=1.2 * cm,
+        topMargin=1.0 * cm,
+        bottomMargin=1.0 * cm,
+        title="PCI-DSS - Informe Ejecutivo"
     )
 
     styles = getSampleStyleSheet()
-    story = []
 
-    # =========================
-    # Estilos
-    # =========================
-    title_style = ParagraphStyle(
-        "PciTitle",
+    styles.add(ParagraphStyle(
+        name="PCI_Title",
         parent=styles["Title"],
         fontName="Helvetica-Bold",
-        fontSize=16,
-        leading=20,
-        textColor=colors.HexColor("#0b1b2b"),
+        fontSize=18,
+        textColor=colors.white,
         alignment=TA_CENTER,
-        spaceAfter=12,
-    )
+        spaceAfter=8
+    ))
 
-    subtitle_style = ParagraphStyle(
-        "PciSubtitle",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=9,
-        leading=12,
-        textColor=colors.HexColor("#4b5563"),
-        alignment=TA_CENTER,
-        spaceAfter=12,
-    )
-
-    section_style = ParagraphStyle(
-        "PciSection",
+    styles.add(ParagraphStyle(
+        name="PCI_Section",
         parent=styles["Heading2"],
         fontName="Helvetica-Bold",
         fontSize=12,
-        leading=15,
-        textColor=colors.HexColor("#1459a6"),
-        spaceBefore=8,
-        spaceAfter=8,
-    )
+        textColor=colors.HexColor("#1d4f8f"),
+        spaceBefore=10,
+        spaceAfter=8
+    ))
 
-    block_title_style = ParagraphStyle(
-        "PciBlockTitle",
-        parent=styles["Heading3"],
-        fontName="Helvetica-Bold",
-        fontSize=11,
-        leading=14,
-        textColor=colors.HexColor("#0f3d68"),
-        spaceBefore=8,
-        spaceAfter=6,
-    )
-
-    small_style = ParagraphStyle(
-        "PciSmall",
+    styles.add(ParagraphStyle(
+        name="PCI_Normal",
         parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=8,
+        fontSize=8.5,
         leading=11,
-        textColor=colors.HexColor("#374151"),
-        spaceAfter=4,
-    )
+        textColor=colors.HexColor("#1f2937"),
+        spaceAfter=5
+    ))
 
-    normal_style = ParagraphStyle(
-        "PciNormalCustom",
+    styles.add(ParagraphStyle(
+        name="PCI_Small",
         parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=9,
-        leading=12,
-        textColor=colors.black,
-        spaceAfter=6,
-    )
+        fontSize=7.5,
+        leading=9,
+        textColor=colors.HexColor("#374151"),
+        spaceAfter=4
+    ))
 
+    story = []
 
-    # =========================
-    # Encabezado
-    # =========================
-    if logo_path and os.path.exists(logo_path):
+    def pdf_escape(v):
+        return html.escape(str(v or ""))
+
+    def nivel_color(pct):
         try:
-            story.append(RLImage(logo_path, width=4 * cm, height=2 * cm))
-            story.append(Spacer(1, 8))
+            pct = float(pct or 0)
         except Exception:
-            pass
+            pct = 0
 
-    nivel_general = pci_resolver_nivel(run.nivel_promedio_general or 0)
+        if pct >= 81:
+            return colors.HexColor("#198754")
+        if pct >= 61:
+            return colors.HexColor("#0d6efd")
+        if pct >= 41:
+            return colors.HexColor("#ffc107")
+        if pct >= 21:
+            return colors.HexColor("#fd7e14")
+        return colors.HexColor("#dc3545")
 
-    story.append(Paragraph("Reporte de Nivel de Madurez PCI-DSS", title_style))
-    story.append(Paragraph(
-       "Informe consolidado de cumplimiento, brecha y madurez por requerimiento y apéndices.",
-        subtitle_style
-    ))
-    story.append(Paragraph(f"Revisión: {xml_escape(run.company_name)}", normal_style))
-    story.append(Paragraph(
-        f"Promedio general: {float(run.nivel_promedio_general or 0):.2f}% "
-        f"— Nivel: {xml_escape(nivel_general.get('nivel', ''))}",
-        normal_style
-    ))
+    def nivel_badge_pdf(pct, nivel_txt):
+        c = nivel_color(pct)
+        nivel_txt = str(nivel_txt or "Sin nivel").strip()
+
+        badge = Table(
+            [[
+                "",
+                Paragraph(pdf_escape(nivel_txt), styles["PCI_Small"])
+            ]],
+            colWidths=[0.28 * cm, 4.25 * cm]
+        )
+
+        badge.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, 0), c),
+            ("BOX", (0, 0), (0, 0), 0.25, c),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 2),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]))
+
+        return badge
+
+    def add_section(title):
+        table = Table(
+            [[Paragraph(pdf_escape(title), styles["PCI_Title"])]],
+            colWidths=[26.8 * cm]
+        )
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#3f86d6")),
+            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#1d4f8f")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 8))
+
+    def add_text_block(texto):
+        texto = pci_normalizar_texto_rico_guardado(texto or "")
+        if not texto:
+            story.append(Paragraph("No hay información registrada.", styles["PCI_Normal"]))
+            return
+
+        for parrafo in re.split(r"\n\s*\n", texto):
+            parrafo = parrafo.strip()
+            if parrafo:
+                story.append(Paragraph(pdf_escape(parrafo), styles["PCI_Normal"]))
+
+    # =========================
+    # ENCABEZADO
+    # =========================
+    add_section("PCI-DSS - Informe de Madurez")
+
+    pct_general = float(run.nivel_promedio_general or 0)
+    nivel_general = pci_resolver_nivel(pct_general)
+
+    resumen_tbl = Table([
+        ["Revisión", pdf_escape(run.company_name)],
+        ["Fecha", run.fecha_calculo.strftime("%Y-%m-%d %H:%M") if run.fecha_calculo else ""],
+        [
+            "Cumplimiento general",
+            f"{pct_general:.2f}% - {pdf_escape(nivel_general.get('nivel', 'Sin nivel'))}"
+        ],
+        ["Nivel de madurez", pdf_escape(nivel_general.get("nivel", "Sin nivel"))]
+    ], colWidths=[5.2 * cm, 21.6 * cm])
+
+    resumen_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f1fb")),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+
+    story.append(resumen_tbl)
+    story.append(Spacer(1, 12))
+
+    # =========================
+    # INFORME EJECUTIVO
+    # =========================
+    story.append(Paragraph("Informe Ejecutivo", styles["PCI_Section"]))
+
+    informe_exec = (
+        run.informe_ejecutivo_editado
+        or run.informe_ejecutivo_ai
+        or ""
+    ).strip()
+
+    add_text_block(informe_exec)
     story.append(Spacer(1, 10))
 
     # =========================
-    # Tabla resumen
+    # TABLA GENERAL
     # =========================
-    story.append(Paragraph("Resumen general por bloque", section_style))
+    story.append(Paragraph("Detalle por Requerimiento / Apéndice", styles["PCI_Section"]))
 
-    table_data = [["Bloque", "Nivel", "% Cumplimiento", "Brecha"]]
+    data = [[
+        "Bloque",
+        "Nombre",
+        "% Cumplimiento",
+        "Nivel de madurez",
+        "Items",
+        "Brecha"
+    ]]
+
     for code in PCI_BLOCK_ORDER:
-        item = resultados.get(code)
+        item = (resultados or {}).get(code)
         if not item:
             continue
-        table_data.append([
-            pci_block_title(code),
-            item.get("madurez", ""),
-            f"{float(item.get('pct', 0) or 0):.2f}%",
-            f"{float(item.get('brecha_pct', 0) or 0):.2f}%"
+
+        pct = float(item.get("pct", 0) or 0)
+        total = int(item.get("total", 0) or 0)
+        brecha = float(item.get("brecha_pct", max(0.0, 100.0 - pct)) or 0)
+        nivel_txt = item.get("madurez") or pci_resolver_nivel(pct).get("nivel", "Sin nivel")
+
+        data.append([
+            Paragraph(pdf_escape(code), styles["PCI_Small"]),
+            Paragraph(pdf_escape(pci_block_title(code)), styles["PCI_Small"]),
+            Paragraph(f"{pct:.2f}%", styles["PCI_Small"]),
+            nivel_badge_pdf(pct, nivel_txt),
+            Paragraph(str(total), styles["PCI_Small"]),
+            Paragraph(f"{brecha:.2f}%", styles["PCI_Small"])
         ])
 
-    tbl = Table(table_data, colWidths=[5.0 * cm, 4.0 * cm, 3.0 * cm, 3.0 * cm])
+    tbl = Table(
+        data,
+        colWidths=[2.6 * cm, 8.8 * cm, 3.0 * cm, 5.4 * cm, 2.2 * cm, 3.0 * cm],
+        repeatRows=1
+    )
+
     tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0b1b2b")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3f86d6")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("ALIGN", (2, 1), (3, -1), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#f8fafc")]),
-        ("FONTSIZE", (0, 0), (-1, 0), 9),
-        ("FONTSIZE", (0, 1), (-1, -1), 8),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 7),
-        ("TOPPADDING", (0, 0), (-1, 0), 7),
+        ("FONTSIZE", (0, 0), (-1, 0), 8),
+        ("FONTSIZE", (0, 1), (-1, -1), 7.2),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (2, 1), (2, -1), "CENTER"),
+        ("ALIGN", (4, 1), (5, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]))
+
     story.append(tbl)
-    story.append(Spacer(1, 14))
 
     # =========================
-    # Velocímetros
+    # ANÁLISIS POR REQUERIMIENTO
     # =========================
-    story.append(Paragraph("Tablero de velocímetros por requisito y apéndices", section_style))
-    story.append(Spacer(1, 4))
+    ai_por_bloque = cargar_ai_pci_por_run(run.id)
 
-    for code in PCI_BLOCK_ORDER:
-        item = resultados.get(code)
-        if not item:
-            continue
+    if ai_por_bloque:
+        story.append(PageBreak())
+        add_section("Análisis Ejecutivo por Requerimiento")
 
-        png = generar_pci_velocimetro_png_bytes(
-            pci_block_title(code),
-            item.get("pct", 0),
-            item.get("madurez", ""),
-            item.get("color", "#6c757d")
-        )
+        for code in PCI_BLOCK_ORDER:
+            a = ai_por_bloque.get(code)
+            if not a:
+                continue
 
-        story.append(Paragraph(pci_block_title(code), block_title_style))
+            titulo = f"{code} - {pci_block_title(code)}"
+            story.append(Paragraph(pdf_escape(titulo), styles["PCI_Section"]))
 
-        if png:
-            try:
-                img = RLImage(BytesIO(png), width=11.8 * cm, height=6.8 * cm)
-                img.hAlign = "CENTER"
-                story.append(img)
-            except Exception:
-                pass
+            estado_actual = pci_normalizar_texto_rico_guardado(a.get("estado_actual") or "")
+            estado_requerido = pci_normalizar_texto_rico_guardado(a.get("estado_requerido") or "")
+            plan_accion = pci_normalizar_texto_rico_guardado(a.get("plan_accion") or "")
 
-        story.append(Paragraph(
-            f"Cumplimiento: {float(item.get('pct', 0) or 0):.2f}% | "
-            f"Nivel: {xml_escape(item.get('madurez', ''))} | "
-            f"Brecha: {float(item.get('brecha_pct', 0) or 0):.2f}%",
-            normal_style
-        ))
+            bloque = Table([
+                [
+                    Paragraph("<b>Estado actual</b>", styles["PCI_Small"]),
+                    Paragraph(pdf_escape(estado_actual or "No registrado."), styles["PCI_Small"])
+                ],
+                [
+                    Paragraph("<b>Estado requerido</b>", styles["PCI_Small"]),
+                    Paragraph(pdf_escape(estado_requerido or "No registrado."), styles["PCI_Small"])
+                ],
+                [
+                    Paragraph("<b>Plan de acción</b>", styles["PCI_Small"]),
+                    Paragraph(pdf_escape(plan_accion or "No registrado."), styles["PCI_Small"])
+                ],
+            ], colWidths=[4.2 * cm, 22.6 * cm])
 
-        counts = item.get("counts", {}) or {}
-        story.append(Paragraph(
-            f"Distribución de respuestas: "
-            f"SI={counts.get('SI', 0)} | "
-            f"PARCIAL={counts.get('PARCIAL', 0)} | "
-            f"NO={counts.get('NO', 0)} | "
-            f"NA={counts.get('NA', 0)}",
-            small_style
-        ))
+            bloque.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f1fb")),
+                ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")),
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]))
 
-        story.append(Spacer(1, 8))
-
-    story.append(PageBreak())
-
-    
+            story.append(bloque)
+            story.append(Spacer(1, 10))
 
     doc.build(story)
     buf.seek(0)
 
+    filename = f"PCI_DSS_{(run.company_name or 'revision').replace(' ', '_')}.pdf"
+
     return send_file(
         buf,
+        mimetype="application/pdf",
         as_attachment=True,
-        download_name=f"Reporte_Madurez_PCI_DSS_{run.id}.pdf",
-        mimetype="application/pdf"
+        download_name=filename
     )
 
 # =====================================================================
