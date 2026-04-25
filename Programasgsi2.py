@@ -7468,7 +7468,7 @@ BASE = """
   <div class="container-fluid sgsi-topbar-inner">
 
     <div class="sgsi-left">
-      <img src="{{ url_for('static', filename='img/arkynthec.png') }}" class="sgsi-logo">
+      <img src="{{ url_for('static', filename='img/Arkynthec.png') }}" class="sgsi-logo">
 
       <h1 class="sgsi-title">
         Administración del Sistema de Gestión de Seguridad de la Información - (SGSI)
