@@ -295,7 +295,7 @@ def ai_text_general(prompt: str, system_prompt: str | None = None, temperature: 
             if not texto:
                 raise RuntimeError(f"Ollama respondió sin contenido. Respuesta: {str(data)[:500]}")
 
-            return texto
+            return limpiar_texto_ia_global(texto)
 
         finally:
             liberar_memoria_ollama_seguro()
@@ -319,7 +319,7 @@ def ai_text_general(prompt: str, system_prompt: str | None = None, temperature: 
     texto = (resp.choices[0].message.content or "").strip()
     if not texto:
         raise RuntimeError("OpenRouter respondió sin contenido.")
-    return texto
+    return limpiar_texto_ia_global(texto)
 
 
 # === MAPAS Y FUNCIÓN PARA CALCULAR RIESGO ===
@@ -365,6 +365,24 @@ def liberar_memoria_ollama_seguro():
 
     except Exception as e:
         print("⚠️ Error liberando memoria Ollama:", repr(e))
+
+def limpiar_texto_ia_global(texto: str) -> str:
+    if not texto:
+        return ""
+
+    # Quitar markdown tipo **texto** o ***texto***
+    texto = re.sub(r"\*{1,3}(.*?)\*{1,3}", r"\1", texto)
+
+    # Quitar asteriscos sueltos
+    texto = texto.replace("*", "")
+
+    # Quitar headers tipo ### Título
+    texto = re.sub(r"^#{1,6}\s*", "", texto, flags=re.MULTILINE)
+
+    # Limpiar saltos de línea duplicados
+    texto = re.sub(r"\n\s*\n", "\n\n", texto)
+
+    return texto.strip()
 
 def calcular_riesgo(probabilidad_txt, impacto_txt):
     prob = mapa_probabilidad.get(probabilidad_txt, 0)
@@ -74704,6 +74722,8 @@ Reglas:
             openrouter_model="openai/gpt-4.1-mini"
         ).strip()
 
+        text_ai = limpiar_texto_ia_global(text_ai)
+
         cfg.tendencia_ai_text = text_ai
         cfg.tendencia_ai_updated_at = datetime.utcnow()
         db.session.commit()
@@ -74733,7 +74753,9 @@ def metricas_riesgos_tendencia_guardar():
         flash("Primero configure parámetros de riesgos.", "warning")
         return redirect(url_for("metricas_riesgos"))
 
-    texto = (request.form.get("tendencia_ai_text") or "").strip()
+    texto = limpiar_texto_ia_global(
+        (request.form.get("tendencia_ai_text") or "").strip()
+    )
 
     try:
         cfg.tendencia_ai_text = texto
@@ -75478,6 +75500,8 @@ Instrucciones:
             max_tokens=350,
             openrouter_model="openai/gpt-4.1-mini"
         ).strip()
+
+        texto = limpiar_texto_ia_global(texto)
 
         return texto or "No fue posible generar un análisis automático para este incidente."
 
@@ -77202,7 +77226,9 @@ def metricas_vulnerabilidades():
 
         if accion == 'guardar_resumen_ejecutivo':
             year_post = request.form.get('year', type=int) or year
-            texto_resumen = (request.form.get('analisis_resumen_ejecutivo') or '').strip()
+            texto_resumen = limpiar_texto_ia_global(
+                (request.form.get('analisis_resumen_ejecutivo') or '').strip()
+            )
 
             analisis_vuln_manual_map = session.get('analisis_vuln_manual_map', {})
             analisis_vuln_manual_map[str(year_post)] = texto_resumen
@@ -77511,9 +77537,12 @@ def metricas_vulnerabilidades():
         - Redacción ejecutiva.
         - Máximo 4 párrafos.
         """)
+            analisis_ia = limpiar_texto_ia_global(analisis_ia or "")
+
             analisis_vuln_manual_map = session.get('analisis_vuln_manual_map', {})
-            analisis_vuln_manual_map[str(year)] = analisis_ia or ""
+            analisis_vuln_manual_map[str(year)] = analisis_ia
             session['analisis_vuln_manual_map'] = analisis_vuln_manual_map
+            
         except Exception as e:
             print("Error al generar análisis IA métricas de vulnerabilidades:", e)
             analisis_ia = None
@@ -78342,8 +78371,9 @@ def metricas_vulnerabilidades_ver_analisis(codigo):
             flash("El rol Auditor no puede editar análisis.", "danger")
             return redirect(url_for('metricas_vulnerabilidades_ver_analisis', codigo=codigo, modo=modo))
 
-        nuevo = (request.form.get('analisis') or "").strip()
-        reg.analisis = nuevo
+        reg.analisis = limpiar_texto_ia_global(
+            (request.form.get("analisis") or "").strip()
+        )
         db.session.commit()
         flash("Análisis actualizado correctamente.", "success")
         return redirect(
@@ -78402,7 +78432,7 @@ def metricas_vulnerabilidades_ver_analisis(codigo):
             Máximo 2 párrafos.
             """)
 
-            reg.analisis = (reg.analisis or "").strip()
+            reg.analisis = limpiar_texto_ia_global((reg.analisis or "").strip())
             db.session.commit()
             flash("Análisis generado correctamente con IA.", "success")
 
@@ -78787,7 +78817,9 @@ def metricas_vulnerabilidades_ver_analisis(codigo):
 @app.route('/metricas/vulnerabilidades/guardar_analisis', methods=['POST'])
 @login_required
 def guardar_analisis_vulnerabilidades():
-    texto = request.form.get('analisis_texto', '').strip()
+    texto = limpiar_texto_ia_global(
+        request.form.get('analisis_texto', '').strip()
+    )
 
     if not texto:
         flash("El análisis no puede estar vacío.", "warning")
@@ -94792,6 +94824,7 @@ def _nist_limpiar_texto_rico_guardado(texto: str) -> str:
     - quita fences ```json
     - convierte <br> a saltos reales
     - elimina tags HTML como <b>
+    - elimina títulos generados por Ollama como **INFORME EJECUTIVO**
     """
     txt = (texto or "").strip()
     if not txt:
@@ -94828,6 +94861,22 @@ def _nist_limpiar_texto_rico_guardado(texto: str) -> str:
     # Quitar llaves sueltas si quedaron por JSON mal guardado
     txt = re.sub(r'^\s*\{\s*"?informe_ejecutivo"?\s*:\s*"?', "", txt, flags=re.IGNORECASE)
     txt = re.sub(r'"?\s*\}\s*$', "", txt)
+
+    # Quitar títulos que Ollama suele agregar
+    patrones_titulos = [
+        r"^\s*\*{1,3}\s*INFORME\s+EJECUTIVO\s*\*{1,3}\s*[:\-–—]?\s*",
+        r"^\s*#{1,6}\s*INFORME\s+EJECUTIVO\s*[:\-–—]?\s*",
+        r"^\s*INFORME\s+EJECUTIVO\s*[:\-–—]?\s*",
+        r"^\s*\*{1,3}\s*RESUMEN\s+EJECUTIVO\s*\*{1,3}\s*[:\-–—]?\s*",
+        r"^\s*#{1,6}\s*RESUMEN\s+EJECUTIVO\s*[:\-–—]?\s*",
+        r"^\s*RESUMEN\s+EJECUTIVO\s*[:\-–—]?\s*",
+    ]
+
+    for patron in patrones_titulos:
+        txt = re.sub(patron, "", txt, flags=re.IGNORECASE).strip()
+
+    # Quitar markdown residual
+    txt = txt.replace("**", "").replace("__", "")
 
     txt = re.sub(r"[ \t]+\n", "\n", txt)
     txt = re.sub(r"\n[ \t]+", "\n", txt)
@@ -101546,30 +101595,87 @@ def _gdpr_plan_trabajo_a_texto(plan_list) -> str:
 
 def _gdpr_normalizar_texto_plano_guardado(texto: str) -> str:
     """
-    Limpia texto guardado para evitar que se muestren tags como <b>, <br>, etc.
-    Lo deja en texto plano con saltos reales.
+    Limpia texto guardado para Datos Personales:
+    - extrae JSON si viene {"informe_ejecutivo": "..."} o {"plan_trabajo": "..."}
+    - quita ```json
+    - convierte <br> a saltos reales
+    - elimina HTML
+    - elimina títulos generados por Ollama como **INFORME EJECUTIVO**
     """
-    txt = (texto or "")
+    txt = (texto or "").strip()
     if not txt:
         return ""
 
-    # Normalizar saltos de línea
     txt = txt.replace("\r\n", "\n").replace("\r", "\n")
+    txt = html.unescape(txt)
+    txt = txt.replace("```json", "").replace("```", "").strip()
 
-    # Desescapar HTML si viene como &lt;b&gt; o &lt;br&gt;
+    # Si viene como JSON, extraer texto principal
+    try:
+        obj = json.loads(txt)
+        if isinstance(obj, dict):
+            val = (
+                obj.get("informe_ejecutivo")
+                or obj.get("plan_trabajo")
+                or obj.get("texto")
+                or ""
+            )
+            if isinstance(val, list):
+                val = _gdpr_plan_trabajo_a_texto(val)
+            if isinstance(val, str) and val.strip():
+                txt = val.strip()
+    except Exception:
+        try:
+            start = txt.find("{")
+            end = txt.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                obj = json.loads(txt[start:end+1])
+                if isinstance(obj, dict):
+                    val = (
+                        obj.get("informe_ejecutivo")
+                        or obj.get("plan_trabajo")
+                        or obj.get("texto")
+                        or ""
+                    )
+                    if isinstance(val, list):
+                        val = _gdpr_plan_trabajo_a_texto(val)
+                    if isinstance(val, str) and val.strip():
+                        txt = val.strip()
+        except Exception:
+            pass
+
     txt = html.unescape(txt)
 
-    # Convertir <br> a saltos reales
+    # Convertir <br> a saltos reales y quitar tags HTML
     txt = re.sub(r"<\s*br\s*/?\s*>", "\n", txt, flags=re.IGNORECASE)
-
-    # Quitar tags HTML restantes, por ejemplo <b>, </b>, <strong>, etc.
     txt = re.sub(r"<[^>]+>", "", txt)
 
-    # Limpiar espacios alrededor de saltos
+    # Quitar restos de JSON mal guardado
+    txt = re.sub(r'^\s*\{\s*"?informe_ejecutivo"?\s*:\s*"?', "", txt, flags=re.IGNORECASE)
+    txt = re.sub(r'^\s*\{\s*"?plan_trabajo"?\s*:\s*"?', "", txt, flags=re.IGNORECASE)
+    txt = re.sub(r'"?\s*\}\s*$', "", txt)
+
+    # Quitar títulos que Ollama suele agregar
+    patrones_titulos = [
+        r"^\s*\*{1,3}\s*INFORME\s+EJECUTIVO\s*\*{1,3}\s*[:\-–—]?\s*",
+        r"^\s*#{1,6}\s*INFORME\s+EJECUTIVO\s*[:\-–—]?\s*",
+        r"^\s*INFORME\s+EJECUTIVO\s*[:\-–—]?\s*",
+        r"^\s*\*{1,3}\s*RESUMEN\s+EJECUTIVO\s*\*{1,3}\s*[:\-–—]?\s*",
+        r"^\s*#{1,6}\s*RESUMEN\s+EJECUTIVO\s*[:\-–—]?\s*",
+        r"^\s*RESUMEN\s+EJECUTIVO\s*[:\-–—]?\s*",
+        r"^\s*\*{1,3}\s*PLAN\s+DE\s+TRABAJO\s*\*{1,3}\s*[:\-–—]?\s*",
+        r"^\s*#{1,6}\s*PLAN\s+DE\s+TRABAJO\s*[:\-–—]?\s*",
+        r"^\s*PLAN\s+DE\s+TRABAJO\s*[:\-–—]?\s*",
+    ]
+
+    for patron in patrones_titulos:
+        txt = re.sub(patron, "", txt, flags=re.IGNORECASE).strip()
+
+    # Quitar markdown residual
+    txt = txt.replace("**", "").replace("__", "")
+
     txt = re.sub(r"[ \t]+\n", "\n", txt)
     txt = re.sub(r"\n[ \t]+", "\n", txt)
-
-    # Compactar líneas vacías excesivas
     txt = re.sub(r"\n{3,}", "\n\n", txt)
 
     return txt.strip()
@@ -107730,20 +107836,60 @@ def cargar_ai_pci_por_run(analysis_run_id: int) -> dict:
         return {}
 
 def pci_normalizar_texto_rico_guardado(texto: str) -> str:
-    txt = (texto or "")
+    txt = (texto or "").strip()
     if not txt:
         return ""
 
     txt = txt.replace("\r\n", "\n").replace("\r", "\n")
     txt = html.unescape(txt)
-
     txt = txt.replace("```json", "").replace("```", "").strip()
 
-    # Convertir <br> reales o escapados en saltos reales
-    txt = re.sub(r"<\s*br\s*/?\s*>", "\n", txt, flags=re.IGNORECASE)
+    # Si viene como JSON, extraer campos principales
+    try:
+        obj = json.loads(txt)
+        if isinstance(obj, dict):
+            val = (
+                obj.get("informe_ejecutivo")
+                or obj.get("plan_trabajo")
+                or obj.get("texto")
+                or ""
+            )
+            if isinstance(val, list):
+                val = json.dumps(val, ensure_ascii=False)
+            if isinstance(val, str) and val.strip():
+                txt = val.strip()
+    except Exception:
+        pass
 
-    # Quitar cualquier otro tag HTML: <b>, </b>, <strong>, etc.
+    txt = html.unescape(txt)
+
+    # Convertir <br> a saltos y eliminar HTML
+    txt = re.sub(r"<\s*br\s*/?\s*>", "\n", txt, flags=re.IGNORECASE)
     txt = re.sub(r"<[^>]+>", "", txt)
+
+    # Quitar títulos que Ollama agrega
+    patrones_titulos = [
+        r"^\s*\*{1,3}\s*INFORME\s+EJECUTIVO\s+DE\s+MADUREZ\s+PCI[-\s]?DSS\s*\*{1,3}\s*[:\-–—]?\s*",
+        r"^\s*#{1,6}\s*INFORME\s+EJECUTIVO\s+DE\s+MADUREZ\s+PCI[-\s]?DSS\s*[:\-–—]?\s*",
+        r"^\s*INFORME\s+EJECUTIVO\s+DE\s+MADUREZ\s+PCI[-\s]?DSS\s*[:\-–—]?\s*",
+        r"^\s*\*{1,3}\s*DE\s+MADUREZ\s+PCI[-\s]?DSS\s*\*{1,3}\s*[:\-–—]?\s*",
+        r"^\s*DE\s+MADUREZ\s+PCI[-\s]?DSS\s*[:\-–—]?\s*",
+        r"^\s*\*{1,3}\s*INFORME\s+EJECUTIVO\s*\*{1,3}\s*[:\-–—]?\s*",
+        r"^\s*#{1,6}\s*INFORME\s+EJECUTIVO\s*[:\-–—]?\s*",
+        r"^\s*INFORME\s+EJECUTIVO\s*[:\-–—]?\s*",
+        r"^\s*\*{1,3}\s*RESUMEN\s+EJECUTIVO\s*\*{1,3}\s*[:\-–—]?\s*",
+        r"^\s*#{1,6}\s*RESUMEN\s+EJECUTIVO\s*[:\-–—]?\s*",
+        r"^\s*RESUMEN\s+EJECUTIVO\s*[:\-–—]?\s*",
+        r"^\s*\*{1,3}\s*PLAN\s+DE\s+TRABAJO\s*\*{1,3}\s*[:\-–—]?\s*",
+        r"^\s*#{1,6}\s*PLAN\s+DE\s+TRABAJO\s*[:\-–—]?\s*",
+        r"^\s*PLAN\s+DE\s+TRABAJO\s*[:\-–—]?\s*",
+    ]
+
+    for patron in patrones_titulos:
+        txt = re.sub(patron, "", txt, flags=re.IGNORECASE).strip()
+
+    # Quitar markdown residual
+    txt = txt.replace("**", "").replace("__", "")
 
     txt = re.sub(r"[ \t]+\n", "\n", txt)
     txt = re.sub(r"\n[ \t]+", "\n", txt)
