@@ -8220,7 +8220,6 @@ def menu():
         flex:0 0 auto;
       }
 
-      /* 🔥 TEXTO BLANCO GLOBAL */
       .sgsi-menu-header-title{
         margin:0;
         font-size:1rem;
@@ -8246,28 +8245,28 @@ def menu():
 
       .sgsi-leftnav-wrap{
         position:relative;
-        z-index:7000;
+        z-index:20;
         overflow:visible !important;
       }
 
       .sgsi-leftnav-card{
-          background: linear-gradient(180deg, #2f6fb6 0%, #1f4e8c 100%);
-          border:1px solid rgba(255,255,255,.25);
-          border-radius:16px;
-          box-shadow:0 10px 25px rgba(0,0,0,.25);
-          padding:10px;
-          overflow:visible !important;
-          position:sticky;
-          top:10px;
-          z-index:7000;
-        }
+        background:linear-gradient(180deg,#2f6fb6 0%,#1f4e8c 100%);
+        border:1px solid rgba(255,255,255,.25);
+        border-radius:16px;
+        box-shadow:0 10px 25px rgba(0,0,0,.25);
+        padding:10px;
+        overflow:visible !important;
+        position:sticky;
+        top:10px;
+        z-index:20;
+      }
 
       .sgsi-leftnav-header{
         display:flex;
         align-items:center;
         gap:10px;
         padding:4px 4px 10px 4px;
-        border-bottom:1px solid #d7dde4;
+        border-bottom:1px solid rgba(255,255,255,.28);
         margin-bottom:10px;
       }
 
@@ -8284,18 +8283,18 @@ def menu():
       }
 
       .sgsi-leftnav-title{
-          font-size:.95rem;
-          font-weight:900;
-          color:#ffffff !important;
-          line-height:1.1;
-        }
+        font-size:.95rem;
+        font-weight:900;
+        color:#ffffff !important;
+        line-height:1.1;
+      }
 
-        .sgsi-leftnav-subtitle{
-          margin-top:3px;
-          font-size:.76rem;
-          color:#ffffff !important;
-          line-height:1.2;
-        }
+      .sgsi-leftnav-subtitle{
+        margin-top:3px;
+        font-size:.76rem;
+        color:#ffffff !important;
+        line-height:1.2;
+      }
 
       .sgsi-leftnav-list{
         display:flex;
@@ -8316,17 +8315,18 @@ def menu():
         justify-content:flex-start;
         gap:8px;
         border:1px solid #d2d8df !important;
-        border-radius:10px !important;
+        border-radius:12px !important;
         background:#ffffff !important;
         color:#334155 !important;
         padding:10px 10px !important;
         font-size:.82rem !important;
-        font-weight:700 !important;
+        font-weight:800 !important;
         box-shadow:none !important;
         white-space:normal !important;
         text-align:left;
         line-height:1.15 !important;
         min-height:46px !important;
+        transition:all .16s ease;
       }
 
       .sgsi-leftnav-link:hover,
@@ -8334,6 +8334,7 @@ def menu():
       .sgsi-leftnav-link.sgsi-active{
         background:#f3f6f8 !important;
         color:#1f2937 !important;
+        transform:translateX(2px);
       }
 
       .sgsi-leftnav-link-text{
@@ -8343,51 +8344,96 @@ def menu():
         line-height:1.12;
       }
 
+      .sgsi-root-toggle::after{
+        content:"⌄";
+        margin-left:auto;
+        font-size:15px;
+        font-weight:900;
+        color:#64748b;
+        transition:transform .18s ease;
+      }
+
+      .sgsi-root-toggle.sgsi-active::after{
+        transform:rotate(180deg);
+      }
+
+      /* =========================================================
+         MENÚ VERTICAL MODERNO — HIJOS Y NIETOS HACIA ABAJO
+         ========================================================= */
+
       .sgsi-panel{
-        position:fixed;
-        top:0;
-        left:0;
+        position:static !important;
         display:none;
         list-style:none;
-        margin:0 !important;
-        padding:6px !important;
-        min-width:290px;
-        max-width:360px;
-        background:#ffffff !important;
-        border:1px solid #d7dde4 !important;
+        margin:8px 0 0 0 !important;
+        padding:6px 0 6px 10px !important;
+        width:100% !important;
+        min-width:100% !important;
+        max-width:100% !important;
+        background:rgba(255,255,255,.14) !important;
+        border:1px solid rgba(255,255,255,.22) !important;
         border-radius:12px !important;
-        box-shadow:0 14px 28px rgba(0,0,0,.18) !important;
-        z-index:100100 !important;
+        box-shadow:none !important;
+        z-index:auto !important;
+        overflow:hidden !important;
       }
 
       .sgsi-panel.sgsi-open{
         display:block !important;
+        animation:sgsiMenuDown .18s ease-out;
+      }
+
+      @keyframes sgsiMenuDown{
+        from{
+          opacity:0;
+          transform:translateY(-5px);
+        }
+        to{
+          opacity:1;
+          transform:translateY(0);
+        }
+      }
+
+      .sgsi-root-panel{
+        background:rgba(255,255,255,.13) !important;
+      }
+
+      .sgsi-subpanel{
+        margin-left:6px !important;
+        padding-left:10px !important;
+        border-left:3px solid rgba(255,255,255,.35) !important;
+        background:rgba(255,255,255,.10) !important;
       }
 
       .sgsi-dropdown-item{
         display:flex;
         align-items:center;
         gap:10px;
-        padding:8px 10px;
-        border-radius:8px;
+        padding:9px 10px;
+        border-radius:10px;
         font-size:.82rem;
-        font-weight:600;
-        color:#253140;
+        font-weight:700;
+        color:#ffffff !important;
         white-space:normal;
-        line-height:1.15;
+        line-height:1.18;
         text-decoration:none;
+        margin:3px 4px;
+        background:rgba(255,255,255,.12);
+        border:1px solid rgba(255,255,255,.12);
+        transition:all .16s ease;
       }
 
       .sgsi-dropdown-item:hover,
       .sgsi-dropdown-item:focus,
       .sgsi-dropdown-item.sgsi-active{
-        background:#eef2f5;
-        color:#111827;
+        background:#ffffff !important;
+        color:#1f2937 !important;
+        transform:translateX(2px);
       }
 
       .sgsi-dropdown-item i{
-        color:#5d6b79;
-        width:16px;
+        color:inherit !important;
+        width:18px;
         text-align:center;
         flex:0 0 auto;
       }
@@ -8397,11 +8443,17 @@ def menu():
       }
 
       .sgsi-node-toggle::after{
-        content:"▸";
+        content:"⌄";
         border:none !important;
         margin-left:auto;
-        color:#64748b;
-        font-size:12px;
+        color:inherit;
+        font-size:15px;
+        font-weight:900;
+        transition:transform .18s ease;
+      }
+
+      .sgsi-node-toggle.sgsi-active::after{
+        transform:rotate(180deg);
       }
 
       .sgsi-dashboard-zone{
@@ -8413,7 +8465,7 @@ def menu():
 
       .sgsi-dashboard-grid{
         display:grid;
-        grid-template-columns:repeat(12, minmax(0,1fr));
+        grid-template-columns:repeat(12,minmax(0,1fr));
         gap:18px;
       }
 
@@ -8435,7 +8487,7 @@ def menu():
       .sgsi-card-head{
         padding:14px 16px 10px 16px;
         border-bottom:1px solid rgba(15,23,42,.06);
-        background:linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.92));
+        background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(248,250,252,.92));
       }
 
       .sgsi-card-title{
@@ -8512,23 +8564,6 @@ def menu():
           top:auto;
         }
 
-        .sgsi-panel{
-          position:static !important;
-          top:auto !important;
-          left:auto !important;
-          display:none;
-          width:100%;
-          min-width:100%;
-          max-width:100%;
-          margin-top:6px !important;
-          box-shadow:none !important;
-          border:1px solid #e2e8f0 !important;
-        }
-
-        .sgsi-panel.sgsi-open{
-          display:block !important;
-        }
-
         .sgsi-card-large{
           grid-column:span 12;
           min-height:340px;
@@ -8572,134 +8607,81 @@ def menu():
       }
     </style>
 
-    <script>
+        <script>
       function getPanel(trigger){
         const id = trigger.getAttribute('data-target');
         return id ? document.getElementById(id) : null;
       }
 
-      function closePanelsAtSameLevel(trigger){
+      function closeChildren(panel){
+        if (!panel) return;
+
+        panel.querySelectorAll('.sgsi-panel.sgsi-open').forEach(function(p){
+          p.classList.remove('sgsi-open');
+        });
+
+        panel.querySelectorAll('.sgsi-active').forEach(function(a){
+          a.classList.remove('sgsi-active');
+        });
+      }
+
+      function closeSiblings(trigger){
         const owner = trigger.closest('.sgsi-root-item, .sgsi-node');
         if (!owner) return;
 
-        const scope = owner.parentElement;
-        if (!scope) return;
+        const parent = owner.parentElement;
+        if (!parent) return;
 
-        scope.querySelectorAll(':scope > .sgsi-root-item > .sgsi-panel.sgsi-open, :scope > .sgsi-node > .sgsi-panel.sgsi-open').forEach(function(panel){
-          if (panel !== getPanel(trigger)) {
-            panel.classList.remove('sgsi-open');
-          }
-        });
+        parent.querySelectorAll(':scope > .sgsi-root-item, :scope > .sgsi-node').forEach(function(sibling){
+          if (sibling !== owner) {
+            sibling.querySelectorAll('.sgsi-panel.sgsi-open').forEach(function(panel){
+              panel.classList.remove('sgsi-open');
+            });
 
-        scope.querySelectorAll(':scope > .sgsi-root-item > .sgsi-leftnav-link.sgsi-active, :scope > .sgsi-node > .sgsi-dropdown-item.sgsi-active').forEach(function(el){
-          if (el !== trigger) {
-            el.classList.remove('sgsi-active');
+            sibling.querySelectorAll('.sgsi-active').forEach(function(active){
+              active.classList.remove('sgsi-active');
+            });
           }
         });
       }
 
-      function positionPanelRight(trigger, panel) {
-        panel.classList.add('sgsi-open');
-        panel.style.visibility = 'hidden';
-        panel.style.display = 'block';
-
-        const triggerRect = trigger.getBoundingClientRect();
-        const panelRect = panel.getBoundingClientRect();
-        const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
-        const gap = 6;
-        const edge = 8;
-
-        let left = triggerRect.right + gap;
-        let top = triggerRect.top;
-
-        if (left + panelRect.width > viewportWidth - edge) {
-          left = Math.max(triggerRect.right + 2, viewportWidth - panelRect.width - edge);
-        }
-
-        if (top + panelRect.height > viewportHeight - edge) {
-          top = Math.max(edge, viewportHeight - panelRect.height - edge);
-        }
-
-        if (top < edge) {
-          top = edge;
-        }
-
-        panel.style.left = left + 'px';
-        panel.style.top = top + 'px';
-        panel.style.visibility = '';
-        panel.style.display = '';
-      }
-
-      function openPanel(trigger) {
+      function toggleVerticalMenu(trigger){
         const panel = getPanel(trigger);
         if (!panel) return;
 
-        closePanelsAtSameLevel(trigger);
+        const isOpen = panel.classList.contains('sgsi-open');
 
-        const owner = trigger.closest('.sgsi-root-item, .sgsi-node');
-        if (owner) {
-          owner.querySelectorAll(':scope > .sgsi-node .sgsi-panel.sgsi-open').forEach(function(p){
-            p.classList.remove('sgsi-open');
-          });
-          owner.querySelectorAll(':scope > .sgsi-node .sgsi-active').forEach(function(a){
-            a.classList.remove('sgsi-active');
-          });
-        }
+        closeSiblings(trigger);
 
-        trigger.classList.add('sgsi-active');
-        positionPanelRight(trigger, panel);
-      }
-
-      function bindDesktop() {
-        document.querySelectorAll('.sgsi-root-toggle, .sgsi-node-toggle').forEach(function(toggle){
-
-          toggle.addEventListener('click', function(e){
-            e.preventDefault();
-            e.stopPropagation();
-
-            const panel = getPanel(toggle);
-            if (!panel) return;
-
-            const isOpen = panel.classList.contains('sgsi-open');
-
-            closePanelsAtSameLevel(toggle);
-
-            if (isOpen) {
-              toggle.classList.remove('sgsi-active');
-              panel.classList.remove('sgsi-open');
-              return;
-            }
-
-            if (window.innerWidth <= 991.98) {
-              toggle.classList.add('sgsi-active');
-              panel.classList.add('sgsi-open');
-            } else {
-              openPanel(toggle);
-            }
-          });
-        });
-      }
-
-      function closeAllMenus() {
-        document.querySelectorAll('.sgsi-panel.sgsi-open').forEach(function(panel){
+        if (isOpen) {
+          trigger.classList.remove('sgsi-active');
           panel.classList.remove('sgsi-open');
-        });
-        document.querySelectorAll('.sgsi-active').forEach(function(el){
-          el.classList.remove('sgsi-active');
-        });
+          closeChildren(panel);
+        } else {
+          trigger.classList.add('sgsi-active');
+          panel.classList.add('sgsi-open');
+        }
       }
+
+      document.querySelectorAll('.sgsi-root-toggle, .sgsi-node-toggle').forEach(function(toggle){
+        toggle.addEventListener('click', function(e){
+          e.preventDefault();
+          e.stopPropagation();
+          toggleVerticalMenu(toggle);
+        });
+      });
 
       document.addEventListener('click', function(e){
         if (e.target.closest('.sgsi-leftnav-wrap')) return;
-        closeAllMenus();
-      });
 
-      window.addEventListener('resize', function(){
-        closeAllMenus();
-      });
+        document.querySelectorAll('.sgsi-panel.sgsi-open').forEach(function(panel){
+          panel.classList.remove('sgsi-open');
+        });
 
-      bindDesktop();
+        document.querySelectorAll('.sgsi-active').forEach(function(active){
+          active.classList.remove('sgsi-active');
+        });
+      });
 
       async function refreshDashboardStatus() {
         try {
@@ -8716,29 +8698,56 @@ def menu():
           const datos = document.getElementById('dash_datos_gauge');
           const riesgos = document.getElementById('dash_riesgos');
           const incidentes = document.getElementById('dash_incidentes');
-          const vulns = document.getElementById('dash_vulnerabilidades');
+          const vulnerabilidades = document.getElementById('dash_vulnerabilidades');
+
+          if (iso && data.iso_radar_b64) {
+            iso.src = 'data:image/png;base64,' + data.iso_radar_b64;
+          }
+
+          if (nist && data.nist_radar_b64) {
+            nist.src = 'data:image/png;base64,' + data.nist_radar_b64;
+          }
+
+          if (datos && data.datos_gauge_b64) {
+            datos.src = 'data:image/png;base64,' + data.datos_gauge_b64;
+          }
+
+          if (riesgos && data.riesgos_b64) {
+            riesgos.src = 'data:image/png;base64,' + data.riesgos_b64;
+          }
+
+          if (incidentes && data.incidentes_b64) {
+            incidentes.src = 'data:image/png;base64,' + data.incidentes_b64;
+          }
+
+          if (vulnerabilidades && data.vulnerabilidades_b64) {
+            vulnerabilidades.src = 'data:image/png;base64,' + data.vulnerabilidades_b64;
+          }
 
           const isoPct = document.getElementById('dash_iso_pct');
           const nistPct = document.getElementById('dash_nist_pct');
           const datosPct = document.getElementById('dash_datos_pct');
 
-          if (iso && data.iso_radar_b64) iso.src = 'data:image/png;base64,' + data.iso_radar_b64;
-          if (nist && data.nist_radar_b64) nist.src = 'data:image/png;base64,' + data.nist_radar_b64;
-          if (datos && data.datos_gauge_b64) datos.src = 'data:image/png;base64,' + data.datos_gauge_b64;
-          if (riesgos && data.riesgos_b64) riesgos.src = 'data:image/png;base64,' + data.riesgos_b64;
-          if (incidentes && data.incidentes_b64) incidentes.src = 'data:image/png;base64,' + data.incidentes_b64;
-          if (vulns && data.vulnerabilidades_b64) vulns.src = 'data:image/png;base64,' + data.vulnerabilidades_b64;
+          if (isoPct) {
+            isoPct.innerText = 'Cumplimiento general: ' + Number(data.iso_pct || 0).toFixed(2) + '%';
+          }
 
-          if (isoPct) isoPct.textContent = (Number(data.iso_pct || 0)).toFixed(1) + '%';
-          if (nistPct) nistPct.textContent = (Number(data.nist_pct || 0)).toFixed(1) + '%';
-          if (datosPct) datosPct.textContent = (Number(data.datos_pct || 0)).toFixed(1) + '%';
+          if (nistPct) {
+            nistPct.innerText = 'Cumplimiento general: ' + Number(data.nist_pct || 0).toFixed(2) + '%';
+          }
+
+          if (datosPct) {
+            datosPct.innerText = 'Cumplimiento: ' + Number(data.datos_pct || 0).toFixed(2) + '%';
+          }
 
         } catch (err) {
-          console.error('Error actualizando tablero:', err);
+          console.error('Error refrescando tablero:', err);
         }
       }
 
-      setInterval(refreshDashboardStatus, 30000);
+      document.addEventListener('DOMContentLoaded', function(){
+        refreshDashboardStatus();
+      });
     </script>
     """, sections=sections, dashboard=dashboard)
 
