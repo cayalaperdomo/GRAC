@@ -8784,12 +8784,28 @@ def menu():
     </div>
 
     <style>
+      :root{
+        --sgsi-topbar-fixed-h:118px;
+      }
+
       body{
         background-image:url('/static/img/ccsgsi.jpg');
         background-size:cover;
         background-position:center;
         background-attachment:fixed;
         background-repeat:no-repeat;
+        padding-top:var(--sgsi-topbar-fixed-h) !important;
+      }
+
+      /* BARRA SUPERIOR FIJA */
+      .sgsi-topbar{
+        position:fixed !important;
+        top:0 !important;
+        left:0 !important;
+        right:0 !important;
+        width:100% !important;
+        z-index:9999 !important;
+        margin:0 !important;
       }
 
       .soa-shell{
@@ -8851,35 +8867,40 @@ def menu():
       }
 
       .sgsi-leftnav-wrap{
-        position:relative;
+        position:sticky;
+        top:calc(var(--sgsi-topbar-fixed-h) + 8px);
+        align-self:start;
+        z-index:30;
       }
 
       .sgsi-leftnav-card{
-      background:linear-gradient(180deg,#2f6fb6 0%,#1f4e8c 100%);
-      border:1px solid rgba(255,255,255,.25);
-      border-radius:16px;
-      box-shadow:0 10px 25px rgba(0,0,0,.25);
-      padding:10px;
+        background:linear-gradient(180deg,#2f6fb6 0%,#1f4e8c 100%);
+        border:1px solid rgba(255,255,255,.25);
+        border-radius:16px;
+        box-shadow:0 10px 25px rgba(0,0,0,.25);
+        padding:10px;
 
-      /* ✅ MUESTRA TODO EL MENÚ SIN SCROLL INTERNO */
-      max-height:none !important;
-      height:auto !important;
-      overflow:visible !important;
-    }
+        /* Scroll pequeño solo para el menú */
+        max-height:calc(100vh - var(--sgsi-topbar-fixed-h) - 20px) !important;
+        overflow-y:auto !important;
+        overflow-x:hidden !important;
+      }
 
       .sgsi-leftnav-card::-webkit-scrollbar{
-        width:7px;
+        width:6px;
       }
 
       .sgsi-leftnav-card::-webkit-scrollbar-thumb{
-        background:rgba(255,255,255,.38);
+        background:rgba(255,255,255,.42);
+        border-radius:999px;
+      }
+
+      .sgsi-leftnav-card::-webkit-scrollbar-track{
+        background:rgba(255,255,255,.10);
         border-radius:999px;
       }
 
       .sgsi-leftnav-header{
-        position:sticky;
-        top:0;
-        z-index:5;
         display:flex;
         align-items:center;
         gap:8px;
@@ -8975,7 +8996,7 @@ def menu():
         background:rgba(255,255,255,.14) !important;
         border:1px solid rgba(255,255,255,.22) !important;
         border-radius:11px !important;
-        overflow:hidden !important;
+        overflow:visible !important;
       }
 
       .sgsi-panel.sgsi-open{
@@ -9183,8 +9204,15 @@ def menu():
           grid-template-columns:1fr;
         }
 
+        .sgsi-leftnav-wrap{
+          position:relative;
+          top:auto;
+        }
+
         .sgsi-leftnav-card{
-          max-height:none;
+          max-height:520px !important;
+          overflow-y:auto !important;
+          overflow-x:hidden !important;
         }
 
         .sgsi-stats-grid{
@@ -9197,6 +9225,10 @@ def menu():
       }
 
       @media(max-width:991px){
+        :root{
+          --sgsi-topbar-fixed-h:96px;
+        }
+
         .sgsi-stats-grid{
           grid-template-columns:1fr;
         }
