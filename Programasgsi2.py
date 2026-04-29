@@ -5655,9 +5655,7 @@ def usuarios():
       </div>
 
       <div class="users-header-actions">
-        <a href="/" class="btn users-btn-main rounded-pill px-4 fw-bold">
-          ⬅ Volver al Menú Principal
-        </a>
+        
       </div>
 
       <div class="users-card p-4 mb-4">
@@ -6026,10 +6024,7 @@ def editar_permisos(user_id):
           ⬅ Volver a Usuarios
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold perm-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
+        
       </div>
 
       <div class="perm-card">
@@ -6337,9 +6332,7 @@ def logs_auditoria():
       </div>
 
       <div class="logs-header-actions">
-        <a href="/" class="btn logs-btn-main rounded-pill px-4 fw-bold">
-          ⬅ Volver al Menú Principal
-        </a>
+        
       </div>
 
       <div class="logs-card p-4 mb-4">
@@ -7070,9 +7063,15 @@ def _dashboard_build_payload():
             "Cumplimiento",
             "Protección de datos personales"
         ),
+
         "riesgos_b64": _dashboard_riesgos_residuales_chart(),
         "incidentes_b64": _dashboard_incidentes_chart(),
         "vulnerabilidades_b64": _dashboard_vulnerabilidades_chart(),
+
+        "proveedores_criticidad_b64": _dashboard_proveedores_criticidad_chart(),
+        "planes_accion_estado_b64": _dashboard_planes_accion_estado_chart(),
+        "requisitos_legales_estado_b64": _dashboard_requisitos_legales_estado_chart(),
+
         "datos_pct": round(float(datos_pct or 0), 2),
     }
 
@@ -7325,6 +7324,107 @@ def _dashboard_vulnerabilidades_chart():
     )
 
 
+def _dashboard_proveedores_criticidad_chart():
+    buckets = [
+        "Criticidad muy baja",
+        "Criticidad baja",
+        "Criticidad media",
+        "Criticidad alta"
+    ]
+
+    conteos = {k: 0 for k in buckets}
+
+    try:
+        items = ProveedorEvaluacion.query.order_by(ProveedorEvaluacion.id.desc()).all()
+
+        for it in items:
+            raw = str(getattr(it, "criticidad_texto", "") or "").strip().lower()
+
+            if "muy baja" in raw:
+                conteos["Criticidad muy baja"] += 1
+            elif "baja" in raw:
+                conteos["Criticidad baja"] += 1
+            elif "media" in raw:
+                conteos["Criticidad media"] += 1
+            elif "alta" in raw:
+                conteos["Criticidad alta"] += 1
+
+    except Exception as e:
+        return _dashboard_empty_chart(
+            "Proveedores por criticidad",
+            f"Error consultando proveedores: {str(e)}"
+        )
+
+    return _dashboard_donut_b64(
+        buckets,
+        [conteos[n] for n in buckets],
+        title="Proveedores por criticidad",
+        subtitle="Distribución de proveedores según criticidad"
+    )
+
+
+def _dashboard_planes_accion_estado_chart():
+    buckets = ["Abierto", "Cerrado", "Sin estado"]
+    conteos = {k: 0 for k in buckets}
+
+    try:
+        items = MejoraPlanRegistro.query.order_by(MejoraPlanRegistro.id.desc()).all()
+
+        for it in items:
+            raw = str(getattr(it, "estado_actividad", "") or "").strip().lower()
+
+            if raw == "abierto":
+                conteos["Abierto"] += 1
+            elif raw == "cerrado":
+                conteos["Cerrado"] += 1
+            else:
+                conteos["Sin estado"] += 1
+
+    except Exception as e:
+        return _dashboard_empty_chart(
+            "Planes de acción por estado",
+            f"Error consultando planes de acción: {str(e)}"
+        )
+
+    return _dashboard_donut_b64(
+        buckets,
+        [conteos[n] for n in buckets],
+        title="Planes de acción por estado",
+        subtitle="Estado general de los planes de acción del SGSI"
+    )
+
+
+def _dashboard_requisitos_legales_estado_chart():
+    buckets = ["Cumple", "Parcial", "No cumple", "Sin estado"]
+    conteos = {k: 0 for k in buckets}
+
+    try:
+        items = RequisitoLegal.query.order_by(RequisitoLegal.id.desc()).all()
+
+        for it in items:
+            raw = str(getattr(it, "estado", "") or "").strip().lower()
+
+            if raw == "cumple":
+                conteos["Cumple"] += 1
+            elif raw == "parcial":
+                conteos["Parcial"] += 1
+            elif raw == "no cumple":
+                conteos["No cumple"] += 1
+            else:
+                conteos["Sin estado"] += 1
+
+    except Exception as e:
+        return _dashboard_empty_chart(
+            "Requisitos legales por estado",
+            f"Error consultando requisitos legales: {str(e)}"
+        )
+
+    return _dashboard_donut_b64(
+        buckets,
+        [conteos[n] for n in buckets],
+        title="Requisitos legales por estado",
+        subtitle="Cumplimiento de requisitos legales aplicables"
+    )
 
 # =========================
 # Plantilla HTML única (integrada)
@@ -7910,6 +8010,543 @@ def filtrar_items_menu(items, usuario_actual):
 
     return filtrados
 
+# ============================================================
+# MENÚ GLOBAL SGSI SIEMPRE VISIBLE EN TODOS LOS MÓDULOS
+# ============================================================
+
+def _sgsi_build_global_menu_html():
+    try:
+        user_id = session.get("user_id")
+        if not user_id:
+            return ""
+
+        usuario_actual = User.query.get(user_id)
+        if not usuario_actual:
+            return ""
+
+        sections = []
+        for sec in MENU_SECTIONS:
+            allowed_items = filtrar_items_menu(sec.get("items", []), usuario_actual)
+            if allowed_items:
+                sec2 = dict(sec)
+                sec2["items"] = allowed_items
+                sections.append(sec2)
+
+        return render_template_string("""
+        <aside id="sgsiGlobalMenu" class="sgsi-global-menu-wrap">
+
+          <!-- FLECHA PARA OCULTAR / MOSTRAR MENÚ -->
+          <div id="sgsiGlobalMenuToggle" class="sgsi-global-menu-arrow">
+            <span class="sgsi-arrow-icon">‹</span>
+          </div>
+
+          <div class="sgsi-global-menu-card">
+
+            <div class="sgsi-global-menu-header">
+              <div class="sgsi-global-menu-icon">
+                <i class="bi bi-list-ul"></i>
+              </div>
+              <div>
+                <div class="sgsi-global-menu-title">Menú principal</div>
+                <div class="sgsi-global-menu-subtitle">Acceso a módulos</div>
+              </div>
+            </div>
+
+            <div class="sgsi-global-menu-list">
+
+              <a class="sgsi-global-root-toggle sgsi-global-panel-control-btn" href="/">
+                <i class="bi bi-speedometer2"></i>
+                <span>Centro de Control</span>
+              </a>
+
+              {% for sec in sections %}
+                {% set sid = "global_root_" ~ loop.index %}
+
+                <div class="sgsi-global-root-item">
+                  <button class="btn sgsi-global-root-toggle"
+                          type="button"
+                          data-target="{{ sid }}">
+                    <i class="bi {{ sec.get('icon', 'bi-grid-1x2') }}"></i>
+                    <span>{{ sec["title"] }}</span>
+                  </button>
+
+                  <ul class="sgsi-global-panel" id="{{ sid }}">
+                    {% for it in sec["items"] %}
+
+                      {% if it.get("children") %}
+                        {% set cid = sid ~ "_child_" ~ loop.index %}
+
+                        <li class="sgsi-global-node">
+                          <a class="sgsi-global-item sgsi-global-node-toggle"
+                             href="javascript:void(0);"
+                             data-target="{{ cid }}">
+                            <i class="bi {{ it.get('icon','bi-box') }}"></i>
+                            <span>{{ it["label"] }}</span>
+                          </a>
+
+                          <ul class="sgsi-global-panel sgsi-global-subpanel" id="{{ cid }}">
+                            {% for child in it["children"] %}
+
+                              {% if child.get("children") %}
+                                {% set gcid = cid ~ "_child_" ~ loop.index %}
+
+                                <li class="sgsi-global-node">
+                                  <a class="sgsi-global-item sgsi-global-node-toggle"
+                                     href="javascript:void(0);"
+                                     data-target="{{ gcid }}">
+                                    <i class="bi {{ child.get('icon','bi-diagram-3') }}"></i>
+                                    <span>{{ child["label"] }}</span>
+                                  </a>
+
+                                  <ul class="sgsi-global-panel sgsi-global-subpanel" id="{{ gcid }}">
+                                    {% for sub in child["children"] %}
+                                      <li>
+                                        <a class="sgsi-global-item" href="{{ sub.href }}">
+                                          <i class="bi {{ sub.get('icon','bi-dot') }}"></i>
+                                          <span>{{ sub["label"] }}</span>
+                                        </a>
+                                      </li>
+                                    {% endfor %}
+                                  </ul>
+                                </li>
+
+                              {% else %}
+                                <li>
+                                  <a class="sgsi-global-item" href="{{ child.href }}">
+                                    <i class="bi {{ child.get('icon','bi-dot') }}"></i>
+                                    <span>{{ child["label"] }}</span>
+                                  </a>
+                                </li>
+                              {% endif %}
+
+                            {% endfor %}
+                          </ul>
+                        </li>
+
+                      {% else %}
+                        <li>
+                          <a class="sgsi-global-item" href="{{ it.href }}">
+                            <i class="bi {{ it.get('icon','bi-box') }}"></i>
+                            <span>{{ it["label"] }}</span>
+                          </a>
+                        </li>
+                      {% endif %}
+
+                    {% endfor %}
+                  </ul>
+                </div>
+              {% endfor %}
+
+            </div>
+          </div>
+        </aside>
+
+        <style>
+          :root{
+            --sgsi-menu-w:235px;
+            --sgsi-menu-left:8px;
+            --sgsi-topbar-h:108px;
+            --sgsi-content-left:250px;
+          }
+
+          body{
+            padding-left:0 !important;
+            padding-top:var(--sgsi-topbar-h) !important;
+          }
+
+          /* BARRA SUPERIOR FIJA */
+          .sgsi-topbar{
+            position:fixed !important;
+            top:0 !important;
+            left:0 !important;
+            right:0 !important;
+            width:100% !important;
+            z-index:999997 !important;
+            margin:0 !important;
+          }
+
+          body > .container.py-4{
+            margin-left:var(--sgsi-content-left) !important;
+            width:calc(100% - var(--sgsi-content-left)) !important;
+            max-width:calc(100% - var(--sgsi-content-left)) !important;
+            padding:8px 8px 10px 6px !important;
+          }
+
+          #sgsiGlobalMenu{
+            display:block !important;
+            visibility:visible !important;
+            opacity:1 !important;
+          }
+
+          .sgsi-global-menu-wrap{
+            position:fixed !important;
+            left:var(--sgsi-menu-left) !important;
+            top:calc(var(--sgsi-topbar-h) + 6px) !important;
+            width:var(--sgsi-menu-w) !important;
+            height:calc(100vh - var(--sgsi-topbar-h) - 14px) !important;
+            z-index:999998 !important;
+            transition:transform .22s ease;
+          }
+
+          .sgsi-global-menu-card{
+            height:100% !important;
+            overflow-y:auto !important;
+            overflow-x:hidden !important;
+            background:linear-gradient(180deg,#2f6fb6 0%,#1f4e8c 100%) !important;
+            border:1px solid rgba(255,255,255,.25) !important;
+            border-radius:16px !important;
+            box-shadow:0 10px 25px rgba(0,0,0,.25) !important;
+            padding:8px !important;
+          }
+
+          /* FLECHA LATERAL */
+          .sgsi-global-menu-arrow{
+            position:absolute;
+            right:-15px;
+            top:18px;
+            width:22px;
+            height:56px;
+            border-radius:0 999px 999px 0;
+            background:#0b3a6e;
+            color:#ffffff;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            cursor:pointer;
+            box-shadow:0 8px 18px rgba(0,0,0,.25);
+            border:1px solid rgba(255,255,255,.45);
+            z-index:1000000;
+            transition:all .22s ease;
+          }
+
+          .sgsi-arrow-icon{
+            font-size:26px;
+            font-weight:900;
+            line-height:1;
+            position:relative;
+            top:-1px;
+          }
+
+          body.sgsi-menu-collapsed .sgsi-global-menu-wrap{
+            transform:translateX(calc(-1 * var(--sgsi-menu-w) - 10px));
+          }
+
+          body.sgsi-menu-collapsed .sgsi-global-menu-arrow{
+            right:-34px;
+            border-radius:999px;
+          }
+
+          body.sgsi-menu-collapsed .sgsi-arrow-icon{
+            transform:rotate(180deg);
+          }
+
+          body.sgsi-menu-collapsed > .container.py-4{
+            margin-left:10px !important;
+            width:calc(100% - 18px) !important;
+            max-width:calc(100% - 18px) !important;
+          }
+
+          .sgsi-global-menu-header{
+            display:flex;
+            align-items:center;
+            gap:8px;
+            padding:4px 4px 9px 4px;
+            border-bottom:1px solid rgba(255,255,255,.28);
+            margin-bottom:8px;
+          }
+
+          .sgsi-global-menu-icon{
+            width:34px;
+            height:34px;
+            border-radius:10px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            background:#d5dbe2;
+            color:#44515f;
+            flex:0 0 auto;
+          }
+
+          .sgsi-global-menu-title{
+            font-size:.88rem;
+            font-weight:900;
+            color:#ffffff !important;
+            line-height:1.1;
+          }
+
+          .sgsi-global-menu-subtitle{
+            margin-top:2px;
+            font-size:.70rem;
+            color:#ffffff !important;
+            line-height:1.2;
+          }
+
+          .sgsi-global-menu-list{
+            display:flex;
+            flex-direction:column;
+            gap:6px;
+          }
+
+          .sgsi-global-root-toggle{
+            width:100%;
+            display:flex !important;
+            align-items:center;
+            gap:7px;
+            border:1px solid #d2d8df !important;
+            border-radius:11px !important;
+            background:#ffffff !important;
+            color:#334155 !important;
+            padding:8px 9px !important;
+            font-size:.76rem !important;
+            font-weight:800 !important;
+            text-align:left !important;
+            white-space:normal !important;
+            line-height:1.12 !important;
+            min-height:40px !important;
+            text-decoration:none !important;
+          }
+
+          .sgsi-global-panel-control-btn{
+            background:linear-gradient(135deg,#0b3a6e 0%,#1459a6 55%,#2c7be5 100%) !important;
+            color:#ffffff !important;
+            border:1px solid rgba(255,255,255,.35) !important;
+            box-shadow:0 8px 18px rgba(0,0,0,.22) !important;
+          }
+
+          .sgsi-global-panel-control-btn i,
+          .sgsi-global-panel-control-btn span{
+            color:#ffffff !important;
+          }
+
+          .sgsi-global-root-toggle::after{
+            content:"⌄";
+            margin-left:auto;
+            font-size:13px;
+            font-weight:900;
+            color:#64748b;
+            transition:transform .18s ease;
+          }
+
+          .sgsi-global-panel-control-btn::after{
+            content:"" !important;
+          }
+
+          .sgsi-global-root-toggle.sgsi-active::after{
+            transform:rotate(180deg);
+          }
+
+          .sgsi-global-panel{
+            display:none;
+            list-style:none;
+            margin:6px 0 0 0 !important;
+            padding:5px 0 5px 7px !important;
+            width:100% !important;
+            background:rgba(255,255,255,.14) !important;
+            border:1px solid rgba(255,255,255,.22) !important;
+            border-radius:11px !important;
+          }
+
+          .sgsi-global-panel.sgsi-open{
+            display:block !important;
+          }
+
+          .sgsi-global-subpanel{
+            margin-left:4px !important;
+            padding-left:7px !important;
+            border-left:2px solid rgba(255,255,255,.35) !important;
+            background:rgba(255,255,255,.10) !important;
+          }
+
+          .sgsi-global-item{
+            display:flex;
+            align-items:center;
+            gap:7px;
+            padding:7px 8px;
+            border-radius:9px;
+            font-size:.74rem;
+            font-weight:700;
+            color:#ffffff !important;
+            text-decoration:none;
+            margin:3px 3px;
+            background:rgba(255,255,255,.12);
+            border:1px solid rgba(255,255,255,.12);
+          }
+
+          .sgsi-global-item:hover,
+          .sgsi-global-item.sgsi-active{
+            background:#ffffff !important;
+            color:#1f2937 !important;
+          }
+
+          .sgsi-global-item i{
+            color:inherit !important;
+            width:16px;
+            text-align:center;
+            flex:0 0 auto;
+          }
+
+          .sgsi-global-node-toggle::after{
+            content:"⌄";
+            margin-left:auto;
+            color:inherit;
+            font-size:13px;
+            font-weight:900;
+            transition:transform .18s ease;
+          }
+
+          .sgsi-global-node-toggle.sgsi-active::after{
+            transform:rotate(180deg);
+          }
+
+          @media (max-width:991.98px){
+            body > .container.py-4{
+              margin-left:0 !important;
+              width:100% !important;
+              max-width:100% !important;
+              padding:8px !important;
+            }
+
+            .sgsi-global-menu-wrap{
+              top:calc(var(--sgsi-topbar-h) + 6px) !important;
+              width:235px !important;
+            }
+          }
+        </style>
+
+        <script>
+          (function(){
+            function getPanel(trigger){
+              const id = trigger.getAttribute("data-target");
+              return id ? document.getElementById(id) : null;
+            }
+
+            function closeChildren(panel){
+              if (!panel) return;
+
+              panel.querySelectorAll(".sgsi-global-panel.sgsi-open").forEach(function(p){
+                p.classList.remove("sgsi-open");
+              });
+
+              panel.querySelectorAll(".sgsi-active").forEach(function(a){
+                a.classList.remove("sgsi-active");
+              });
+            }
+
+            function closeSiblings(trigger){
+              const owner = trigger.closest(".sgsi-global-root-item, .sgsi-global-node");
+              if (!owner) return;
+
+              const parent = owner.parentElement;
+              if (!parent) return;
+
+              parent.querySelectorAll(":scope > .sgsi-global-root-item, :scope > .sgsi-global-node").forEach(function(sibling){
+                if (sibling !== owner) {
+                  sibling.querySelectorAll(".sgsi-global-panel.sgsi-open").forEach(function(panel){
+                    panel.classList.remove("sgsi-open");
+                  });
+
+                  sibling.querySelectorAll(".sgsi-active").forEach(function(active){
+                    active.classList.remove("sgsi-active");
+                  });
+                }
+              });
+            }
+
+            function toggleMenu(trigger){
+              const panel = getPanel(trigger);
+              if (!panel) return;
+
+              const isOpen = panel.classList.contains("sgsi-open");
+
+              closeSiblings(trigger);
+
+              if (isOpen) {
+                trigger.classList.remove("sgsi-active");
+                panel.classList.remove("sgsi-open");
+                closeChildren(panel);
+              } else {
+                trigger.classList.add("sgsi-active");
+                panel.classList.add("sgsi-open");
+              }
+            }
+
+            document.querySelectorAll(".sgsi-global-root-toggle, .sgsi-global-node-toggle").forEach(function(toggle){
+              toggle.addEventListener("click", function(e){
+                if (toggle.classList.contains("sgsi-global-panel-control-btn")) return;
+                e.preventDefault();
+                e.stopPropagation();
+                toggleMenu(toggle);
+              });
+            });
+
+            const menuToggle = document.getElementById("sgsiGlobalMenuToggle");
+            if (menuToggle) {
+              menuToggle.addEventListener("click", function(e){
+                e.preventDefault();
+                e.stopPropagation();
+                document.body.classList.toggle("sgsi-menu-collapsed");
+              });
+            }
+          })();
+        </script>
+        """, sections=sections)
+
+    except Exception as e:
+        print("Error construyendo menú global SGSI:", repr(e))
+        return ""
+
+
+@app.after_request
+def inject_sgsi_global_vertical_menu(response):
+    try:
+        content_type = response.headers.get("Content-Type", "")
+
+        if "text/html" not in content_type:
+            return response
+
+        user_id = session.get("user_id")
+        if not user_id:
+            return response
+
+        endpoint = request.endpoint or ""
+
+        rutas_excluidas = {
+            "login",
+            "logout",
+            "static",
+            "dashboard_status",
+            "menu"
+        }
+
+        if endpoint in rutas_excluidas:
+            return response
+
+        html = response.get_data(as_text=True)
+
+        if not html or "sgsiGlobalMenu" in html:
+            return response
+
+        menu_html = _sgsi_build_global_menu_html()
+        if not menu_html:
+            return response
+
+        if "</header>" in html:
+            html = html.replace("</header>", "</header>\n" + menu_html, 1)
+        elif "<body>" in html:
+            html = html.replace("<body>", "<body>\n" + menu_html, 1)
+        elif "</body>" in html:
+            html = html.replace("</body>", menu_html + "\n</body>", 1)
+        else:
+            html = menu_html + html
+
+        response.set_data(html)
+        response.headers["Content-Length"] = str(len(response.get_data()))
+
+    except Exception as e:
+        print("No se pudo inyectar menú global SGSI:", repr(e))
+
+    return response
+
 # =========================
 # API JSON TABLERO PRINCIPAL
 # =========================
@@ -7920,6 +8557,7 @@ def dashboard_status():
         payload = _dashboard_build_payload()
         return jsonify({
             "ok": True,
+
             "iso_radar_b64": payload.get("iso_radar_b64", ""),
             "iso_pct": float(payload.get("iso_pct", 0) or 0),
 
@@ -7927,17 +8565,21 @@ def dashboard_status():
             "nist_pct": float(payload.get("nist_pct", 0) or 0),
 
             "datos_gauge_b64": payload.get("datos_gauge_b64", ""),
+            "datos_pct": float(payload.get("datos_pct", 0) or 0),
+
             "riesgos_b64": payload.get("riesgos_b64", ""),
             "incidentes_b64": payload.get("incidentes_b64", ""),
             "vulnerabilidades_b64": payload.get("vulnerabilidades_b64", ""),
-            "datos_pct": float(payload.get("datos_pct", 0) or 0),
+
+            "proveedores_criticidad_b64": payload.get("proveedores_criticidad_b64", ""),
+            "planes_accion_estado_b64": payload.get("planes_accion_estado_b64", ""),
+            "requisitos_legales_estado_b64": payload.get("requisitos_legales_estado_b64", ""),
         })
     except Exception as e:
         return jsonify({
             "ok": False,
             "error": str(e)
         }), 500
-
 
 # ====================
 # Menú principal con tablero compacto
@@ -7947,332 +8589,309 @@ def dashboard_status():
 @login_required
 def menu():
     usuario_actual = User.query.get(session.get('user_id'))
-
-    # =========================================================
-    # 1) Filtrar items según permisos
-    # =========================================================
-    sections = []
-    for sec in MENU_SECTIONS:
-        allowed_items = filtrar_items_menu(sec.get("items", []), usuario_actual)
-
-        if allowed_items:
-            sec2 = dict(sec)
-            sec2["items"] = allowed_items
-            sections.append(sec2)
-
-    # =========================================================
-    # 2) Construcción de tablero
-    # =========================================================
     dashboard = _dashboard_build_payload()
 
-    # =========================================================
-    # 3) Render
-    # =========================================================
-    content = render_template_string("""
-    <div class="sgsi-menu-shell">
+    # Admin ve todo el menú completo.
+    # Otros roles ven solo lo permitido.
+    if usuario_actual and usuario_actual.role == "admin":
+        sections = MENU_SECTIONS
+    else:
+        sections = []
+        for sec in MENU_SECTIONS:
+            allowed_items = filtrar_items_menu(sec.get("items", []), usuario_actual)
+            if allowed_items:
+                sec2 = dict(sec)
+                sec2["items"] = allowed_items
+                sections.append(sec2)
 
-      <div class="sgsi-menu-header">
-        <div class="sgsi-menu-header-icon">
-          <i class="bi bi-shield-check"></i>
-        </div>
-        <div class="sgsi-menu-header-body">
-          <h2 class="sgsi-menu-header-title">Centro de Control SGSI</h2>
-          <p class="sgsi-menu-header-text">
-            Visualice el estado general del sistema y acceda a los módulos desde el menú lateral.
-          </p>
-        </div>
-      </div>
+    content = render_template_string("""
+    <div class="soa-shell">
 
       <div class="sgsi-layout">
 
-        <!-- MENÚ IZQUIERDO -->
-        <aside class="sgsi-leftnav-wrap">
+        <!-- MENÚ PRINCIPAL COMPLETO -->
+        <aside id="sgsiLocalMenu" class="sgsi-leftnav-wrap">
+
+          <div id="sgsiLocalMenuToggle" class="sgsi-leftnav-arrow">
+            <span class="sgsi-arrow-icon">‹</span>
+          </div>
+
           <div class="sgsi-leftnav-card">
+
             <div class="sgsi-leftnav-header">
               <div class="sgsi-leftnav-header-icon">
                 <i class="bi bi-list-ul"></i>
               </div>
-              <div class="sgsi-leftnav-header-text">
-                <div class="text-blank sgsi-leftnav-title">Menú principal</div>
+              <div>
+                <div class="sgsi-leftnav-title">Menú principal</div>
                 <div class="sgsi-leftnav-subtitle">Acceso a módulos</div>
               </div>
             </div>
 
             <div class="sgsi-leftnav-list">
+
+              <a class="sgsi-leftnav-link sgsi-panel-control-btn" href="/">
+                <i class="bi bi-speedometer2"></i>
+                <span>Centro de Control</span>
+              </a>
+
+              {% macro render_menu_items(items, prefix) %}
+                {% for it in items %}
+                  {% set item_id = prefix ~ "_item_" ~ loop.index %}
+
+                  {% if it.get("children") %}
+                    <li class="sgsi-node">
+                      <a class="sgsi-dropdown-item sgsi-node-toggle"
+                         href="javascript:void(0);"
+                         data-target="{{ item_id }}">
+                        <i class="bi {{ it.get('icon','bi-box') }}"></i>
+                        <span>{{ it["label"] }}</span>
+                      </a>
+
+                      <ul class="sgsi-panel sgsi-subpanel" id="{{ item_id }}">
+                        {{ render_menu_items(it["children"], item_id) }}
+                      </ul>
+                    </li>
+                  {% else %}
+                    <li>
+                      <a class="sgsi-dropdown-item" href="{{ it.get('href', '#') }}">
+                        <i class="bi {{ it.get('icon','bi-dot') }}"></i>
+                        <span>{{ it["label"] }}</span>
+                      </a>
+                    </li>
+                  {% endif %}
+                {% endfor %}
+              {% endmacro %}
+
               {% for sec in sections %}
                 {% set sid = "sgsi_root_" ~ loop.index %}
+
                 <div class="sgsi-root-item">
-                  <button class="btn sgsi-leftnav-link sgsi-root-toggle"
+                  <button class="sgsi-leftnav-link sgsi-root-toggle"
                           type="button"
                           data-target="{{ sid }}">
                     <i class="bi {{ sec.get('icon', 'bi-grid-1x2') }}"></i>
-                    <span class="sgsi-leftnav-link-text">{{ sec["title"] }}</span>
+                    <span>{{ sec["title"] }}</span>
                   </button>
 
-                  <ul class="sgsi-panel sgsi-root-panel" id="{{ sid }}">
-                    {% for it in sec["items"] %}
-                      {% if it.get("children") %}
-                        {% set cid = sid ~ "_child_" ~ loop.index %}
-                        <li class="sgsi-node">
-                          <a class="sgsi-dropdown-item sgsi-node-toggle"
-                             href="javascript:void(0);"
-                             data-target="{{ cid }}">
-                            <i class="bi {{ it.get('icon','bi-box') }}"></i>
-                            <span>{{ it["label"] }}</span>
-                          </a>
-
-                          <ul class="sgsi-panel sgsi-subpanel" id="{{ cid }}">
-                            {% for child in it["children"] %}
-                              {% if child.get("children") %}
-                                {% set gcid = cid ~ "_child_" ~ loop.index %}
-                                <li class="sgsi-node">
-                                  <a class="sgsi-dropdown-item sgsi-node-toggle"
-                                     href="javascript:void(0);"
-                                     data-target="{{ gcid }}">
-                                    <i class="bi {{ child.get('icon','bi-diagram-3') }}"></i>
-                                    <span>{{ child["label"] }}</span>
-                                  </a>
-
-                                  <ul class="sgsi-panel sgsi-subpanel" id="{{ gcid }}">
-                                    {% for sub in child["children"] %}
-                                      <li>
-                                        <a class="sgsi-dropdown-item"
-                                           href="{{ sub.href }}"
-                                           onclick="showLoader()">
-                                          <i class="bi {{ sub.get('icon','bi-dot') }}"></i>
-                                          <span>{{ sub["label"] }}</span>
-                                        </a>
-                                      </li>
-                                    {% endfor %}
-                                  </ul>
-                                </li>
-                              {% else %}
-                                <li>
-                                  <a class="sgsi-dropdown-item"
-                                     href="{{ child.href }}"
-                                     onclick="showLoader()">
-                                    <i class="bi {{ child.get('icon','bi-dot') }}"></i>
-                                    <span>{{ child["label"] }}</span>
-                                  </a>
-                                </li>
-                              {% endif %}
-                            {% endfor %}
-                          </ul>
-                        </li>
-                      {% else %}
-                        <li>
-                          <a class="sgsi-dropdown-item"
-                             href="{{ it.href }}"
-                             onclick="showLoader()">
-                            <i class="bi {{ it.get('icon','bi-box') }}"></i>
-                            <span>{{ it["label"] }}</span>
-                          </a>
-                        </li>
-                      {% endif %}
-                    {% endfor %}
+                  <ul class="sgsi-panel" id="{{ sid }}">
+                    {{ render_menu_items(sec["items"], sid) }}
                   </ul>
                 </div>
               {% endfor %}
+
             </div>
           </div>
         </aside>
 
         <!-- TABLERO -->
-        <div class="sgsi-dashboard-zone">
-          <div class="sgsi-dashboard-grid">
+        <main class="sgsi-dashboard-zone">
 
-            <div class="sgsi-card sgsi-card-large">
-              <div class="sgsi-card-head">
-                <div class="sgsi-card-title">Madurez ISO 27001</div>
-                <div class="sgsi-card-subtitle" id="dash_iso_pct">
-                  Cumplimiento general: {{ "%.2f"|format(dashboard.iso_pct) }}%
+          <section class="sgsi-stats-grid">
+
+            <div class="sgsi-stat-card">
+              <div class="sgsi-stat-icon blue">
+                <i class="bi bi-shield-check"></i>
+              </div>
+              <div class="sgsi-stat-text">
+                <div class="sgsi-stat-title">ISO 27001</div>
+                <div class="sgsi-stat-value blue-text" id="dash_iso_stat">
+                  {{ "%.2f"|format(dashboard.iso_pct) }}%
+                </div>
+                <div class="sgsi-stat-link">Madurez general</div>
+              </div>
+            </div>
+
+            <div class="sgsi-stat-card">
+              <div class="sgsi-stat-icon orange">
+                <i class="bi bi-compass"></i>
+              </div>
+              <div class="sgsi-stat-text">
+                <div class="sgsi-stat-title">NIST CSF 2.0</div>
+                <div class="sgsi-stat-value orange-text" id="dash_nist_stat">
+                  {{ "%.2f"|format(dashboard.nist_pct) }}%
+                </div>
+                <div class="sgsi-stat-link">Cumplimiento general</div>
+              </div>
+            </div>
+
+            <div class="sgsi-stat-card">
+              <div class="sgsi-stat-icon green">
+                <i class="bi bi-lock-fill"></i>
+              </div>
+              <div class="sgsi-stat-text">
+                <div class="sgsi-stat-title">Datos Personales</div>
+                <div class="sgsi-stat-value green-text" id="dash_datos_stat">
+                  {{ "%.2f"|format(dashboard.datos_pct) }}%
+                </div>
+                <div class="sgsi-stat-link">Nivel de cumplimiento</div>
+              </div>
+            </div>
+
+            <div class="sgsi-stat-card">
+              <div class="sgsi-stat-icon red">
+                <i class="bi bi-graph-up-arrow"></i>
+              </div>
+              <div class="sgsi-stat-text">
+                <div class="sgsi-stat-title">Estadísticas SGSI</div>
+                <div class="sgsi-stat-value red-text" id="dash_sgsi_stat">
+                  {{ "%.2f"|format((dashboard.iso_pct + dashboard.nist_pct + dashboard.datos_pct) / 3) }}%
+                </div>
+                <div class="sgsi-stat-link">Tablero consolidado</div>
+              </div>
+            </div>
+
+          </section>
+
+          <section class="sgsi-dashboard-grid">
+
+            {% set charts = [
+              ("Madurez ISO 27001", dashboard.iso_pct, dashboard.iso_radar_b64, "dash_iso_radar"),
+              ("Madurez NIST CSF 2.0", dashboard.nist_pct, dashboard.nist_radar_b64, "dash_nist_radar"),
+              ("Protección de Datos Personales", dashboard.datos_pct, dashboard.datos_gauge_b64, "dash_datos_gauge"),
+              ("Riesgos residuales", "Distribución", dashboard.riesgos_b64, "dash_riesgos"),
+              ("Incidentes", "Clasificación", dashboard.incidentes_b64, "dash_incidentes"),
+              ("Vulnerabilidades", "Criticidad", dashboard.vulnerabilidades_b64, "dash_vulnerabilidades"),
+              ("Proveedores", "Criticidad", dashboard.proveedores_criticidad_b64, "dash_proveedores_criticidad"),
+              ("Planes de acción", "Estado", dashboard.planes_accion_estado_b64, "dash_planes_accion_estado"),
+              ("Requisitos legales", "Cumplimiento", dashboard.requisitos_legales_estado_b64, "dash_requisitos_legales_estado")
+            ] %}
+
+            {% for title, value, img, img_id in charts %}
+              <div class="sgsi-chart-card">
+                <div class="sgsi-chart-head">
+                  <h3>{{ title }}</h3>
+                  <span>
+                    {% if value is number %}
+                      {{ "%.2f"|format(value) }}%
+                    {% else %}
+                      {{ value }}
+                    {% endif %}
+                  </span>
+                </div>
+                <div class="sgsi-chart-body">
+                  <img id="{{ img_id }}"
+                       src="data:image/png;base64,{{ img }}"
+                       class="sgsi-chart-img">
                 </div>
               </div>
-              <div class="sgsi-card-body chart-center chart-center-radar">
-                <img id="dash_iso_radar"
-                     src="data:image/png;base64,{{ dashboard.iso_radar_b64 }}"
-                     alt="Radar ISO 27001"
-                     class="sgsi-chart-img sgsi-chart-radar-big">
-              </div>
-            </div>
+            {% endfor %}
 
-            <div class="sgsi-card sgsi-card-large">
-              <div class="sgsi-card-head">
-                <div class="sgsi-card-title">Madurez NIST CSF 2.0</div>
-                <div class="sgsi-card-subtitle" id="dash_nist_pct">
-                  Cumplimiento general: {{ "%.2f"|format(dashboard.nist_pct) }}%
-                </div>
-              </div>
-              <div class="sgsi-card-body chart-center chart-center-radar">
-                <img id="dash_nist_radar"
-                     src="data:image/png;base64,{{ dashboard.nist_radar_b64 }}"
-                     alt="Radar NIST CSF 2.0"
-                     class="sgsi-chart-img sgsi-chart-radar-big">
-              </div>
-            </div>
+          </section>
 
-            <div class="sgsi-card sgsi-card-large">
-              <div class="sgsi-card-head">
-                <div class="sgsi-card-title">Protección de datos personales</div>
-                <div class="sgsi-card-subtitle" id="dash_datos_pct">
-                  Cumplimiento: {{ "%.2f"|format(dashboard.datos_pct) }}%
-                </div>
-              </div>
-              <div class="sgsi-card-body chart-center chart-center-large">
-                <img id="dash_datos_gauge"
-                     src="data:image/png;base64,{{ dashboard.datos_gauge_b64 }}"
-                     alt="Cumplimiento protección de datos"
-                     class="sgsi-chart-img sgsi-chart-gauge">
-              </div>
-            </div>
-
-            <div class="sgsi-card sgsi-card-large">
-              <div class="sgsi-card-head">
-                <div class="sgsi-card-title">Riesgos residuales</div>
-                <div class="sgsi-card-subtitle">Distribución por nivel</div>
-              </div>
-              <div class="sgsi-card-body chart-center chart-center-large">
-                <img id="dash_riesgos"
-                     src="data:image/png;base64,{{ dashboard.riesgos_b64 }}"
-                     alt="Riesgos residuales"
-                     class="sgsi-chart-img sgsi-chart-donut">
-              </div>
-            </div>
-
-            <div class="sgsi-card sgsi-card-large">
-              <div class="sgsi-card-head">
-                <div class="sgsi-card-title">Incidentes</div>
-                <div class="sgsi-card-subtitle">Clasificación desde registro_incidentes</div>
-              </div>
-              <div class="sgsi-card-body chart-center chart-center-large">
-                <img id="dash_incidentes"
-                     src="data:image/png;base64,{{ dashboard.incidentes_b64 }}"
-                     alt="Incidentes por clasificación"
-                     class="sgsi-chart-img sgsi-chart-donut">
-              </div>
-            </div>
-
-            <div class="sgsi-card sgsi-card-large">
-              <div class="sgsi-card-head">
-                <div class="sgsi-card-title">Vulnerabilidades</div>
-                <div class="sgsi-card-subtitle">Distribución por criticidad</div>
-              </div>
-              <div class="sgsi-card-body chart-center chart-center-large">
-                <img id="dash_vulnerabilidades"
-                     src="data:image/png;base64,{{ dashboard.vulnerabilidades_b64 }}"
-                     alt="Vulnerabilidades por criticidad"
-                     class="sgsi-chart-img sgsi-chart-donut">
-              </div>
-            </div>
-
-          </div>
-        </div>
-
+        </main>
       </div>
     </div>
-    
 
     <style>
       body{
-        background:#c9ced6 !important;
-        background-image:none !important;
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
       }
 
-      .container.py-4{
-        max-width:100% !important;
-        width:100% !important;
-        padding-top:10px !important;
-        padding-left:10px !important;
-        padding-right:10px !important;
-        padding-bottom:12px !important;
-        overflow:visible !important;
+      .soa-shell{
+        width:97%;
+        max-width:1820px;
+        margin:8px auto 30px auto;
       }
 
-      .sgsi-menu-shell{
-        width:100%;
-        margin:0;
-        position:relative;
-        overflow:visible !important;
-      }
-
-      .sgsi-menu-header{
-        display:flex;
-        align-items:center;
-        gap:12px;
-        width:100%;
+      .soa-header-card{
         background:linear-gradient(135deg,#2f6fb6 0%,#3f86d6 55%,#5aa3ea 100%);
-        border-radius:18px;
-        box-shadow:0 8px 22px rgba(0,0,0,.08);
-        padding:10px 14px;
-        margin-bottom:12px;
-      }
-
-      .sgsi-menu-header-icon{
-        width:42px;
-        height:42px;
-        border-radius:12px;
+        min-height:92px;
         display:flex;
         align-items:center;
         justify-content:center;
-        background:#d5dbe2;
-        color:#44515f;
-        box-shadow:0 6px 14px rgba(0,0,0,.08);
-        flex:0 0 auto;
+        border-radius:20px;
+        box-shadow:0 12px 30px rgba(0,0,0,.30);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
       }
 
-      .sgsi-menu-header-title{
-        margin:0;
-        font-size:1rem;
-        font-weight:900;
+      .soa-header-overlay{
+        width:100%;
+        height:100%;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        text-align:center;
+        padding:10px 24px;
+        background:rgba(0,0,0,.08);
+      }
+
+      .soa-header-text{
+        max-width:1250px;
+      }
+
+      .soa-title{
         color:#ffffff !important;
-        line-height:1.1;
+        font-weight:900;
+        font-size:1.42rem;
+        line-height:1.15;
+        text-shadow:0 4px 14px rgba(0,0,0,.45);
+        margin:0;
       }
 
-      .sgsi-menu-header-text{
-        margin:3px 0 0 0;
-        color:#eaf2ff !important;
-        font-size:.83rem;
-        line-height:1.28;
+      .soa-subtitle{
+        color:rgba(255,255,255,.97);
+        font-size:.84rem;
+        margin-top:4px;
+        text-shadow:0 2px 8px rgba(0,0,0,.35);
       }
 
       .sgsi-layout{
         display:grid;
-        grid-template-columns:280px minmax(0,1fr);
-        gap:14px;
+        grid-template-columns:265px minmax(0,1fr);
+        gap:16px;
         align-items:start;
-        overflow:visible !important;
+        transition:all .22s ease;
       }
 
       .sgsi-leftnav-wrap{
         position:relative;
-        z-index:20;
-        overflow:visible !important;
       }
 
       .sgsi-leftnav-card{
-        background:linear-gradient(180deg,#2f6fb6 0%,#1f4e8c 100%);
-        border:1px solid rgba(255,255,255,.25);
-        border-radius:16px;
-        box-shadow:0 10px 25px rgba(0,0,0,.25);
-        padding:10px;
-        overflow:visible !important;
-        position:sticky;
-        top:10px;
-        z-index:20;
+      background:linear-gradient(180deg,#2f6fb6 0%,#1f4e8c 100%);
+      border:1px solid rgba(255,255,255,.25);
+      border-radius:16px;
+      box-shadow:0 10px 25px rgba(0,0,0,.25);
+      padding:10px;
+
+      /* ✅ MUESTRA TODO EL MENÚ SIN SCROLL INTERNO */
+      max-height:none !important;
+      height:auto !important;
+      overflow:visible !important;
+    }
+
+      .sgsi-leftnav-card::-webkit-scrollbar{
+        width:7px;
+      }
+
+      .sgsi-leftnav-card::-webkit-scrollbar-thumb{
+        background:rgba(255,255,255,.38);
+        border-radius:999px;
       }
 
       .sgsi-leftnav-header{
+        position:sticky;
+        top:0;
+        z-index:5;
         display:flex;
         align-items:center;
-        gap:10px;
-        padding:4px 4px 10px 4px;
+        gap:8px;
+        padding:7px 6px 9px 6px;
         border-bottom:1px solid rgba(255,255,255,.28);
-        margin-bottom:10px;
+        margin-bottom:8px;
+        background:linear-gradient(180deg,#2f6fb6 0%,#2864aa 100%);
       }
 
       .sgsi-leftnav-header-icon{
-        width:38px;
-        height:38px;
+        width:34px;
+        height:34px;
         border-radius:10px;
         display:flex;
         align-items:center;
@@ -8283,15 +8902,15 @@ def menu():
       }
 
       .sgsi-leftnav-title{
-        font-size:.95rem;
+        font-size:.88rem;
         font-weight:900;
         color:#ffffff !important;
         line-height:1.1;
       }
 
       .sgsi-leftnav-subtitle{
-        margin-top:3px;
-        font-size:.76rem;
+        margin-top:2px;
+        font-size:.70rem;
         color:#ffffff !important;
         line-height:1.2;
       }
@@ -8299,13 +8918,7 @@ def menu():
       .sgsi-leftnav-list{
         display:flex;
         flex-direction:column;
-        gap:8px;
-        overflow:visible !important;
-      }
-
-      .sgsi-root-item{
-        position:relative;
-        overflow:visible !important;
+        gap:6px;
       }
 
       .sgsi-leftnav-link{
@@ -8313,154 +8926,207 @@ def menu():
         display:flex !important;
         align-items:center;
         justify-content:flex-start;
-        gap:8px;
+        gap:7px;
         border:1px solid #d2d8df !important;
-        border-radius:12px !important;
+        border-radius:11px !important;
         background:#ffffff !important;
         color:#334155 !important;
-        padding:10px 10px !important;
-        font-size:.82rem !important;
+        padding:8px 9px !important;
+        font-size:.76rem !important;
         font-weight:800 !important;
-        box-shadow:none !important;
         white-space:normal !important;
         text-align:left;
-        line-height:1.15 !important;
-        min-height:46px !important;
-        transition:all .16s ease;
+        line-height:1.12 !important;
+        min-height:40px !important;
+        text-decoration:none !important;
       }
 
       .sgsi-leftnav-link:hover,
-      .sgsi-leftnav-link:focus,
       .sgsi-leftnav-link.sgsi-active{
         background:#f3f6f8 !important;
         color:#1f2937 !important;
-        transform:translateX(2px);
       }
 
-      .sgsi-leftnav-link-text{
-        display:block;
-        white-space:normal !important;
-        word-break:break-word;
-        line-height:1.12;
+      .sgsi-panel-control-btn{
+        background:linear-gradient(135deg,#0b3a6e 0%,#1459a6 55%,#2c7be5 100%) !important;
+        color:#ffffff !important;
+        border:1px solid rgba(255,255,255,.35) !important;
+        box-shadow:0 8px 18px rgba(0,0,0,.22) !important;
       }
 
-      .sgsi-root-toggle::after{
+      .sgsi-root-toggle::after,
+      .sgsi-node-toggle::after{
         content:"⌄";
         margin-left:auto;
-        font-size:15px;
+        font-size:13px;
         font-weight:900;
-        color:#64748b;
-        transition:transform .18s ease;
       }
 
-      .sgsi-root-toggle.sgsi-active::after{
+      .sgsi-root-toggle.sgsi-active::after,
+      .sgsi-node-toggle.sgsi-active::after{
         transform:rotate(180deg);
       }
 
-      /* =========================================================
-         MENÚ VERTICAL MODERNO — HIJOS Y NIETOS HACIA ABAJO
-         ========================================================= */
-
       .sgsi-panel{
-        position:static !important;
         display:none;
         list-style:none;
-        margin:8px 0 0 0 !important;
-        padding:6px 0 6px 10px !important;
-        width:100% !important;
-        min-width:100% !important;
-        max-width:100% !important;
+        margin:6px 0 0 0 !important;
+        padding:5px 0 5px 7px !important;
         background:rgba(255,255,255,.14) !important;
         border:1px solid rgba(255,255,255,.22) !important;
-        border-radius:12px !important;
-        box-shadow:none !important;
-        z-index:auto !important;
+        border-radius:11px !important;
         overflow:hidden !important;
       }
 
       .sgsi-panel.sgsi-open{
         display:block !important;
-        animation:sgsiMenuDown .18s ease-out;
-      }
-
-      @keyframes sgsiMenuDown{
-        from{
-          opacity:0;
-          transform:translateY(-5px);
-        }
-        to{
-          opacity:1;
-          transform:translateY(0);
-        }
-      }
-
-      .sgsi-root-panel{
-        background:rgba(255,255,255,.13) !important;
       }
 
       .sgsi-subpanel{
-        margin-left:6px !important;
-        padding-left:10px !important;
-        border-left:3px solid rgba(255,255,255,.35) !important;
-        background:rgba(255,255,255,.10) !important;
+        margin-left:4px !important;
+        padding-left:7px !important;
+        border-left:2px solid rgba(255,255,255,.35) !important;
       }
 
       .sgsi-dropdown-item{
         display:flex;
         align-items:center;
-        gap:10px;
-        padding:9px 10px;
-        border-radius:10px;
-        font-size:.82rem;
+        gap:7px;
+        padding:7px 8px;
+        border-radius:9px;
+        font-size:.74rem;
         font-weight:700;
         color:#ffffff !important;
         white-space:normal;
-        line-height:1.18;
+        line-height:1.15;
         text-decoration:none;
-        margin:3px 4px;
+        margin:3px 3px;
         background:rgba(255,255,255,.12);
         border:1px solid rgba(255,255,255,.12);
-        transition:all .16s ease;
       }
 
       .sgsi-dropdown-item:hover,
-      .sgsi-dropdown-item:focus,
       .sgsi-dropdown-item.sgsi-active{
         background:#ffffff !important;
         color:#1f2937 !important;
-        transform:translateX(2px);
       }
 
-      .sgsi-dropdown-item i{
-        color:inherit !important;
-        width:18px;
-        text-align:center;
-        flex:0 0 auto;
+      .sgsi-leftnav-arrow{
+        position:absolute;
+        right:-15px;
+        top:18px;
+        width:22px;
+        height:56px;
+        border-radius:0 999px 999px 0;
+        background:#0b3a6e;
+        color:#ffffff;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        cursor:pointer;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        border:1px solid rgba(255,255,255,.45);
+        z-index:20;
       }
 
-      .sgsi-node{
-        position:relative;
-      }
-
-      .sgsi-node-toggle::after{
-        content:"⌄";
-        border:none !important;
-        margin-left:auto;
-        color:inherit;
-        font-size:15px;
+      .sgsi-arrow-icon{
+        font-size:26px;
         font-weight:900;
-        transition:transform .18s ease;
+        line-height:1;
+        position:relative;
+        top:-1px;
       }
 
-      .sgsi-node-toggle.sgsi-active::after{
+      body.sgsi-menu-collapsed .sgsi-layout{
+        grid-template-columns:0 minmax(0,1fr);
+        gap:0;
+      }
+
+      body.sgsi-menu-collapsed .sgsi-leftnav-card{
+        opacity:0;
+        pointer-events:none;
+        transform:translateX(-270px);
+      }
+
+      body.sgsi-menu-collapsed .sgsi-leftnav-arrow{
+        right:-38px;
+        border-radius:999px;
+      }
+
+      body.sgsi-menu-collapsed .sgsi-arrow-icon{
         transform:rotate(180deg);
       }
 
       .sgsi-dashboard-zone{
-        position:relative;
-        z-index:1;
         min-width:0;
-        overflow:visible !important;
+      }
+
+      .sgsi-stats-grid{
+        display:grid;
+        grid-template-columns:repeat(4,minmax(0,1fr));
+        gap:14px;
+        margin-bottom:18px;
+      }
+
+      .sgsi-stat-card{
+        background:rgba(255,255,255,.96);
+        border-radius:16px;
+        min-height:96px;
+        padding:14px;
+        display:flex;
+        align-items:center;
+        gap:12px;
+        box-shadow:0 10px 22px rgba(15,23,42,.14);
+        overflow:hidden;
+      }
+
+      .sgsi-stat-text{
+        min-width:0;
+        flex:1 1 auto;
+        overflow:hidden;
+      }
+
+      .sgsi-stat-icon{
+        width:48px;
+        height:48px;
+        border-radius:50%;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.22rem;
+        flex:0 0 48px;
+      }
+
+      .sgsi-stat-icon.blue{background:#e8f0ff;color:#2f6ff2;}
+      .sgsi-stat-icon.orange{background:#fff1df;color:#f97316;}
+      .sgsi-stat-icon.green{background:#e6f7ee;color:#16a34a;}
+      .sgsi-stat-icon.red{background:#ffe8e8;color:#ef4444;}
+
+      .blue-text{color:#2f6ff2 !important;}
+      .orange-text{color:#f97316 !important;}
+      .green-text{color:#16a34a !important;}
+      .red-text{color:#ef4444 !important;}
+
+      .sgsi-stat-title{
+        font-size:.76rem;
+        font-weight:850;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+      }
+
+      .sgsi-stat-value{
+        font-size:1.25rem;
+        font-weight:950;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+      }
+
+      .sgsi-stat-link{
+        color:#64748b;
+        font-size:.66rem;
+        font-weight:750;
       }
 
       .sgsi-dashboard-grid{
@@ -8469,289 +9135,120 @@ def menu():
         gap:18px;
       }
 
-      .sgsi-card{
-        background:rgba(255,255,255,.97);
-        border-radius:18px;
-        box-shadow:0 12px 28px rgba(0,0,0,.12);
-        overflow:hidden;
-        border:1px solid rgba(255,255,255,.55);
-        position:relative;
-        z-index:1;
-      }
-
-      .sgsi-card-large{
+      .sgsi-chart-card{
         grid-column:span 4;
-        min-height:390px;
+        background:rgba(255,255,255,.96);
+        border-radius:18px;
+        box-shadow:0 12px 28px rgba(0,0,0,.16);
+        min-height:360px;
+        overflow:hidden;
       }
 
-      .sgsi-card-head{
-        padding:14px 16px 10px 16px;
+      .sgsi-chart-head{
+        padding:15px 18px 9px 18px;
+        display:flex;
+        justify-content:space-between;
+        gap:10px;
         border-bottom:1px solid rgba(15,23,42,.06);
-        background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(248,250,252,.92));
+        background:#fff;
       }
 
-      .sgsi-card-title{
-        font-size:1rem;
-        font-weight:900;
-        color:#111827;
-        line-height:1.15;
+      .sgsi-chart-head h3{
+        margin:0;
+        font-size:.92rem;
+        font-weight:950;
       }
 
-      .sgsi-card-subtitle{
-        margin-top:4px;
-        font-size:.84rem;
-        color:#6b7280;
-        font-weight:700;
+      .sgsi-chart-head span{
+        font-size:.70rem;
+        font-weight:850;
       }
 
-      .sgsi-card-body{
-        padding:12px;
-      }
-
-      .chart-center{
+      .sgsi-chart-body{
+        min-height:295px;
         display:flex;
         align-items:center;
         justify-content:center;
-      }
-
-      .chart-center-radar{
-        min-height:300px;
-      }
-
-      .chart-center-large{
-        min-height:250px;
+        padding:10px 14px 16px;
       }
 
       .sgsi-chart-img{
         width:100%;
-        max-width:100%;
-        height:auto;
-        display:block;
+        height:295px;
         object-fit:contain;
-        border-radius:12px;
       }
 
-      .sgsi-chart-radar-big{
-        max-height:300px;
-      }
-
-      .sgsi-chart-gauge{
-        max-height:240px;
-      }
-
-      .sgsi-chart-donut{
-        max-height:230px;
-      }
-
-      @media (max-width:1200px){
-        .sgsi-card-large{
-          grid-column:span 6;
-        }
-      }
-
-      @media (max-width:991.98px){
-        .container.py-4{
-          padding-left:8px !important;
-          padding-right:8px !important;
-        }
-
+      @media(max-width:1200px){
         .sgsi-layout{
           grid-template-columns:1fr;
         }
 
         .sgsi-leftnav-card{
-          position:relative;
-          top:auto;
+          max-height:none;
         }
 
-        .sgsi-card-large{
-          grid-column:span 12;
-          min-height:340px;
+        .sgsi-stats-grid{
+          grid-template-columns:repeat(2,minmax(0,1fr));
         }
 
-        .chart-center-radar{
-          min-height:260px;
-        }
-
-        .chart-center-large{
-          min-height:220px;
-        }
-
-        .sgsi-chart-radar-big{
-          max-height:260px;
-        }
-
-        .sgsi-chart-gauge,
-        .sgsi-chart-donut{
-          max-height:210px;
+        .sgsi-chart-card{
+          grid-column:span 6;
         }
       }
 
-      @media (max-width:575.98px){
-        .sgsi-menu-header{
-          padding:8px 10px;
-          align-items:flex-start;
+      @media(max-width:991px){
+        .sgsi-stats-grid{
+          grid-template-columns:1fr;
         }
 
-        .sgsi-leftnav-card{
-          padding:8px;
-        }
-
-        .sgsi-leftnav-link{
-          font-size:.8rem !important;
-        }
-
-        .sgsi-card-large{
-          min-height:auto;
+        .sgsi-chart-card{
+          grid-column:span 12;
         }
       }
     </style>
 
-        <script>
-      function getPanel(trigger){
-        const id = trigger.getAttribute('data-target');
-        return id ? document.getElementById(id) : null;
-      }
+    <script>
+      function sgsiTogglePanel(trigger){
+        const id = trigger.getAttribute("data-target");
+        const panel = id ? document.getElementById(id) : null;
+        if(!panel) return;
 
-      function closeChildren(panel){
-        if (!panel) return;
+        const isOpen = panel.classList.contains("sgsi-open");
 
-        panel.querySelectorAll('.sgsi-panel.sgsi-open').forEach(function(p){
-          p.classList.remove('sgsi-open');
-        });
-
-        panel.querySelectorAll('.sgsi-active').forEach(function(a){
-          a.classList.remove('sgsi-active');
-        });
-      }
-
-      function closeSiblings(trigger){
-        const owner = trigger.closest('.sgsi-root-item, .sgsi-node');
-        if (!owner) return;
-
-        const parent = owner.parentElement;
-        if (!parent) return;
-
-        parent.querySelectorAll(':scope > .sgsi-root-item, :scope > .sgsi-node').forEach(function(sibling){
-          if (sibling !== owner) {
-            sibling.querySelectorAll('.sgsi-panel.sgsi-open').forEach(function(panel){
-              panel.classList.remove('sgsi-open');
-            });
-
-            sibling.querySelectorAll('.sgsi-active').forEach(function(active){
-              active.classList.remove('sgsi-active');
-            });
-          }
-        });
-      }
-
-      function toggleVerticalMenu(trigger){
-        const panel = getPanel(trigger);
-        if (!panel) return;
-
-        const isOpen = panel.classList.contains('sgsi-open');
-
-        closeSiblings(trigger);
-
-        if (isOpen) {
-          trigger.classList.remove('sgsi-active');
-          panel.classList.remove('sgsi-open');
-          closeChildren(panel);
-        } else {
-          trigger.classList.add('sgsi-active');
-          panel.classList.add('sgsi-open');
+        if(isOpen){
+          panel.classList.remove("sgsi-open");
+          trigger.classList.remove("sgsi-active");
+        }else{
+          panel.classList.add("sgsi-open");
+          trigger.classList.add("sgsi-active");
         }
       }
 
-      document.querySelectorAll('.sgsi-root-toggle, .sgsi-node-toggle').forEach(function(toggle){
-        toggle.addEventListener('click', function(e){
+      document.addEventListener("click", function(e){
+        const trigger = e.target.closest(".sgsi-root-toggle, .sgsi-node-toggle");
+
+        if(trigger){
           e.preventDefault();
           e.stopPropagation();
-          toggleVerticalMenu(toggle);
-        });
-      });
-
-      document.addEventListener('click', function(e){
-        if (e.target.closest('.sgsi-leftnav-wrap')) return;
-
-        document.querySelectorAll('.sgsi-panel.sgsi-open').forEach(function(panel){
-          panel.classList.remove('sgsi-open');
-        });
-
-        document.querySelectorAll('.sgsi-active').forEach(function(active){
-          active.classList.remove('sgsi-active');
-        });
-      });
-
-      async function refreshDashboardStatus() {
-        try {
-          const r = await fetch('/dashboard/status', { cache: 'no-store' });
-          const data = await r.json();
-
-          if (!data.ok) {
-            console.error('Error cargando tablero:', data.error || 'Error desconocido');
-            return;
-          }
-
-          const iso = document.getElementById('dash_iso_radar');
-          const nist = document.getElementById('dash_nist_radar');
-          const datos = document.getElementById('dash_datos_gauge');
-          const riesgos = document.getElementById('dash_riesgos');
-          const incidentes = document.getElementById('dash_incidentes');
-          const vulnerabilidades = document.getElementById('dash_vulnerabilidades');
-
-          if (iso && data.iso_radar_b64) {
-            iso.src = 'data:image/png;base64,' + data.iso_radar_b64;
-          }
-
-          if (nist && data.nist_radar_b64) {
-            nist.src = 'data:image/png;base64,' + data.nist_radar_b64;
-          }
-
-          if (datos && data.datos_gauge_b64) {
-            datos.src = 'data:image/png;base64,' + data.datos_gauge_b64;
-          }
-
-          if (riesgos && data.riesgos_b64) {
-            riesgos.src = 'data:image/png;base64,' + data.riesgos_b64;
-          }
-
-          if (incidentes && data.incidentes_b64) {
-            incidentes.src = 'data:image/png;base64,' + data.incidentes_b64;
-          }
-
-          if (vulnerabilidades && data.vulnerabilidades_b64) {
-            vulnerabilidades.src = 'data:image/png;base64,' + data.vulnerabilidades_b64;
-          }
-
-          const isoPct = document.getElementById('dash_iso_pct');
-          const nistPct = document.getElementById('dash_nist_pct');
-          const datosPct = document.getElementById('dash_datos_pct');
-
-          if (isoPct) {
-            isoPct.innerText = 'Cumplimiento general: ' + Number(data.iso_pct || 0).toFixed(2) + '%';
-          }
-
-          if (nistPct) {
-            nistPct.innerText = 'Cumplimiento general: ' + Number(data.nist_pct || 0).toFixed(2) + '%';
-          }
-
-          if (datosPct) {
-            datosPct.innerText = 'Cumplimiento: ' + Number(data.datos_pct || 0).toFixed(2) + '%';
-          }
-
-        } catch (err) {
-          console.error('Error refrescando tablero:', err);
+          sgsiTogglePanel(trigger);
+          return;
         }
-      }
 
-      document.addEventListener('DOMContentLoaded', function(){
-        refreshDashboardStatus();
+        const menuToggle = e.target.closest("#sgsiLocalMenuToggle");
+
+        if(menuToggle){
+          e.preventDefault();
+          document.body.classList.toggle("sgsi-menu-collapsed");
+        }
       });
     </script>
     """, sections=sections, dashboard=dashboard)
 
-    return render_template_string(BASE, content=content)
+    return render_template_string(
+        BASE,
+        content=content,
+        current_user=usuario_actual
+    )
 
 # ============================================================================================================================================
 #                                                               Fin del Menu Principal
@@ -8828,13 +9325,6 @@ def areas_area():
         </div>
       </div>
 
-      <!-- BOTÓN VOLVER -->
-      <div class="areas-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn areas-btn-main rounded-pill px-4 fw-bold">
-          ⬅ Volver al Menú Principal
-        </a>
-      </div>
 
       <!-- FORMULARIO -->
       <div class="areas-card p-4 mb-3">
@@ -9232,14 +9722,6 @@ def areas_division():
             </div>
           </div>
         </div>
-      </div>
-
-      <!-- BOTÓN VOLVER -->
-      <div class="divisiones-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn divisiones-btn-main rounded-pill px-4 fw-bold">
-          ⬅ Volver al Menú Principal
-        </a>
       </div>
 
       <!-- FORMULARIO -->
@@ -9717,14 +10199,6 @@ def config_email():
         </div>
       </div>
 
-      <!-- BOTÓN VOLVER -->
-      <div class="smtp-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn smtp-btn-main rounded-pill px-4 fw-bold">
-          ⬅ Volver al Menú Principal
-        </a>
-      </div>
-
       <!-- FORMULARIO -->
       <div class="smtp-card p-4">
         <div class="smtp-section-title">
@@ -10040,14 +10514,6 @@ def empresa_logo():
             </div>
           </div>
         </div>
-      </div>
-
-      <!-- BOTÓN VOLVER -->
-      <div class="logo-header-actions">
-        <a href="{url_for('menu')}"
-           class="btn logo-btn-main rounded-pill px-4 fw-bold">
-          ⬅ Volver al Menú Principal
-        </a>
       </div>
 
       <!-- FORMULARIO -->
@@ -10518,14 +10984,6 @@ def admin_openrouter_key():
         </div>
       </div>
 
-      <!-- BOTÓN VOLVER -->
-      <div class="openrouter-header-actions">
-        <a href="{url_for('menu')}"
-           class="btn openrouter-btn-main rounded-pill px-4 fw-bold">
-          ⬅ Volver al menú principal
-        </a>
-      </div>
-
       <!-- TARJETA -->
       <div class="openrouter-card p-4">
 
@@ -10957,9 +11415,6 @@ def declaracion_aplicabilidad():
                 Guardar
               </button>
             {% endif %}
-            <a class="btn rounded-pill px-4 fw-bold soa-back-btn" href="/">
-              Volver al Menú Principal
-            </a>
           </div>
 
           <!-- =========================
@@ -12164,11 +12619,6 @@ def gestion_riesgos():
             🌡️ Mapa de Calor
           </a>
 
-          <a href="{{ url_for('menu') }}"
-             class="risk-menu-btn risk-back-btn"
-             onclick="showLoader()">
-            ⬅ Volver al Menú Principal
-          </a>
         </div>
       </div>
 
@@ -17782,10 +18232,6 @@ def objetivos_new():
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold objform-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="objform-card">
@@ -18077,10 +18523,6 @@ def objetivos_matriz():
           </a>
         {% endif %}
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold obj-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="obj-table-card">
@@ -18450,11 +18892,6 @@ def objetivos_detalle(id):
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold objd-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
-
         {% if not read_only %}
           <a href="{{ url_for('objetivos_edit', id=it.id) }}"
              class="btn btn-warning rounded-pill px-4 fw-bold">
@@ -18800,10 +19237,6 @@ def objetivos_edit(id):
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold objform-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="objform-card">
@@ -19266,10 +19699,6 @@ def parte_interesada_new():
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold partesnew-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="partesnew-card">
@@ -19968,11 +20397,6 @@ def partes_interesadas_matriz():
           </a>
         {% endif %}
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold pi-back-btn"
-           onclick="showLoader()">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="pi-table-card">
@@ -20338,12 +20762,6 @@ def parte_interesada_detalle(id):
            class="btn rounded-pill px-4 fw-bold pid-back-btn"
            onclick="showLoader()">
           ⬅ Volver a la Matriz
-        </a>
-
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold pid-back-btn"
-           onclick="showLoader()">
-          🏠 Volver al Menú Principal
         </a>
 
         {% if not read_only %}
@@ -20775,11 +21193,6 @@ def parte_interesada_edit(id):
         <a href="{{ url_for('partes_interesadas_matriz') }}"
            class="btn rounded-pill px-4 fw-bold partesedit-back-btn">
           ⬅ Volver a la Matriz
-        </a>
-
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold partesedit-back-btn">
-          🏠 Volver al Menú Principal
         </a>
       </div>
 
@@ -21468,10 +21881,6 @@ def contexto_interno_new():
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold ctxint-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="ctxint-card">
@@ -21726,10 +22135,6 @@ def contexto_interno_matriz():
           </a>
         {% endif %}
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold ctxintmat-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="ctxintmat-card">
@@ -22073,10 +22478,6 @@ def contexto_interno_detalle(id):
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold ctxintd-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
 
         {% if not read_only %}
           <a href="{{ url_for('contexto_interno_edit', id=it.id) }}"
@@ -22380,10 +22781,6 @@ def contexto_interno_edit(id):
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold ctxinted-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="ctxinted-card">
@@ -22750,10 +23147,6 @@ def contexto_externo_new():
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold ctxext-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="ctxext-card">
@@ -23008,10 +23401,6 @@ def contexto_externo_matriz():
           </a>
         {% endif %}
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold ctxextmat-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="ctxextmat-card">
@@ -23355,10 +23744,6 @@ def contexto_externo_detalle(id):
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold ctxextd-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
 
         {% if not read_only %}
           <a href="{{ url_for('contexto_externo_edit', id=it.id) }}"
@@ -23662,10 +24047,6 @@ def contexto_externo_edit(id):
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold ctxexed-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="ctxexed-card">
@@ -24055,10 +24436,6 @@ def dofa_new():
           ⬅ Volver al Listado DOFA
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold dofa-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <form method="POST" class="dofa-card">
@@ -24370,11 +24747,6 @@ def dofa_list():
 
       <div class="dofalist-header-actions">
         <div class="d-flex gap-2 flex-wrap justify-content-center">
-          <a href="{{ url_for('menu') }}"
-             class="btn rounded-pill px-4 fw-semibold dofalist-back-btn"
-             onclick="showLoader()">
-            🏠 Volver al menú principal
-          </a>
 
           {% if not read_only %}
             <a href="{{ url_for('dofa_new') }}"
@@ -26283,10 +26655,6 @@ def docs_matriz():
       </div>
 
       <div class="docmat-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold docmat-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
 
         {% if not read_only %}
           <a href="{{ url_for('docs_new') }}"
@@ -27434,10 +27802,6 @@ def comunicaciones_new(reg_id=None):
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold com-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="com-card">
@@ -27721,10 +28085,6 @@ def comunicaciones_matriz():
       </div>
 
       <div class="com-matrix-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold com-matrix-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
 
         {% if not read_only %}
           <a href="{{ url_for('comunicaciones_new') }}"
@@ -28555,11 +28915,6 @@ def comunicaciones_detalle(id):
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold comdet-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
-
         {% if not read_only %}
           <a href="{{ url_for('comunicaciones_new', reg_id=r.id) }}"
              class="btn btn-warning rounded-pill px-4 fw-bold">
@@ -28953,11 +29308,6 @@ def requisito_legal_new():
            class="btn rounded-pill px-4 fw-bold reqadd-back-btn">
           ⬅ Volver a la Matriz
         </a>
-
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold reqadd-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="reqadd-card">
@@ -29231,10 +29581,6 @@ def req_legal_matriz():
       </div>
 
       <div class="req-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold req-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
 
         {% if not read_only %}
           <a href="{{ url_for('requisito_legal_new') }}"
@@ -29615,11 +29961,6 @@ def req_legal_detalle(id):
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold reqdet-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
-
         {% if not read_only %}
           <a href="{{ url_for('requisito_legal_edit', id=it.id) }}"
              class="btn btn-warning rounded-pill px-4 fw-bold">
@@ -29972,10 +30313,6 @@ def requisito_legal_edit(id):
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold reqedit-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="reqedit-card">
@@ -30258,8 +30595,8 @@ def duenos_info():
     if user.role == 'auditor':
         read_only = True
     else:
-        if user.role != 'admin' and not verificar_permiso(user, "Registro de Proveedores"):
-            flash("No tiene permiso para ver los registros de proveedores.", "danger")
+        if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos"):
+            flash("No tiene permiso para ver la gestión de activos.", "danger")
             return redirect(url_for('proveedores_menu'))
         read_only = False
 
@@ -31113,10 +31450,6 @@ def inventario_informacion_new():
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold invinfo-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="invinfo-card">
@@ -32105,10 +32438,6 @@ def inventario_informacion():
       </div>
 
       <div class="invinfomat-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold invinfomat-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
 
         {% if not read_only %}
           <a href="{{ url_for('inventario_informacion_new') }}"
@@ -33167,10 +33496,6 @@ def inventario_software_new():
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold invsoft-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="invsoft-card">
@@ -33656,10 +33981,6 @@ def inventario_software_edit(id):
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold invsoftedit-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="invsoftedit-card">
@@ -34085,10 +34406,6 @@ def inventario_software():
       </div>
 
       <div class="invsoftmat-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold invsoftmat-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
 
         {% if not read_only %}
           <a href="{{ url_for('inventario_software_new') }}"
@@ -34559,11 +34876,6 @@ def inventario_software_detalle(id):
         <a href="{{ url_for('inventario_software') }}"
            class="btn rounded-pill px-4 fw-bold invsoftdet-back-btn">
           ⬅ Volver a la Matriz
-        </a>
-
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold invsoftdet-back-btn">
-          🏠 Volver al Menú Principal
         </a>
 
         {% if user.role != 'auditor' %}
@@ -35136,11 +35448,6 @@ def inventario_fisico_new():
            class="btn rounded-pill px-4 fw-bold invfis-back-btn">
           ⬅ Volver a la Matriz
         </a>
-
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold invfis-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="invfis-card">
@@ -35707,10 +36014,6 @@ def inventario_fisico_edit(id):
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold invfisedit-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="invfisedit-card">
@@ -36204,10 +36507,6 @@ def inventario_fisico():
       </div>
 
       <div class="invfismat-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold invfismat-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
 
         {% if not read_only %}
           <a href="{{ url_for('inventario_fisico_new') }}"
@@ -36681,11 +36980,6 @@ def inventario_fisico_detalle(id):
         <a href="{{ url_for('inventario_fisico') }}"
            class="btn rounded-pill px-4 fw-bold invfisdet-back-btn">
           ⬅ Volver a la Matriz
-        </a>
-
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold invfisdet-back-btn">
-          🏠 Volver al Menú Principal
         </a>
 
         {% if user.role != 'auditor' %}
@@ -37561,10 +37855,6 @@ def valor_confidencialidad():
 
       <!-- BOTÓN VOLVER -->
       <div class="valconf-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-5 fw-bold valconf-back-btn">
-          ⬅ Volver al Menú Principal
-        </a>
       </div>
 
       <!-- FORMULARIO -->
@@ -38080,10 +38370,6 @@ def valor_integridad():
 
       <!-- BOTÓN VOLVER -->
       <div class="valint-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-5 fw-bold valint-back-btn">
-          ⬅ Volver al Menú Principal
-        </a>
       </div>
 
       <!-- FORMULARIO -->
@@ -38638,10 +38924,7 @@ def valor_disponibilidad():
 
       <!-- BOTÓN VOLVER -->
       <div class="valdisp-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-5 fw-bold valdisp-back-btn">
-          ⬅ Volver al Menú Principal
-        </a>
+    
       </div>
 
       <!-- FORMULARIO -->
@@ -39185,10 +39468,7 @@ def valor_criticidad_activo():
 
       <!-- BOTÓN VOLVER -->
       <div class="valcrit-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-5 fw-bold valcrit-back-btn">
-          ⬅ Volver al Menú Principal
-        </a>
+        
       </div>
 
       <!-- FORMULARIO -->
@@ -39774,10 +40054,7 @@ def inventario_datos_personales_new():
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold invdp-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
+        
       </div>
 
       <div class="invdp-card">
@@ -40204,10 +40481,6 @@ def inventario_datos_personales():
       </div>
 
       <div class="invdpm-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold invdpm-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
 
         {% if not read_only %}
           <a href="{{ url_for('inventario_datos_personales_new') }}"
@@ -40539,10 +40812,6 @@ def inventario_datos_personales_detalle(id):
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold invdpd-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
 
         {% if not read_only %}
           <a href="{{ url_for('inventario_datos_personales_edit', id=item.id) }}"
@@ -40847,10 +41116,6 @@ def inventario_datos_personales_edit(id):
           🔎 Volver al Detalle
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold invdpe-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="invdpe-card">
@@ -41379,10 +41644,6 @@ def accesos_estados():
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold accestado-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="accestado-card mb-3">
@@ -41718,10 +41979,7 @@ def accesos_new():
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold accesoadd-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
+
       </div>
 
       <div class="accesoadd-card">
@@ -42117,10 +42375,7 @@ def accesos_matriz():
       </div>
 
       <div class="accesomat-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold accesomat-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
+        
 
         {% if not read_only %}
           <a href="{{ url_for('accesos_new') }}"
@@ -44085,10 +44340,7 @@ def revision_accesos_new():
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold revadd-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
+
       </div>
 
       <div class="revadd-card">
@@ -44401,10 +44653,7 @@ def revision_accesos_matriz():
       </div>
 
       <div class="revmat-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold revmat-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
+        
 
         {% if not read_only %}
           <a href="{{ url_for('revision_accesos_new') }}"
@@ -46873,11 +47122,7 @@ def rfc_matriz():
 
       <!-- BOTONES SUPERIORES -->
       <div class="rfcmat-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold rfcmat-back-btn"
-           onclick="showLoader()">
-          ⬅ Volver al Menú Principal
-        </a>
+        
 
         {% if not read_only %}
         <a href="{{ url_for('rfc_new') }}"
@@ -49005,10 +49250,6 @@ def rfc_view(id):
           ⬅ Volver a la Matriz RFC
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold rfcdet-back-btn">
-          🏁 Volver al Menú Principal
-        </a>
 
         {% if not read_only %}
           <a href="{{ url_for('rfc_edit', id=item.id) }}"
@@ -50589,11 +50830,6 @@ def incidentes_matriz():
       </div>
 
       <div class="incmat-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold incmat-back-btn"
-           onclick="showLoader()">
-          ⬅ Volver al Menú Principal
-        </a>
 
         {% if not solo_lectura %}
         <a href="{{ url_for('incidentes_nuevo') }}"
@@ -53308,11 +53544,6 @@ def proveedores_matriz():
       </div>
 
       <div class="provmat-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold provmat-back-btn"
-           onclick="showLoader()">
-          ⬅ Volver al Menú Principal
-        </a>
 
         {% if not read_only %}
         <a href="{{ url_for('proveedores_param') }}"
@@ -57498,10 +57729,7 @@ def plan_cf_matriz():
       </div>
 
       <div class="plancfmat-header-actions">
-        <a href="{url_for('menu')}"
-           class="btn rounded-pill px-5 fw-bold plancfmat-back-btn">
-          ⬅ Volver al Menú Principal
-        </a>
+       
 
         {agregar_top}
       </div>
@@ -61509,11 +61737,6 @@ def vulnerabilidades_matriz():
             Modelamiento de amenazas
           </a>
 
-          <a href="{{ url_for('menu') }}"
-             class="btn btn-light rounded-pill px-4 fw-semibold"
-             onclick="showLoader()">
-            Volver al menú principal
-          </a>
         </div>
       </div>
 
@@ -64801,10 +65024,6 @@ def plan_remediacion_new():
           ⬅ Volver a la Matriz
         </a>
 
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold remadd-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
       </div>
 
       <div class="remadd-card">
@@ -65145,10 +65364,6 @@ def plan_remediacion_matriz():
       </div>
 
       <div class="remmat-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold remmat-back-btn">
-          🏠 Volver al Menú Principal
-        </a>
 
         {% if not read_only %}
           <a href="{{ url_for('plan_remediacion_new') }}"
@@ -67830,11 +68045,6 @@ def plan_remediacion_competencias_matriz():
       </div>
 
       <div class="plancompmat-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold plancompmat-back-btn"
-           onclick="showLoader()">
-          ⬅ Volver al Menú Principal
-        </a>
 
         {% if not read_only %}
         <a href="{{ url_for('plan_remediacion_competencias_new') }}"
@@ -70121,10 +70331,7 @@ def cuestionarios_proveedores():
 
       <!-- BOTÓN VOLVER -->
       <div class="propia-header-actions">
-        <a href="/"
-           class="btn rounded-pill px-5 fw-bold propia-back-btn">
-          ⬅️ Volver al Menú Principal
-        </a>
+        
       </div>
 
       <!-- CARGA -->
@@ -72881,10 +73088,7 @@ def config_param_riesgos():
 
       <!-- BOTÓN VOLVER -->
       <div class="riskcfg-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn riskcfg-btn-main rounded-pill px-4 fw-bold">
-          ⬅️ Volver al Menú Principal
-        </a>
+
       </div>
 
       <!-- TARJETA -->
@@ -73193,10 +73397,7 @@ def config_param_incidentes():
 
       <!-- BOTÓN VOLVER -->
       <div class="incparam-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn incparam-btn-main rounded-pill px-4 fw-bold">
-          ⬅️ Volver al Menú Principal
-        </a>
+        
       </div>
 
       <!-- TARJETA PRINCIPAL -->
@@ -73702,10 +73903,7 @@ def config_param_vulnerabilidades():
 
       <!-- BOTÓN VOLVER -->
       <div class="vulnpar-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn vulnpar-btn-main rounded-pill px-4 fw-bold">
-          ⬅️ Volver al Menú Principal
-        </a>
+       
       </div>
 
       <!-- TARJETA PRINCIPAL -->
@@ -74161,10 +74359,7 @@ def config_param_cultura():
 
       <!-- BOTÓN VOLVER -->
       <div class="cultcfg-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn cultcfg-btn-main rounded-pill px-4 fw-bold">
-          ⬅️ Volver al Menú Principal
-        </a>
+    
       </div>
 
       <!-- TARJETA PRINCIPAL -->
@@ -74908,10 +75103,7 @@ def metricas_riesgos():
 
       <!-- BOTÓN VOLVER -->
       <div class="riskmet-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn riskmet-btn-main rounded-pill px-4 fw-bold">
-          ⬅️ Volver al Menú Principal
-        </a>
+        
       </div>
 
       <!-- RESUMEN -->
@@ -75703,10 +75895,7 @@ def metricas_incidente_matriz():
 
       <!-- BOTONES -->
       <div class="minc-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn minc-btn-main rounded-pill px-4 fw-bold">
-          ⬅️ Volver al Menú Principal
-        </a>
+        
       </div>
 
       <!-- FILTROS -->
@@ -77577,10 +77766,7 @@ def metricas_vulnerabilidades():
       </div>
 
       <div class="vulnmet-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn vulnmet-btn-main rounded-pill px-4 fw-bold">
-          ⬅️ Volver al Menú Principal
-        </a>
+        
       </div>
 
       <div class="vulnmet-card p-4 mb-3">
@@ -79401,10 +79587,7 @@ def metricas_cultura_matriz():
       </div>
 
       <div class="cultmet-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn cultmet-btn-main rounded-pill px-4 fw-bold">
-          ⬅️ Volver al Menú Principal
-        </a>
+        
       </div>
 
       <div class="cultmet-card p-4 mb-3">
@@ -80353,11 +80536,7 @@ def metricas_mejora_planes():
 
       <!-- BOTÓN VOLVER -->
       <div class="mejmet-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn mejmet-btn-main rounded-pill px-4 fw-bold"
-           onclick="showLoader()">
-          ⬅ Volver al Menú Principal
-        </a>
+        
       </div>
 
       <div class="row g-3">
@@ -81407,11 +81586,7 @@ def mejora_matriz():
       </div>
 
       <div class="mejmat-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rounded-pill px-4 fw-bold mejmat-back-btn"
-           onclick="showLoader()">
-          ⬅ Volver al Menú Principal
-        </a>
+        
 
         {% if not read_only %}
         <a href="{{ url_for('mejora_new') }}"
@@ -82307,7 +82482,7 @@ def mejora_delete(id):
     return redirect(url_for('mejora_matriz'))
 
 # ==========================================================================================================================================
-#                                                               Fin Módulo de Plan de Mejora del SGSI
+#                                                               Fin Módulo de Planes de Acción del SGSI
 # ==========================================================================================================================================
 
 # ==========================================================================================================================================
@@ -82358,10 +82533,7 @@ def chatgpt_view():
 
       <!-- BOTÓN VOLVER -->
       <div class="chatsgsi-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn chatsgsi-btn-main rounded-pill px-4 fw-bold">
-          ⬅ Volver al Menú Principal
-        </a>
+
       </div>
 
       <!-- TARJETA PRINCIPAL -->
@@ -88239,9 +88411,7 @@ def home():
       </div>
 
       <div class="nistmad-header-actions">
-        <a href="{url_for('menu')}" class="btn nistmad-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-house-door-fill me-2"></i>Volver al Menú Principal
-        </a>
+        
 
         {ingreso_btn}
       </div>
@@ -93970,11 +94140,7 @@ def reportes_home():
       </div>
 
       <div class="rep-header-actions">
-        <a href="{{ url_for('menu') }}"
-           class="btn rep-btn-main rounded-pill px-4 fw-bold"
-           onclick="showLoader()">
-          ⬅ Volver al Menú Principal
-        </a>
+        
       </div>
 
       <div class="rep-card p-4 mb-3">
@@ -96168,9 +96334,6 @@ def home():
 
       <!-- BOTONES PRINCIPALES -->
       <div class="nistmad-header-actions">
-        <a href="{url_for('menu')}" class="btn nistmad-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-house-door-fill me-2"></i>Volver al Menú Principal
-        </a>
 
         {ingreso_btn}
 
@@ -112012,9 +112175,7 @@ def listas_restrictivas_home():
 
        </div>
           <div class="text-center mt-3">
-            <a href="{{ url_for('menu') }}" class="btn btn-light rounded-pill px-4 fw-bold">
-              Volver al Menú Principal
-            </a>
+            
           </div>
       </div>
 
