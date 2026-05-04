@@ -5461,6 +5461,7 @@ MODULES = [
     "Cuestionarios de Proponentes",
     "Revisión en Listas Restrictivas",
     "Security Scorecard de Proveedores",
+    "Security Scorecard de Proponentes",
     "Nivel de madurez ISO 27001:2022",
     "Nivel de Madurez NIST CSF V.2.0",
     "Nivel de Madurez protección de datos personales",
@@ -8070,8 +8071,9 @@ MENU_SECTIONS = [
         "items": [
             {"label": "Cuestionarios de Proponentes", "href": "/cuestionarios_proveedores", "icon": "bi-ui-checks", "btn": "btn-info text-white", "module": "Cuestionarios de Proponentes"},
             {"label": "Revisión en Listas Restrictivas", "href": "/listas_restrictivas", "icon": "bi-shield-exclamation", "btn": "btn-danger", "module": "/Listas Restrictivas"},
+            {"label": "Security Scorecard de Proponentes", "href": "/proponentes/scorecard", "icon": "bi-speedometer", "btn": "btn-warning text-dark", "module": "Cuestionarios de Proponentes"},
             {"label": "Registro de Proveedores", "href": "/proveedores_menu", "icon": "bi-building", "btn": "btn-primary", "module": "Registro de Proveedores"},
-            {"label": "Security Scorecard de Proveedores", "href": "/proveedores/scorecard", "icon": "bi-speedometer2", "btn": "btn-success", "module": "Registro de Proveedores"},
+            {"label": "Security Scorecard de Proveedores", "href": "/proveedores/scorecard", "icon": "bi-speedometer2", "btn": "btn-success", "module": "Registro de Proveedores"},          
         ],
     },
     {
@@ -136664,6 +136666,5349 @@ def proveedores_scorecard_parametros():
         content=Markup(render_template_string(
             body,
             params=params,
+            risk_levels=risk_levels
+        ))
+    )
+
+
+# ==========================================================================================================================================
+#            SCORECARD PROPONENTES INDEPENDIENTE
+#            DNS HEALTH / IP REPUTATION / HACKER CHATTER / ESCANEO KALI PROPIO
+# ==========================================================================================================================================
+# IMPORTANTE:
+# - NO entra en conflicto con Security Scorecard de Proveedores.
+# - Usa rutas propias: /proponentes/scorecard
+# - Usa base propia: instance/scorecard_proponentes.db
+# - No selecciona proveedor desde lista.
+# - El usuario ingresa manualmente el nombre del proponente.
+# - Reutiliza funciones técnicas ya existentes del módulo Scorecard Proveedores:
+#   limpiar_dominio_scorecard, resolver_ip_scorecard, evaluar_dns_health_scorecard,
+#   evaluar_ip_reputation_scorecard, scorecard_calcular_total, nivel_riesgo_scorecard,
+#   scorecard_badge_color, consultar_incidentes_osint_scorecard,
+#   consultar_leakcheck_hibrido_scorecard, consultar_hibp_hibrido_scorecard,
+#   consultar_shodan_hibrido_scorecard, consultar_hacker_chatter_gdelt_scorecard,
+#   consultar_certificados_ct_scorecard, consultar_github_exposure_scorecard,
+#   scorecard_score_hacker_chatter, _scan_cfg, scorecard_tool_path,
+#   scorecard_run_command, scorecard_detectar_severidades,
+#   scorecard_score_kali_desde_resumen.
+# ==========================================================================================================================================
+
+
+SCORECARD_PROPONENTES_DB_PATH = os.path.join(app.instance_path, "scorecard_proponentes.db")
+SCORECARD_PROPONENTES_UPLOAD_DIR = os.path.join(app.instance_path, "scorecard_proponentes_outputs")
+os.makedirs(SCORECARD_PROPONENTES_UPLOAD_DIR, exist_ok=True)
+
+
+# ============================================================
+# DB INDEPENDIENTE SCORECARD PROPONENTES
+# ============================================================
+
+def get_scorecard_proponentes_db_connection():
+    os.makedirs(app.instance_path, exist_ok=True)
+    conn = sqlite3.connect(SCORECARD_PROPONENTES_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_scorecard_proponentes_db():
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    # ===== PARAMETROS =====
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS scorecard_parametros (
+            clave TEXT PRIMARY KEY,
+            valor REAL NOT NULL,
+            descripcion TEXT
+        )
+    """)
+
+    # ===== NIVELES DE RIESGO =====
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS scorecard_risk_levels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            score_min REAL NOT NULL DEFAULT 0,
+            color_bootstrap TEXT DEFAULT 'secondary',
+            orden INTEGER DEFAULT 0,
+            activo INTEGER DEFAULT 1,
+            fecha_creacion TEXT NOT NULL
+        )
+    """)
+
+    parametros_default = [
+        ("peso_dns", 20, "Peso DNS Health"),
+        ("peso_ip", 15, "Peso IP Reputation"),
+        ("peso_kali", 35, "Peso Kali Linux"),
+        ("peso_incidentes", 15, "Peso Incidentes/Brechas"),
+        ("peso_darkweb", 15, "Peso Dark Web / Exposure Intelligence"),
+        ("darkweb_score_sin_hallazgos", 100, "Sin hallazgos"),
+        ("darkweb_score_1_2", 80, "1 a 2 hallazgos"),
+        ("darkweb_score_3_5", 60, "3 a 5 hallazgos"),
+        ("darkweb_score_mas_5", 40, "Más de 5 hallazgos"),
+        ("darkweb_score_credenciales_confirmadas", 20, "Credenciales confirmadas"),
+    ]
+
+    for clave, valor, descripcion in parametros_default:
+        cur.execute("""
+            INSERT OR IGNORE INTO scorecard_parametros (clave, valor, descripcion)
+            VALUES (?, ?, ?)
+        """, (clave, valor, descripcion))
+
+    # ===== RISK LEVELS =====
+    cur.execute("SELECT COUNT(*) FROM scorecard_risk_levels")
+    if cur.fetchone()[0] == 0:
+        niveles = [
+            ("Bajo", 85, "success", 1),
+            ("Medio", 70, "warning text-dark", 2),
+            ("Alto", 50, "danger", 3),
+            ("Crítico", 0, "dark", 4),
+        ]
+
+        for n in niveles:
+            cur.execute("""
+                INSERT INTO scorecard_risk_levels
+                (nombre, score_min, color_bootstrap, orden, activo, fecha_creacion)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                n[0], n[1], n[2], n[3], 1,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ))
+
+    conn.commit()
+    conn.close()
+
+init_scorecard_proponentes_db()
+
+
+# ============================================================
+# PERMISOS
+# ============================================================
+
+def scorecard_proponentes_user_permiso():
+    user = User.query.get(session.get("user_id"))
+
+    if not user:
+        return None, False, False
+
+    read_only = user.role == "auditor"
+
+    if (
+        user.role != "admin"
+        and user.role != "auditor"
+        and not verificar_permiso(user, "Cuestionarios de Proponentes")
+        and not verificar_permiso(user, "Registro de Proveedores")
+    ):
+        return user, False, read_only
+
+    return user, True, read_only
+
+
+# ============================================================
+# UTILIDADES PROPONENTES
+# ============================================================
+
+def scorecard_proponentes_run_dir(run_id, dominio):
+    safe = re.sub(r"[^a-zA-Z0-9_.-]+", "_", dominio or "target")
+    path = os.path.join(SCORECARD_PROPONENTES_UPLOAD_DIR, f"scorecard_proponente_{run_id}_{safe}")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def scorecard_proponentes_output_file(run_dir, herramienta, ext="txt"):
+    herramienta = re.sub(r"[^a-zA-Z0-9_.-]+", "_", herramienta or "output")
+    return os.path.join(run_dir, f"{herramienta}.{ext}")
+
+
+def scorecard_proponentes_set_progress(run_id, pct=None, stage=None, tool=None, estado=None, error=None):
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    updates = []
+    params = []
+
+    if pct is not None:
+        updates.append("progress_pct = ?")
+        params.append(max(0, min(100, int(pct))))
+
+    if stage is not None:
+        updates.append("current_stage = ?")
+        params.append(stage)
+
+    if tool is not None:
+        updates.append("current_tool = ?")
+        params.append(tool)
+
+    if estado is not None:
+        updates.append("estado = ?")
+        params.append(estado)
+
+    if error is not None:
+        updates.append("error_detalle = ?")
+        params.append(error)
+
+    if updates:
+        params.append(run_id)
+        cur.execute(f"""
+            UPDATE scorecard_proponentes_runs
+            SET {', '.join(updates)}
+            WHERE id = ?
+        """, params)
+        conn.commit()
+
+    conn.close()
+
+
+def guardar_scorecard_proponentes_finding(run_id, item):
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO scorecard_proponentes_findings
+        (run_id, categoria, herramienta, control, estado, riesgo, severidad, score,
+         evidencia, recomendacion, archivo_salida, detalle_json, fecha)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        run_id,
+        item.get("categoria"),
+        item.get("herramienta"),
+        item.get("control"),
+        item.get("estado"),
+        item.get("riesgo"),
+        item.get("severidad"),
+        float(item.get("score") or 0),
+        item.get("evidencia"),
+        item.get("recomendacion"),
+        item.get("archivo_salida"),
+        json.dumps(item, ensure_ascii=False),
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ))
+
+    conn.commit()
+    conn.close()
+
+
+def guardar_scorecard_proponentes_output(run_id, herramienta, comando, archivo_salida, exit_code, duracion):
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO scorecard_proponentes_outputs
+        (run_id, herramienta, comando, archivo_salida, exit_code, duracion_segundos, fecha)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        run_id,
+        herramienta,
+        comando,
+        archivo_salida,
+        int(exit_code or 0),
+        float(duracion or 0),
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ))
+
+    conn.commit()
+    conn.close()
+
+
+def guardar_scorecard_proponentes_incidente(run_id, proponente_nombre, dominio, item):
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO scorecard_proponentes_incidents
+        (run_id, proponente_nombre, dominio, fuente, titulo, url,
+         fecha_incidente, severidad, descripcion, detalle_json, fecha_registro)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        run_id,
+        proponente_nombre,
+        dominio,
+        item.get("fuente"),
+        item.get("titulo"),
+        item.get("url"),
+        item.get("fecha_incidente"),
+        item.get("severidad"),
+        item.get("descripcion"),
+        json.dumps(item, ensure_ascii=False),
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ))
+
+    conn.commit()
+    conn.close()
+
+
+def guardar_scorecard_proponentes_darkweb_exposure(run_id, proponente_nombre, dominio, item):
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO scorecard_proponentes_darkweb_exposures
+        (run_id, proponente_nombre, dominio, fuente, tipo_exposicion,
+         indicador, severidad, fecha, evidencia, recomendacion, url,
+         credencial_confirmada, detalle_json, fecha_registro)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        run_id,
+        proponente_nombre,
+        dominio,
+        item.get("fuente"),
+        item.get("tipo_exposicion"),
+        item.get("indicador"),
+        item.get("severidad"),
+        item.get("fecha"),
+        item.get("evidencia"),
+        item.get("recomendacion"),
+        item.get("url"),
+        1 if item.get("credencial_confirmada") else 0,
+        json.dumps(item, ensure_ascii=False),
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ))
+
+    conn.commit()
+    conn.close()
+
+
+# ============================================================
+# INCIDENT HISTORY PROPONENTES
+# ============================================================
+
+def evaluar_incident_history_proponentes_scorecard(run_id, proponente_nombre, dominio):
+    incidentes = consultar_incidentes_osint_scorecard(proponente_nombre, dominio)
+
+    for item in incidentes:
+        guardar_scorecard_proponentes_incidente(run_id, proponente_nombre, dominio, item)
+
+    total = len(incidentes)
+    score, riesgo = scorecard_score_incidentes(incidentes)
+
+    evidencia = (
+        f"Se identificaron {total} referencias públicas o históricas asociadas a incidentes, brechas, ransomware, leaks o ataques."
+        if total else
+        "No se identificaron referencias públicas relevantes de brechas o incidentes en la consulta OSINT básica."
+    )
+
+    guardar_scorecard_proponentes_finding(run_id, {
+        "categoria": "Incident History",
+        "herramienta": "Catálogo histórico + OSINT Público",
+        "control": "Brechas e incidentes de seguridad",
+        "estado": "Con hallazgos" if total else "Sin hallazgos",
+        "riesgo": riesgo,
+        "severidad": riesgo,
+        "score": score,
+        "evidencia": evidencia,
+        "recomendacion": (
+            "Validar manualmente las fuentes públicas encontradas, solicitar explicación formal al proponente "
+            "y pedir evidencia de remediación, mejoras de seguridad y controles posteriores al incidente."
+            if total else
+            "Mantener monitoreo periódico de noticias e incidentes públicos."
+        )
+    })
+
+    return score, riesgo, total
+
+
+# ============================================================
+# HACKER CHATTER / EXPOSURE INTELLIGENCE PROPONENTES
+# ============================================================
+
+def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, dominio, ip):
+    scorecard_proponentes_set_progress(
+        run_id,
+        pct=30,
+        stage="Consultando Hacker Chatter / Exposure Intelligence",
+        tool="OSINT / APIs Proponentes"
+    )
+
+    hallazgos = []
+
+    # LeakCheck independiente Proponentes
+    try:
+        api_key_leakcheck = scorecard_proponentes_get_api_key("leakcheck")
+
+        if api_key_leakcheck:
+            dominio_base = obtener_dominio_base(dominio)
+
+            resp = requests.get(
+                f"https://leakcheck.io/api/v2/query/{dominio_base}",
+                params={"type": "domain", "limit": 100},
+                headers={"Accept": "application/json", "X-API-Key": api_key_leakcheck},
+                timeout=25
+            )
+
+            if resp.status_code == 200:
+                data = resp.json() or {}
+                found, results = scorecard_leakcheck_extraer_resultados(data)
+
+                if found > 0:
+                    hallazgos.append({
+                        "fuente": "LeakCheck API - Proponentes",
+                        "tipo_exposicion": "Credenciales / identidades filtradas",
+                        "indicador": f"{dominio_base} - {found} registros encontrados",
+                        "severidad": "Crítico" if found > 10 else "Alto" if found > 2 else "Medio",
+                        "fecha": datetime.now().strftime("%Y-%m-%d"),
+                        "evidencia": f"LeakCheck reportó {found} registros asociados al dominio {dominio_base}.",
+                        "recomendacion": "Solicitar al proponente investigación formal, rotación de credenciales, MFA obligatorio y evidencia de remediación.",
+                        "url": "https://leakcheck.io/",
+                        "credencial_confirmada": True,
+                        "detalle": {
+                            "found": found,
+                            "raw_passwords_omitted": True
+                        }
+                    })
+            elif resp.status_code in [400, 401, 403, 422, 429]:
+                hallazgos.append(scorecard_api_error_item("LeakCheck API - Proponentes", f"HTTP {resp.status_code}: {resp.text[:300]}"))
+
+    except Exception as e:
+        hallazgos.append(scorecard_api_error_item("LeakCheck API - Proponentes", repr(e)))
+
+    # HIBP independiente Proponentes
+    try:
+        api_key_hibp = scorecard_proponentes_get_api_key("hibp")
+
+        if api_key_hibp:
+            dominio_base = obtener_dominio_base(dominio)
+
+            headers = {
+                "hibp-api-key": api_key_hibp,
+                "User-Agent": "GRAC-SGSI-Scorecard-Proponentes/1.0",
+                "Accept": "application/json"
+            }
+
+            resp = requests.get(
+                f"https://haveibeenpwned.com/api/v3/breacheddomain/{dominio_base}",
+                params={"truncateResponse": "false"},
+                headers=headers,
+                timeout=25
+            )
+
+            if resp.status_code == 200:
+                data = resp.json() or {}
+                total_accounts = len(data.keys()) if isinstance(data, dict) else 0
+
+                if total_accounts > 0:
+                    hallazgos.append({
+                        "fuente": "Have I Been Pwned API - Proponentes",
+                        "tipo_exposicion": "Cuentas del dominio en brechas",
+                        "indicador": f"{dominio_base} - {total_accounts} cuentas afectadas",
+                        "severidad": "Crítico" if total_accounts > 10 else "Alto" if total_accounts > 2 else "Medio",
+                        "fecha": datetime.now().strftime("%Y-%m-%d"),
+                        "evidencia": f"HIBP reportó {total_accounts} cuentas del dominio {dominio_base} asociadas a brechas.",
+                        "recomendacion": "Exigir al proponente revisión de cuentas afectadas, rotación de credenciales, MFA y detección de password reuse.",
+                        "url": "https://haveibeenpwned.com/",
+                        "credencial_confirmada": True,
+                        "detalle": {
+                            "total_accounts": total_accounts,
+                            "raw_accounts_masked": True
+                        }
+                    })
+
+            elif resp.status_code in [400, 401, 403, 429]:
+                hallazgos.append(scorecard_api_error_item("Have I Been Pwned API - Proponentes", f"HTTP {resp.status_code}: dominio no verificado, API key inválida, cuota o rate limit."))
+
+    except Exception as e:
+        hallazgos.append(scorecard_api_error_item("Have I Been Pwned API - Proponentes", repr(e)))
+
+    # Shodan independiente Proponentes
+    try:
+        api_key_shodan = scorecard_proponentes_get_api_key("shodan")
+
+        if api_key_shodan and ip:
+            resp = requests.get(
+                f"https://api.shodan.io/shodan/host/{ip}",
+                params={"key": api_key_shodan},
+                timeout=25
+            )
+
+            if resp.status_code == 200:
+                data = resp.json() or {}
+
+                ports = data.get("ports") or []
+                vulns = data.get("vulns") or {}
+                hostnames = data.get("hostnames") or []
+
+                cves = []
+
+                if isinstance(vulns, dict):
+                    for cve, detail in vulns.items():
+                        cvss = 0
+                        try:
+                            if isinstance(detail, dict):
+                                cvss = float(detail.get("cvss") or 0)
+                        except Exception:
+                            cvss = 0
+
+                        cves.append({
+                            "cve": cve,
+                            "cvss": cvss
+                        })
+
+                critical_cves = [x for x in cves if x["cvss"] >= 9]
+                high_cves = [x for x in cves if 7 <= x["cvss"] < 9]
+
+                if critical_cves:
+                    severidad = "Crítico"
+                elif high_cves or len(cves) > 0:
+                    severidad = "Alto"
+                elif len(ports) >= 8:
+                    severidad = "Medio"
+                else:
+                    severidad = "Bajo"
+
+                if ports or cves:
+                    hallazgos.append({
+                        "fuente": "Shodan API - Proponentes",
+                        "tipo_exposicion": "Servicios expuestos / CVEs",
+                        "indicador": f"{ip} - puertos: {', '.join(str(p) for p in ports[:20])}",
+                        "severidad": severidad,
+                        "fecha": datetime.now().strftime("%Y-%m-%d"),
+                        "evidencia": f"Shodan reportó {len(ports)} puertos observados y {len(cves)} CVEs para la IP {ip}.",
+                        "recomendacion": "Validar exposición de servicios, cerrar puertos innecesarios, aplicar hardening y corregir CVEs.",
+                        "url": f"https://www.shodan.io/host/{ip}",
+                        "credencial_confirmada": False,
+                        "detalle": {
+                            "ip": ip,
+                            "ports": ports,
+                            "hostnames": hostnames,
+                            "cves": cves[:50],
+                            "critical_cves": critical_cves[:20],
+                            "high_cves": high_cves[:20],
+                            "org": data.get("org"),
+                            "isp": data.get("isp"),
+                            "country": data.get("country_name")
+                        }
+                    })
+
+            elif resp.status_code in [400, 401, 403, 429]:
+                hallazgos.append(scorecard_api_error_item("Shodan API - Proponentes", f"HTTP {resp.status_code}: API key inválida, sin créditos o rate limit."))
+
+    except Exception as e:
+        hallazgos.append(scorecard_api_error_item("Shodan API - Proponentes", repr(e)))
+
+    # Fuentes OSINT sin API key
+    try:
+        hallazgos.extend(consultar_hacker_chatter_gdelt_scorecard(proponente_nombre, dominio))
+    except Exception as e:
+        print("Error GDELT proponentes:", repr(e))
+
+    try:
+        hallazgos.extend(consultar_certificados_ct_scorecard(dominio))
+    except Exception as e:
+        print("Error crt.sh proponentes:", repr(e))
+
+    try:
+        hallazgos.extend(consultar_github_exposure_scorecard(proponente_nombre, dominio))
+    except Exception as e:
+        print("Error GitHub exposure proponentes:", repr(e))
+
+    severidad_orden = {
+        "Bajo": 1,
+        "Medio": 2,
+        "Alto": 3,
+        "Crítico": 4,
+        "Critico": 4
+    }
+
+    severidad_max = "Bajo"
+    credencial_confirmada = False
+    total_riesgo = 0
+    total_info = 0
+    total_cves = 0
+
+    for item in hallazgos:
+        detalle = item.get("detalle") or {}
+        no_penaliza = bool(detalle.get("no_penaliza_score"))
+
+        if no_penaliza:
+            total_info += 1
+        else:
+            total_riesgo += 1
+
+        sev = item.get("severidad") or "Bajo"
+
+        if severidad_orden.get(sev, 0) > severidad_orden.get(severidad_max, 0):
+            severidad_max = sev
+
+        if item.get("credencial_confirmada"):
+            credencial_confirmada = True
+
+        try:
+            if isinstance(detalle, dict):
+                total_cves += len(detalle.get("cves") or [])
+        except Exception:
+            pass
+
+        guardar_scorecard_proponentes_darkweb_exposure(
+            run_id,
+            proponente_nombre,
+            dominio,
+            item
+        )
+
+    score, riesgo = scorecard_score_hacker_chatter(
+        total_riesgo,
+        credencial_confirmada=credencial_confirmada,
+        severidad_max=severidad_max
+    )
+
+    estado = "Con hallazgos" if total_riesgo else "Sin hallazgos de riesgo"
+
+    evidencia = (
+        f"Se identificaron {total_riesgo} hallazgos de riesgo y {total_info} hallazgos informativos "
+        f"en Exposure Intelligence / Hacker Chatter."
+        if total_riesgo or total_info else
+        "No se identificaron hallazgos relevantes en las fuentes consultadas."
+    )
+
+    recomendacion = (
+        "Validar hallazgos con el proponente, solicitar evidencias de remediación, rotación de credenciales, "
+        "MFA, hardening, cierre de servicios expuestos y confirmación formal de contención."
+        if total_riesgo else
+        "Mantener monitoreo periódico de exposición externa y fuentes OSINT."
+    )
+
+    guardar_scorecard_proponentes_finding(run_id, {
+        "categoria": "Hacker Chatter / Exposure Intelligence",
+        "herramienta": "LeakCheck + HIBP + Shodan + GDELT + crt.sh + GitHub",
+        "control": "Credenciales, identidades, brechas, CVEs, chatter y superficie expuesta",
+        "estado": estado,
+        "riesgo": riesgo,
+        "severidad": riesgo,
+        "score": score,
+        "evidencia": evidencia,
+        "recomendacion": recomendacion,
+        "detalle": {
+            "total_hallazgos_riesgo": total_riesgo,
+            "total_hallazgos_info": total_info,
+            "severidad_max": severidad_max,
+            "credencial_confirmada": credencial_confirmada,
+            "total_cves": total_cves,
+            "api_scope": "proponentes_independiente"
+        }
+    })
+
+    scorecard_proponentes_set_progress(
+        run_id,
+        pct=40,
+        stage="Hacker Chatter / Exposure Intelligence finalizado",
+        tool=None
+    )
+
+    return score, riesgo, total_riesgo, credencial_confirmada
+
+# ============================================================
+# KALI SCAN INDEPENDIENTE PROPONENTES
+# ============================================================
+
+def ejecutar_scorecard_proponentes_kali_independiente(run_id, dominio):
+    cfg = _scan_cfg()
+    run_dir = scorecard_proponentes_run_dir(run_id, dominio)
+    url = target_url_scorecard(dominio)
+    ip = resolver_ip_scorecard(dominio)
+
+    modo = scorecard_kali_modo(cfg)
+
+    herramientas = {
+        "nmap": scorecard_tool_path(cfg, "nmap"),
+        "whatweb": scorecard_tool_path(cfg, "whatweb"),
+        "nikto": scorecard_tool_path(cfg, "nikto"),
+        "nuclei": scorecard_tool_path(cfg, "nuclei"),
+        "testssl": scorecard_tool_path(cfg, "testssl"),
+    }
+
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE scorecard_proponentes_runs
+        SET modo_kali = ?, herramientas_json = ?, estado = ?, fecha_inicio = ?,
+            progress_pct = ?, current_stage = ?, current_tool = ?
+        WHERE id = ?
+    """, (
+        modo,
+        json.dumps(herramientas, ensure_ascii=False),
+        "ejecutando",
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        45,
+        "Inicializando escaneo Kali independiente",
+        "dispatcher",
+        run_id
+    ))
+
+    conn.commit()
+    conn.close()
+
+    logs = []
+
+    resumen_global = {
+        "criticas": 0,
+        "altas": 0,
+        "medias": 0,
+        "bajas": 0,
+        "errores": 0,
+        "herramientas": {}
+    }
+
+    comandos = []
+
+    if ip:
+        comandos.append(("Nmap", [
+            herramientas["nmap"],
+            "-Pn",
+            "-sV",
+            "--top-ports",
+            "100",
+            ip
+        ], 240))
+
+    comandos.append(("WhatWeb", [
+        herramientas["whatweb"],
+        "--no-errors",
+        url
+    ], 180))
+
+    comandos.append(("Nikto", [
+        herramientas["nikto"],
+        "-host",
+        url,
+        "-nointeractive"
+    ], 300))
+
+    comandos.append(("Nuclei", [
+        herramientas["nuclei"],
+        "-u",
+        url,
+        "-severity",
+        "critical,high,medium,low",
+        "-silent"
+    ], 420))
+
+    comandos.append(("testssl", [
+        herramientas["testssl"],
+        "--fast",
+        "--warnings",
+        "batch",
+        url
+    ], 420))
+
+    total_tools = len(comandos)
+
+    for idx, (nombre, cmd, timeout) in enumerate(comandos, start=1):
+        pct = 45 + int((idx / max(total_tools, 1)) * 45)
+        scorecard_proponentes_set_progress(run_id, pct=pct, stage=f"Ejecutando {nombre}", tool=nombre)
+
+        archivo = scorecard_proponentes_output_file(run_dir, nombre.lower(), "txt")
+
+        try:
+            resultado = scorecard_run_command(cfg, cmd, timeout=timeout)
+
+            with open(archivo, "w", encoding="utf-8", errors="ignore") as f:
+                f.write(resultado.get("output") or "")
+
+            guardar_scorecard_proponentes_output(
+                run_id,
+                nombre,
+                resultado.get("cmd"),
+                archivo,
+                resultado.get("exit_code"),
+                resultado.get("duracion")
+            )
+
+            salida = resultado.get("output") or ""
+            severidades = scorecard_detectar_severidades(salida)
+
+            for k in ["criticas", "altas", "medias", "bajas"]:
+                resumen_global[k] += severidades.get(k, 0)
+
+            resumen_global["herramientas"][nombre] = {
+                "exit_code": resultado.get("exit_code"),
+                "archivo": archivo,
+                "duracion": resultado.get("duracion"),
+                "severidades": severidades
+            }
+
+            riesgo = "Bajo"
+
+            if severidades["criticas"] > 0:
+                riesgo = "Crítico"
+            elif severidades["altas"] > 0:
+                riesgo = "Alto"
+            elif severidades["medias"] > 0:
+                riesgo = "Medio"
+
+            evidencia = salida[:1200] if salida else "La herramienta no retornó hallazgos relevantes."
+
+            guardar_scorecard_proponentes_finding(run_id, {
+                "categoria": "Kali Linux Scan",
+                "herramienta": nombre,
+                "control": f"Ejecución {nombre}",
+                "estado": "Ejecutado" if resultado.get("exit_code") in [0, None] else f"Finalizó con código {resultado.get('exit_code')}",
+                "riesgo": riesgo,
+                "severidad": riesgo,
+                "score": 100 if riesgo == "Bajo" else 70 if riesgo == "Medio" else 45 if riesgo == "Alto" else 20,
+                "evidencia": evidencia,
+                "recomendacion": "Revisar la salida técnica y validar remediación con el proponente.",
+                "archivo_salida": archivo,
+                "detalle": resumen_global["herramientas"][nombre]
+            })
+
+            logs.append(f"\n\n===== {nombre} =====\n{salida[:5000]}")
+
+        except Exception as e:
+            resumen_global["errores"] += 1
+            error_text = traceback.format_exc()
+
+            with open(archivo, "w", encoding="utf-8", errors="ignore") as f:
+                f.write(error_text)
+
+            guardar_scorecard_proponentes_output(
+                run_id,
+                nombre,
+                " ".join(str(x) for x in cmd),
+                archivo,
+                99,
+                0
+            )
+
+            guardar_scorecard_proponentes_finding(run_id, {
+                "categoria": "Kali Linux Scan",
+                "herramienta": nombre,
+                "control": f"Ejecución {nombre}",
+                "estado": "Error",
+                "riesgo": "Medio",
+                "severidad": "Medio",
+                "score": 50,
+                "evidencia": str(e),
+                "recomendacion": "Validar instalación, rutas y conectividad con Kali.",
+                "archivo_salida": archivo,
+                "detalle": {"error": str(e)}
+            })
+
+            logs.append(f"\n\n===== {nombre} ERROR =====\n{error_text[:5000]}")
+
+    score_kali = scorecard_score_kali_desde_resumen(resumen_global)
+
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT score_dns, score_ip, score_incidentes, score_darkweb, resumen_json
+        FROM scorecard_proponentes_runs
+        WHERE id = ?
+    """, (run_id,))
+
+    row = cur.fetchone()
+
+    score_dns = float(row["score_dns"] or 0) if row else 0
+    score_ip = float(row["score_ip"] or 0) if row else 0
+    score_incidentes = float(row["score_incidentes"] or 100) if row else 100
+    score_darkweb = float(row["score_darkweb"] or 100) if row else 100
+
+    score_total = scorecard_proponentes_calcular_total(
+        score_dns,
+        score_ip,
+        score_kali,
+        score_incidentes,
+        score_darkweb,
+        incluir_kali=True
+    )
+
+    nivel = nivel_riesgo_scorecard_proponentes(score_total)
+
+    resumen_base = {}
+
+    try:
+        resumen_base = json.loads(row["resumen_json"] or "{}") if row else {}
+    except Exception:
+        resumen_base = {}
+
+    resumen_final = {
+        **resumen_base,
+        "dns_score": score_dns,
+        "ip_score": score_ip,
+        "kali_score": score_kali,
+        "incident_score": score_incidentes,
+        "darkweb_score": score_darkweb,
+        "score_total": score_total,
+        "nivel_riesgo": nivel,
+        "kali": resumen_global
+    }
+
+    cur.execute("""
+        UPDATE scorecard_proponentes_runs
+        SET score_kali = ?, score_total = ?, nivel_riesgo = ?, estado = ?, progress_pct = ?,
+            current_stage = ?, current_tool = ?, resumen_json = ?, salida_consola = ?, fecha_fin = ?
+        WHERE id = ?
+    """, (
+        score_kali,
+        score_total,
+        nivel,
+        "finalizado",
+        100,
+        "Escaneo Scorecard de Proponentes finalizado",
+        None,
+        json.dumps(resumen_final, ensure_ascii=False),
+        ("\n".join(logs))[:25000],
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        run_id
+    ))
+
+    conn.commit()
+    conn.close()
+
+
+def scorecard_proponentes_kali_worker(run_id, dominio):
+    with app.app_context():
+        try:
+            ejecutar_scorecard_proponentes_kali_independiente(run_id, dominio)
+        except Exception:
+            tb = traceback.format_exc()
+            scorecard_proponentes_set_progress(
+                run_id,
+                pct=100,
+                stage="Error en escaneo Kali independiente de Proponentes",
+                tool=None,
+                estado="error",
+                error=tb
+            )
+
+
+# ============================================================
+# APIs INDEPENDIENTES SCORECARD PROPONENTES
+# ============================================================
+
+def init_scorecard_proponentes_api_db():
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS scorecard_proponentes_api_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proveedor TEXT NOT NULL UNIQUE,
+            api_key_encrypted TEXT,
+            activo INTEGER DEFAULT 0,
+            notas TEXT,
+            actualizado_por TEXT,
+            fecha_actualizacion TEXT NOT NULL
+        )
+    """)
+
+    proveedores_default = [
+        ("leakcheck", "LeakCheck API para Proponentes"),
+        ("hibp", "Have I Been Pwned API para Proponentes"),
+        ("shodan", "Shodan API para Proponentes"),
+    ]
+
+    for proveedor, notas in proveedores_default:
+        cur.execute("""
+            INSERT OR IGNORE INTO scorecard_proponentes_api_keys
+            (proveedor, api_key_encrypted, activo, notas, actualizado_por, fecha_actualizacion)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            proveedor,
+            "",
+            0,
+            notas,
+            "Sistema",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ))
+
+    conn.commit()
+    conn.close()
+
+
+init_scorecard_proponentes_api_db()
+
+
+def scorecard_proponentes_get_api_key(proveedor):
+    proveedor = (proveedor or "").strip().lower()
+
+    try:
+        conn = get_scorecard_proponentes_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT api_key_encrypted, activo
+            FROM scorecard_proponentes_api_keys
+            WHERE proveedor = ?
+            LIMIT 1
+        """, (proveedor,))
+
+        row = cur.fetchone()
+        conn.close()
+
+        if not row:
+            return ""
+
+        if int(row["activo"] or 0) != 1:
+            return ""
+
+        return scorecard_decrypt_api_key(row["api_key_encrypted"])
+
+    except Exception:
+        return ""
+
+
+def scorecard_proponentes_api_status():
+    proveedores = ["leakcheck", "hibp", "shodan"]
+    estado = {}
+
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    for proveedor in proveedores:
+        cur.execute("""
+            SELECT *
+            FROM scorecard_proponentes_api_keys
+            WHERE proveedor = ?
+            LIMIT 1
+        """, (proveedor,))
+
+        row = cur.fetchone()
+
+        if row:
+            api_key = scorecard_decrypt_api_key(row["api_key_encrypted"])
+            estado[proveedor] = {
+                "activo": int(row["activo"] or 0) == 1,
+                "configurada": bool(api_key),
+                "mask": scorecard_mask_api_key(api_key),
+                "fecha": row["fecha_actualizacion"],
+                "notas": row["notas"] or ""
+            }
+        else:
+            estado[proveedor] = {
+                "activo": False,
+                "configurada": False,
+                "mask": "No configurada",
+                "fecha": "",
+                "notas": ""
+            }
+
+    conn.close()
+    return estado
+
+
+def scorecard_proponentes_guardar_api_key(proveedor, api_key, activo, usuario):
+    proveedor = (proveedor or "").strip().lower()
+    api_key = (api_key or "").strip()
+
+    encrypted = scorecard_encrypt_api_key(api_key) if api_key else ""
+
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO scorecard_proponentes_api_keys
+        (proveedor, api_key_encrypted, activo, notas, actualizado_por, fecha_actualizacion)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(proveedor) DO UPDATE SET
+            api_key_encrypted = excluded.api_key_encrypted,
+            activo = excluded.activo,
+            actualizado_por = excluded.actualizado_por,
+            fecha_actualizacion = excluded.fecha_actualizacion
+    """, (
+        proveedor,
+        encrypted,
+        1 if activo and api_key else 0,
+        proveedor,
+        usuario,
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ))
+
+    conn.commit()
+    conn.close()
+
+
+# ============================================================
+# DASHBOARD PROPONENTES
+# ============================================================
+
+@app.route("/proponentes/scorecard")
+@login_required
+def proponentes_scorecard_dashboard():
+    user, allowed, read_only = scorecard_proponentes_user_permiso()
+
+    if not allowed:
+        flash("No tiene permiso para acceder al Security Scorecard de Proponentes.", "danger")
+        return redirect(url_for("menu"))
+
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT *
+        FROM scorecard_proponentes_runs
+        ORDER BY id DESC
+        LIMIT 100
+    """)
+    runs = cur.fetchall()
+
+    cur.execute("SELECT COUNT(*) AS total FROM scorecard_proponentes_runs")
+    total_runs = cur.fetchone()["total"] or 0
+
+    cur.execute("""
+        SELECT AVG(score_total) AS promedio
+        FROM scorecard_proponentes_runs
+        WHERE estado = 'finalizado'
+    """)
+    promedio = cur.fetchone()["promedio"] or 0
+
+    cur.execute("""
+        SELECT COUNT(*) AS total
+        FROM scorecard_proponentes_runs
+        WHERE nivel_riesgo IN ('Alto', 'Crítico', 'Critico')
+    """)
+    alto_critico = cur.fetchone()["total"] or 0
+
+    cur.execute("""
+        SELECT COUNT(*) AS total
+        FROM scorecard_proponentes_runs
+        WHERE estado IN ('pendiente', 'ejecutando')
+    """)
+    en_ejecucion = cur.fetchone()["total"] or 0
+
+    conn.close()
+
+    body = """
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .prop-score-shell{
+        width:96%;
+        max-width:1500px;
+        margin:26px auto 24px auto;
+      }
+
+      .prop-score-header-card{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .prop-score-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }
+
+      .prop-score-title{
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        gap:14px;
+        color:#ffffff;
+        position:relative;
+        z-index:1;
+        width:100%;
+      }
+
+      .prop-score-icon{
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+      }
+
+      .prop-score-pill{
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }
+
+      .prop-score-title h2{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .score-action-row{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .score-action-row .btn,
+      .btn{
+        border-radius:10px !important;
+        min-height:38px;
+        padding:8px 18px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .soft-card{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
+      }
+
+      .metric-card{
+        background:#ffffff;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        box-shadow:0 8px 18px rgba(15,23,42,.10);
+        padding:18px;
+        height:100%;
+      }
+
+      .metric-label{
+        font-size:.72rem;
+        font-weight:900;
+        color:#1459a6;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:8px;
+      }
+
+      .metric-value{
+        color:#1459a6;
+        font-size:1.8rem;
+        font-weight:950;
+        line-height:1;
+      }
+
+      .table-wrap{
+        max-height:72vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        background:#ffffff;
+        border-radius:14px;
+        border:1px solid #dbe6f4;
+        box-shadow:0 12px 24px rgba(15,23,42,.10);
+      }
+
+      .table{
+        margin-bottom:0;
+      }
+
+      .table thead th{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-size:.78rem;
+        font-weight:900 !important;
+        border:none !important;
+        white-space:nowrap;
+        vertical-align:middle !important;
+        text-align:center;
+        padding:9px 8px;
+      }
+
+      .table tbody td{
+        vertical-align:middle !important;
+        font-size:.82rem;
+        padding:9px 8px;
+        border-bottom:1px solid #e5edf7;
+        color:#1f2937;
+      }
+
+      .table tbody tr:nth-child(even){
+        background:#f8fbff;
+      }
+
+      .table tbody tr:hover{
+        background:#eef6ff;
+      }
+
+      .badge{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }
+
+      .acciones-score{
+        display:flex;
+        justify-content:center;
+        gap:6px;
+        flex-wrap:wrap;
+        min-width:260px;
+      }
+
+      .acciones-score .btn{
+        padding:6px 10px !important;
+        min-height:32px;
+        font-size:.74rem;
+      }
+    </style>
+
+    <div class="prop-score-shell">
+
+      <div class="prop-score-header-card">
+        <div class="prop-score-title">
+          <div class="prop-score-icon">⚡</div>
+          <div>
+            <div class="prop-score-pill">SGSI · Scorecard</div>
+            <h2>Security Scorecard de Proponentes</h2>
+          </div>
+        </div>
+      </div>
+
+      <div class="score-action-row">
+        {% if user.role == 'admin' %}
+          <a href="{{ url_for('admin_scorecard_proponentes_apis') }}" class="btn btn-dark">
+            🔐 Configurar APIs
+          </a>
+
+          <a href="{{ url_for('proponentes_scorecard_parametros') }}" class="btn btn-secondary">
+            ⚙️ Parámetros Scorecard
+          </a>
+        {% endif %}
+
+        {% if not read_only %}
+          <a href="{{ url_for('proponentes_scorecard_scan_nuevo') }}" class="btn btn-primary">
+            🚀 Ejecutar Escaneo Scorecard
+          </a>
+        {% endif %}
+      </div>
+
+      <div class="soft-card p-3 mb-4">
+        <h6 class="fw-bold text-primary mb-2">FUENTES ENTERPRISE CONFIGURADAS</h6>
+        <span class="badge bg-secondary me-1">LeakCheck</span>
+        <span class="badge bg-secondary me-1">HIBP</span>
+        <span class="badge bg-secondary me-1">Shodan</span>
+        <span class="badge bg-info text-dark me-1">OSINT público activo</span>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-3">
+          <div class="metric-card">
+            <div class="metric-label">Evaluaciones Ejecutadas</div>
+            <div class="metric-value">{{ total_runs }}</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="metric-card">
+            <div class="metric-label">Score Promedio</div>
+            <div class="metric-value">{{ "%.1f"|format(promedio) }}%</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="metric-card">
+            <div class="metric-label">Riesgos Críticos / No Aceptables</div>
+            <div class="metric-value text-danger">{{ alto_critico }}</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="metric-card">
+            <div class="metric-label">En Ejecución</div>
+            <div class="metric-value text-primary">{{ en_ejecucion }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="soft-card p-3">
+        <h5 class="fw-bold mb-3">📋 Historial de Scorecard de Proponentes</h5>
+
+        <div class="table-wrap">
+          <table class="table table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Proponente</th>
+                <th>Dominio</th>
+                <th>IP</th>
+                <th>DNS</th>
+                <th>IP Rep.</th>
+                <th>Kali</th>
+                <th>Hacker Chatter</th>
+                <th>Total</th>
+                <th>Riesgo</th>
+                <th>Estado</th>
+                <th>Progreso</th>
+                <th class="text-center">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in runs %}
+              <tr>
+                <td class="fw-bold">#{{ r.id }}</td>
+                <td>{{ r.proponente_nombre }}</td>
+                <td>{{ r.dominio }}</td>
+                <td>{{ r.ip_resuelta or "—" }}</td>
+                <td>{{ "%.1f"|format(r.score_dns or 0) }}</td>
+                <td>{{ "%.1f"|format(r.score_ip or 0) }}</td>
+                <td>{{ "%.1f"|format(r.score_kali or 0) }}</td>
+                <td>{{ "%.1f"|format(r.score_darkweb or 100) }}</td>
+                <td class="fw-bold">{{ "%.1f"|format(r.score_total or 0) }}</td>
+                <td>
+                  <span class="badge bg-{{ scorecard_proponentes_badge_color(r.nivel_riesgo or 'Pendiente') }}">
+                    {{ r.nivel_riesgo or "Pendiente" }}
+                  </span>
+                </td>
+                <td>
+                  {% if r.estado == 'finalizado' %}
+                    <span class="badge bg-success">Finalizado</span>
+                  {% elif r.estado == 'error' %}
+                    <span class="badge bg-danger">Error</span>
+                  {% elif r.estado == 'ejecutando' %}
+                    <span class="badge bg-primary">Ejecutando</span>
+                  {% else %}
+                    <span class="badge bg-secondary">{{ r.estado or "Pendiente" }}</span>
+                  {% endif %}
+                </td>
+                <td style="min-width:130px;">
+                  <div class="progress" style="height:18px;border-radius:20px;">
+                    <div class="progress-bar" style="width:{{ r.progress_pct or 0 }}%;">
+                      {{ r.progress_pct or 0 }}%
+                    </div>
+                  </div>
+                </td>
+                <td class="text-center">
+                  <div class="acciones-score">
+                    <a href="{{ url_for('proponentes_scorecard_detalle', scorecard_id=r.id) }}" class="btn btn-sm btn-outline-primary">
+                      Ver detalle
+                    </a>
+
+                    <a href="{{ url_for('proponentes_scorecard_rating', scorecard_id=r.id) }}" class="btn btn-sm btn-outline-success">
+                      📊 Gráfica
+                    </a>
+
+                    {% if not read_only %}
+                      <form method="POST"
+                            action="{{ url_for('proponentes_scorecard_eliminar', scorecard_id=r.id) }}"
+                            style="display:inline;"
+                            onsubmit="return confirm('¿Seguro que desea eliminar este Security Scorecard de Proponentes? Esta acción no se puede deshacer.');">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                          🗑️ Eliminar
+                        </button>
+                      </form>
+                    {% endif %}
+                  </div>
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="13" class="text-center text-muted py-4">
+                  No existen scorecards de proponentes registrados.
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+    """
+
+    return render_template_string(
+        BASE,
+        content=Markup(render_template_string(
+            body,
+            runs=runs,
+            total_runs=total_runs,
+            promedio=float(promedio or 0),
+            alto_critico=alto_critico,
+            en_ejecucion=en_ejecucion,
+            read_only=read_only,
+            user=user,
+            scorecard_proponentes_badge_color=scorecard_proponentes_badge_color
+        ))
+    )
+
+# ============================================================
+# SECURITYSCORECARD GRAC - PROPONENTES
+# MISMO DISEÑO QUE PROVEEDORES
+# ============================================================
+
+def scorecard_proponentes_rating_letra(score):
+    score = float(score or 0)
+
+    if score >= 90:
+        return "A", "Excelente"
+    if score >= 80:
+        return "B", "Bueno"
+    if score >= 70:
+        return "C", "Aceptable"
+    if score >= 60:
+        return "D", "Débil"
+    return "F", "Crítico"
+
+
+def scorecard_proponentes_rating_color(score):
+    score = float(score or 0)
+
+    if score >= 90:
+        return "#16a34a"
+    if score >= 80:
+        return "#15803d"
+    if score >= 70:
+        return "#d97706"
+    if score >= 60:
+        return "#c2410c"
+    return "#991b1b"
+
+
+def scorecard_proponentes_get_trend_data(run):
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT fecha_ejecucion, score_total
+        FROM scorecard_proponentes_runs
+        WHERE LOWER(TRIM(proponente_nombre)) = LOWER(TRIM(?))
+          AND estado = 'finalizado'
+          AND fecha_ejecucion >= datetime('now', '-30 days')
+        ORDER BY fecha_ejecucion ASC
+    """, (run["proponente_nombre"],))
+
+    rows = cur.fetchall()
+    conn.close()
+
+    data = []
+    for r in rows:
+        fecha = str(r["fecha_ejecucion"] or "")[:10]
+        data.append({
+            "fecha": fecha,
+            "score_total": round(float(r["score_total"] or 0), 1)
+        })
+
+    if not data:
+        data.append({
+            "fecha": str(run["fecha_ejecucion"] or "")[:10],
+            "score_total": round(float(run["score_total"] or 0), 1)
+        })
+
+    return data
+
+
+def scorecard_proponentes_get_monthly_comparison(run):
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT substr(fecha_ejecucion, 1, 7) AS mes,
+               AVG(score_total) AS score
+        FROM scorecard_proponentes_runs
+        WHERE LOWER(TRIM(proponente_nombre)) = LOWER(TRIM(?))
+          AND estado = 'finalizado'
+        GROUP BY substr(fecha_ejecucion, 1, 7)
+        ORDER BY mes ASC
+        LIMIT 12
+    """, (run["proponente_nombre"],))
+
+    rows = cur.fetchall()
+    conn.close()
+
+    data = []
+    for r in rows:
+        data.append({
+            "label": r["mes"] or "N/A",
+            "score": round(float(r["score"] or 0), 1)
+        })
+
+    if not data:
+        data.append({
+            "label": str(run["fecha_ejecucion"] or "")[:7],
+            "score": round(float(run["score_total"] or 0), 1)
+        })
+
+    return data
+
+
+def scorecard_proponentes_get_risk_counts(scorecard_id):
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT COALESCE(severidad, riesgo, 'Bajo') AS sev,
+               COUNT(*) AS total
+        FROM scorecard_proponentes_findings
+        WHERE run_id = ?
+        GROUP BY COALESCE(severidad, riesgo, 'Bajo')
+    """, (scorecard_id,))
+
+    rows = cur.fetchall()
+    conn.close()
+
+    counts = {
+        "Crítico": 0,
+        "Alto": 0,
+        "Medio": 0,
+        "Bajo": 0
+    }
+
+    for r in rows:
+        sev = r["sev"] or "Bajo"
+
+        if sev == "Critico":
+            sev = "Crítico"
+
+        if sev not in counts:
+            sev = "Bajo"
+
+        counts[sev] += int(r["total"] or 0)
+
+    total = sum(counts.values())
+    return counts, total
+
+
+def scorecard_proponentes_issue_summary(scorecard_id):
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT COUNT(*) AS total
+        FROM scorecard_proponentes_findings
+        WHERE run_id = ?
+          AND COALESCE(severidad, riesgo, '') IN ('Crítico', 'Critico')
+    """, (scorecard_id,))
+    criticos = cur.fetchone()["total"] or 0
+
+    cur.execute("""
+        SELECT COUNT(*) AS total
+        FROM scorecard_proponentes_findings
+        WHERE run_id = ?
+          AND COALESCE(severidad, riesgo, '') = 'Alto'
+    """, (scorecard_id,))
+    altos = cur.fetchone()["total"] or 0
+
+    cur.execute("""
+        SELECT COUNT(*) AS total
+        FROM scorecard_proponentes_findings
+        WHERE run_id = ?
+          AND categoria = 'Kali Linux Scan'
+          AND COALESCE(severidad, riesgo, '') IN ('Crítico', 'Critico', 'Alto', 'Medio')
+    """, (scorecard_id,))
+    vulnerabilidades = cur.fetchone()["total"] or 0
+
+    cur.execute("""
+        SELECT COUNT(*) AS total
+        FROM scorecard_proponentes_darkweb_exposures
+        WHERE run_id = ?
+          AND (
+                LOWER(COALESCE(fuente, '')) LIKE '%shodan%'
+             OR LOWER(COALESCE(tipo_exposicion, '')) LIKE '%servicio%'
+             OR LOWER(COALESCE(tipo_exposicion, '')) LIKE '%puerto%'
+             OR LOWER(COALESCE(tipo_exposicion, '')) LIKE '%cve%'
+             OR LOWER(COALESCE(indicador, '')) LIKE '%puerto%'
+             OR LOWER(COALESCE(evidencia, '')) LIKE '%puerto%'
+          )
+    """, (scorecard_id,))
+    servicios_expuestos = cur.fetchone()["total"] or 0
+
+    conn.close()
+
+    return {
+        "criticos": int(criticos),
+        "altos": int(altos),
+        "vulnerabilidades": int(vulnerabilidades),
+        "servicios_expuestos": int(servicios_expuestos)
+    }
+
+
+def scorecard_proponentes_get_recent_findings(scorecard_id, limit=4):
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT *
+        FROM scorecard_proponentes_findings
+        WHERE run_id = ?
+        ORDER BY
+          CASE COALESCE(severidad, riesgo, '')
+            WHEN 'Crítico' THEN 1
+            WHEN 'Critico' THEN 1
+            WHEN 'Alto' THEN 2
+            WHEN 'Medio' THEN 3
+            WHEN 'Bajo' THEN 4
+            ELSE 5
+          END,
+          id DESC
+        LIMIT ?
+    """, (scorecard_id, limit))
+
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def scorecard_proponentes_get_peer_comparison(run):
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT AVG(score_total) AS promedio,
+               MAX(score_total) AS mejor
+        FROM scorecard_proponentes_runs
+        WHERE estado = 'finalizado'
+    """)
+    row = cur.fetchone()
+    conn.close()
+
+    actual = round(float(run["score_total"] or 0), 1)
+    promedio = round(float(row["promedio"] or actual), 1) if row else actual
+    mejor = round(float(row["mejor"] or actual), 1) if row else actual
+
+    return {
+        "actual": actual,
+        "promedio": promedio,
+        "mejor": mejor
+    }
+
+
+@app.route("/proponentes/scorecard/<int:scorecard_id>/rating")
+@login_required
+def proponentes_scorecard_rating(scorecard_id):
+    user, allowed, read_only = scorecard_proponentes_user_permiso()
+
+    if not allowed:
+        flash("No tiene permiso para acceder al Scorecard de Proponentes.", "danger")
+        return redirect(url_for("menu"))
+
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT * FROM scorecard_proponentes_runs WHERE id = ?", (scorecard_id,))
+    run = cur.fetchone()
+    conn.close()
+
+    if not run:
+        abort(404)
+
+    score_total = round(float(run["score_total"] or 0), 1)
+    letra, texto_rating = scorecard_proponentes_rating_letra(score_total)
+    color_rating = scorecard_proponentes_rating_color(score_total)
+
+    trend = scorecard_proponentes_get_trend_data(run)
+    monthly = scorecard_proponentes_get_monthly_comparison(run)
+
+    counts, total_riesgos = scorecard_proponentes_get_risk_counts(scorecard_id)
+    summary = scorecard_proponentes_issue_summary(scorecard_id)
+
+    recent_findings = scorecard_proponentes_get_recent_findings(scorecard_id, limit=4)
+    peer = scorecard_proponentes_get_peer_comparison(run)
+
+    risk_factor_scores = [
+        {"label": "Salud DNS", "score": round(float(run["score_dns"] or 0), 1), "canvas": "gaugeDns"},
+        {"label": "Reputación IP", "score": round(float(run["score_ip"] or 0), 1), "canvas": "gaugeIp"},
+        {"label": "Kali Linux", "score": round(float(run["score_kali"] or 0), 1), "canvas": "gaugeKali"},
+        {"label": "Incidentes / Brechas", "score": round(float(run["score_incidentes"] or 100), 1), "canvas": "gaugeIncidentes"},
+        {"label": "Exposición / Hacker Chatter", "score": round(float(run["score_darkweb"] or 100), 1), "canvas": "gaugeDarkweb"},
+    ]
+
+    trend_labels = [x["fecha"] for x in trend]
+    trend_scores = [x["score_total"] for x in trend]
+
+    monthly_labels = [x["label"] for x in monthly]
+    monthly_scores = [x["score"] for x in monthly]
+
+    risk_labels = ["Crítico", "Alto", "Medio", "Bajo"]
+    risk_values = [
+        counts.get("Crítico", 0),
+        counts.get("Alto", 0),
+        counts.get("Medio", 0),
+        counts.get("Bajo", 0)
+    ]
+
+    peer_labels = ["Proponente", "Promedio", "Mejor"]
+    peer_values = [peer["actual"], peer["promedio"], peer["mejor"]]
+
+    gauge_labels = [x["label"] for x in risk_factor_scores]
+    gauge_scores = [x["score"] for x in risk_factor_scores]
+    gauge_canvas_ids = [x["canvas"] for x in risk_factor_scores]
+
+    body = """
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .rating-shell{
+        width:96%;
+        max-width:1480px;
+        margin:26px auto 24px auto;
+      }
+
+      .score-header-card{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .score-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }
+
+      .score-header-card::after{
+        content:"📊";
+        order:-1;
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+        position:relative;
+        z-index:1;
+      }
+
+      .score-header-text{
+        max-width:1100px;
+        width:100%;
+        display:block !important;
+        transform:none !important;
+        color:#ffffff !important;
+        font-size:1.32rem;
+        font-weight:950;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+        position:relative;
+        z-index:1;
+      }
+
+      .score-header-text::before{
+        content:"SGSI · Rating Scorecard";
+        display:block;
+        width:max-content;
+        max-width:100%;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+        text-shadow:none;
+      }
+
+      .action-bar{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:10px;
+        margin:10px 0 14px;
+        flex-wrap:wrap;
+      }
+
+      .btn{
+        border-radius:10px !important;
+        font-weight:900;
+        padding:.48rem 1.05rem;
+        font-size:.86rem;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }
+
+      .ssc-frame{
+        background:rgba(245,248,252,.96);
+        border:1px solid rgba(219,230,244,.9);
+        border-radius:18px;
+        padding:12px;
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+      }
+
+      .ssc-card{
+        background:rgba(255,255,255,.985);
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        box-shadow:0 6px 14px rgba(15,23,42,.075);
+        padding:10px 12px;
+        height:100%;
+        overflow:hidden;
+      }
+
+      .ssc-top{
+        display:grid;
+        grid-template-columns:.95fr .50fr 1.25fr;
+        gap:9px;
+        align-items:stretch;
+      }
+
+      .company-title{
+        font-size:1.05rem;
+        font-weight:950;
+        color:#172033;
+        margin-bottom:6px;
+        line-height:1.1;
+      }
+
+      .company-meta{
+        font-size:.76rem;
+        font-weight:800;
+        color:#334155;
+        margin-bottom:2px;
+        line-height:1.22;
+      }
+
+      .rating-circle{
+        width:108px;
+        height:108px;
+        border-radius:50%;
+        margin:0 auto;
+        background:{{ color_rating }};
+        color:#fff;
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 22px rgba(15,23,42,.22);
+        border:4px solid rgba(255,255,255,.55);
+      }
+
+      .rating-letter{
+        font-size:2.75rem;
+        line-height:.82;
+        font-weight:950;
+      }
+
+      .rating-score{
+        font-size:1.26rem;
+        font-weight:950;
+        margin-top:5px;
+      }
+
+      .rating-label{
+        margin-top:6px;
+        padding:3px 8px;
+        border-radius:999px;
+        background:#eef5ff;
+        border:1px solid #d8e9ff;
+        color:#1459a6;
+        font-size:.64rem;
+        font-weight:950;
+        text-align:center;
+        line-height:1.1;
+      }
+
+      .section-title{
+        font-size:.80rem;
+        font-weight:950;
+        color:#1459a6;
+        margin-bottom:5px;
+        line-height:1.1;
+      }
+
+      .chart-box{
+        height:118px;
+        position:relative;
+      }
+
+      .chart-box-small{
+        height:132px;
+        position:relative;
+      }
+
+      .empty-note{
+        border-radius:9px;
+        background:#fff7ed;
+        border:1px solid #fed7aa;
+        color:#9a3412;
+        padding:5px 7px;
+        font-weight:800;
+        font-size:.66rem;
+        margin-top:5px;
+        line-height:1.15;
+      }
+
+      .issue-card{
+        margin-top:9px;
+        padding:8px 10px;
+      }
+
+      .issue-row{
+        display:grid;
+        grid-template-columns:repeat(4,1fr);
+        gap:7px;
+      }
+
+      .issue-pill{
+        border:1px solid #dbe6f4;
+        border-radius:10px;
+        padding:6px 8px;
+        background:#fff;
+        display:flex;
+        align-items:center;
+        gap:6px;
+        font-weight:900;
+        color:#1e293b;
+        font-size:.70rem;
+        min-height:34px;
+      }
+
+      .issue-dot{
+        width:20px;
+        height:20px;
+        border-radius:7px;
+        color:#fff;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:.62rem;
+        font-weight:950;
+        flex:0 0 auto;
+      }
+
+      .dot-critical{background:#991b1b;}
+      .dot-high{background:#c2410c;}
+      .dot-medium{background:#d97706;}
+      .dot-low{background:#1459a6;}
+
+      .main-grid{
+        display:grid;
+        grid-template-columns:.98fr 1.02fr;
+        gap:9px;
+        margin-top:9px;
+      }
+
+      .left-stack,
+      .right-stack{
+        display:grid;
+        gap:9px;
+      }
+
+      .right-stack{
+        grid-template-columns:1fr 1fr;
+      }
+
+      .right-stack .full{
+        grid-column:1 / -1;
+      }
+
+      .gauge-grid{
+        display:grid;
+        grid-template-columns:repeat(5,1fr);
+        gap:8px;
+      }
+
+      .gauge-card{
+        border:1px solid rgba(190,210,235,.95);
+        border-radius:14px;
+        background:
+          radial-gradient(circle at 50% 20%,rgba(255,255,255,.98),rgba(241,247,255,.96) 58%,rgba(230,239,252,.95) 100%);
+        padding:7px 7px 6px 7px;
+        min-height:124px;
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        justify-content:flex-start;
+        overflow:hidden;
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,.95),
+          0 7px 16px rgba(15,23,42,.10);
+        position:relative;
+      }
+
+      .gauge-card::before{
+        content:"";
+        position:absolute;
+        top:5px;
+        left:8px;
+        right:8px;
+        height:24px;
+        background:linear-gradient(180deg,rgba(255,255,255,.80),rgba(255,255,255,0));
+        border-radius:999px;
+        pointer-events:none;
+      }
+
+      .gauge-title{
+        width:100%;
+        text-align:center;
+        font-size:.62rem;
+        font-weight:950;
+        color:#17365d;
+        line-height:1.08;
+        min-height:24px;
+        margin-bottom:1px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        position:relative;
+        z-index:2;
+      }
+
+      .gauge-canvas-wrap{
+        width:100%;
+        height:76px;
+        position:relative;
+        z-index:2;
+      }
+
+      .gauge-score{
+        margin-top:-5px;
+        font-size:1rem;
+        font-weight:950;
+        color:#0f3769;
+        line-height:1;
+        position:relative;
+        z-index:2;
+      }
+
+      .gauge-state{
+        margin-top:3px;
+        font-size:.56rem;
+        font-weight:950;
+        border-radius:999px;
+        padding:2px 8px;
+        line-height:1;
+        position:relative;
+        z-index:2;
+        border:1px solid rgba(255,255,255,.8);
+        box-shadow:0 3px 8px rgba(15,23,42,.10);
+      }
+
+      .gauge-state.bajo{
+        background:#dcfce7;
+        color:#166534;
+      }
+
+      .gauge-state.medio{
+        background:#fef3c7;
+        color:#92400e;
+      }
+
+      .gauge-state.alto{
+        background:#ffedd5;
+        color:#9a3412;
+      }
+
+      .gauge-state.critico{
+        background:#fee2e2;
+        color:#991b1b;
+      }
+
+      .finding-table{
+        width:100%;
+        border-collapse:separate;
+        border-spacing:0;
+      }
+
+      .finding-table th{
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-weight:950;
+        padding:5px 6px;
+        font-size:.66rem;
+        line-height:1.1;
+      }
+
+      .finding-table td{
+        border-bottom:1px solid #edf2f7;
+        padding:5px 6px;
+        font-size:.66rem;
+        font-weight:700;
+        vertical-align:middle;
+        line-height:1.12;
+      }
+
+      .finding-table td:first-child{
+        max-width:230px;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+      }
+
+      .severity-badge{
+        border-radius:999px;
+        padding:3px 7px;
+        color:#fff;
+        font-size:.60rem;
+        font-weight:950;
+        display:inline-block;
+        line-height:1;
+      }
+
+      .sev-critical{background:#991b1b;}
+      .sev-high{background:#c2410c;}
+      .sev-medium{background:#d97706;}
+      .sev-low{background:#1459a6;}
+
+      @media(max-width:1200px){
+        .ssc-top,
+        .main-grid,
+        .right-stack{
+          grid-template-columns:1fr;
+        }
+
+        .right-stack .full{
+          grid-column:auto;
+        }
+
+        .chart-box,
+        .chart-box-small{
+          height:150px;
+        }
+
+        .gauge-grid{
+          grid-template-columns:repeat(3,1fr);
+        }
+      }
+
+      @media(max-width:720px){
+        .score-header-card{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .score-header-card::after{
+          margin:0;
+        }
+
+        .score-header-text,
+        .score-header-text::before{
+          text-align:center;
+          margin-left:auto;
+          margin-right:auto;
+        }
+
+        .issue-row{
+          grid-template-columns:repeat(2,1fr);
+        }
+
+        .gauge-grid{
+          grid-template-columns:repeat(2,1fr);
+        }
+
+        .score-header-text{
+          font-size:1.20rem;
+        }
+      }
+    </style>
+
+    <div class="rating-shell">
+      <div class="score-header-card">
+        <h1 class="score-header-text">SecurityScorecard GRAC</h1>
+      </div>
+
+      <div class="action-bar">
+        <a href="{{ url_for('proponentes_scorecard_detalle', scorecard_id=run.id) }}" class="btn btn-outline-secondary px-4">
+          Volver al detalle
+        </a>
+
+        <a href="{{ url_for('proponentes_scorecard_dashboard') }}" class="btn btn-primary px-4">
+          Dashboard Scorecard
+        </a>
+      </div>
+
+      <div class="ssc-frame">
+        <div class="ssc-top">
+          <div class="ssc-card">
+            <div class="company-title">{{ run.proponente_nombre or 'Proponente no asociado' }}</div>
+            <div class="company-meta"><strong>Dominio:</strong> {{ run.dominio }}</div>
+            <div class="company-meta"><strong>IP:</strong> {{ run.ip_resuelta or '—' }}</div>
+            <div class="company-meta"><strong>Fecha evaluación:</strong> {{ run.fecha_ejecucion }}</div>
+            <div class="company-meta"><strong>Estado:</strong> {{ run.estado }}</div>
+          </div>
+
+          <div class="ssc-card text-center">
+            <div class="rating-circle">
+              <div class="rating-letter">{{ letra }}</div>
+              <div class="rating-score">{{ "%.1f"|format(score_total) }}</div>
+            </div>
+            <div class="rating-label">Calificación de seguridad · {{ texto_rating }}</div>
+          </div>
+
+          <div class="ssc-card">
+            <div class="section-title">Tendencia del score — últimos 30 días</div>
+            <div class="chart-box">
+              <canvas id="trendChart"></canvas>
+            </div>
+            {% if trend|length < 2 %}
+              <div class="empty-note">
+                Ejecuta varios Scorecards del mismo proponente para ver tendencia real.
+              </div>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="ssc-card issue-card">
+          <div class="section-title">Resumen de hallazgos</div>
+          <div class="issue-row">
+            <div class="issue-pill">
+              <span class="issue-dot dot-critical">{{ summary.criticos }}</span>
+              Riesgos críticos
+            </div>
+            <div class="issue-pill">
+              <span class="issue-dot dot-high">{{ summary.altos }}</span>
+              Riesgos altos
+            </div>
+            <div class="issue-pill">
+              <span class="issue-dot dot-medium">{{ summary.vulnerabilidades }}</span>
+              Vulnerabilidades
+            </div>
+            <div class="issue-pill">
+              <span class="issue-dot dot-low">{{ summary.servicios_expuestos }}</span>
+              Servicios expuestos
+            </div>
+          </div>
+        </div>
+
+        <div class="main-grid">
+          <div class="left-stack">
+            <div class="ssc-card">
+              <div class="section-title">Factores de riesgo</div>
+
+              <div class="gauge-grid">
+                {% for f in risk_factor_scores %}
+                <div class="gauge-card">
+                  <div class="gauge-title">{{ f.label }}</div>
+                  <div class="gauge-canvas-wrap">
+                    <canvas id="{{ f.canvas }}"></canvas>
+                  </div>
+                  <div class="gauge-score">{{ "%.1f"|format(f.score) }}</div>
+                  <div class="gauge-state
+                    {% if f.score >= 85 %}bajo
+                    {% elif f.score >= 70 %}medio
+                    {% elif f.score >= 50 %}alto
+                    {% else %}critico{% endif %}">
+                    {% if f.score >= 85 %}
+                      Bajo
+                    {% elif f.score >= 70 %}
+                      Medio
+                    {% elif f.score >= 50 %}
+                      Alto
+                    {% else %}
+                      Crítico
+                    {% endif %}
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+
+            <div class="ssc-card">
+              <div class="section-title">Hallazgos recientes</div>
+              <table class="finding-table">
+                <thead>
+                  <tr>
+                    <th>Hallazgo</th>
+                    <th>Severidad</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for f in recent_findings %}
+                  {% set sev = f.severidad or f.riesgo or 'Bajo' %}
+                  <tr>
+                    <td title="{{ f.control or f.categoria }}">{{ f.control or f.categoria }}</td>
+                    <td>
+                      <span class="severity-badge
+                        {% if sev in ['Crítico','Critico'] %}sev-critical
+                        {% elif sev == 'Alto' %}sev-high
+                        {% elif sev == 'Medio' %}sev-medium
+                        {% else %}sev-low{% endif %}">
+                        {{ sev }}
+                      </span>
+                    </td>
+                    <td>{{ f.estado or 'Abierto' }}</td>
+                  </tr>
+                  {% else %}
+                  <tr>
+                    <td colspan="3" class="text-center text-muted">Sin hallazgos registrados.</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="right-stack">
+            <div class="ssc-card">
+              <div class="section-title">Desglose de riesgo</div>
+              <div class="chart-box-small">
+                <canvas id="riskChart"></canvas>
+              </div>
+            </div>
+
+            <div class="ssc-card">
+              <div class="section-title">Comparación con pares</div>
+              <div class="chart-box-small">
+                <canvas id="peerChart"></canvas>
+              </div>
+            </div>
+
+            <div class="ssc-card full">
+              <div class="section-title">Comparación mensual del proponente</div>
+              <div class="chart-box-small">
+                <canvas id="monthlyChart"></canvas>
+              </div>
+              {% if monthly|length < 2 %}
+                <div class="empty-note">
+                  Para comparar por mes, ejecuta evaluaciones en meses diferentes o carga históricos.
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script>
+      const trendLabels = {{ trend_labels|tojson }};
+      const trendScores = {{ trend_scores|tojson }};
+      const riskLabels = {{ risk_labels|tojson }};
+      const riskValues = {{ risk_values|tojson }};
+      const peerLabels = {{ peer_labels|tojson }};
+      const peerValues = {{ peer_values|tojson }};
+      const monthlyLabels = {{ monthly_labels|tojson }};
+      const monthlyScores = {{ monthly_scores|tojson }};
+
+      const gaugeLabels = {{ gauge_labels|tojson }};
+      const gaugeScores = {{ gauge_scores|tojson }};
+      const gaugeCanvasIds = {{ gauge_canvas_ids|tojson }};
+
+      function chartBaseOptions(maxY=true){
+        return {
+          responsive: true,
+          maintainAspectRatio: false,
+          layout: { padding: 0 },
+          scales: maxY ? {
+            y: {
+              min: 0,
+              max: 100,
+              ticks: { stepSize: 25, font: { size: 9 } },
+              grid: { lineWidth: .5 }
+            },
+            x: {
+              ticks: { font: { size: 9 }, maxRotation: 0, autoSkip: true },
+              grid: { display: false }
+            }
+          } : {},
+          plugins: {
+            legend: { display: false },
+            tooltip: { bodyFont: { size: 10 }, titleFont: { size: 10 } }
+          }
+        }
+      }
+
+      const gaugeNeedlePlugin = {
+        id: 'gaugeNeedlePlugin',
+        afterDatasetDraw(chart, args, pluginOptions){
+          if(chart.config.type !== 'doughnut' || !chart.config.options.plugins.gaugeNeedle){
+            return;
+          }
+
+          const score = Number(chart.config.options.plugins.gaugeNeedle.score || 0);
+          const ctx = chart.ctx;
+          const meta = chart.getDatasetMeta(0);
+
+          if(!meta || !meta.data || !meta.data[0]){
+            return;
+          }
+
+          const arc = meta.data[0];
+          const x = arc.x;
+          const y = arc.y;
+          const outerRadius = arc.outerRadius;
+          const needleLength = outerRadius - 9;
+
+          const angle = Math.PI + (Math.PI * Math.max(0, Math.min(100, score)) / 100);
+
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate(angle);
+
+          ctx.beginPath();
+          ctx.moveTo(-5, 2);
+          ctx.lineTo(needleLength, 0);
+          ctx.lineTo(-5, -2);
+          ctx.closePath();
+          ctx.fillStyle = 'rgba(15,23,42,.28)';
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.moveTo(-6, 3);
+          ctx.lineTo(needleLength - 2, 0);
+          ctx.lineTo(-6, -3);
+          ctx.closePath();
+          ctx.fillStyle = '#172033';
+          ctx.fill();
+
+          ctx.restore();
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(x, y, 8, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.shadowColor = 'rgba(15,23,42,.25)';
+          ctx.shadowBlur = 7;
+          ctx.shadowOffsetY = 2;
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+          ctx.fillStyle = '#172033';
+          ctx.shadowBlur = 0;
+          ctx.fill();
+          ctx.restore();
+
+          ctx.save();
+          ctx.fillStyle = '#64748b';
+          ctx.font = '700 8px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('0', x - outerRadius + 12, y + 12);
+          ctx.fillText('50', x, y - outerRadius + 16);
+          ctx.fillText('100', x + outerRadius - 12, y + 12);
+          ctx.restore();
+        }
+      };
+
+      Chart.register(gaugeNeedlePlugin);
+
+      function buildGauge(canvasId, score, label){
+        const ctx = document.getElementById(canvasId);
+
+        if(!ctx){
+          return;
+        }
+
+        score = Math.max(0, Math.min(100, Number(score || 0)));
+
+        new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: ['Crítico', 'Alto', 'Medio', 'Bajo'],
+            datasets: [{
+              data: [50, 20, 15, 15],
+              backgroundColor: ['#991b1b', '#c2410c', '#d97706', '#16a34a'],
+              borderColor: '#ffffff',
+              borderWidth: 2,
+              circumference: 180,
+              rotation: 270,
+              cutout: '68%',
+              borderRadius: 5
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: {
+              padding: {
+                top: 4,
+                left: 2,
+                right: 2,
+                bottom: 0
+              }
+            },
+            plugins: {
+              legend: { display: false },
+              tooltip: { enabled: false },
+              gaugeNeedle: {
+                score: score
+              }
+            }
+          }
+        });
+      }
+
+      function buildAllGauges(){
+        for(let i = 0; i < gaugeCanvasIds.length; i++){
+          buildGauge(gaugeCanvasIds[i], gaugeScores[i], gaugeLabels[i]);
+        }
+      }
+
+      function buildTrend(){
+        const ctx = document.getElementById('trendChart');
+
+        new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: trendLabels,
+            datasets: [{
+              label: 'Score',
+              data: trendScores,
+              tension: 0.35,
+              fill: true,
+              borderWidth: 2,
+              pointRadius: 3,
+              pointHoverRadius: 4
+            }]
+          },
+          options: chartBaseOptions(true)
+        });
+      }
+
+      function buildRisk(){
+        const ctx = document.getElementById('riskChart');
+
+        new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: riskLabels,
+            datasets: [{
+              data: riskValues,
+              backgroundColor: ['#991b1b', '#c2410c', '#d97706', '#1459a6'],
+              borderWidth: 1
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '58%',
+            layout: { padding: 0 },
+            plugins: {
+              legend: {
+                position: 'right',
+                labels: {
+                  boxWidth: 9,
+                  font: { size: 9 },
+                  padding: 6
+                }
+              },
+              tooltip: {
+                bodyFont: { size: 10 },
+                titleFont: { size: 10 }
+              }
+            }
+          }
+        });
+      }
+
+      function buildPeer(){
+        const ctx = document.getElementById('peerChart');
+
+        new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: peerLabels,
+            datasets: [{
+              label: 'Score',
+              data: peerValues,
+              backgroundColor: ['#16a34a', '#334155', '#1459a6'],
+              borderWidth: 1
+            }]
+          },
+          options: chartBaseOptions(true)
+        });
+      }
+
+      function buildMonthly(){
+        const ctx = document.getElementById('monthlyChart');
+
+        new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: monthlyLabels,
+            datasets: [{
+              label: 'Score mensual',
+              data: monthlyScores,
+              tension: 0.35,
+              fill: false,
+              borderWidth: 2,
+              pointRadius: 3
+            }]
+          },
+          options: chartBaseOptions(true)
+        });
+      }
+
+      buildAllGauges();
+      buildTrend();
+      buildRisk();
+      buildPeer();
+      buildMonthly();
+    </script>
+    """
+
+    return render_template_string(
+        BASE,
+        content=Markup(render_template_string(
+            body,
+            run=run,
+            score_total=score_total,
+            letra=letra,
+            texto_rating=texto_rating,
+            color_rating=color_rating,
+            trend=trend,
+            monthly=monthly,
+            summary=summary,
+            counts=counts,
+            total_riesgos=total_riesgos,
+            recent_findings=recent_findings,
+            risk_factor_scores=risk_factor_scores,
+            trend_labels=trend_labels,
+            trend_scores=trend_scores,
+            risk_labels=risk_labels,
+            risk_values=risk_values,
+            peer_labels=peer_labels,
+            peer_values=peer_values,
+            monthly_labels=monthly_labels,
+            monthly_scores=monthly_scores,
+            gauge_labels=gauge_labels,
+            gauge_scores=gauge_scores,
+            gauge_canvas_ids=gauge_canvas_ids
+        ))
+    )
+
+
+# ============================================================
+# ELIMINAR SCORECARD PROPONENTES
+# ============================================================
+
+@app.route("/proponentes/scorecard/<int:scorecard_id>/eliminar", methods=["POST"])
+@login_required
+def proponentes_scorecard_eliminar(scorecard_id):
+    user, allowed, read_only = scorecard_proponentes_user_permiso()
+
+    if not allowed:
+        flash("No tiene permiso para eliminar Scorecard de Proponentes.", "danger")
+        return redirect(url_for("menu"))
+
+    if read_only:
+        flash("El rol Auditor no puede eliminar scorecards.", "danger")
+        return redirect(url_for("proponentes_scorecard_dashboard"))
+
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT id FROM scorecard_proponentes_runs WHERE id = ?", (scorecard_id,))
+    row = cur.fetchone()
+
+    if not row:
+        conn.close()
+        flash("Scorecard de Proponente no encontrado.", "warning")
+        return redirect(url_for("proponentes_scorecard_dashboard"))
+
+    cur.execute("DELETE FROM scorecard_proponentes_findings WHERE run_id = ?", (scorecard_id,))
+    cur.execute("DELETE FROM scorecard_proponentes_outputs WHERE run_id = ?", (scorecard_id,))
+    cur.execute("DELETE FROM scorecard_proponentes_incidents WHERE run_id = ?", (scorecard_id,))
+    cur.execute("DELETE FROM scorecard_proponentes_darkweb_exposures WHERE run_id = ?", (scorecard_id,))
+    cur.execute("DELETE FROM scorecard_proponentes_runs WHERE id = ?", (scorecard_id,))
+
+    conn.commit()
+    conn.close()
+
+    flash("Security Scorecard de Proponentes eliminado correctamente.", "success")
+    return redirect(url_for("proponentes_scorecard_dashboard"))
+
+
+# ============================================================
+# NUEVO ESCANEO PROPONENTES
+# ============================================================
+
+@app.route("/proponentes/scorecard/scan/nuevo", methods=["GET", "POST"])
+@login_required
+def proponentes_scorecard_scan_nuevo():
+    user, allowed, read_only = scorecard_proponentes_user_permiso()
+
+    if not allowed:
+        flash("No tiene permiso para ejecutar Security Scorecard de Proponentes.", "danger")
+        return redirect(url_for("menu"))
+
+    if read_only:
+        flash("El rol Auditor no puede ejecutar scorecards.", "danger")
+        return redirect(url_for("proponentes_scorecard_dashboard"))
+
+    if request.method == "POST":
+        proponente_nombre = (request.form.get("proponente_nombre") or "").strip()
+        dominio = limpiar_dominio_scorecard(request.form.get("dominio"))
+        ejecutar_kali = bool(request.form.get("ejecutar_kali"))
+
+        if not proponente_nombre:
+            flash("Debe ingresar el nombre del proponente.", "danger")
+            return redirect(url_for("proponentes_scorecard_scan_nuevo"))
+
+        if not dominio:
+            flash("Debe indicar el dominio autorizado del proponente.", "danger")
+            return redirect(url_for("proponentes_scorecard_scan_nuevo"))
+
+        ip = resolver_ip_scorecard(dominio)
+
+        # ============================================================
+        # MISMAS REVISIONES QUE PROVEEDORES
+        # ============================================================
+
+        scorecard_proponentes_set_progress(
+            run_id if "run_id" in locals() else 0,
+            pct=5,
+            stage="Resolviendo dominio e IP del proponente",
+            tool="Resolver IP"
+        )
+
+        score_dns, findings_dns = evaluar_dns_health_scorecard(dominio)
+        score_ip, findings_ip = evaluar_ip_reputation_scorecard(ip)
+
+        score_kali = 0
+
+        # Valores iniciales, luego se recalculan con OSINT / Dark Web
+        score_incidentes = 100
+        score_darkweb = 100
+
+        estado = "finalizado"
+        progress = 100
+        current_stage = "Scorecard finalizado sin escaneo Kali"
+
+        if ejecutar_kali:
+            estado = "pendiente"
+            progress = 1
+            current_stage = "Escaneo Kali pendiente"
+
+        resumen = {
+            "dns_score": score_dns,
+            "ip_score": score_ip,
+            "kali_score": score_kali,
+            "incident_score": score_incidentes,
+            "darkweb_score": score_darkweb,
+            "ejecutar_kali": ejecutar_kali
+        }
+
+        conn = get_scorecard_proponentes_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO scorecard_proponentes_runs
+            (proponente_nombre, dominio, ip_resuelta,
+             score_dns, score_ip, score_kali, score_incidentes, score_darkweb,
+             score_total, nivel_riesgo, estado, progress_pct, current_stage,
+             current_tool, resumen_json, usuario, fecha_ejecucion)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            proponente_nombre,
+            dominio,
+            ip,
+            score_dns,
+            score_ip,
+            score_kali,
+            score_incidentes,
+            score_darkweb,
+            0,
+            "Pendiente",
+            estado,
+            progress,
+            current_stage,
+            None,
+            json.dumps(resumen, ensure_ascii=False),
+            getattr(user, "username", "Sistema"),
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ))
+
+        run_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+
+        # ============================================================
+        # GUARDAR HALLAZGOS DNS HEALTH
+        # ============================================================
+
+        scorecard_proponentes_set_progress(
+            run_id,
+            pct=10,
+            stage="Guardando hallazgos DNS Health",
+            tool="DNS Health"
+        )
+
+        for item in findings_dns:
+            guardar_scorecard_proponentes_finding(run_id, item)
+
+
+        # ============================================================
+        # GUARDAR HALLAZGOS IP REPUTATION / DNSBL
+        # ============================================================
+
+        scorecard_proponentes_set_progress(
+            run_id,
+            pct=15,
+            stage="Guardando hallazgos IP Reputation / DNSBL",
+            tool="DNSBL"
+        )
+
+        for item in findings_ip:
+            guardar_scorecard_proponentes_finding(run_id, item)
+
+
+        # ============================================================
+        # INCIDENT HISTORY / OSINT
+        # ============================================================
+
+        scorecard_proponentes_set_progress(
+            run_id,
+            pct=25,
+            stage="Consultando historial de incidentes / OSINT",
+            tool="GDELT / Catálogo histórico"
+        )
+
+        score_incidentes, riesgo_incidentes, total_incidentes = evaluar_incident_history_proponentes_scorecard(
+            run_id,
+            proponente_nombre,
+            dominio
+        )
+
+
+        # ============================================================
+        # DARK WEB / EXPOSURE INTELLIGENCE
+        # LeakCheck + HIBP + Shodan + GDELT + crt.sh + GitHub
+        # ============================================================
+
+        scorecard_proponentes_set_progress(
+            run_id,
+            pct=35,
+            stage="Consultando Dark Web / Exposure Intelligence",
+            tool="HIBP / LeakCheck / Shodan / GDELT"
+        )
+
+        score_darkweb, riesgo_darkweb, total_darkweb, credencial_confirmada = evaluar_hacker_chatter_proponentes_scorecard(
+            run_id,
+            proponente_nombre,
+            dominio,
+            ip
+        )
+
+
+        # ============================================================
+        # RECALCULAR SCORE TOTAL PROPONENTES
+        # ============================================================
+
+        score_total = scorecard_proponentes_calcular_total(
+            score_dns,
+            score_ip,
+            score_kali,
+            score_incidentes,
+            score_darkweb,
+            incluir_kali=ejecutar_kali
+        )
+
+        nivel = nivel_riesgo_scorecard_proponentes(score_total)
+
+        resumen.update({
+            "incident_score": score_incidentes,
+            "darkweb_score": score_darkweb,
+            "incident_total": total_incidentes,
+            "darkweb_total": total_darkweb,
+            "credencial_confirmada": credencial_confirmada,
+            "score_total": score_total,
+            "nivel_riesgo": nivel
+        })
+
+        conn = get_scorecard_proponentes_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            UPDATE scorecard_proponentes_runs
+            SET score_incidentes = ?, score_darkweb = ?, score_total = ?, nivel_riesgo = ?,
+                resumen_json = ?, progress_pct = ?, current_stage = ?
+            WHERE id = ?
+        """, (
+            score_incidentes,
+            score_darkweb,
+            score_total,
+            nivel,
+            json.dumps(resumen, ensure_ascii=False),
+            40 if ejecutar_kali else 100,
+            "Scorecard base finalizado. Escaneo Kali pendiente." if ejecutar_kali else "Scorecard finalizado sin escaneo Kali",
+            run_id
+        ))
+
+        conn.commit()
+        conn.close()
+
+        if ejecutar_kali:
+            t = threading.Thread(
+                target=scorecard_proponentes_kali_worker,
+                args=(run_id, dominio),
+                daemon=True
+            )
+            t.start()
+        else:
+            scorecard_proponentes_set_progress(
+                run_id,
+                pct=100,
+                stage="Scorecard de Proponentes finalizado",
+                tool=None,
+                estado="finalizado"
+            )
+
+        try:
+            registrar_log(
+                getattr(user, "username", "Sistema"),
+                f"Ejecutó Security Scorecard de Proponentes para {proponente_nombre} - dominio {dominio}"
+            )
+        except Exception:
+            pass
+
+        flash("Security Scorecard de Proponentes iniciado correctamente.", "success")
+        return redirect(url_for("proponentes_scorecard_detalle", scorecard_id=run_id))
+
+    body = """
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .prop-score-shell{
+        width:96%;
+        max-width:1200px;
+        margin:26px auto 24px auto;
+      }
+
+      .prop-score-header-card{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .prop-score-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }
+
+      .prop-score-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }
+
+      .prop-score-header-overlay::before{
+        content:"🚀";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .prop-score-header-overlay h2{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .prop-score-header-overlay h2::before{
+        content:"SGSI · Scorecard de Proponentes";
+        display:block;
+        width:max-content;
+        max-width:100%;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+        text-shadow:none;
+      }
+
+      .soft-card,
+      .card{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
+      }
+
+      .form-label{
+        font-size:.72rem;
+        font-weight:900;
+        color:#1459a6;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
+      }
+
+      .form-control,
+      .form-select{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        box-shadow:none !important;
+      }
+
+      .form-control:focus,
+      .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#ffffff;
+      }
+
+      .btn{
+        border-radius:10px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }
+
+      .badge{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }
+
+      @media (max-width:992px){
+        .prop-score-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .prop-score-header-card{
+          min-height:88px;
+        }
+
+        .prop-score-header-overlay h2{
+          font-size:1.20rem;
+        }
+      }
+
+      @media (max-width:768px){
+        .prop-score-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .prop-score-header-overlay::before{
+          margin:0;
+        }
+
+        .prop-score-header-overlay h2,
+        .prop-score-header-overlay h2::before{
+          text-align:center;
+          margin-left:auto;
+          margin-right:auto;
+        }
+      }
+    </style>
+
+    <div class="prop-score-shell">
+
+      <div class="prop-score-header-card">
+        <div class="prop-score-header-overlay">
+          <h2>Nuevo Security Scorecard de Proponentes</h2>
+        </div>
+      </div>
+
+      <div class="soft-card p-4">
+        <form method="POST">
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">Nombre del proponente</label>
+            <input type="text" name="proponente_nombre" class="form-control form-control-lg"
+                   placeholder="Ejemplo: Proponente ABC S.A.S." required>
+            <div class="form-text">
+              Este campo reemplaza la lista desplegable de proveedores. No se crea ni se consulta proveedor existente.
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">Dominio autorizado del proponente</label>
+            <input type="text" name="dominio" class="form-control form-control-lg"
+                   placeholder="Ejemplo: empresa.com" required>
+            <div class="form-text">
+              Ingrese únicamente el dominio autorizado para evaluación.
+            </div>
+          </div>
+
+          <div class="form-check form-switch mb-4">
+            <input class="form-check-input" type="checkbox" name="ejecutar_kali" id="ejecutar_kali" checked>
+            <label class="form-check-label fw-bold" for="ejecutar_kali">
+              Ejecutar escaneo Kali independiente: Nmap, WhatWeb, Nikto, Nuclei y testssl
+            </label>
+          </div>
+
+          <div class="alert alert-warning">
+            <strong>Importante:</strong> use este módulo solo con autorización expresa del proponente para evaluar su dominio.
+          </div>
+
+          <div class="d-flex justify-content-between">
+            <a href="{{ url_for('proponentes_scorecard_dashboard') }}" class="btn btn-outline-secondary rounded-pill px-4">
+              Volver
+            </a>
+            <button class="btn btn-warning text-dark rounded-pill px-4 fw-bold">
+              🚀 Ejecutar Scorecard
+            </button>
+          </div>
+
+        </form>
+      </div>
+
+    </div>
+    """
+
+    return render_template_string(BASE, content=Markup(render_template_string(body)))
+
+
+# ============================================================
+# ESTADO JSON PROPONENTES
+# ============================================================
+
+@app.route("/proponentes/scorecard/<int:scorecard_id>/estado")
+@login_required
+def proponentes_scorecard_estado(scorecard_id):
+    user, allowed, read_only = scorecard_proponentes_user_permiso()
+
+    if not allowed:
+        return jsonify({
+            "ok": False,
+            "error": "No tiene permiso para consultar el estado del Scorecard."
+        }), 403
+
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT id, estado, progress_pct, current_stage, current_tool,
+               score_total, score_dns, score_ip, score_kali,
+               score_incidentes, score_darkweb, nivel_riesgo, error_detalle
+        FROM scorecard_proponentes_runs
+        WHERE id = ?
+    """, (scorecard_id,))
+
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({
+            "ok": False,
+            "error": "Scorecard no encontrado."
+        }), 404
+
+    return jsonify({
+        "ok": True,
+        "id": row["id"],
+        "estado": row["estado"] or "pendiente",
+        "progress_pct": int(row["progress_pct"] or 0),
+        "current_stage": row["current_stage"] or "—",
+        "current_tool": row["current_tool"] or "—",
+        "score_total": round(float(row["score_total"] or 0), 1),
+        "score_dns": round(float(row["score_dns"] or 0), 1),
+        "score_ip": round(float(row["score_ip"] or 0), 1),
+        "score_kali": round(float(row["score_kali"] or 0), 1),
+        "score_incidentes": round(float(row["score_incidentes"] or 100), 1),
+        "score_darkweb": round(float(row["score_darkweb"] or 100), 1),
+        "nivel_riesgo": row["nivel_riesgo"] or "Pendiente",
+        "error_detalle": row["error_detalle"] or ""
+    })
+
+
+# ============================================================
+# DETALLE PROPONENTES
+# ============================================================
+
+@app.route("/proponentes/scorecard/<int:scorecard_id>")
+@login_required
+def proponentes_scorecard_detalle(scorecard_id):
+    user, allowed, read_only = scorecard_proponentes_user_permiso()
+
+    if not allowed:
+        flash("No tiene permiso para acceder al Security Scorecard de Proponentes.", "danger")
+        return redirect(url_for("menu"))
+
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT *
+        FROM scorecard_proponentes_runs
+        WHERE id = ?
+    """, (scorecard_id,))
+    run = cur.fetchone()
+
+    if not run:
+        conn.close()
+        flash("Scorecard de Proponentes no encontrado.", "danger")
+        return redirect(url_for("proponentes_scorecard_dashboard"))
+
+    cur.execute("""
+        SELECT *
+        FROM scorecard_proponentes_findings
+        WHERE run_id = ?
+        ORDER BY
+          CASE COALESCE(severidad, riesgo, '')
+            WHEN 'Crítico' THEN 1
+            WHEN 'Critico' THEN 1
+            WHEN 'Alto' THEN 2
+            WHEN 'Medio' THEN 3
+            WHEN 'Bajo' THEN 4
+            ELSE 5
+          END,
+          id ASC
+    """, (scorecard_id,))
+    findings = cur.fetchall()
+
+    cur.execute("""
+        SELECT *
+        FROM scorecard_proponentes_incidents
+        WHERE run_id = ?
+        ORDER BY id DESC
+    """, (scorecard_id,))
+    incidentes = cur.fetchall()
+
+    cur.execute("""
+        SELECT *
+        FROM scorecard_proponentes_darkweb_exposures
+        WHERE run_id = ?
+        ORDER BY id DESC
+    """, (scorecard_id,))
+    exposures = cur.fetchall()
+
+    cur.execute("""
+        SELECT *
+        FROM scorecard_proponentes_outputs
+        WHERE run_id = ?
+        ORDER BY id ASC
+    """, (scorecard_id,))
+    outputs = cur.fetchall()
+
+    conn.close()
+
+    body = """
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .prop-score-shell{
+        width:96%;
+        max-width:1500px;
+        margin:26px auto 24px auto;
+      }
+
+      .prop-score-header-card{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .prop-score-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }
+
+      .prop-score-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }
+
+      .prop-score-header-overlay::before{
+        content:"📈";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .prop-score-header-overlay h2{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+        position:relative;
+      }
+
+      .prop-score-header-overlay h2::before{
+        content:"SGSI · Scorecard de Proponentes";
+        display:block;
+        width:max-content;
+        max-width:100%;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+        text-shadow:none;
+      }
+
+      .soft-card,
+      .card{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
+      }
+
+      .metric-card{
+        background:#ffffff;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        box-shadow:0 8px 18px rgba(15,23,42,.10);
+        padding:18px;
+        height:100%;
+      }
+
+      .metric-label{
+        font-size:.72rem;
+        font-weight:900;
+        color:#1459a6;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:8px;
+      }
+
+      .metric-value{
+        color:#1459a6;
+        font-size:1.8rem;
+        font-weight:950;
+        line-height:1;
+      }
+
+      .table-wrap,
+      .table-responsive{
+        max-height:72vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        background:#ffffff;
+        border-radius:14px;
+        border:1px solid #dbe6f4;
+        box-shadow:0 12px 24px rgba(15,23,42,.10);
+      }
+
+      .table{
+        margin-bottom:0;
+      }
+
+      .table thead th{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-size:.78rem;
+        font-weight:900 !important;
+        border:none !important;
+        white-space:nowrap;
+        vertical-align:middle !important;
+        text-align:center;
+        padding:9px 8px;
+      }
+
+      .table tbody td,
+      .table td{
+        vertical-align:middle !important;
+        font-size:.82rem;
+        padding:9px 8px;
+        border-bottom:1px solid #e5edf7;
+        color:#1f2937;
+      }
+
+      .table tbody tr:nth-child(even){
+        background:#f8fbff;
+      }
+
+      .table tbody tr:hover{
+        background:#eef6ff;
+      }
+
+      pre.console{
+        background:#0b1f33;
+        color:#dceeff;
+        border-radius:14px;
+        padding:16px;
+        max-height:420px;
+        overflow:auto;
+        font-size:.82rem;
+        line-height:1.45;
+        border:1px solid rgba(255,255,255,.12);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.08);
+      }
+
+      .form-label{
+        font-size:.72rem;
+        font-weight:900;
+        color:#1459a6;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
+      }
+
+      .form-control,
+      .form-select{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        box-shadow:none !important;
+      }
+
+      .form-control:focus,
+      .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#ffffff;
+      }
+
+      .btn{
+        border-radius:10px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }
+
+      .badge{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }
+
+      @media (max-width:992px){
+        .prop-score-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .prop-score-header-card{
+          min-height:88px;
+        }
+
+        .prop-score-header-overlay h2{
+          font-size:1.20rem;
+        }
+      }
+
+      @media (max-width:768px){
+        .prop-score-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .prop-score-header-overlay::before{
+          margin:0;
+        }
+
+        .prop-score-header-overlay h2,
+        .prop-score-header-overlay h2::before{
+          text-align:center;
+          margin-left:auto;
+          margin-right:auto;
+        }
+      }
+    </style>
+
+    <div class="prop-score-shell">
+
+      <div class="prop-score-header-card">
+        <div class="prop-score-header-overlay">
+          <h2>⚡ Detalle Security Scorecard de Proponentes</h2>
+        </div>
+      </div>
+
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="text-black fw-bold">
+          Proponente: {{ run.proponente_nombre }} — Dominio: {{ run.dominio }}
+        </div>
+        <a href="{{ url_for('proponentes_scorecard_dashboard') }}" class="btn btn-light rounded-pill px-4">
+          ⬅ Volver
+        </a>
+      </div>
+
+      <div class="soft-card p-4 mb-4">
+        <div class="row g-3 align-items-center">
+
+          <div class="col-md-3">
+            <div class="metric-card text-center">
+              <div class="metric-label">Score Total</div>
+              <div class="metric-value" id="scoreTotal">{{ "%.1f"|format(run.score_total or 0) }}</div>
+              <span id="nivelBadge" class="badge bg-{{ scorecard_badge_color(run.nivel_riesgo or 'Pendiente') }}">
+                {{ run.nivel_riesgo or "Pendiente" }}
+              </span>
+            </div>
+          </div>
+
+          <div class="col-md-9">
+            <div class="mb-2 fw-bold">
+              Estado: <span id="estadoText">{{ run.estado or "pendiente" }}</span>
+            </div>
+
+            <div class="progress mb-2" style="height:28px;border-radius:20px;overflow:hidden;">
+              <div id="progressBar"
+                   class="progress-bar progress-bar-striped progress-bar-animated"
+                   role="progressbar"
+                   style="width: {{ run.progress_pct or 0 }}%;">
+                {{ run.progress_pct or 0 }}%
+              </div>
+            </div>
+
+            <div class="small text-muted">
+              Etapa: <span id="stageText">{{ run.current_stage or "—" }}</span>
+              |
+              Herramienta: <span id="toolText">{{ run.current_tool or "—" }}</span>
+            </div>
+
+            {% if run.error_detalle %}
+              <div class="alert alert-danger mt-3">
+                <strong>Error:</strong>
+                <pre class="mb-0">{{ run.error_detalle }}</pre>
+              </div>
+            {% endif %}
+          </div>
+
+        </div>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-2">
+          <div class="metric-card text-center">
+            <div class="metric-label">DNS</div>
+            <div class="metric-value" id="scoreDns">{{ "%.1f"|format(run.score_dns or 0) }}</div>
+          </div>
+        </div>
+        <div class="col-md-2">
+          <div class="metric-card text-center">
+            <div class="metric-label">IP</div>
+            <div class="metric-value" id="scoreIp">{{ "%.1f"|format(run.score_ip or 0) }}</div>
+          </div>
+        </div>
+        <div class="col-md-2">
+          <div class="metric-card text-center">
+            <div class="metric-label">Kali</div>
+            <div class="metric-value" id="scoreKali">{{ "%.1f"|format(run.score_kali or 0) }}</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="metric-card text-center">
+            <div class="metric-label">Incidentes</div>
+            <div class="metric-value" id="scoreIncidentes">{{ "%.1f"|format(run.score_incidentes or 100) }}</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="metric-card text-center">
+            <div class="metric-label">Hacker Chatter</div>
+            <div class="metric-value" id="scoreDarkweb">{{ "%.1f"|format(run.score_darkweb or 100) }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="soft-card p-3 mb-4">
+        <h5 class="fw-bold mb-3">🧩 Hallazgos Consolidados</h5>
+
+        <div class="table-wrap">
+          <table class="table table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Categoría</th>
+                <th>Herramienta</th>
+                <th>Control</th>
+                <th>Estado</th>
+                <th>Riesgo</th>
+                <th>Score</th>
+                <th>Evidencia</th>
+                <th>Recomendación</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for f in findings %}
+              <tr>
+                <td>{{ f.categoria }}</td>
+                <td>{{ f.herramienta or "—" }}</td>
+                <td>{{ f.control or "—" }}</td>
+                <td>{{ f.estado or "—" }}</td>
+                <td>
+                  <span class="badge bg-{{ scorecard_badge_color(f.severidad or f.riesgo or 'Bajo') }}">
+                    {{ f.severidad or f.riesgo or "Bajo" }}
+                  </span>
+                </td>
+                <td>{{ "%.1f"|format(f.score or 0) }}</td>
+                <td style="max-width:360px;white-space:pre-wrap;">{{ f.evidencia or "—" }}</td>
+                <td style="max-width:360px;white-space:pre-wrap;">{{ f.recomendacion or "—" }}</td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="8" class="text-center text-muted py-4">No hay hallazgos registrados.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="soft-card p-3 mb-4">
+        <h5 class="fw-bold mb-3">🕵️ Hacker Chatter / Exposure Intelligence</h5>
+
+        <div class="table-wrap">
+          <table class="table table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Fuente</th>
+                <th>Tipo</th>
+                <th>Indicador</th>
+                <th>Severidad</th>
+                <th>Fecha</th>
+                <th>Evidencia</th>
+                <th>URL</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for e in exposures %}
+              <tr>
+                <td>{{ e.fuente or "—" }}</td>
+                <td>{{ e.tipo_exposicion or "—" }}</td>
+                <td>{{ e.indicador or "—" }}</td>
+                <td>
+                  <span class="badge bg-{{ scorecard_badge_color(e.severidad or 'Bajo') }}">
+                    {{ e.severidad or "Bajo" }}
+                  </span>
+                </td>
+                <td>{{ e.fecha or "—" }}</td>
+                <td style="max-width:420px;white-space:pre-wrap;">{{ e.evidencia or "—" }}</td>
+                <td>
+                  {% if e.url %}
+                    <a href="{{ e.url }}" target="_blank" class="btn btn-sm btn-outline-primary rounded-pill">Abrir</a>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="7" class="text-center text-muted py-4">No hay exposiciones registradas.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="soft-card p-3 mb-4">
+        <h5 class="fw-bold mb-3">📰 Incidentes / Brechas Públicas</h5>
+
+        <div class="table-wrap">
+          <table class="table table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Fuente</th>
+                <th>Título</th>
+                <th>Fecha</th>
+                <th>Severidad</th>
+                <th>Descripción</th>
+                <th>URL</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for i in incidentes %}
+              <tr>
+                <td>{{ i.fuente or "—" }}</td>
+                <td>{{ i.titulo or "—" }}</td>
+                <td>{{ i.fecha_incidente or "—" }}</td>
+                <td>
+                  <span class="badge bg-{{ scorecard_badge_color(i.severidad or 'Bajo') }}">
+                    {{ i.severidad or "Bajo" }}
+                  </span>
+                </td>
+                <td style="max-width:420px;white-space:pre-wrap;">{{ i.descripcion or "—" }}</td>
+                <td>
+                  {% if i.url %}
+                    <a href="{{ i.url }}" target="_blank" class="btn btn-sm btn-outline-primary rounded-pill">Abrir</a>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="6" class="text-center text-muted py-4">No hay incidentes registrados.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="soft-card p-3 mb-4">
+        <h5 class="fw-bold mb-3">🛠 Salidas Técnicas Kali</h5>
+
+        <div class="table-wrap mb-3">
+          <table class="table table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Herramienta</th>
+                <th>Comando</th>
+                <th>Exit Code</th>
+                <th>Duración</th>
+                <th>Archivo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for o in outputs %}
+              <tr>
+                <td>{{ o.herramienta }}</td>
+                <td style="max-width:520px;white-space:pre-wrap;">{{ o.comando or "—" }}</td>
+                <td>{{ o.exit_code }}</td>
+                <td>{{ "%.1f"|format(o.duracion_segundos or 0) }} seg</td>
+                <td style="max-width:380px;word-break:break-all;">{{ o.archivo_salida or "—" }}</td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="5" class="text-center text-muted py-4">No hay salidas técnicas registradas.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        {% if run.salida_consola %}
+          <pre class="console">{{ run.salida_consola }}</pre>
+        {% endif %}
+      </div>
+
+    </div>
+
+    <script>
+      const SCORECARD_ID = {{ run.id }};
+      const ESTADO_URL = "{{ url_for('proponentes_scorecard_estado', scorecard_id=run.id) }}";
+
+      function updateProgressUI(data){
+        const pct = parseInt(data.progress_pct || 0);
+
+        const progressBar = document.getElementById("progressBar");
+        if(progressBar){
+          progressBar.style.width = pct + "%";
+          progressBar.textContent = pct + "%";
+
+          if(data.estado === "finalizado"){
+            progressBar.classList.remove("progress-bar-animated");
+            progressBar.classList.add("bg-success");
+          }else if(data.estado === "error"){
+            progressBar.classList.remove("progress-bar-animated");
+            progressBar.classList.add("bg-danger");
+          }
+        }
+
+        const map = {
+          "estadoText": data.estado,
+          "stageText": data.current_stage,
+          "toolText": data.current_tool,
+          "scoreTotal": data.score_total,
+          "scoreDns": data.score_dns,
+          "scoreIp": data.score_ip,
+          "scoreKali": data.score_kali,
+          "scoreIncidentes": data.score_incidentes,
+          "scoreDarkweb": data.score_darkweb
+        };
+
+        Object.keys(map).forEach(id => {
+          const el = document.getElementById(id);
+          if(el && map[id] !== undefined && map[id] !== null){
+            el.textContent = map[id];
+          }
+        });
+
+        const nivelBadge = document.getElementById("nivelBadge");
+        if(nivelBadge && data.nivel_riesgo){
+          nivelBadge.textContent = data.nivel_riesgo;
+        }
+      }
+
+      async function pollEstado(){
+        try{
+          const resp = await fetch(ESTADO_URL, {cache:"no-store"});
+          const data = await resp.json();
+
+          if(data.ok){
+            updateProgressUI(data);
+
+            if(data.estado === "finalizado" || data.estado === "error"){
+              clearInterval(window.__scorecardPoller);
+
+              setTimeout(() => {
+                window.location.reload();
+              }, 1200);
+            }
+          }
+        }catch(e){
+          console.log("Error consultando estado scorecard proponentes", e);
+        }
+      }
+
+      {% if run.estado in ['pendiente', 'ejecutando'] %}
+        window.__scorecardPoller = setInterval(pollEstado, 3000);
+        pollEstado();
+      {% endif %}
+    </script>
+    """
+
+    return render_template_string(
+        BASE,
+        content=Markup(render_template_string(
+            body,
+            run=run,
+            findings=findings,
+            incidentes=incidentes,
+            exposures=exposures,
+            outputs=outputs,
+            scorecard_badge_color=scorecard_badge_color
+        ))
+    )
+
+# ============================================================
+# ADMIN - CONFIGURACIÓN APIs SCORECARD PROPONENTES
+# ============================================================
+
+@app.route("/admin/scorecard-proponentes/apis", methods=["GET", "POST"])
+@login_required
+def admin_scorecard_proponentes_apis():
+    user = User.query.get(session.get("user_id"))
+
+    if not user or user.role != "admin":
+        flash("Solo el administrador puede configurar las APIs del Scorecard de Proponentes.", "danger")
+        return redirect(url_for("menu"))
+
+    if request.method == "POST":
+        proveedor = (request.form.get("proveedor") or "").strip().lower()
+        api_key = (request.form.get("api_key") or "").strip()
+        activo = bool(request.form.get("activo"))
+
+        if proveedor not in ["leakcheck", "hibp", "shodan"]:
+            flash("Proveedor API no válido.", "danger")
+            return redirect(url_for("admin_scorecard_proponentes_apis"))
+
+        scorecard_proponentes_guardar_api_key(
+            proveedor,
+            api_key,
+            activo,
+            getattr(user, "username", "admin")
+        )
+
+        try:
+            registrar_log(
+                getattr(user, "username", "admin"),
+                f"Actualizó API {proveedor} para Security Scorecard de Proponentes"
+            )
+        except Exception:
+            pass
+
+        flash("Configuración de API actualizada correctamente para Proponentes.", "success")
+        return redirect(url_for("admin_scorecard_proponentes_apis"))
+
+    estado_apis = scorecard_proponentes_api_status()
+
+    body = """
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .api-prop-shell{
+        width:96%;
+        max-width:1300px;
+        margin:26px auto 24px auto;
+      }
+
+      .api-prop-header-card{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .api-prop-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }
+
+      .api-prop-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }
+
+      .api-prop-header-overlay::before{
+        content:"🔌";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .api-prop-header-overlay h2{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .api-prop-header-overlay h2::before{
+        content:"SGSI · Configuración de APIs Proponentes";
+        display:block;
+        width:max-content;
+        max-width:100%;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+        text-shadow:none;
+      }
+
+      .soft-card,
+      .card{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
+      }
+
+      .api-card{
+        background:#ffffff;
+        border-radius:16px;
+        box-shadow:0 8px 18px rgba(15,23,42,.10);
+        padding:18px;
+        height:100%;
+        border:1px solid #dbe6f4;
+      }
+
+      .api-title{
+        color:#1459a6;
+        font-weight:950;
+        font-size:1.05rem;
+      }
+
+      .api-muted{
+        color:#607086;
+        font-size:.9rem;
+        font-weight:700;
+      }
+
+      .form-label{
+        font-size:.72rem;
+        font-weight:900;
+        color:#1459a6;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
+      }
+
+      .form-control,
+      .form-select{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        box-shadow:none !important;
+      }
+
+      .form-control:focus,
+      .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#ffffff;
+      }
+
+      .btn{
+        border-radius:10px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }
+
+      .badge{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }
+
+      @media (max-width:992px){
+        .api-prop-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .api-prop-header-card{
+          min-height:88px;
+        }
+
+        .api-prop-header-overlay h2{
+          font-size:1.20rem;
+        }
+      }
+
+      @media (max-width:768px){
+        .api-prop-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .api-prop-header-overlay::before{
+          margin:0;
+        }
+
+        .api-prop-header-overlay h2,
+        .api-prop-header-overlay h2::before{
+          text-align:center;
+          margin-left:auto;
+          margin-right:auto;
+        }
+      }
+    </style>
+
+    <div class="api-prop-shell">
+
+      <div class="api-prop-header-card">
+        <div class="api-prop-header-overlay">
+          <h2>APIs — Security Scorecard de Proponentes</h2>
+        </div>
+      </div>
+
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="text-black fw-bold">
+          Configuración independiente de APIs para evaluación de Proponentes.
+        </div>
+
+        <a href="{{ url_for('proponentes_scorecard_dashboard') }}" class="btn btn-light rounded-pill px-4">
+          ⬅ Volver
+        </a>
+      </div>
+
+      <div class="alert alert-info soft-card">
+        <strong>Separación activa:</strong>
+        Estas API Keys se guardan en <code>scorecard_proponentes.db</code>,
+        tabla <code>scorecard_proponentes_api_keys</code>.
+        No afectan el Scorecard de Proveedores.
+      </div>
+
+      <div class="row g-4">
+
+        <div class="col-md-4">
+          <div class="api-card">
+            <div class="api-title">LeakCheck API</div>
+            <div class="api-muted mb-2">Credenciales filtradas / exposición de identidades.</div>
+
+            <div class="mb-2">
+              Estado:
+              {% if estado_apis.leakcheck.activo and estado_apis.leakcheck.configurada %}
+                <span class="badge bg-success">Activa</span>
+              {% elif estado_apis.leakcheck.configurada %}
+                <span class="badge bg-warning text-dark">Configurada inactiva</span>
+              {% else %}
+                <span class="badge bg-secondary">No configurada</span>
+              {% endif %}
+            </div>
+
+            <div class="mb-3">
+              <strong>Key:</strong> {{ estado_apis.leakcheck.mask }}
+            </div>
+
+            <form method="POST">
+              <input type="hidden" name="proveedor" value="leakcheck">
+
+              <div class="mb-3">
+                <label class="form-label fw-bold">Nueva API Key</label>
+                <input type="password" name="api_key" class="form-control" placeholder="Pegar API Key LeakCheck">
+              </div>
+
+              <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" name="activo" id="activo_leakcheck"
+                       {% if estado_apis.leakcheck.activo %}checked{% endif %}>
+                <label class="form-check-label" for="activo_leakcheck">Activa</label>
+              </div>
+
+              <button class="btn btn-primary rounded-pill w-100">
+                Guardar LeakCheck
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <div class="col-md-4">
+          <div class="api-card">
+            <div class="api-title">Have I Been Pwned API</div>
+            <div class="api-muted mb-2">Brechas por dominio verificado.</div>
+
+            <div class="mb-2">
+              Estado:
+              {% if estado_apis.hibp.activo and estado_apis.hibp.configurada %}
+                <span class="badge bg-success">Activa</span>
+              {% elif estado_apis.hibp.configurada %}
+                <span class="badge bg-warning text-dark">Configurada inactiva</span>
+              {% else %}
+                <span class="badge bg-secondary">No configurada</span>
+              {% endif %}
+            </div>
+
+            <div class="mb-3">
+              <strong>Key:</strong> {{ estado_apis.hibp.mask }}
+            </div>
+
+            <form method="POST">
+              <input type="hidden" name="proveedor" value="hibp">
+
+              <div class="mb-3">
+                <label class="form-label fw-bold">Nueva API Key</label>
+                <input type="password" name="api_key" class="form-control" placeholder="Pegar API Key HIBP">
+              </div>
+
+              <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" name="activo" id="activo_hibp"
+                       {% if estado_apis.hibp.activo %}checked{% endif %}>
+                <label class="form-check-label" for="activo_hibp">Activa</label>
+              </div>
+
+              <button class="btn btn-primary rounded-pill w-100">
+                Guardar HIBP
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <div class="col-md-4">
+          <div class="api-card">
+            <div class="api-title">Shodan API</div>
+            <div class="api-muted mb-2">Servicios expuestos / CVEs / superficie externa.</div>
+
+            <div class="mb-2">
+              Estado:
+              {% if estado_apis.shodan.activo and estado_apis.shodan.configurada %}
+                <span class="badge bg-success">Activa</span>
+              {% elif estado_apis.shodan.configurada %}
+                <span class="badge bg-warning text-dark">Configurada inactiva</span>
+              {% else %}
+                <span class="badge bg-secondary">No configurada</span>
+              {% endif %}
+            </div>
+
+            <div class="mb-3">
+              <strong>Key:</strong> {{ estado_apis.shodan.mask }}
+            </div>
+
+            <form method="POST">
+              <input type="hidden" name="proveedor" value="shodan">
+
+              <div class="mb-3">
+                <label class="form-label fw-bold">Nueva API Key</label>
+                <input type="password" name="api_key" class="form-control" placeholder="Pegar API Key Shodan">
+              </div>
+
+              <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" name="activo" id="activo_shodan"
+                       {% if estado_apis.shodan.activo %}checked{% endif %}>
+                <label class="form-check-label" for="activo_shodan">Activa</label>
+              </div>
+
+              <button class="btn btn-primary rounded-pill w-100">
+                Guardar Shodan
+              </button>
+            </form>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+    """
+
+    return render_template_string(
+        BASE,
+        content=Markup(render_template_string(
+            body,
+            estado_apis=estado_apis
+        ))
+    )
+
+# ============================================================
+# ADMIN - PARÁMETROS SCORECARD PROPONENTES
+# ============================================================
+
+def init_scorecard_proponentes_parametros_db():
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS scorecard_parametros (
+            clave TEXT PRIMARY KEY,
+            valor REAL NOT NULL,
+            descripcion TEXT
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS scorecard_risk_levels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            score_min REAL NOT NULL DEFAULT 0,
+            color_bootstrap TEXT DEFAULT 'secondary',
+            orden INTEGER DEFAULT 0,
+            activo INTEGER DEFAULT 1,
+            fecha_creacion TEXT NOT NULL
+        )
+    """)
+
+    parametros_default = [
+        ("peso_dns", 20, "Peso DNS Health"),
+        ("peso_ip", 15, "Peso IP Reputation"),
+        ("peso_kali", 35, "Peso Kali Linux"),
+        ("peso_incidentes", 15, "Peso Incidentes/Brechas"),
+        ("peso_darkweb", 15, "Peso Dark Web / Exposure Intelligence"),
+        ("darkweb_score_sin_hallazgos", 100, "Sin hallazgos"),
+        ("darkweb_score_1_2", 80, "1 a 2 hallazgos"),
+        ("darkweb_score_3_5", 60, "3 a 5 hallazgos"),
+        ("darkweb_score_mas_5", 40, "Más de 5 hallazgos"),
+        ("darkweb_score_credenciales_confirmadas", 20, "Credenciales confirmadas"),
+    ]
+
+    for clave, valor, descripcion in parametros_default:
+        cur.execute("""
+            INSERT OR IGNORE INTO scorecard_parametros
+            (clave, valor, descripcion)
+            VALUES (?, ?, ?)
+        """, (clave, valor, descripcion))
+
+    cur.execute("SELECT COUNT(*) AS total FROM scorecard_risk_levels")
+    total_risk_levels = cur.fetchone()["total"]
+
+    if total_risk_levels == 0:
+        niveles_default = [
+            ("Bajo", 85, "success", 1),
+            ("Medio", 70, "warning text-dark", 2),
+            ("Alto", 50, "danger", 3),
+            ("Crítico", 0, "dark", 4),
+        ]
+
+        for nombre, score_min, color_bootstrap, orden in niveles_default:
+            cur.execute("""
+                INSERT INTO scorecard_risk_levels
+                (nombre, score_min, color_bootstrap, orden, activo, fecha_creacion)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                nombre,
+                score_min,
+                color_bootstrap,
+                orden,
+                1,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ))
+
+    conn.commit()
+    conn.close()
+
+
+init_scorecard_proponentes_parametros_db()
+
+
+def scorecard_proponentes_get_param(clave, default):
+    try:
+        conn = get_scorecard_proponentes_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT valor
+            FROM scorecard_parametros
+            WHERE clave = ?
+        """, (clave,))
+
+        row = cur.fetchone()
+        conn.close()
+
+        if row:
+            return float(row["valor"])
+
+        return float(default)
+
+    except Exception:
+        return float(default)
+
+def scorecard_proponentes_risk_levels_activos():
+    try:
+        conn = get_scorecard_proponentes_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT *
+            FROM scorecard_risk_levels
+            WHERE activo = 1
+            ORDER BY score_min DESC, orden ASC, id ASC
+        """)
+
+        rows = cur.fetchall()
+        conn.close()
+        return rows
+
+    except Exception:
+        return []
+
+def scorecard_proponentes_badge_color(nivel_nombre):
+    try:
+        conn = get_scorecard_proponentes_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT color_bootstrap
+            FROM scorecard_risk_levels
+            WHERE nombre = ?
+            LIMIT 1
+        """, (nivel_nombre,))
+
+        row = cur.fetchone()
+        conn.close()
+
+        if row:
+            return row["color_bootstrap"]
+
+        return "secondary"
+
+    except Exception:
+        return "secondary"
+
+
+
+def nivel_riesgo_scorecard_proponentes(score):
+    score = float(score or 0)
+    niveles = scorecard_proponentes_risk_levels_activos()
+
+    if not niveles:
+        if score >= 85:
+            return "Bajo"
+        if score >= 70:
+            return "Medio"
+        if score >= 50:
+            return "Alto"
+        return "Crítico"
+
+    for nivel in niveles:
+        if score >= float(nivel["score_min"] or 0):
+            return nivel["nombre"]
+
+    return niveles[-1]["nombre"]
+
+
+def scorecard_proponentes_calcular_total(
+    score_dns,
+    score_ip,
+    score_kali,
+    score_incidentes,
+    score_darkweb=100,
+    incluir_kali=True
+):
+    peso_dns = scorecard_proponentes_get_param("peso_dns", 20)
+    peso_ip = scorecard_proponentes_get_param("peso_ip", 15)
+    peso_kali = scorecard_proponentes_get_param("peso_kali", 35)
+    peso_incidentes = scorecard_proponentes_get_param("peso_incidentes", 15)
+    peso_darkweb = scorecard_proponentes_get_param("peso_darkweb", 15)
+
+    componentes = [
+        (float(score_dns or 0), peso_dns),
+        (float(score_ip or 0), peso_ip),
+        (float(score_incidentes or 0), peso_incidentes),
+        (float(score_darkweb or 0), peso_darkweb),
+    ]
+
+    if incluir_kali:
+        componentes.append((float(score_kali or 0), peso_kali))
+
+    total_pesos = sum(peso for _, peso in componentes)
+
+    if total_pesos <= 0:
+        return 0
+
+    total = sum(valor * peso for valor, peso in componentes) / total_pesos
+    return round(max(0, min(100, total)), 2)
+
+
+
+def scorecard_proponentes_nivel_riesgo(score):
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT * FROM scorecard_risk_levels
+        WHERE activo = 1
+        ORDER BY score_min DESC
+    """)
+
+    niveles = cur.fetchall()
+    conn.close()
+
+    for n in niveles:
+        if score >= n["score_min"]:
+            return n["nombre"]
+
+    return "Crítico"
+
+def scorecard_score_hacker_chatter_proponentes(total_hallazgos, credencial_confirmada=False, severidad_max="Bajo"):
+    total_hallazgos = int(total_hallazgos or 0)
+
+    if credencial_confirmada:
+        return scorecard_proponentes_get_param("darkweb_score_credenciales_confirmadas", 20), "Crítico"
+
+    if total_hallazgos <= 0:
+        return scorecard_proponentes_get_param("darkweb_score_sin_hallazgos", 100), "Bajo"
+
+    if total_hallazgos <= 2:
+        base = scorecard_proponentes_get_param("darkweb_score_1_2", 80)
+        riesgo = "Medio"
+    elif total_hallazgos <= 5:
+        base = scorecard_proponentes_get_param("darkweb_score_3_5", 60)
+        riesgo = "Alto"
+    else:
+        base = scorecard_proponentes_get_param("darkweb_score_mas_5", 40)
+        riesgo = "Crítico"
+
+    if severidad_max == "Crítico":
+        base = min(base, 35)
+        riesgo = "Crítico"
+    elif severidad_max == "Alto":
+        base = min(base, 55)
+        if riesgo in ["Bajo", "Medio"]:
+            riesgo = "Alto"
+
+    return max(0, min(100, float(base))), riesgo
+
+
+
+@app.route("/proponentes/scorecard/parametros", methods=["GET", "POST"])
+@login_required
+def proponentes_scorecard_parametros():
+    user, allowed, read_only = scorecard_proponentes_user_permiso()
+
+    if not allowed:
+        flash("No tiene permiso para parametrizar Scorecard de Proponentes.", "danger")
+        return redirect(url_for("menu"))
+
+    if read_only:
+        flash("El rol Auditor no puede modificar parámetros.", "danger")
+        return redirect(url_for("proponentes_scorecard_dashboard"))
+
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        accion = request.form.get("accion")
+
+        if accion == "guardar_parametros":
+            claves_numericas = [
+                "peso_dns",
+                "peso_ip",
+                "peso_kali",
+                "peso_incidentes",
+                "peso_darkweb",
+                "darkweb_score_sin_hallazgos",
+                "darkweb_score_1_2",
+                "darkweb_score_3_5",
+                "darkweb_score_mas_5",
+                "darkweb_score_credenciales_confirmadas",
+            ]
+
+            for clave in claves_numericas:
+                valor = request.form.get(clave, type=float)
+
+                if valor is None:
+                    valor = scorecard_proponentes_get_param(clave, 0)
+
+                cur.execute("""
+                    INSERT INTO scorecard_parametros
+                    (clave, valor, descripcion)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(clave) DO UPDATE SET
+                        valor = excluded.valor
+                """, (
+                    clave,
+                    valor,
+                    clave.replace("_", " ").title()
+                ))
+
+            conn.commit()
+
+            try:
+                registrar_log(
+                    getattr(user, "username", "Sistema"),
+                    "Actualizó parámetros generales del Scorecard de Proponentes"
+                )
+            except Exception:
+                pass
+
+            flash("Parámetros generales actualizados correctamente.", "success")
+            conn.close()
+            return redirect(url_for("proponentes_scorecard_parametros"))
+
+        elif accion == "agregar_riesgo":
+            nombre = (request.form.get("nombre_riesgo") or "").strip()
+            score_min = request.form.get("score_min", type=float)
+            color_bootstrap = (request.form.get("color_bootstrap") or "secondary").strip()
+            orden = request.form.get("orden", type=int) or 0
+
+            if not nombre:
+                flash("Debe indicar el nombre del nivel de riesgo.", "danger")
+                conn.close()
+                return redirect(url_for("proponentes_scorecard_parametros"))
+
+            if score_min is None:
+                flash("Debe indicar el score mínimo del nivel de riesgo.", "danger")
+                conn.close()
+                return redirect(url_for("proponentes_scorecard_parametros"))
+
+            cur.execute("""
+                INSERT INTO scorecard_risk_levels
+                (nombre, score_min, color_bootstrap, orden, activo, fecha_creacion)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                nombre,
+                score_min,
+                color_bootstrap,
+                orden,
+                1,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ))
+
+            conn.commit()
+
+            try:
+                registrar_log(
+                    getattr(user, "username", "Sistema"),
+                    f"Agregó nivel de riesgo Scorecard Proponentes: {nombre} desde {score_min}"
+                )
+            except Exception:
+                pass
+
+            flash("Nivel de riesgo agregado correctamente.", "success")
+            conn.close()
+            return redirect(url_for("proponentes_scorecard_parametros"))
+
+        elif accion == "actualizar_riesgos":
+            ids = request.form.getlist("risk_id")
+
+            for risk_id in ids:
+                nombre = (request.form.get(f"nombre_{risk_id}") or "").strip()
+                score_min = request.form.get(f"score_min_{risk_id}", type=float)
+                color_bootstrap = (request.form.get(f"color_{risk_id}") or "secondary").strip()
+                orden = request.form.get(f"orden_{risk_id}", type=int) or 0
+                activo = 1 if request.form.get(f"activo_{risk_id}") else 0
+
+                if not nombre or score_min is None:
+                    continue
+
+                cur.execute("""
+                    UPDATE scorecard_risk_levels
+                    SET nombre = ?,
+                        score_min = ?,
+                        color_bootstrap = ?,
+                        orden = ?,
+                        activo = ?
+                    WHERE id = ?
+                """, (
+                    nombre,
+                    score_min,
+                    color_bootstrap,
+                    orden,
+                    activo,
+                    risk_id
+                ))
+
+            conn.commit()
+
+            try:
+                registrar_log(
+                    getattr(user, "username", "Sistema"),
+                    "Actualizó niveles de riesgo del Scorecard de Proponentes"
+                )
+            except Exception:
+                pass
+
+            flash("Niveles de riesgo actualizados correctamente.", "success")
+            conn.close()
+            return redirect(url_for("proponentes_scorecard_parametros"))
+
+        elif accion == "eliminar_riesgo":
+            risk_id = request.form.get("risk_id", type=int)
+
+            if risk_id:
+                cur.execute("DELETE FROM scorecard_risk_levels WHERE id = ?", (risk_id,))
+                conn.commit()
+
+                try:
+                    registrar_log(
+                        getattr(user, "username", "Sistema"),
+                        f"Eliminó nivel de riesgo Scorecard Proponentes ID {risk_id}"
+                    )
+                except Exception:
+                    pass
+
+                flash("Nivel de riesgo eliminado correctamente.", "success")
+
+            conn.close()
+            return redirect(url_for("proponentes_scorecard_parametros"))
+
+    parametros = {}
+
+    cur.execute("SELECT * FROM scorecard_parametros")
+    for row in cur.fetchall():
+        parametros[row["clave"]] = row
+
+    cur.execute("""
+        SELECT *
+        FROM scorecard_risk_levels
+        ORDER BY score_min DESC, orden ASC, id ASC
+    """)
+    risk_levels = cur.fetchall()
+
+    conn.close()
+
+    body = """
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .score-shell{
+        width:96%;
+        max-width:1450px;
+        margin:26px auto 24px auto;
+      }
+
+      .score-header-card{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .score-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }
+
+      .score-header-card::after{
+        content:"⚙️";
+        order:-1;
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+        position:relative;
+        z-index:1;
+      }
+
+      .score-header-text{
+        max-width:1100px;
+        width:100%;
+        display:block !important;
+        transform:none !important;
+        color:#ffffff !important;
+        font-size:1.32rem;
+        font-weight:950;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+        position:relative;
+        z-index:1;
+      }
+
+      .score-header-text::before{
+        content:"SGSI · Parámetros Scorecard";
+        display:block;
+        width:max-content;
+        max-width:100%;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+        text-shadow:none;
+      }
+
+      .score-card,
+      .card{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
+        padding:22px;
+        margin-bottom:18px;
+      }
+
+      .section-title,
+      .card h5,
+      .card h6{
+        font-weight:950;
+        font-size:.95rem;
+        color:#1459a6;
+        margin-bottom:16px;
+        padding-bottom:8px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+        text-transform:none;
+        letter-spacing:0;
+      }
+
+      .table{
+        margin-bottom:0;
+      }
+
+      .table thead th{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-size:.78rem;
+        font-weight:900 !important;
+        border:none !important;
+        white-space:nowrap;
+        vertical-align:middle !important;
+        text-align:center;
+        padding:9px 8px;
+      }
+
+      .table tbody td,
+      .table td{
+        vertical-align:middle !important;
+        font-size:.82rem;
+        padding:9px 8px;
+        border-bottom:1px solid #e5edf7;
+        color:#1f2937;
+      }
+
+      .table tbody tr:nth-child(even){
+        background:#f8fbff;
+      }
+
+      .table tbody tr:hover{
+        background:#eef6ff;
+      }
+
+      .param-help{
+        font-size:.86rem;
+        color:#607086;
+        font-weight:700;
+        line-height:1.45;
+      }
+
+      .form-label{
+        font-size:.72rem;
+        font-weight:900;
+        color:#1459a6;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
+      }
+
+      .form-control,
+      .form-select{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        box-shadow:none !important;
+      }
+
+      .form-control:focus,
+      .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#ffffff;
+      }
+
+      .btn{
+        border-radius:10px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }
+
+      .badge{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }
+
+      @media (max-width:992px){
+        .score-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .score-header-card{
+          min-height:88px;
+        }
+
+        .score-header-text{
+          font-size:1.20rem;
+        }
+
+        .score-card,
+        .card{
+          padding:16px;
+        }
+      }
+
+      @media (max-width:768px){
+        .score-header-card{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .score-header-card::after{
+          margin:0;
+        }
+
+        .score-header-text,
+        .score-header-text::before{
+          text-align:center;
+          margin-left:auto;
+          margin-right:auto;
+        }
+      }
+    </style>
+
+    <div class="score-shell">
+
+      <div class="score-header-card">
+        <h1 class="score-header-text">Parámetros Scorecard de Proponentes</h1>
+      </div>
+
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="fw-bold text-black">
+          Configuración de pesos, scoring y niveles de riesgo del Security Scorecard de Proponentes.
+        </div>
+
+        <a href="{{ url_for('proponentes_scorecard_dashboard') }}" class="btn btn-light rounded-pill px-4">
+          ⬅ Volver
+        </a>
+      </div>
+
+      <div class="score-card">
+        <h5 class="section-title">Parámetros generales de scoring</h5>
+
+        <form method="POST">
+          <input type="hidden" name="accion" value="guardar_parametros">
+
+          <div class="row g-3">
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">Peso DNS Health</label>
+              <input type="number" step="0.01" name="peso_dns" class="form-control"
+                     value="{{ parametros.get('peso_dns').valor if parametros.get('peso_dns') else 20 }}">
+              <div class="param-help">Peso para validaciones DNS.</div>
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">Peso IP Reputation</label>
+              <input type="number" step="0.01" name="peso_ip" class="form-control"
+                     value="{{ parametros.get('peso_ip').valor if parametros.get('peso_ip') else 15 }}">
+              <div class="param-help">Peso para reputación IP.</div>
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">Peso Kali Linux</label>
+              <input type="number" step="0.01" name="peso_kali" class="form-control"
+                     value="{{ parametros.get('peso_kali').valor if parametros.get('peso_kali') else 35 }}">
+              <div class="param-help">Peso para herramientas Kali.</div>
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">Peso Incidentes / Brechas</label>
+              <input type="number" step="0.01" name="peso_incidentes" class="form-control"
+                     value="{{ parametros.get('peso_incidentes').valor if parametros.get('peso_incidentes') else 15 }}">
+              <div class="param-help">Peso de historial de incidentes.</div>
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">Peso Dark Web / Exposure Intelligence</label>
+              <input type="number" step="0.01" name="peso_darkweb" class="form-control"
+                     value="{{ parametros.get('peso_darkweb').valor if parametros.get('peso_darkweb') else 15 }}">
+              <div class="param-help">Peso de Hacker Chatter / exposición.</div>
+            </div>
+
+          </div>
+
+          <hr>
+
+          <h6 class="fw-bold text-primary">Scoring Hacker Chatter / Exposure Intelligence</h6>
+
+          <div class="row g-3 mt-1">
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">Sin hallazgos</label>
+              <input type="number" step="0.01" name="darkweb_score_sin_hallazgos" class="form-control"
+                     value="{{ parametros.get('darkweb_score_sin_hallazgos').valor if parametros.get('darkweb_score_sin_hallazgos') else 100 }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">1 a 2 hallazgos</label>
+              <input type="number" step="0.01" name="darkweb_score_1_2" class="form-control"
+                     value="{{ parametros.get('darkweb_score_1_2').valor if parametros.get('darkweb_score_1_2') else 80 }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">3 a 5 hallazgos</label>
+              <input type="number" step="0.01" name="darkweb_score_3_5" class="form-control"
+                     value="{{ parametros.get('darkweb_score_3_5').valor if parametros.get('darkweb_score_3_5') else 60 }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">Más de 5 hallazgos</label>
+              <input type="number" step="0.01" name="darkweb_score_mas_5" class="form-control"
+                     value="{{ parametros.get('darkweb_score_mas_5').valor if parametros.get('darkweb_score_mas_5') else 40 }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">Credenciales confirmadas</label>
+              <input type="number" step="0.01" name="darkweb_score_credenciales_confirmadas" class="form-control"
+                     value="{{ parametros.get('darkweb_score_credenciales_confirmadas').valor if parametros.get('darkweb_score_credenciales_confirmadas') else 20 }}">
+            </div>
+
+          </div>
+
+          <div class="text-end mt-4">
+            <button class="btn btn-primary rounded-pill px-4 fw-bold">
+              💾 Guardar Parámetros
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="score-card">
+        <h5 class="section-title">Niveles de riesgo</h5>
+
+        <form method="POST" class="mb-4">
+          <input type="hidden" name="accion" value="agregar_riesgo">
+
+          <div class="row g-3 align-items-end">
+            <div class="col-md-3">
+              <label class="form-label fw-bold">Nombre</label>
+              <input type="text" name="nombre_riesgo" class="form-control" placeholder="Ej: Muy Alto">
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label fw-bold">Score mínimo</label>
+              <input type="number" step="0.01" name="score_min" class="form-control" placeholder="Ej: 30">
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label fw-bold">Color Bootstrap</label>
+              <select name="color_bootstrap" class="form-select">
+                <option value="success">success</option>
+                <option value="warning text-dark">warning text-dark</option>
+                <option value="danger">danger</option>
+                <option value="dark">dark</option>
+                <option value="secondary">secondary</option>
+                <option value="primary">primary</option>
+                <option value="info text-dark">info text-dark</option>
+              </select>
+            </div>
+
+            <div class="col-md-2">
+              <label class="form-label fw-bold">Orden</label>
+              <input type="number" name="orden" class="form-control" value="0">
+            </div>
+
+            <div class="col-md-1 d-grid">
+              <button class="btn btn-success rounded-pill">+</button>
+            </div>
+          </div>
+        </form>
+
+        <form method="POST">
+          <input type="hidden" name="accion" value="actualizar_riesgos">
+
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Nombre</th>
+                  <th>Score mínimo</th>
+                  <th>Color</th>
+                  <th>Orden</th>
+                  <th>Activo</th>
+                  <th>Vista</th>
+                  <th>Eliminar</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {% for n in risk_levels %}
+                <tr>
+                  <td>
+                    {{ n.id }}
+                    <input type="hidden" name="risk_id" value="{{ n.id }}">
+                  </td>
+
+                  <td>
+                    <input type="text" name="nombre_{{ n.id }}" class="form-control" value="{{ n.nombre }}">
+                  </td>
+
+                  <td>
+                    <input type="number" step="0.01" name="score_min_{{ n.id }}" class="form-control" value="{{ n.score_min }}">
+                  </td>
+
+                  <td>
+                    <select name="color_{{ n.id }}" class="form-select">
+                      {% for c in ['success','warning text-dark','danger','dark','secondary','primary','info text-dark'] %}
+                        <option value="{{ c }}" {% if n.color_bootstrap == c %}selected{% endif %}>{{ c }}</option>
+                      {% endfor %}
+                    </select>
+                  </td>
+
+                  <td>
+                    <input type="number" name="orden_{{ n.id }}" class="form-control" value="{{ n.orden or 0 }}">
+                  </td>
+
+                  <td class="text-center">
+                    <input type="checkbox" name="activo_{{ n.id }}" {% if n.activo %}checked{% endif %}>
+                  </td>
+
+                  <td>
+                    <span class="badge bg-{{ n.color_bootstrap }}">{{ n.nombre }}</span>
+                  </td>
+
+                  <td>
+                    <button type="submit"
+                            class="btn btn-sm btn-outline-danger rounded-pill"
+                            formaction="{{ url_for('proponentes_scorecard_parametros') }}"
+                            formmethod="POST"
+                            name="accion"
+                            value="eliminar_riesgo"
+                            onclick="this.form.risk_id.value='{{ n.id }}'; return confirm('¿Eliminar este nivel de riesgo?');">
+                      Eliminar
+                    </button>
+                  </td>
+                </tr>
+                {% else %}
+                <tr>
+                  <td colspan="8" class="text-center text-muted py-4">
+                    No hay niveles de riesgo configurados.
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          <input type="hidden" name="risk_id" value="">
+
+          <div class="text-end mt-3">
+            <button class="btn btn-primary rounded-pill px-4 fw-bold">
+              💾 Guardar Niveles de Riesgo
+            </button>
+          </div>
+        </form>
+      </div>
+
+    </div>
+    """
+
+    return render_template_string(
+        BASE,
+        content=Markup(render_template_string(
+            body,
+            parametros=parametros,
             risk_levels=risk_levels
         ))
     )
