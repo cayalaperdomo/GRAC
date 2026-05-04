@@ -141207,9 +141207,6 @@ def admin_scorecard_proponentes_apis():
       </div>
 
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <div class="text-black fw-bold">
-          Configuración independiente de APIs para evaluación de Proponentes.
-        </div>
 
         <a href="{{ url_for('proponentes_scorecard_dashboard') }}" class="btn btn-light rounded-pill px-4">
           ⬅ Volver
