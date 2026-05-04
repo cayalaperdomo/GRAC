@@ -5459,6 +5459,8 @@ MODULES = [
     "Gestión de Accesos",
     "Revisión de Accesos",
     "Cuestionarios de Proponentes",
+    "Revisión en Listas Restrictivas",
+    "Security Scorecard de Proveedores",
     "Nivel de madurez ISO 27001:2022",
     "Nivel de Madurez NIST CSF V.2.0",
     "Nivel de Madurez protección de datos personales",
@@ -6096,7 +6098,7 @@ def editar_permisos(user_id):
       <div class="perm-header-card">
         <div class="perm-header-overlay">
           <div class="perm-header-text">
-            <h3 class="perm-title m-0">🔐 Editar Permisos</h3>
+            <h3 class="perm-title m-0">Editar Permisos</h3>
             <div class="perm-subtitle">
               Administración de módulos habilitados para el usuario {{ user.username }}
             </div>
@@ -6162,90 +6164,165 @@ def editar_permisos(user_id):
       .perm-shell{
         width:96%;
         max-width:1400px;
-        margin:10px auto 30px auto;
+        margin:26px auto 24px auto;
       }
 
       .perm-header-card{
-        background:linear-gradient(135deg,#2f6fb6 0%,#3f86d6 55%,#5aa3ea 100%);
-        height:88px;
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
         display:flex;
         align-items:center;
-        justify-content:center;
-        border-radius:18px;
-        box-shadow:0 12px 30px rgba(0,0,0,.30);
-        margin-bottom:14px;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
         overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .perm-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
       }
 
       .perm-header-overlay{
         width:100%;
-        height:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }
+
+      .perm-header-overlay::before{
+        content:"🔐";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
         display:flex;
         align-items:center;
         justify-content:center;
-        text-align:center;
-        background:rgba(0,0,0,.08);
-        padding:8px 24px;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
       }
 
       .perm-header-text{
         max-width:1100px;
+        width:100%;
+        display:block !important;
+      }
+
+      .perm-header-text::before{
+        content:"SGSI · Gestión de Permisos";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
       }
 
       .perm-title{
         color:#ffffff !important;
-        font-weight:900;
-        font-size:1.38rem;
-        line-height:1.15;
-        text-shadow:0 4px 14px rgba(0,0,0,.45);
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
         margin:0 !important;
       }
 
       .perm-subtitle{
-        color:rgba(255,255,255,.96);
-        font-size:.82rem;
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
         margin-top:4px;
+        line-height:1.25;
       }
 
       .perm-header-actions{
         display:flex;
         justify-content:center;
-        gap:12px;
+        gap:10px;
         flex-wrap:wrap;
-        margin-bottom:16px;
+        margin:10px 0 14px;
       }
 
-      .perm-back-btn{
+      .perm-header-actions .btn,
+      .perm-back-btn,
+      .perm-cancel-btn,
+      .btn{
+        border-radius:10px !important;
+        min-height:38px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .perm-back-btn,
+      .perm-cancel-btn{
         background:#ffffff;
-        color:#000000;
-        border:2px solid #ffffff;
-        box-shadow:0 4px 10px rgba(0,0,0,.10);
+        color:#0f172a !important;
+        border:1px solid #cfd8e3 !important;
       }
 
-      .perm-back-btn:hover{
-        background:#f3f4f6;
-        color:#000000;
-        border-color:#f3f4f6;
+      .perm-back-btn:hover,
+      .perm-cancel-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8 !important;
+        border-color:#9ec5fe !important;
       }
 
-      .perm-card{
-        background:rgba(255,255,255,.93)!important;
-        border-radius:18px;
-        backdrop-filter:blur(6px);
-        box-shadow:0 10px 24px rgba(0,0,0,.18);
+      .perm-card,
+      .card{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
         overflow:hidden;
       }
 
-      .perm-card-body{
+      .perm-card-body,
+      .perm-card .card-body{
         padding:20px;
       }
 
       .perm-check{
         background:#f8fafc;
-        border:1px solid #dbe5f0;
+        border:1px solid #dbe6f4;
         border-radius:14px;
         padding:14px 16px 14px 40px;
         min-height:58px;
+        box-shadow:0 4px 10px rgba(15,23,42,.05);
+      }
+
+      .form-check-input{
+        border-color:#9db7d7;
+      }
+
+      .form-check-input:checked{
+        background-color:#1459a6;
+        border-color:#1459a6;
+      }
+
+      .form-check-label{
+        font-weight:800;
+        color:#1f2937;
       }
 
       .perm-bottom-actions{
@@ -6256,27 +6333,21 @@ def editar_permisos(user_id):
         flex-wrap:wrap;
       }
 
-      .perm-cancel-btn{
-        background:#ffffff;
-        color:#000000;
-        border:2px solid #ffffff;
-        box-shadow:0 4px 10px rgba(0,0,0,.10);
-      }
-
-      .perm-cancel-btn:hover{
-        background:#f3f4f6;
-        color:#000000;
-        border-color:#f3f4f6;
+      .badge{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
       }
 
       @media (max-width:992px){
         .perm-shell{
           width:98%;
-          margin:8px auto 24px auto;
+          margin:8px auto 22px auto;
         }
 
         .perm-header-card{
-          height:84px;
+          min-height:88px;
         }
 
         .perm-title{
@@ -6287,8 +6358,36 @@ def editar_permisos(user_id):
           font-size:.76rem;
         }
 
-        .perm-card-body{
+        .perm-card-body,
+        .perm-card .card-body{
           padding:14px;
+        }
+      }
+
+      @media (max-width:768px){
+        .perm-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .perm-header-overlay::before{
+          margin:0;
+        }
+
+        .perm-header-text::before{
+          margin-left:auto;
+          margin-right:auto;
+        }
+
+        .perm-title,
+        .perm-subtitle{
+          text-align:center;
+        }
+
+        .perm-header-actions .btn,
+        .perm-bottom-actions .btn{
+          width:100%;
         }
       }
     </style>
