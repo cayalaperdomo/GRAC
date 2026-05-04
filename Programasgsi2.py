@@ -139984,7 +139984,8 @@ def proponentes_scorecard_estado(scorecard_id):
 
 
 # ============================================================
-# DETALLE PROPONENTES
+# DETALLE SCORECARD PROPONENTES - MISMO DISEÑO QUE PROVEEDORES
+# CON COLOR DE RIESGO SEGÚN PARÁMETROS
 # ============================================================
 
 @app.route("/proponentes/scorecard/<int:scorecard_id>")
@@ -140008,13 +140009,668 @@ def proponentes_scorecard_detalle(scorecard_id):
 
     if not run:
         conn.close()
-        flash("Scorecard de Proponentes no encontrado.", "danger")
-        return redirect(url_for("proponentes_scorecard_dashboard"))
+        abort(404)
 
     cur.execute("""
         SELECT *
         FROM scorecard_proponentes_findings
         WHERE run_id = ?
+          AND categoria <> 'Kali Linux Scan'
+        ORDER BY
+          CASE categoria
+            WHEN 'Hacker Chatter / Exposure Intelligence' THEN 1
+            WHEN 'Incident History' THEN 2
+            WHEN 'DNS Health' THEN 3
+            WHEN 'IP Reputation' THEN 4
+            ELSE 5
+          END,
+          id ASC
+    """, (scorecard_id,))
+    findings = cur.fetchall()
+
+    cur.execute("""
+        SELECT *
+        FROM scorecard_proponentes_incidents
+        WHERE run_id = ?
+        ORDER BY
+          CASE severidad
+            WHEN 'Crítico' THEN 1
+            WHEN 'Critico' THEN 1
+            WHEN 'Alto' THEN 2
+            WHEN 'Medio' THEN 3
+            WHEN 'Bajo' THEN 4
+            ELSE 5
+          END,
+          id ASC
+    """, (scorecard_id,))
+    incidentes = cur.fetchall()
+
+    cur.execute("""
+        SELECT *
+        FROM scorecard_proponentes_darkweb_exposures
+        WHERE run_id = ?
+        ORDER BY
+          CASE severidad
+            WHEN 'Crítico' THEN 1
+            WHEN 'Critico' THEN 1
+            WHEN 'Alto' THEN 2
+            WHEN 'Medio' THEN 3
+            WHEN 'Bajo' THEN 4
+            ELSE 5
+          END,
+          id ASC
+    """, (scorecard_id,))
+    hacker_chatter = cur.fetchall()
+
+    cur.execute("""
+        SELECT COUNT(*) AS total
+        FROM scorecard_proponentes_findings
+        WHERE run_id = ?
+          AND categoria = 'Kali Linux Scan'
+    """, (scorecard_id,))
+    total_kali = cur.fetchone()["total"] or 0
+
+    conn.close()
+
+    body = """
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .score-shell{
+        width:96%;
+        max-width:1480px;
+        margin:26px auto 24px auto;
+      }
+
+      .score-header-card{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .score-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }
+
+      .score-header-card::after{
+        content:"📈";
+        order:-1;
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+        position:relative;
+        z-index:1;
+      }
+
+      .score-header-text{
+        color:#ffffff !important;
+        font-size:1.32rem;
+        font-weight:950;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+        position:relative;
+        z-index:1;
+      }
+
+      .score-header-text::before{
+        content:"SGSI · Scorecard Hacker Chatter";
+        display:block;
+        width:max-content;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+        text-shadow:none;
+      }
+
+      .action-bar{
+        display:grid;
+        grid-template-columns:1fr 1fr 1fr 1fr;
+        gap:10px;
+        margin:10px 0 14px;
+        align-items:center;
+      }
+
+      .btn{
+        border-radius:10px !important;
+        font-weight:900;
+        padding:.55rem 1.05rem;
+        font-size:.88rem;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }
+
+      .score-main-card{
+        background:rgba(255,255,255,.97);
+        border:1px solid #dbe6f4;
+        border-radius:18px;
+        box-shadow:0 12px 24px rgba(15,23,42,.16);
+        padding:28px 32px;
+        margin-bottom:18px;
+      }
+
+      .summary-grid{
+        display:grid;
+        grid-template-columns:.85fr 1.25fr;
+        gap:28px;
+        align-items:center;
+      }
+
+      .score-big{
+        text-align:center;
+      }
+
+      .score-number{
+        font-size:3.8rem;
+        font-weight:950;
+        color:#1459a6;
+        line-height:1;
+      }
+
+      .risk-pill{
+        display:inline-block;
+        border-radius:999px;
+        font-weight:950;
+        padding:4px 14px;
+        font-size:1rem;
+      }
+
+      .risk-pill.bg-warning,
+      .risk-pill.text-dark{
+        color:#111827 !important;
+      }
+
+      .company-title{
+        font-size:1.55rem;
+        font-weight:950;
+        color:#172033;
+        margin-bottom:8px;
+      }
+
+      .company-meta{
+        font-size:1rem;
+        font-weight:800;
+        color:#1f2937;
+        margin-bottom:6px;
+      }
+
+      .progress-panel{
+        background:#eef5ff;
+        border:1px solid #cfe0f7;
+        border-radius:14px;
+        padding:14px 16px;
+        margin:16px 0;
+      }
+
+      .progress{
+        height:24px;
+        border-radius:999px;
+        background:#dbeafe;
+        overflow:hidden;
+      }
+
+      .progress-bar{
+        font-weight:950;
+        background:
+          repeating-linear-gradient(45deg,rgba(255,255,255,.18) 0,rgba(255,255,255,.18) 10px,transparent 10px,transparent 20px),
+          linear-gradient(135deg,#198754,#2dbb73);
+      }
+
+      .section-card{
+        background:rgba(255,255,255,.97);
+        border:1px solid #dbe6f4;
+        border-radius:18px;
+        box-shadow:0 10px 22px rgba(15,23,42,.13);
+        padding:18px;
+        margin-bottom:18px;
+      }
+
+      .section-title{
+        color:#1459a6;
+        font-weight:950;
+        margin-bottom:12px;
+      }
+
+      .table-wrap{
+        max-height:55vh;
+        overflow:auto;
+        border-radius:14px;
+        border:1px solid #dbe6f4;
+      }
+
+      .table{
+        margin-bottom:0;
+      }
+
+      .table thead th{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-size:.78rem;
+        font-weight:900;
+        text-align:center;
+        white-space:nowrap;
+      }
+
+      .table td{
+        font-size:.82rem;
+        vertical-align:middle;
+      }
+
+      .badge{
+        border-radius:999px;
+        font-weight:900;
+      }
+
+      @media(max-width:1100px){
+        .action-bar{
+          grid-template-columns:1fr 1fr;
+        }
+
+        .summary-grid{
+          grid-template-columns:1fr;
+        }
+      }
+
+      @media(max-width:720px){
+        .action-bar{
+          grid-template-columns:1fr;
+        }
+      }
+    </style>
+
+    <div class="score-shell">
+
+      <div class="score-header-card">
+        <h1 class="score-header-text">Detalle Security Scorecard de Proponentes</h1>
+      </div>
+
+      <div class="action-bar">
+        <a href="{{ url_for('proponentes_scorecard_dashboard') }}" class="btn btn-outline-secondary">
+          Volver
+        </a>
+
+        <a href="{{ url_for('proponentes_scorecard_rating', scorecard_id=run.id) }}" class="btn btn-success">
+          📊 SecurityScorecard Proponentes
+        </a>
+
+        <a href="{{ url_for('proponentes_scorecard_kali_detalle', scorecard_id=run.id) }}" class="btn btn-warning text-dark">
+          🧪 Ver Detalle Kali Linux
+        </a>
+
+        <a href="{{ url_for('proponentes_scorecard_detalle', scorecard_id=run.id) }}" class="btn btn-primary">
+          🔄 Actualizar
+        </a>
+      </div>
+
+      <div class="score-main-card">
+        <div class="summary-grid">
+
+          <div class="score-big">
+            <div id="scoreTotal" class="score-number">{{ "%.1f"|format(run.score_total or 0) }}%</div>
+
+            <div id="riskNivel"
+                 class="risk-pill bg-{{ scorecard_proponentes_badge_color(run.nivel_riesgo or 'Pendiente') }}">
+              Riesgo {{ run.nivel_riesgo or "Pendiente" }}
+            </div>
+          </div>
+
+          <div>
+            <div class="company-title">{{ run.proponente_nombre }}</div>
+            <div class="company-meta"><strong>Dominio:</strong> {{ run.dominio }}</div>
+            <div class="company-meta"><strong>IP:</strong> {{ run.ip_resuelta or "—" }}</div>
+
+            <div class="progress-panel">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="fw-bold text-primary">
+                  Estado:
+                  <span id="estadoBadge" class="badge bg-success">{{ run.estado or "pendiente" }}</span>
+                </div>
+                <div class="fw-bold text-primary">
+                  Progreso: <span id="progressLabel">{{ run.progress_pct or 0 }}</span>%
+                </div>
+              </div>
+
+              <div class="progress">
+                <div id="progressBar" class="progress-bar" style="width:{{ run.progress_pct or 0 }}%;">
+                  {{ run.progress_pct or 0 }}%
+                </div>
+              </div>
+
+              <div id="progressNote" class="mt-2 text-muted fw-bold">
+                {% if run.estado == 'finalizado' %}
+                  Actualización automática detenida porque el proceso está finalizado.
+                {% elif run.estado == 'error' %}
+                  Proceso finalizado con error.
+                {% else %}
+                  Actualizando automáticamente el progreso del Scorecard.
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="company-meta">
+              <strong>Etapa:</strong> <span id="currentStage">{{ run.current_stage or "—" }}</span>
+            </div>
+
+            <div class="company-meta">
+              <strong>Herramienta actual:</strong> <span id="currentTool">{{ run.current_tool or "—" }}</span>
+            </div>
+
+            <div class="company-meta">
+              <strong>Fecha:</strong> {{ run.fecha_ejecucion }}
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="section-card">
+        <h5 class="section-title">🧩 Hallazgos Generales</h5>
+        <div class="table-wrap">
+          <table class="table table-hover align-middle">
+            <thead>
+              <tr>
+                <th>Categoría</th>
+                <th>Herramienta</th>
+                <th>Control</th>
+                <th>Estado</th>
+                <th>Riesgo</th>
+                <th>Score</th>
+                <th>Evidencia</th>
+                <th>Recomendación</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for f in findings %}
+              <tr>
+                <td>{{ f.categoria }}</td>
+                <td>{{ f.herramienta or "—" }}</td>
+                <td>{{ f.control or "—" }}</td>
+                <td>{{ f.estado or "—" }}</td>
+                <td>
+                  <span class="badge bg-{{ scorecard_proponentes_badge_color(f.riesgo or f.severidad or 'Bajo') }}">
+                    {{ f.riesgo or f.severidad or "Bajo" }}
+                  </span>
+                </td>
+                <td class="fw-bold">{{ "%.1f"|format(f.score or 0) }}</td>
+                <td style="min-width:280px;">{{ f.evidencia or "—" }}</td>
+                <td style="min-width:280px;">{{ f.recomendacion or "—" }}</td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="8" class="text-center text-muted py-4">
+                  No hay hallazgos generales registrados.
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <h5 class="section-title">📰 Incidentes / Brechas OSINT</h5>
+        <div class="table-wrap">
+          <table class="table table-hover align-middle">
+            <thead>
+              <tr>
+                <th>Fuente</th>
+                <th>Título</th>
+                <th>Fecha</th>
+                <th>Severidad</th>
+                <th>Descripción</th>
+                <th>URL</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for i in incidentes %}
+              <tr>
+                <td>{{ i.fuente or "—" }}</td>
+                <td>{{ i.titulo or "—" }}</td>
+                <td>{{ i.fecha_incidente or "—" }}</td>
+                <td>
+                  <span class="badge bg-{{ scorecard_proponentes_badge_color(i.severidad or 'Bajo') }}">
+                    {{ i.severidad or "Bajo" }}
+                  </span>
+                </td>
+                <td style="min-width:320px;">{{ i.descripcion or "—" }}</td>
+                <td>
+                  {% if i.url %}
+                    <a href="{{ i.url }}" target="_blank" class="btn btn-sm btn-outline-primary">Abrir</a>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="6" class="text-center text-muted py-4">
+                  No hay incidentes públicos registrados.
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <h5 class="section-title">🕵️ Dark Web / Exposure Intelligence / Hacker Chatter</h5>
+        <div class="table-wrap">
+          <table class="table table-hover align-middle">
+            <thead>
+              <tr>
+                <th>Fuente</th>
+                <th>Tipo</th>
+                <th>Indicador</th>
+                <th>Severidad</th>
+                <th>Fecha</th>
+                <th>Evidencia</th>
+                <th>Recomendación</th>
+                <th>URL</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for h in hacker_chatter %}
+              <tr>
+                <td>{{ h.fuente or "—" }}</td>
+                <td>{{ h.tipo_exposicion or "—" }}</td>
+                <td>{{ h.indicador or "—" }}</td>
+                <td>
+                  <span class="badge bg-{{ scorecard_proponentes_badge_color(h.severidad or 'Bajo') }}">
+                    {{ h.severidad or "Bajo" }}
+                  </span>
+                </td>
+                <td>{{ h.fecha or "—" }}</td>
+                <td style="min-width:300px;">{{ h.evidencia or "—" }}</td>
+                <td style="min-width:300px;">{{ h.recomendacion or "—" }}</td>
+                <td>
+                  {% if h.url %}
+                    <a href="{{ h.url }}" target="_blank" class="btn btn-sm btn-outline-primary">Abrir</a>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="8" class="text-center text-muted py-4">
+                  No hay exposiciones registradas.
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <script>
+      const SCORECARD_ESTADO_URL = "{{ url_for('proponentes_scorecard_estado', scorecard_id=run.id) }}";
+
+      function setBadge(estado){
+        const badge = document.getElementById("estadoBadge");
+
+        badge.className = "badge";
+
+        if(estado === "finalizado"){
+          badge.classList.add("bg-success");
+          badge.textContent = "Finalizado";
+        }else if(estado === "error"){
+          badge.classList.add("bg-danger");
+          badge.textContent = "Error";
+        }else if(estado === "ejecutando"){
+          badge.classList.add("bg-primary");
+          badge.textContent = "Ejecutando";
+        }else{
+          badge.classList.add("bg-secondary");
+          badge.textContent = estado || "Pendiente";
+        }
+      }
+
+      function setRiskColor(nivel){
+        const riskNivel = document.getElementById("riskNivel");
+        riskNivel.textContent = "Riesgo " + (nivel || "Pendiente");
+        riskNivel.className = "risk-pill";
+
+        if(nivel === "Bajo"){
+          riskNivel.classList.add("bg-success");
+        }else if(nivel === "Medio"){
+          riskNivel.classList.add("bg-warning", "text-dark");
+        }else if(nivel === "Alto"){
+          riskNivel.classList.add("bg-danger");
+        }else if(nivel === "Crítico" || nivel === "Critico"){
+          riskNivel.classList.add("bg-dark");
+        }else{
+          riskNivel.classList.add("bg-secondary");
+        }
+      }
+
+      async function refreshScorecardStatus(){
+        try{
+          const resp = await fetch(SCORECARD_ESTADO_URL, {cache:"no-store"});
+          const data = await resp.json();
+
+          if(!data.ok){
+            return;
+          }
+
+          const pct = Number(data.progress_pct || 0);
+
+          document.getElementById("progressLabel").textContent = pct;
+          document.getElementById("progressBar").style.width = pct + "%";
+          document.getElementById("progressBar").textContent = pct + "%";
+
+          document.getElementById("currentStage").textContent = data.current_stage || "—";
+          document.getElementById("currentTool").textContent = data.current_tool || "—";
+          document.getElementById("scoreTotal").textContent = Number(data.score_total || 0).toFixed(1) + "%";
+
+          setRiskColor(data.nivel_riesgo);
+          setBadge(data.estado);
+
+          if(data.estado === "finalizado"){
+            document.getElementById("progressNote").textContent = "Actualización automática detenida porque el proceso está finalizado.";
+            clearInterval(window.scorecardTimer);
+          }
+
+          if(data.estado === "error"){
+            document.getElementById("progressNote").textContent = "Proceso finalizado con error.";
+            clearInterval(window.scorecardTimer);
+          }
+
+        }catch(e){
+          console.log("No se pudo actualizar estado Scorecard Proponentes", e);
+        }
+      }
+
+      {% if run.estado not in ['finalizado', 'error'] %}
+        window.scorecardTimer = setInterval(refreshScorecardStatus, 3000);
+        refreshScorecardStatus();
+      {% endif %}
+    </script>
+    """
+
+    return render_template_string(
+        BASE,
+        content=Markup(render_template_string(
+            body,
+            run=run,
+            findings=findings,
+            incidentes=incidentes,
+            hacker_chatter=hacker_chatter,
+            total_kali=total_kali,
+            scorecard_proponentes_badge_color=scorecard_proponentes_badge_color
+        ))
+    )
+
+
+# ============================================================
+# DETALLE KALI LINUX - PROPONENTES
+# ============================================================
+
+@app.route("/proponentes/scorecard/<int:scorecard_id>/kali")
+@login_required
+def proponentes_scorecard_kali_detalle(scorecard_id):
+    user, allowed, read_only = scorecard_proponentes_user_permiso()
+
+    if not allowed:
+        flash("No tiene permiso para acceder al detalle Kali de Proponentes.", "danger")
+        return redirect(url_for("menu"))
+
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT *
+        FROM scorecard_proponentes_runs
+        WHERE id = ?
+    """, (scorecard_id,))
+    run = cur.fetchone()
+
+    if not run:
+        conn.close()
+        abort(404)
+
+    cur.execute("""
+        SELECT *
+        FROM scorecard_proponentes_findings
+        WHERE run_id = ?
+          AND categoria = 'Kali Linux Scan'
         ORDER BY
           CASE COALESCE(severidad, riesgo, '')
             WHEN 'Crítico' THEN 1
@@ -140026,23 +140682,7 @@ def proponentes_scorecard_detalle(scorecard_id):
           END,
           id ASC
     """, (scorecard_id,))
-    findings = cur.fetchall()
-
-    cur.execute("""
-        SELECT *
-        FROM scorecard_proponentes_incidents
-        WHERE run_id = ?
-        ORDER BY id DESC
-    """, (scorecard_id,))
-    incidentes = cur.fetchall()
-
-    cur.execute("""
-        SELECT *
-        FROM scorecard_proponentes_darkweb_exposures
-        WHERE run_id = ?
-        ORDER BY id DESC
-    """, (scorecard_id,))
-    exposures = cur.fetchall()
+    kali_findings = cur.fetchall()
 
     cur.execute("""
         SELECT *
@@ -140064,13 +140704,13 @@ def proponentes_scorecard_detalle(scorecard_id):
         background-repeat:no-repeat;
       }
 
-      .prop-score-shell{
+      .score-shell{
         width:96%;
-        max-width:1500px;
+        max-width:1480px;
         margin:26px auto 24px auto;
       }
 
-      .prop-score-header-card{
+      .score-header-card{
         background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
         border-radius:18px;
         padding:16px 24px;
@@ -140084,30 +140724,9 @@ def proponentes_scorecard_detalle(scorecard_id):
         margin-bottom:14px;
       }
 
-      .prop-score-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }
-
-      .prop-score-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }
-
-      .prop-score-header-overlay::before{
-        content:"📈";
+      .score-header-card::after{
+        content:"🧪";
+        order:-1;
         width:54px;
         height:54px;
         min-width:54px;
@@ -140122,21 +140741,19 @@ def proponentes_scorecard_detalle(scorecard_id):
         margin-right:14px;
       }
 
-      .prop-score-header-overlay h2{
-        color:#ffffff !important;
-        font-weight:950;
+      .score-header-text{
+        color:#fff !important;
         font-size:1.32rem;
+        font-weight:950;
         line-height:1.1;
         text-shadow:0 3px 10px rgba(0,0,0,.35);
         margin:0 !important;
-        position:relative;
       }
 
-      .prop-score-header-overlay h2::before{
-        content:"SGSI · Scorecard de Proponentes";
+      .score-header-text::before{
+        content:"SGSI · Kali Linux Scorecard";
         display:block;
         width:max-content;
-        max-width:100%;
         background:rgba(255,255,255,.18);
         border-radius:999px;
         padding:3px 10px;
@@ -140147,59 +140764,39 @@ def proponentes_scorecard_detalle(scorecard_id):
         text-shadow:none;
       }
 
-      .soft-card,
-      .card{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
-        overflow:hidden;
+      .action-bar{
+        display:flex;
+        justify-content:space-between;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
       }
 
-      .metric-card{
-        background:#ffffff;
-        border:1px solid #dbe6f4;
-        border-radius:16px;
-        box-shadow:0 8px 18px rgba(15,23,42,.10);
-        padding:18px;
-        height:100%;
-      }
-
-      .metric-label{
-        font-size:.72rem;
+      .btn{
+        border-radius:10px !important;
         font-weight:900;
-        color:#1459a6;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        padding:6px 10px;
-        border-radius:10px;
-        display:inline-block;
-        margin-bottom:8px;
       }
 
-      .metric-value{
+      .section-card{
+        background:rgba(255,255,255,.97);
+        border:1px solid #dbe6f4;
+        border-radius:18px;
+        box-shadow:0 10px 22px rgba(15,23,42,.13);
+        padding:18px;
+        margin-bottom:18px;
+      }
+
+      .section-title{
         color:#1459a6;
-        font-size:1.8rem;
         font-weight:950;
-        line-height:1;
+        margin-bottom:12px;
       }
 
-      .table-wrap,
-      .table-responsive{
-        max-height:72vh;
-        overflow-y:auto;
-        overflow-x:auto;
-        background:#ffffff;
+      .table-wrap{
+        max-height:62vh;
+        overflow:auto;
         border-radius:14px;
         border:1px solid #dbe6f4;
-        box-shadow:0 12px 24px rgba(15,23,42,.10);
-      }
-
-      .table{
-        margin-bottom:0;
       }
 
       .table thead th{
@@ -140209,253 +140806,90 @@ def proponentes_scorecard_detalle(scorecard_id):
         background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
         color:#ffffff !important;
         font-size:.78rem;
-        font-weight:900 !important;
-        border:none !important;
-        white-space:nowrap;
-        vertical-align:middle !important;
+        font-weight:900;
         text-align:center;
-        padding:9px 8px;
+        white-space:nowrap;
       }
 
-      .table tbody td,
       .table td{
-        vertical-align:middle !important;
         font-size:.82rem;
-        padding:9px 8px;
-        border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        vertical-align:middle;
       }
 
-      .table tbody tr:nth-child(even){
-        background:#f8fbff;
-      }
-
-      .table tbody tr:hover{
-        background:#eef6ff;
-      }
-
-      pre.console{
-        background:#0b1f33;
-        color:#dceeff;
+      .console-box{
+        background:#0f172a;
+        color:#d1e7ff;
         border-radius:14px;
-        padding:16px;
+        padding:14px;
         max-height:420px;
         overflow:auto;
-        font-size:.82rem;
-        line-height:1.45;
-        border:1px solid rgba(255,255,255,.12);
-        box-shadow:inset 0 1px 0 rgba(255,255,255,.08);
-      }
-
-      .form-label{
-        font-size:.72rem;
-        font-weight:900;
-        color:#1459a6;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        padding:6px 10px;
-        border-radius:10px;
-        display:inline-block;
-        margin-bottom:6px;
-      }
-
-      .form-control,
-      .form-select{
-        border-radius:10px;
-        border:1px solid #d9e3f0;
-        min-height:40px;
-        font-size:.86rem;
-        background:#f8fafc;
-        box-shadow:none !important;
-      }
-
-      .form-control:focus,
-      .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
-      }
-
-      .btn{
-        border-radius:10px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }
-
-      .badge{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }
-
-      @media (max-width:992px){
-        .prop-score-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .prop-score-header-card{
-          min-height:88px;
-        }
-
-        .prop-score-header-overlay h2{
-          font-size:1.20rem;
-        }
-      }
-
-      @media (max-width:768px){
-        .prop-score-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .prop-score-header-overlay::before{
-          margin:0;
-        }
-
-        .prop-score-header-overlay h2,
-        .prop-score-header-overlay h2::before{
-          text-align:center;
-          margin-left:auto;
-          margin-right:auto;
-        }
+        font-size:.78rem;
+        white-space:pre-wrap;
       }
     </style>
 
-    <div class="prop-score-shell">
+    <div class="score-shell">
 
-      <div class="prop-score-header-card">
-        <div class="prop-score-header-overlay">
-          <h2>⚡ Detalle Security Scorecard de Proponentes</h2>
-        </div>
+      <div class="score-header-card">
+        <h1 class="score-header-text">Detalle Kali Linux — Proponentes</h1>
       </div>
 
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <div class="text-black fw-bold">
-          Proponente: {{ run.proponente_nombre }} — Dominio: {{ run.dominio }}
-        </div>
-        <a href="{{ url_for('proponentes_scorecard_dashboard') }}" class="btn btn-light rounded-pill px-4">
-          ⬅ Volver
+      <div class="action-bar">
+        <a href="{{ url_for('proponentes_scorecard_detalle', scorecard_id=run.id) }}" class="btn btn-outline-secondary px-4">
+          Volver al detalle
+        </a>
+
+        <a href="{{ url_for('proponentes_scorecard_dashboard') }}" class="btn btn-primary px-4">
+          Dashboard Scorecard
         </a>
       </div>
 
-      <div class="soft-card p-4 mb-4">
-        <div class="row g-3 align-items-center">
-
-          <div class="col-md-3">
-            <div class="metric-card text-center">
-              <div class="metric-label">Score Total</div>
-              <div class="metric-value" id="scoreTotal">{{ "%.1f"|format(run.score_total or 0) }}</div>
-              <span id="nivelBadge" class="badge bg-{{ scorecard_badge_color(run.nivel_riesgo or 'Pendiente') }}">
-                {{ run.nivel_riesgo or "Pendiente" }}
-              </span>
-            </div>
-          </div>
-
-          <div class="col-md-9">
-            <div class="mb-2 fw-bold">
-              Estado: <span id="estadoText">{{ run.estado or "pendiente" }}</span>
-            </div>
-
-            <div class="progress mb-2" style="height:28px;border-radius:20px;overflow:hidden;">
-              <div id="progressBar"
-                   class="progress-bar progress-bar-striped progress-bar-animated"
-                   role="progressbar"
-                   style="width: {{ run.progress_pct or 0 }}%;">
-                {{ run.progress_pct or 0 }}%
-              </div>
-            </div>
-
-            <div class="small text-muted">
-              Etapa: <span id="stageText">{{ run.current_stage or "—" }}</span>
-              |
-              Herramienta: <span id="toolText">{{ run.current_tool or "—" }}</span>
-            </div>
-
-            {% if run.error_detalle %}
-              <div class="alert alert-danger mt-3">
-                <strong>Error:</strong>
-                <pre class="mb-0">{{ run.error_detalle }}</pre>
-              </div>
-            {% endif %}
-          </div>
-
-        </div>
+      <div class="section-card">
+        <h5 class="section-title">🧾 Información del Escaneo</h5>
+        <p class="fw-bold mb-1">Proponente: {{ run.proponente_nombre }}</p>
+        <p class="fw-bold mb-1">Dominio: {{ run.dominio }}</p>
+        <p class="fw-bold mb-1">IP: {{ run.ip_resuelta or "—" }}</p>
+        <p class="fw-bold mb-1">Modo Kali: {{ run.modo_kali or "—" }}</p>
+        <p class="fw-bold mb-0">Score Kali: {{ "%.1f"|format(run.score_kali or 0) }}</p>
       </div>
 
-      <div class="row g-3 mb-4">
-        <div class="col-md-2">
-          <div class="metric-card text-center">
-            <div class="metric-label">DNS</div>
-            <div class="metric-value" id="scoreDns">{{ "%.1f"|format(run.score_dns or 0) }}</div>
-          </div>
-        </div>
-        <div class="col-md-2">
-          <div class="metric-card text-center">
-            <div class="metric-label">IP</div>
-            <div class="metric-value" id="scoreIp">{{ "%.1f"|format(run.score_ip or 0) }}</div>
-          </div>
-        </div>
-        <div class="col-md-2">
-          <div class="metric-card text-center">
-            <div class="metric-label">Kali</div>
-            <div class="metric-value" id="scoreKali">{{ "%.1f"|format(run.score_kali or 0) }}</div>
-          </div>
-        </div>
-        <div class="col-md-3">
-          <div class="metric-card text-center">
-            <div class="metric-label">Incidentes</div>
-            <div class="metric-value" id="scoreIncidentes">{{ "%.1f"|format(run.score_incidentes or 100) }}</div>
-          </div>
-        </div>
-        <div class="col-md-3">
-          <div class="metric-card text-center">
-            <div class="metric-label">Hacker Chatter</div>
-            <div class="metric-value" id="scoreDarkweb">{{ "%.1f"|format(run.score_darkweb or 100) }}</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="soft-card p-3 mb-4">
-        <h5 class="fw-bold mb-3">🧩 Hallazgos Consolidados</h5>
-
+      <div class="section-card">
+        <h5 class="section-title">🧪 Hallazgos Kali Linux</h5>
         <div class="table-wrap">
           <table class="table table-hover align-middle mb-0">
             <thead>
               <tr>
-                <th>Categoría</th>
                 <th>Herramienta</th>
                 <th>Control</th>
                 <th>Estado</th>
-                <th>Riesgo</th>
+                <th>Severidad</th>
                 <th>Score</th>
                 <th>Evidencia</th>
                 <th>Recomendación</th>
+                <th>Archivo</th>
               </tr>
             </thead>
             <tbody>
-              {% for f in findings %}
+              {% for f in kali_findings %}
               <tr>
-                <td>{{ f.categoria }}</td>
                 <td>{{ f.herramienta or "—" }}</td>
                 <td>{{ f.control or "—" }}</td>
                 <td>{{ f.estado or "—" }}</td>
                 <td>
-                  <span class="badge bg-{{ scorecard_badge_color(f.severidad or f.riesgo or 'Bajo') }}">
+                  <span class="badge bg-{{ scorecard_proponentes_badge_color(f.severidad or f.riesgo or 'Bajo') }}">
                     {{ f.severidad or f.riesgo or "Bajo" }}
                   </span>
                 </td>
-                <td>{{ "%.1f"|format(f.score or 0) }}</td>
-                <td style="max-width:360px;white-space:pre-wrap;">{{ f.evidencia or "—" }}</td>
-                <td style="max-width:360px;white-space:pre-wrap;">{{ f.recomendacion or "—" }}</td>
+                <td class="fw-bold">{{ "%.1f"|format(f.score or 0) }}</td>
+                <td style="min-width:320px;">{{ f.evidencia or "—" }}</td>
+                <td style="min-width:320px;">{{ f.recomendacion or "—" }}</td>
+                <td style="min-width:240px;">{{ f.archivo_salida or "—" }}</td>
               </tr>
               {% else %}
               <tr>
-                <td colspan="8" class="text-center text-muted py-4">No hay hallazgos registrados.</td>
+                <td colspan="8" class="text-center text-muted py-4">
+                  No hay hallazgos Kali registrados. Puede que el escaneo no se haya ejecutado.
+                </td>
               </tr>
               {% endfor %}
             </tbody>
@@ -140463,102 +140897,9 @@ def proponentes_scorecard_detalle(scorecard_id):
         </div>
       </div>
 
-      <div class="soft-card p-3 mb-4">
-        <h5 class="fw-bold mb-3">🕵️ Hacker Chatter / Exposure Intelligence</h5>
-
+      <div class="section-card">
+        <h5 class="section-title">📁 Salidas de Herramientas</h5>
         <div class="table-wrap">
-          <table class="table table-hover align-middle mb-0">
-            <thead>
-              <tr>
-                <th>Fuente</th>
-                <th>Tipo</th>
-                <th>Indicador</th>
-                <th>Severidad</th>
-                <th>Fecha</th>
-                <th>Evidencia</th>
-                <th>URL</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for e in exposures %}
-              <tr>
-                <td>{{ e.fuente or "—" }}</td>
-                <td>{{ e.tipo_exposicion or "—" }}</td>
-                <td>{{ e.indicador or "—" }}</td>
-                <td>
-                  <span class="badge bg-{{ scorecard_badge_color(e.severidad or 'Bajo') }}">
-                    {{ e.severidad or "Bajo" }}
-                  </span>
-                </td>
-                <td>{{ e.fecha or "—" }}</td>
-                <td style="max-width:420px;white-space:pre-wrap;">{{ e.evidencia or "—" }}</td>
-                <td>
-                  {% if e.url %}
-                    <a href="{{ e.url }}" target="_blank" class="btn btn-sm btn-outline-primary rounded-pill">Abrir</a>
-                  {% else %}
-                    —
-                  {% endif %}
-                </td>
-              </tr>
-              {% else %}
-              <tr>
-                <td colspan="7" class="text-center text-muted py-4">No hay exposiciones registradas.</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="soft-card p-3 mb-4">
-        <h5 class="fw-bold mb-3">📰 Incidentes / Brechas Públicas</h5>
-
-        <div class="table-wrap">
-          <table class="table table-hover align-middle mb-0">
-            <thead>
-              <tr>
-                <th>Fuente</th>
-                <th>Título</th>
-                <th>Fecha</th>
-                <th>Severidad</th>
-                <th>Descripción</th>
-                <th>URL</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for i in incidentes %}
-              <tr>
-                <td>{{ i.fuente or "—" }}</td>
-                <td>{{ i.titulo or "—" }}</td>
-                <td>{{ i.fecha_incidente or "—" }}</td>
-                <td>
-                  <span class="badge bg-{{ scorecard_badge_color(i.severidad or 'Bajo') }}">
-                    {{ i.severidad or "Bajo" }}
-                  </span>
-                </td>
-                <td style="max-width:420px;white-space:pre-wrap;">{{ i.descripcion or "—" }}</td>
-                <td>
-                  {% if i.url %}
-                    <a href="{{ i.url }}" target="_blank" class="btn btn-sm btn-outline-primary rounded-pill">Abrir</a>
-                  {% else %}
-                    —
-                  {% endif %}
-                </td>
-              </tr>
-              {% else %}
-              <tr>
-                <td colspan="6" class="text-center text-muted py-4">No hay incidentes registrados.</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="soft-card p-3 mb-4">
-        <h5 class="fw-bold mb-3">🛠 Salidas Técnicas Kali</h5>
-
-        <div class="table-wrap mb-3">
           <table class="table table-hover align-middle mb-0">
             <thead>
               <tr>
@@ -140567,105 +140908,39 @@ def proponentes_scorecard_detalle(scorecard_id):
                 <th>Exit Code</th>
                 <th>Duración</th>
                 <th>Archivo</th>
+                <th>Fecha</th>
               </tr>
             </thead>
             <tbody>
               {% for o in outputs %}
               <tr>
-                <td>{{ o.herramienta }}</td>
-                <td style="max-width:520px;white-space:pre-wrap;">{{ o.comando or "—" }}</td>
+                <td>{{ o.herramienta or "—" }}</td>
+                <td style="min-width:420px;"><code>{{ o.comando or "—" }}</code></td>
                 <td>{{ o.exit_code }}</td>
-                <td>{{ "%.1f"|format(o.duracion_segundos or 0) }} seg</td>
-                <td style="max-width:380px;word-break:break-all;">{{ o.archivo_salida or "—" }}</td>
+                <td>{{ "%.2f"|format(o.duracion_segundos or 0) }}s</td>
+                <td style="min-width:280px;">{{ o.archivo_salida or "—" }}</td>
+                <td>{{ o.fecha or "—" }}</td>
               </tr>
               {% else %}
               <tr>
-                <td colspan="5" class="text-center text-muted py-4">No hay salidas técnicas registradas.</td>
+                <td colspan="6" class="text-center text-muted py-4">
+                  No hay salidas de herramientas registradas.
+                </td>
               </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
-
-        {% if run.salida_consola %}
-          <pre class="console">{{ run.salida_consola }}</pre>
-        {% endif %}
       </div>
 
-    </div>
-
-    <script>
-      const SCORECARD_ID = {{ run.id }};
-      const ESTADO_URL = "{{ url_for('proponentes_scorecard_estado', scorecard_id=run.id) }}";
-
-      function updateProgressUI(data){
-        const pct = parseInt(data.progress_pct || 0);
-
-        const progressBar = document.getElementById("progressBar");
-        if(progressBar){
-          progressBar.style.width = pct + "%";
-          progressBar.textContent = pct + "%";
-
-          if(data.estado === "finalizado"){
-            progressBar.classList.remove("progress-bar-animated");
-            progressBar.classList.add("bg-success");
-          }else if(data.estado === "error"){
-            progressBar.classList.remove("progress-bar-animated");
-            progressBar.classList.add("bg-danger");
-          }
-        }
-
-        const map = {
-          "estadoText": data.estado,
-          "stageText": data.current_stage,
-          "toolText": data.current_tool,
-          "scoreTotal": data.score_total,
-          "scoreDns": data.score_dns,
-          "scoreIp": data.score_ip,
-          "scoreKali": data.score_kali,
-          "scoreIncidentes": data.score_incidentes,
-          "scoreDarkweb": data.score_darkweb
-        };
-
-        Object.keys(map).forEach(id => {
-          const el = document.getElementById(id);
-          if(el && map[id] !== undefined && map[id] !== null){
-            el.textContent = map[id];
-          }
-        });
-
-        const nivelBadge = document.getElementById("nivelBadge");
-        if(nivelBadge && data.nivel_riesgo){
-          nivelBadge.textContent = data.nivel_riesgo;
-        }
-      }
-
-      async function pollEstado(){
-        try{
-          const resp = await fetch(ESTADO_URL, {cache:"no-store"});
-          const data = await resp.json();
-
-          if(data.ok){
-            updateProgressUI(data);
-
-            if(data.estado === "finalizado" || data.estado === "error"){
-              clearInterval(window.__scorecardPoller);
-
-              setTimeout(() => {
-                window.location.reload();
-              }, 1200);
-            }
-          }
-        }catch(e){
-          console.log("Error consultando estado scorecard proponentes", e);
-        }
-      }
-
-      {% if run.estado in ['pendiente', 'ejecutando'] %}
-        window.__scorecardPoller = setInterval(pollEstado, 3000);
-        pollEstado();
+      {% if run.salida_consola %}
+      <div class="section-card">
+        <h5 class="section-title">🖥️ Consola Consolidada</h5>
+        <div class="console-box">{{ run.salida_consola }}</div>
+      </div>
       {% endif %}
-    </script>
+
+    </div>
     """
 
     return render_template_string(
@@ -140673,11 +140948,9 @@ def proponentes_scorecard_detalle(scorecard_id):
         content=Markup(render_template_string(
             body,
             run=run,
-            findings=findings,
-            incidentes=incidentes,
-            exposures=exposures,
+            kali_findings=kali_findings,
             outputs=outputs,
-            scorecard_badge_color=scorecard_badge_color
+            scorecard_proponentes_badge_color=scorecard_proponentes_badge_color
         ))
     )
 
@@ -141773,10 +142046,6 @@ def proponentes_scorecard_parametros():
       </div>
 
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <div class="fw-bold text-black">
-          Configuración de pesos, scoring y niveles de riesgo del Security Scorecard de Proponentes.
-        </div>
-
         <a href="{{ url_for('proponentes_scorecard_dashboard') }}" class="btn btn-light rounded-pill px-4">
           ⬅ Volver
         </a>
