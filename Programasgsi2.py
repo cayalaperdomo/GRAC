@@ -8071,7 +8071,7 @@ MENU_SECTIONS = [
         "items": [
             {"label": "Cuestionarios de Proponentes", "href": "/cuestionarios_proveedores", "icon": "bi-ui-checks", "btn": "btn-info text-white", "module": "Cuestionarios de Proponentes"},
             {"label": "Revisión en Listas Restrictivas", "href": "/listas_restrictivas", "icon": "bi-shield-exclamation", "btn": "btn-danger", "module": "/Listas Restrictivas"},
-            {"label": "Security Scorecard de Proponentes y Proveedores", "href": "/proponentes/scorecard", "icon": "bi-speedometer", "btn": "btn-warning text-dark", "module": "Cuestionarios de Proponentes"},
+            {"label": "Security Scorecard de Terceros", "href": "/proponentes/scorecard", "icon": "bi-speedometer", "btn": "btn-warning text-dark", "module": "Cuestionarios de Proponentes"},
             {"label": "Registro de Proveedores", "href": "/proveedores_menu", "icon": "bi-building", "btn": "btn-primary", "module": "Registro de Proveedores"},
         ],
     },
@@ -9008,20 +9008,6 @@ def menu():
                 <div class="sgsi-stat-link">Nivel de cumplimiento</div>
               </div>
             </div>
-
-            <div class="sgsi-stat-card">
-              <div class="sgsi-stat-icon red">
-                <i class="bi bi-graph-up-arrow"></i>
-              </div>
-              <div class="sgsi-stat-text">
-                <div class="sgsi-stat-title">Estadísticas SGSI</div>
-                <div class="sgsi-stat-value red-text" id="dash_sgsi_stat">
-                  {{ "%.2f"|format((dashboard.iso_pct + dashboard.nist_pct + dashboard.datos_pct) / 3) }}%
-                </div>
-                <div class="sgsi-stat-link">Tablero consolidado</div>
-              </div>
-            </div>
-
           </section>
 
           <section class="sgsi-dashboard-grid">
@@ -9160,8 +9146,6 @@ def menu():
         border-radius:16px;
         box-shadow:0 10px 25px rgba(0,0,0,.25);
         padding:10px;
-
-        /* Scroll pequeño solo para el menú */
         max-height:calc(100vh - var(--sgsi-topbar-fixed-h) - 20px) !important;
         overflow-y:auto !important;
         overflow-x:hidden !important;
@@ -9363,40 +9347,54 @@ def menu():
         min-width:0;
       }
 
+      /* ============================================================
+         KPI / STATS CARDS SGSI - CENTRADAS
+         ISO 27001 / NIST CSF 2.0 / DATOS PERSONALES
+      ============================================================ */
+
       .sgsi-stats-grid{
+        width:100%;
+        max-width:1040px;
+        margin:0 auto 20px auto;
         display:grid;
-        grid-template-columns:repeat(4,minmax(0,1fr));
-        gap:14px;
-        margin-bottom:18px;
+        grid-template-columns:repeat(3, minmax(260px, 300px));
+        justify-content:center;
+        align-items:stretch;
+        gap:16px;
       }
 
       .sgsi-stat-card{
-        background:rgba(255,255,255,.96);
-        border-radius:16px;
-        min-height:96px;
-        padding:14px;
+        width:100%;
+        min-height:104px;
+        padding:16px 18px;
         display:flex;
         align-items:center;
-        gap:12px;
+        justify-content:center;
+        gap:14px;
+        background:rgba(255,255,255,.96);
+        border:1px solid rgba(219,230,244,.95);
+        border-radius:18px;
         box-shadow:0 10px 22px rgba(15,23,42,.14);
+        text-align:center;
         overflow:hidden;
+        transition:all .20s ease;
       }
 
-      .sgsi-stat-text{
-        min-width:0;
-        flex:1 1 auto;
-        overflow:hidden;
+      .sgsi-stat-card:hover{
+        transform:translateY(-3px);
+        box-shadow:0 16px 30px rgba(15,23,42,.18);
       }
 
       .sgsi-stat-icon{
-        width:48px;
-        height:48px;
+        width:52px;
+        height:52px;
+        min-width:52px;
+        flex:0 0 52px;
         border-radius:50%;
         display:flex;
         align-items:center;
         justify-content:center;
-        font-size:1.22rem;
-        flex:0 0 48px;
+        font-size:1.35rem;
       }
 
       .sgsi-stat-icon.blue{background:#e8f0ff;color:#2f6ff2;}
@@ -9409,16 +9407,32 @@ def menu():
       .green-text{color:#16a34a !important;}
       .red-text{color:#ef4444 !important;}
 
+      .sgsi-stat-text{
+        min-width:0;
+        flex:1 1 auto;
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        justify-content:center;
+        text-align:center;
+        overflow:hidden;
+      }
+
       .sgsi-stat-title{
-        font-size:.76rem;
-        font-weight:850;
+        width:100%;
+        font-size:.78rem;
+        font-weight:900;
+        color:#1f2937;
         white-space:nowrap;
         overflow:hidden;
         text-overflow:ellipsis;
       }
 
       .sgsi-stat-value{
-        font-size:1.25rem;
+        width:100%;
+        margin-top:2px;
+        font-size:1.45rem;
+        line-height:1.05;
         font-weight:950;
         white-space:nowrap;
         overflow:hidden;
@@ -9426,9 +9440,14 @@ def menu():
       }
 
       .sgsi-stat-link{
+        width:100%;
+        margin-top:4px;
         color:#64748b;
-        font-size:.66rem;
-        font-weight:750;
+        font-size:.70rem;
+        font-weight:800;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
       }
 
       .sgsi-dashboard-grid{
@@ -9497,7 +9516,8 @@ def menu():
         }
 
         .sgsi-stats-grid{
-          grid-template-columns:repeat(2,minmax(0,1fr));
+          max-width:680px;
+          grid-template-columns:repeat(2, minmax(260px, 300px));
         }
 
         .sgsi-chart-card{
@@ -9511,7 +9531,8 @@ def menu():
         }
 
         .sgsi-stats-grid{
-          grid-template-columns:1fr;
+          max-width:330px;
+          grid-template-columns:minmax(260px, 300px);
         }
 
         .sgsi-chart-card{
@@ -136741,11 +136762,25 @@ def init_scorecard_proponentes_db():
         ("peso_kali", 35, "Peso Kali Linux"),
         ("peso_incidentes", 15, "Peso Incidentes/Brechas"),
         ("peso_darkweb", 15, "Peso Dark Web / Exposure Intelligence"),
-        ("darkweb_score_sin_hallazgos", 100, "Sin hallazgos"),
-        ("darkweb_score_1_2", 80, "1 a 2 hallazgos"),
-        ("darkweb_score_3_5", 60, "3 a 5 hallazgos"),
-        ("darkweb_score_mas_5", 40, "Más de 5 hallazgos"),
+
+        ("darkweb_score_sin_hallazgos", 100, "Sin hallazgos de riesgo"),
+        ("darkweb_score_bajo", 90, "Hallazgos de severidad Baja"),
+        ("darkweb_score_medio", 75, "Hallazgos de severidad Media"),
+        ("darkweb_score_alto", 55, "Hallazgos de severidad Alta"),
+        ("darkweb_score_critico", 25, "Hallazgos de severidad Crítica"),
         ("darkweb_score_credenciales_confirmadas", 20, "Credenciales confirmadas"),
+
+        ("dns_score_a_ok", 100, "Registro A/CNAME OK"),
+        ("dns_score_a_no_detectado", 0, "Registro A/CNAME no detectado"),
+        ("dns_score_mx_ok", 100, "MX OK"),
+        ("dns_score_mx_no_detectado", 70, "MX no detectado"),
+        ("dns_score_ns_ok", 100, "NS OK"),
+        ("dns_score_ns_no_detectado", 0, "NS no detectado"),
+        ("dns_score_spf_ok", 100, "SPF OK"),
+        ("dns_score_spf_no_configurado", 0, "SPF no configurado"),
+        ("dns_score_dmarc_ok", 100, "DMARC OK"),
+        ("dns_score_dmarc_p_none", 70, "DMARC p=none"),
+        ("dns_score_dmarc_no_configurado", 0, "DMARC no configurado"),
     ]
 
     for clave, valor, descripcion in parametros_default:
@@ -136966,6 +137001,140 @@ def guardar_scorecard_proponentes_darkweb_exposure(run_id, proponente_nombre, do
     conn.commit()
     conn.close()
 
+# ============================================================
+# DNS HEALTH PARAMETRIZABLE - PROPONENTES
+# ============================================================
+
+def evaluar_dns_health_proponentes_scorecard(dominio):
+    findings = []
+
+    dominio_original = limpiar_dominio_scorecard(dominio)
+    dominio_base = obtener_dominio_base(dominio_original)
+
+    registros_a = dns_any_scorecard(dominio_original, "A")
+
+    registros_cname = []
+    if not registros_a:
+        registros_cname = dns_any_scorecard(dominio_original, "CNAME")
+
+    registros_mx = dns_any_scorecard(dominio_base, "MX")
+    registros_ns = dns_any_scorecard(dominio_base, "NS")
+
+    txt_root = dns_txt_scorecard(dominio_base)
+    txt_dmarc = dns_txt_scorecard(f"_dmarc.{dominio_base}")
+
+    spf_ok = any("v=spf1" in x.lower() for x in txt_root)
+    dmarc_ok = any("v=dmarc1" in x.lower() for x in txt_dmarc)
+
+    dmarc_policy = ""
+    for item in txt_dmarc:
+        low = item.lower()
+        if "p=reject" in low:
+            dmarc_policy = "reject"
+        elif "p=quarantine" in low:
+            dmarc_policy = "quarantine"
+        elif "p=none" in low:
+            dmarc_policy = "none"
+
+    scores_componentes = []
+
+    def add(control, estado, riesgo, puntaje, evidencia, recomendacion, regla):
+        scores_componentes.append(float(puntaje or 0))
+        findings.append({
+            "categoria": "DNS Health",
+            "herramienta": "DNS Resolver",
+            "control": control,
+            "estado": estado,
+            "riesgo": riesgo,
+            "severidad": riesgo,
+            "score": puntaje,
+            "evidencia": evidencia,
+            "recomendacion": recomendacion,
+            "detalle": {
+                "regla_calculo": regla,
+                "modelo_score": "DNS Health parametrizable por control: A/CNAME, MX, NS, SPF y DMARC."
+            }
+        })
+
+    if registros_a:
+        puntaje = scorecard_proponentes_get_param("dns_score_a_ok", 100)
+        add("Registro A", "OK", "Bajo", puntaje,
+            f"{dominio_original}: " + ", ".join(registros_a[:8]),
+            "Mantener monitoreo de resolución pública.",
+            f"Registro A detectado → Score {puntaje}")
+    elif registros_cname:
+        puntaje = scorecard_proponentes_get_param("dns_score_a_ok", 100)
+        add("Registro A/CNAME", "OK por CNAME", "Bajo", puntaje,
+            f"{dominio_original} apunta por CNAME a: " + ", ".join(registros_cname[:8]),
+            "Mantener monitoreo de resolución pública y destino CNAME autorizado.",
+            f"Registro CNAME detectado → Score {puntaje}")
+    else:
+        puntaje = scorecard_proponentes_get_param("dns_score_a_no_detectado", 0)
+        add("Registro A", "No detectado", "Alto", puntaje,
+            f"No se encontraron registros A ni CNAME para {dominio_original}.",
+            "Validar publicación DNS del dominio o subdominio evaluado.",
+            f"Registro A/CNAME no detectado → Score {puntaje}")
+
+    if registros_mx:
+        puntaje = scorecard_proponentes_get_param("dns_score_mx_ok", 100)
+        add("MX", "OK", "Bajo", puntaje,
+            f"{dominio_base}: " + ", ".join(registros_mx[:8]),
+            "Mantener proveedores MX autorizados.",
+            f"MX detectado → Score {puntaje}")
+    else:
+        puntaje = scorecard_proponentes_get_param("dns_score_mx_no_detectado", 70)
+        add("MX", "No detectado en dominio base", "Bajo", puntaje,
+            f"No se encontraron registros MX para {dominio_base}. Esto puede ser aceptable si el dominio no recibe correo.",
+            "Confirmar si el proveedor usa este dominio para correo. Si lo usa, configurar MX.",
+            f"MX no detectado → Score {puntaje}")
+
+    if registros_ns:
+        puntaje = scorecard_proponentes_get_param("dns_score_ns_ok", 100)
+        add("NS", "OK", "Bajo", puntaje,
+            f"{dominio_base}: " + ", ".join(registros_ns[:8]),
+            "Mantener gobierno sobre la administración DNS.",
+            f"NS detectado → Score {puntaje}")
+    else:
+        puntaje = scorecard_proponentes_get_param("dns_score_ns_no_detectado", 0)
+        add("NS", "No detectado en dominio base", "Medio", puntaje,
+            f"No se encontraron registros NS para {dominio_base}.",
+            "Validar delegación DNS del dominio base.",
+            f"NS no detectado → Score {puntaje}")
+
+    if spf_ok:
+        puntaje = scorecard_proponentes_get_param("dns_score_spf_ok", 100)
+        add("SPF", "OK", "Bajo", puntaje,
+            f"Se detectó registro SPF en {dominio_base}.",
+            "Evitar configuraciones demasiado permisivas como +all.",
+            f"SPF detectado → Score {puntaje}")
+    else:
+        puntaje = scorecard_proponentes_get_param("dns_score_spf_no_configurado", 0)
+        add("SPF", "No configurado en dominio base", "Alto", puntaje,
+            f"No se encontró TXT con v=spf1 en {dominio_base}.",
+            "Configurar SPF para mitigar spoofing si el dominio envía correo.",
+            f"SPF no configurado → Score {puntaje}")
+
+    if not dmarc_ok:
+        puntaje = scorecard_proponentes_get_param("dns_score_dmarc_no_configurado", 0)
+        add("DMARC", "No configurado en dominio base", "Alto", puntaje,
+            f"No se encontró _dmarc.{dominio_base}.",
+            "Configurar DMARC con política gradual.",
+            f"DMARC no configurado → Score {puntaje}")
+    elif dmarc_policy == "none":
+        puntaje = scorecard_proponentes_get_param("dns_score_dmarc_p_none", 70)
+        add("DMARC", "Configurado p=none", "Medio", puntaje,
+            f"DMARC existe en _dmarc.{dominio_base}, pero está en modo monitoreo.",
+            "Avanzar gradualmente a quarantine o reject.",
+            f"DMARC p=none → Score {puntaje}")
+    else:
+        puntaje = scorecard_proponentes_get_param("dns_score_dmarc_ok", 100)
+        add("DMARC", "OK", "Bajo", puntaje,
+            f"Política DMARC en _dmarc.{dominio_base}: {dmarc_policy or 'definida'}.",
+            "Mantener monitoreo DMARC.",
+            f"DMARC enforce detectado → Score {puntaje}")
+
+    score = round(sum(scores_componentes) / len(scores_componentes), 2) if scores_componentes else 0
+    return max(0, min(100, score)), findings
 
 # ============================================================
 # INCIDENT HISTORY PROPONENTES
@@ -137005,9 +137174,58 @@ def evaluar_incident_history_proponentes_scorecard(run_id, proponente_nombre, do
 
     return score, riesgo, total
 
+def scorecard_proponentes_score_hacker_chatter_por_severidad(
+    total_hallazgos,
+    credencial_confirmada=False,
+    severidad_max="Bajo"
+):
+    total_hallazgos = int(total_hallazgos or 0)
+    severidad_max = (severidad_max or "Bajo").strip()
+
+    if total_hallazgos <= 0:
+        return (
+            scorecard_proponentes_get_param("darkweb_score_sin_hallazgos", 100),
+            "Bajo",
+            "Sin hallazgos de riesgo. Score parametrizado aplicado."
+        )
+
+    if credencial_confirmada:
+        return (
+            scorecard_proponentes_get_param("darkweb_score_credenciales_confirmadas", 20),
+            "Crítico",
+            "Credenciales confirmadas detectadas. Se aplica score crítico parametrizado."
+        )
+
+    if severidad_max in ["Crítico", "Critico", "Critical"]:
+        return (
+            scorecard_proponentes_get_param("darkweb_score_critico", 25),
+            "Crítico",
+            "Se detectó severidad máxima Crítica. Score parametrizado aplicado."
+        )
+
+    if severidad_max in ["Alto", "Alta", "High"]:
+        return (
+            scorecard_proponentes_get_param("darkweb_score_alto", 55),
+            "Alto",
+            "Se detectó severidad máxima Alta. Score parametrizado aplicado."
+        )
+
+    if severidad_max in ["Medio", "Media", "Medium"]:
+        return (
+            scorecard_proponentes_get_param("darkweb_score_medio", 75),
+            "Medio",
+            "Se detectó severidad máxima Media. Score parametrizado aplicado."
+        )
+
+    return (
+        scorecard_proponentes_get_param("darkweb_score_bajo", 90),
+        "Bajo",
+        "Solo se detectaron hallazgos de severidad Baja. Score parametrizado aplicado."
+    )
 
 # ============================================================
 # HACKER CHATTER / EXPOSURE INTELLIGENCE PROPONENTES
+# SCORING POR SEVERIDAD MÁXIMA
 # ============================================================
 
 def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, dominio, ip):
@@ -137022,7 +137240,6 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
 
     # ============================================================
     # LeakCheck independiente Proponentes
-    # SOLO penaliza si hay found > 0 real y respuesta HTTP 200 válida
     # ============================================================
     try:
         api_key_leakcheck = scorecard_proponentes_get_api_key("leakcheck")
@@ -137085,7 +137302,6 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
 
     # ============================================================
     # HIBP independiente Proponentes
-    # SOLO penaliza si total_accounts > 0 real y HTTP 200 válido
     # ============================================================
     try:
         api_key_hibp = scorecard_proponentes_get_api_key("hibp")
@@ -137157,9 +137373,6 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
 
     # ============================================================
     # Shodan independiente Proponentes
-    # SOLO penaliza si hay CVEs reales.
-    # Puertos sin CVE quedan informativos.
-    # Error de API NO penaliza.
     # ============================================================
     try:
         api_key_shodan = scorecard_proponentes_get_api_key("shodan")
@@ -137204,7 +137417,6 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
                 else:
                     severidad = "Bajo"
 
-                # Penaliza SOLO si hay CVEs reales.
                 if cves:
                     hallazgos.append({
                         "fuente": "Shodan API - Proponentes",
@@ -137280,9 +137492,7 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
         })
 
     # ============================================================
-    # OSINT público
-    # Se guarda como informativo, NO penaliza score salvo que
-    # venga con credencial_confirmada=True, lo cual normalmente no aplica.
+    # OSINT público informativo
     # ============================================================
     for fuente_func, nombre_fuente in [
         (consultar_hacker_chatter_gdelt_scorecard, "GDELT"),
@@ -137310,11 +137520,7 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
             print(f"Error {nombre_fuente} proponentes:", repr(e))
 
     # ============================================================
-    # Clasificación final:
-    # Solo penalizan:
-    # - LeakCheck con found > 0
-    # - HIBP con cuentas > 0
-    # - Shodan con CVEs reales
+    # Clasificación final por severidad máxima
     # ============================================================
 
     severidad_orden = {
@@ -137366,21 +137572,19 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
             item
         )
 
-    if total_riesgo <= 0:
-        score = 100
-        riesgo = "Bajo"
-    else:
-        score, riesgo = scorecard_proponentes_score_hacker_chatter(
-            total_riesgo,
-            credencial_confirmada=credencial_confirmada,
-            severidad_max=severidad_max
-        )
+    score, riesgo, regla_score = scorecard_proponentes_score_hacker_chatter_por_severidad(
+        total_riesgo,
+        credencial_confirmada=credencial_confirmada,
+        severidad_max=severidad_max
+    )
 
     estado = "Con hallazgos de riesgo" if total_riesgo else "Sin hallazgos de riesgo"
 
     evidencia = (
         f"Se identificaron {total_riesgo} hallazgos válidos que penalizan el score "
         f"y {total_info} hallazgos informativos que no afectan el cálculo. "
+        f"Severidad máxima detectada: {severidad_max}. "
+        f"Regla aplicada: {regla_score} "
         f"Fuentes que penalizan: {', '.join(sorted(set(fuentes_penalizadas))) if fuentes_penalizadas else 'Ninguna'}."
     )
 
@@ -137410,7 +137614,8 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
             "fuentes_penalizadas": list(sorted(set(fuentes_penalizadas))),
             "fuentes_informativas": list(sorted(set(fuentes_informativas))),
             "api_scope": "proponentes_independiente",
-            "regla_calculo": "Solo penalizan LeakCheck/HIBP con credenciales reales y Shodan con CVEs reales. Errores API y OSINT informativo no suman ni restan."
+            "regla_calculo": regla_score,
+            "modelo_score": "Scoring por severidad máxima: Sin hallazgos, Bajo, Medio, Alto, Crítico o Credenciales confirmadas."
         }
     })
 
@@ -139881,7 +140086,7 @@ def proponentes_scorecard_scan_nuevo():
             tool="Resolver IP"
         )
 
-        score_dns, findings_dns = evaluar_dns_health_scorecard(dominio)
+        score_dns, findings_dns = evaluar_dns_health_proponentes_scorecard(dominio)
         score_ip, findings_ip = evaluar_ip_reputation_scorecard(ip)
 
         score_kali = 0
@@ -140375,10 +140580,59 @@ def proponentes_scorecard_estado(scorecard_id):
         "error_detalle": row["error_detalle"] or ""
     })
 
+def scorecard_proponentes_explicar_calculo_riesgo(run):
+    try:
+        resumen = json.loads(run["resumen_json"] or "{}")
+    except Exception:
+        resumen = {}
+
+    score_dns = float(run["score_dns"] or 0)
+    score_ip = float(run["score_ip"] or 0)
+    score_kali = float(run["score_kali"] or 0)
+    score_incidentes = float(run["score_incidentes"] or 100)
+    score_darkweb = float(run["score_darkweb"] or 100)
+
+    incluir_kali = bool(resumen.get("kali_ejecutado")) or bool(resumen.get("ejecutar_kali") and score_kali > 0)
+
+    peso_dns = scorecard_proponentes_get_param("peso_dns", 20)
+    peso_ip = scorecard_proponentes_get_param("peso_ip", 15)
+    peso_kali = scorecard_proponentes_get_param("peso_kali", 35)
+    peso_incidentes = scorecard_proponentes_get_param("peso_incidentes", 15)
+    peso_darkweb = scorecard_proponentes_get_param("peso_darkweb", 15)
+
+    componentes = [
+        {"nombre": "DNS Health", "score": score_dns, "peso": peso_dns},
+        {"nombre": "IP Reputation / DNSBL", "score": score_ip, "peso": peso_ip},
+        {"nombre": "Incidentes / OSINT", "score": score_incidentes, "peso": peso_incidentes},
+        {"nombre": "Dark Web / Exposure Intelligence", "score": score_darkweb, "peso": peso_darkweb},
+    ]
+
+    if incluir_kali:
+        componentes.append({"nombre": "Kali Linux Scan", "score": score_kali, "peso": peso_kali})
+
+    total_pesos = sum(c["peso"] for c in componentes)
+
+    for c in componentes:
+        c["aporte"] = round((c["score"] * c["peso"]) / total_pesos, 2) if total_pesos else 0
+        c["formula"] = f"({c['score']:.1f} × {c['peso']:.1f}) / {total_pesos:.1f}"
+
+    score_total = round(sum(c["aporte"] for c in componentes), 2)
+    nivel = nivel_riesgo_scorecard_proponentes(score_total)
+
+    return {
+        "componentes": componentes,
+        "total_pesos": total_pesos,
+        "score_total": score_total,
+        "nivel": nivel,
+        "incluye_kali": incluir_kali,
+        "formula_general": "Score Total = Σ(Score componente × Peso componente) / Σ(Pesos aplicables)"
+    }
+
 
 # ============================================================
 # DETALLE SCORECARD PROPONENTES - MISMO DISEÑO QUE PROVEEDORES
 # CON COLOR DE RIESGO SEGÚN PARÁMETROS
+# CON EXPLICACIÓN DEL CÁLCULO DEL RIESGO
 # ============================================================
 
 @app.route("/proponentes/scorecard/<int:scorecard_id>")
@@ -140464,6 +140718,11 @@ def proponentes_scorecard_detalle(scorecard_id):
     total_kali = cur.fetchone()["total"] or 0
 
     conn.close()
+
+    # ============================================================
+    # EXPLICACIÓN DEL CÁLCULO DEL RIESGO
+    # ============================================================
+    calculo_riesgo = scorecard_proponentes_explicar_calculo_riesgo(run)
 
     body = """
     <style>
@@ -140689,6 +140948,19 @@ def proponentes_scorecard_detalle(scorecard_id):
         font-weight:900;
       }
 
+      .calc-risk-box{
+        border-radius:16px;
+        background:linear-gradient(135deg,#eef6ff,#ffffff);
+        border:1px solid #cfe0f7;
+        box-shadow:0 8px 18px rgba(15,23,42,.10);
+      }
+
+      .calc-risk-box .table thead th{
+        position:static !important;
+        background:#dbeafe !important;
+        color:#0f3f75 !important;
+      }
+
       @media(max-width:1100px){
         .action-bar{
           grid-template-columns:1fr 1fr;
@@ -140793,6 +141065,56 @@ def proponentes_scorecard_detalle(scorecard_id):
 
       <div class="section-card">
         <h5 class="section-title">🧩 Hallazgos Generales</h5>
+
+        <div class="alert alert-primary border-0 shadow-sm mb-3 calc-risk-box">
+          <div class="fw-bold mb-2">🧮 Cálculo del Riesgo del Proponente</div>
+
+          <div class="small text-muted mb-2">
+            {{ calculo_riesgo.formula_general }}
+          </div>
+
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle mb-2">
+              <thead class="table-primary">
+                <tr>
+                  <th>Componente</th>
+                  <th class="text-center">Score</th>
+                  <th class="text-center">Peso</th>
+                  <th class="text-center">Fórmula</th>
+                  <th class="text-center">Aporte</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for c in calculo_riesgo.componentes %}
+                <tr>
+                  <td class="fw-bold">{{ c.nombre }}</td>
+                  <td class="text-center">{{ "%.1f"|format(c.score) }}</td>
+                  <td class="text-center">{{ "%.1f"|format(c.peso) }}</td>
+                  <td class="text-center small">{{ c.formula }}</td>
+                  <td class="text-center fw-bold">{{ "%.2f"|format(c.aporte) }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="d-flex flex-wrap gap-2 mt-2">
+            <span class="badge bg-primary">
+              Score Total: {{ "%.2f"|format(calculo_riesgo.score_total) }}%
+            </span>
+
+            <span class="badge bg-{{ scorecard_proponentes_badge_color(calculo_riesgo.nivel) }}">
+              Riesgo: {{ calculo_riesgo.nivel }}
+            </span>
+
+            {% if calculo_riesgo.incluye_kali %}
+              <span class="badge bg-dark">Kali incluido en el cálculo</span>
+            {% else %}
+              <span class="badge bg-secondary">Kali no incluido</span>
+            {% endif %}
+          </div>
+        </div>
+
         <div class="table-wrap">
           <table class="table table-hover align-middle">
             <thead>
@@ -141027,10 +141349,10 @@ def proponentes_scorecard_detalle(scorecard_id):
             incidentes=incidentes,
             hacker_chatter=hacker_chatter,
             total_kali=total_kali,
+            calculo_riesgo=calculo_riesgo,
             scorecard_proponentes_badge_color=scorecard_proponentes_badge_color
         ))
     )
-
 
 # ============================================================
 # DETALLE KALI LINUX - PROPONENTES
@@ -141894,11 +142216,25 @@ def init_scorecard_proponentes_parametros_db():
         ("peso_kali", 35, "Peso Kali Linux"),
         ("peso_incidentes", 15, "Peso Incidentes/Brechas"),
         ("peso_darkweb", 15, "Peso Dark Web / Exposure Intelligence"),
-        ("darkweb_score_sin_hallazgos", 100, "Sin hallazgos"),
-        ("darkweb_score_1_2", 80, "1 a 2 hallazgos"),
-        ("darkweb_score_3_5", 60, "3 a 5 hallazgos"),
-        ("darkweb_score_mas_5", 40, "Más de 5 hallazgos"),
+
+        ("darkweb_score_sin_hallazgos", 100, "Sin hallazgos de riesgo"),
+        ("darkweb_score_bajo", 90, "Hallazgos de severidad Baja"),
+        ("darkweb_score_medio", 75, "Hallazgos de severidad Media"),
+        ("darkweb_score_alto", 55, "Hallazgos de severidad Alta"),
+        ("darkweb_score_critico", 25, "Hallazgos de severidad Crítica"),
         ("darkweb_score_credenciales_confirmadas", 20, "Credenciales confirmadas"),
+
+        ("dns_score_a_ok", 100, "Registro A/CNAME OK"),
+        ("dns_score_a_no_detectado", 0, "Registro A/CNAME no detectado"),
+        ("dns_score_mx_ok", 100, "MX OK"),
+        ("dns_score_mx_no_detectado", 70, "MX no detectado"),
+        ("dns_score_ns_ok", 100, "NS OK"),
+        ("dns_score_ns_no_detectado", 0, "NS no detectado"),
+        ("dns_score_spf_ok", 100, "SPF OK"),
+        ("dns_score_spf_no_configurado", 0, "SPF no configurado"),
+        ("dns_score_dmarc_ok", 100, "DMARC OK"),
+        ("dns_score_dmarc_p_none", 70, "DMARC p=none"),
+        ("dns_score_dmarc_no_configurado", 0, "DMARC no configurado"),
     ]
 
     for clave, valor, descripcion in parametros_default:
@@ -141961,6 +142297,247 @@ def scorecard_proponentes_get_param(clave, default):
 
     except Exception:
         return float(default)
+
+# ============================================================
+# DNS HEALTH PARAMETRIZABLE - PROPONENTES
+# ============================================================
+
+def init_scorecard_proponentes_dns_params():
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    params = [
+        ("dns_score_a_ok", 100, "DNS A/CNAME OK"),
+        ("dns_score_a_no_detectado", 0, "DNS A/CNAME no detectado"),
+
+        ("dns_score_mx_ok", 100, "MX OK"),
+        ("dns_score_mx_no_detectado", 70, "MX no detectado"),
+
+        ("dns_score_ns_ok", 100, "NS OK"),
+        ("dns_score_ns_no_detectado", 0, "NS no detectado"),
+
+        ("dns_score_spf_ok", 100, "SPF OK"),
+        ("dns_score_spf_no_configurado", 0, "SPF no configurado"),
+
+        ("dns_score_dmarc_ok", 100, "DMARC OK"),
+        ("dns_score_dmarc_p_none", 70, "DMARC p=none"),
+        ("dns_score_dmarc_no_configurado", 0, "DMARC no configurado"),
+    ]
+
+    for clave, valor, descripcion in params:
+        cur.execute("""
+            INSERT OR IGNORE INTO scorecard_parametros
+            (clave, valor, descripcion)
+            VALUES (?, ?, ?)
+        """, (clave, valor, descripcion))
+
+    conn.commit()
+    conn.close()
+
+
+init_scorecard_proponentes_dns_params()
+
+
+def evaluar_dns_health_proponentes_scorecard(dominio):
+    score = 100
+    findings = []
+
+    dominio_original = limpiar_dominio_scorecard(dominio)
+    dominio_base = obtener_dominio_base(dominio_original)
+
+    registros_a = dns_any_scorecard(dominio_original, "A")
+
+    registros_cname = []
+    if not registros_a:
+        registros_cname = dns_any_scorecard(dominio_original, "CNAME")
+
+    registros_mx = dns_any_scorecard(dominio_base, "MX")
+    registros_ns = dns_any_scorecard(dominio_base, "NS")
+
+    txt_root = dns_txt_scorecard(dominio_base)
+    txt_dmarc = dns_txt_scorecard(f"_dmarc.{dominio_base}")
+
+    spf_ok = any("v=spf1" in x.lower() for x in txt_root)
+    dmarc_ok = any("v=dmarc1" in x.lower() for x in txt_dmarc)
+
+    dmarc_policy = ""
+    for item in txt_dmarc:
+        low = item.lower()
+        if "p=reject" in low:
+            dmarc_policy = "reject"
+        elif "p=quarantine" in low:
+            dmarc_policy = "quarantine"
+        elif "p=none" in low:
+            dmarc_policy = "none"
+
+    scores_componentes = []
+
+    def add(control, estado, riesgo, puntaje, evidencia, recomendacion, regla):
+        scores_componentes.append(float(puntaje or 0))
+        findings.append({
+            "categoria": "DNS Health",
+            "herramienta": "DNS Resolver",
+            "control": control,
+            "estado": estado,
+            "riesgo": riesgo,
+            "severidad": riesgo,
+            "score": puntaje,
+            "evidencia": evidencia,
+            "recomendacion": recomendacion,
+            "detalle": {
+                "regla_calculo": regla,
+                "modelo_score": "DNS Health parametrizable por control: A/CNAME, MX, NS, SPF y DMARC."
+            }
+        })
+
+    # Registro A / CNAME
+    if registros_a:
+        puntaje = scorecard_proponentes_get_param("dns_score_a_ok", 100)
+        add(
+            "Registro A",
+            "OK",
+            "Bajo",
+            puntaje,
+            f"{dominio_original}: " + ", ".join(registros_a[:8]),
+            "Mantener monitoreo de resolución pública.",
+            f"Registro A detectado → Score {puntaje}"
+        )
+    elif registros_cname:
+        puntaje = scorecard_proponentes_get_param("dns_score_a_ok", 100)
+        add(
+            "Registro A/CNAME",
+            "OK por CNAME",
+            "Bajo",
+            puntaje,
+            f"{dominio_original} apunta por CNAME a: " + ", ".join(registros_cname[:8]),
+            "Mantener monitoreo de resolución pública y destino CNAME autorizado.",
+            f"Registro CNAME detectado → Score {puntaje}"
+        )
+    else:
+        puntaje = scorecard_proponentes_get_param("dns_score_a_no_detectado", 0)
+        add(
+            "Registro A",
+            "No detectado",
+            "Alto",
+            puntaje,
+            f"No se encontraron registros A ni CNAME para {dominio_original}.",
+            "Validar publicación DNS del dominio o subdominio evaluado.",
+            f"Registro A/CNAME no detectado → Score {puntaje}"
+        )
+
+    # MX
+    if registros_mx:
+        puntaje = scorecard_proponentes_get_param("dns_score_mx_ok", 100)
+        add(
+            "MX",
+            "OK",
+            "Bajo",
+            puntaje,
+            f"{dominio_base}: " + ", ".join(registros_mx[:8]),
+            "Mantener proveedores MX autorizados.",
+            f"MX detectado → Score {puntaje}"
+        )
+    else:
+        puntaje = scorecard_proponentes_get_param("dns_score_mx_no_detectado", 70)
+        add(
+            "MX",
+            "No detectado en dominio base",
+            "Bajo",
+            puntaje,
+            f"No se encontraron registros MX para {dominio_base}. Esto puede ser aceptable si el dominio no recibe correo.",
+            "Confirmar si el proveedor usa este dominio para correo. Si lo usa, configurar MX.",
+            f"MX no detectado → Score {puntaje}"
+        )
+
+    # NS
+    if registros_ns:
+        puntaje = scorecard_proponentes_get_param("dns_score_ns_ok", 100)
+        add(
+            "NS",
+            "OK",
+            "Bajo",
+            puntaje,
+            f"{dominio_base}: " + ", ".join(registros_ns[:8]),
+            "Mantener gobierno sobre la administración DNS.",
+            f"NS detectado → Score {puntaje}"
+        )
+    else:
+        puntaje = scorecard_proponentes_get_param("dns_score_ns_no_detectado", 0)
+        add(
+            "NS",
+            "No detectado en dominio base",
+            "Medio",
+            puntaje,
+            f"No se encontraron registros NS para {dominio_base}.",
+            "Validar delegación DNS del dominio base.",
+            f"NS no detectado → Score {puntaje}"
+        )
+
+    # SPF
+    if spf_ok:
+        puntaje = scorecard_proponentes_get_param("dns_score_spf_ok", 100)
+        add(
+            "SPF",
+            "OK",
+            "Bajo",
+            puntaje,
+            f"Se detectó registro SPF en {dominio_base}.",
+            "Evitar configuraciones demasiado permisivas como +all.",
+            f"SPF detectado → Score {puntaje}"
+        )
+    else:
+        puntaje = scorecard_proponentes_get_param("dns_score_spf_no_configurado", 0)
+        add(
+            "SPF",
+            "No configurado en dominio base",
+            "Alto",
+            puntaje,
+            f"No se encontró TXT con v=spf1 en {dominio_base}.",
+            "Configurar SPF para mitigar spoofing si el dominio envía correo.",
+            f"SPF no configurado → Score {puntaje}"
+        )
+
+    # DMARC
+    if not dmarc_ok:
+        puntaje = scorecard_proponentes_get_param("dns_score_dmarc_no_configurado", 0)
+        add(
+            "DMARC",
+            "No configurado en dominio base",
+            "Alto",
+            puntaje,
+            f"No se encontró _dmarc.{dominio_base}.",
+            "Configurar DMARC con política gradual.",
+            f"DMARC no configurado → Score {puntaje}"
+        )
+    elif dmarc_policy == "none":
+        puntaje = scorecard_proponentes_get_param("dns_score_dmarc_p_none", 70)
+        add(
+            "DMARC",
+            "Configurado p=none",
+            "Medio",
+            puntaje,
+            f"DMARC existe en _dmarc.{dominio_base}, pero está en modo monitoreo.",
+            "Avanzar gradualmente a quarantine o reject.",
+            f"DMARC p=none → Score {puntaje}"
+        )
+    else:
+        puntaje = scorecard_proponentes_get_param("dns_score_dmarc_ok", 100)
+        add(
+            "DMARC",
+            "OK",
+            "Bajo",
+            puntaje,
+            f"Política DMARC en _dmarc.{dominio_base}: {dmarc_policy or 'definida'}.",
+            "Mantener monitoreo DMARC.",
+            f"DMARC enforce detectado → Score {puntaje}"
+        )
+
+    if scores_componentes:
+        score = round(sum(scores_componentes) / len(scores_componentes), 2)
+    else:
+        score = 0
+
+    return max(0, min(100, score)), findings
 
 def scorecard_proponentes_risk_levels_activos():
     try:
@@ -142170,22 +142747,49 @@ def proponentes_scorecard_parametros():
     conn = get_scorecard_proponentes_db_connection()
     cur = conn.cursor()
 
+    parametros_base = [
+        ("peso_dns", 20, "Peso DNS Health"),
+        ("peso_ip", 15, "Peso IP Reputation"),
+        ("peso_kali", 35, "Peso Kali Linux"),
+        ("peso_incidentes", 15, "Peso Incidentes/Brechas"),
+        ("peso_darkweb", 15, "Peso Dark Web / Exposure Intelligence"),
+
+        ("darkweb_score_sin_hallazgos", 100, "Sin hallazgos de riesgo"),
+        ("darkweb_score_bajo", 90, "Hallazgos de severidad Baja"),
+        ("darkweb_score_medio", 75, "Hallazgos de severidad Media"),
+        ("darkweb_score_alto", 55, "Hallazgos de severidad Alta"),
+        ("darkweb_score_critico", 25, "Hallazgos de severidad Crítica"),
+        ("darkweb_score_credenciales_confirmadas", 20, "Credenciales confirmadas"),
+
+        ("dns_score_a_ok", 100, "Registro A/CNAME OK"),
+        ("dns_score_a_no_detectado", 0, "Registro A/CNAME no detectado"),
+        ("dns_score_mx_ok", 100, "MX OK"),
+        ("dns_score_mx_no_detectado", 70, "MX no detectado"),
+        ("dns_score_ns_ok", 100, "NS OK"),
+        ("dns_score_ns_no_detectado", 0, "NS no detectado"),
+        ("dns_score_spf_ok", 100, "SPF OK"),
+        ("dns_score_spf_no_configurado", 0, "SPF no configurado"),
+        ("dns_score_dmarc_ok", 100, "DMARC OK"),
+        ("dns_score_dmarc_p_none", 70, "DMARC p=none"),
+        ("dns_score_dmarc_no_configurado", 0, "DMARC no configurado"),
+    ]
+
+    for clave, valor, descripcion in parametros_base:
+        cur.execute("""
+            INSERT OR IGNORE INTO scorecard_parametros
+            (clave, valor, descripcion)
+            VALUES (?, ?, ?)
+        """, (clave, valor, descripcion))
+
+    conn.commit()
+
+    descripciones = {clave: descripcion for clave, valor, descripcion in parametros_base}
+
     if request.method == "POST":
         accion = request.form.get("accion")
 
         if accion == "guardar_parametros":
-            claves_numericas = [
-                "peso_dns",
-                "peso_ip",
-                "peso_kali",
-                "peso_incidentes",
-                "peso_darkweb",
-                "darkweb_score_sin_hallazgos",
-                "darkweb_score_1_2",
-                "darkweb_score_3_5",
-                "darkweb_score_mas_5",
-                "darkweb_score_credenciales_confirmadas",
-            ]
+            claves_numericas = [clave for clave, valor, descripcion in parametros_base]
 
             for clave in claves_numericas:
                 valor = request.form.get(clave, type=float)
@@ -142198,11 +142802,12 @@ def proponentes_scorecard_parametros():
                     (clave, valor, descripcion)
                     VALUES (?, ?, ?)
                     ON CONFLICT(clave) DO UPDATE SET
-                        valor = excluded.valor
+                        valor = excluded.valor,
+                        descripcion = excluded.descripcion
                 """, (
                     clave,
                     valor,
-                    clave.replace("_", " ").title()
+                    descripciones.get(clave, clave.replace("_", " ").title())
                 ))
 
             conn.commit()
@@ -142401,10 +143006,6 @@ def proponentes_scorecard_parametros():
       }
 
       .score-header-text{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
         color:#ffffff !important;
         font-size:1.32rem;
         font-weight:950;
@@ -142419,7 +143020,6 @@ def proponentes_scorecard_parametros():
         content:"SGSI · Parámetros Scorecard";
         display:block;
         width:max-content;
-        max-width:100%;
         background:rgba(255,255,255,.18);
         border-radius:999px;
         padding:3px 10px;
@@ -142430,8 +143030,7 @@ def proponentes_scorecard_parametros():
         text-shadow:none;
       }
 
-      .score-card,
-      .card{
+      .score-card{
         background:rgba(255,255,255,.96) !important;
         border-radius:18px !important;
         backdrop-filter:blur(8px);
@@ -142442,53 +143041,13 @@ def proponentes_scorecard_parametros():
         margin-bottom:18px;
       }
 
-      .section-title,
-      .card h5,
-      .card h6{
+      .section-title{
         font-weight:950;
         font-size:.95rem;
         color:#1459a6;
         margin-bottom:16px;
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
-        text-transform:none;
-        letter-spacing:0;
-      }
-
-      .table{
-        margin-bottom:0;
-      }
-
-      .table thead th{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#ffffff !important;
-        font-size:.78rem;
-        font-weight:900 !important;
-        border:none !important;
-        white-space:nowrap;
-        vertical-align:middle !important;
-        text-align:center;
-        padding:9px 8px;
-      }
-
-      .table tbody td,
-      .table td{
-        vertical-align:middle !important;
-        font-size:.82rem;
-        padding:9px 8px;
-        border-bottom:1px solid #e5edf7;
-        color:#1f2937;
-      }
-
-      .table tbody tr:nth-child(even){
-        background:#f8fbff;
-      }
-
-      .table tbody tr:hover{
-        background:#eef6ff;
       }
 
       .param-help{
@@ -142522,17 +143081,28 @@ def proponentes_scorecard_parametros():
         box-shadow:none !important;
       }
 
-      .form-control:focus,
-      .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
+      .table thead th{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-size:.78rem;
+        font-weight:900 !important;
+        border:none !important;
+        white-space:nowrap;
+        text-align:center;
+        padding:9px 8px;
+      }
+
+      .table td{
+        vertical-align:middle !important;
+        font-size:.82rem;
       }
 
       .btn{
         border-radius:10px !important;
         font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
       }
 
       .badge{
@@ -142540,45 +143110,6 @@ def proponentes_scorecard_parametros():
         font-size:.70rem;
         padding:.35rem .65rem;
         font-weight:900;
-      }
-
-      @media (max-width:992px){
-        .score-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .score-header-card{
-          min-height:88px;
-        }
-
-        .score-header-text{
-          font-size:1.20rem;
-        }
-
-        .score-card,
-        .card{
-          padding:16px;
-        }
-      }
-
-      @media (max-width:768px){
-        .score-header-card{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .score-header-card::after{
-          margin:0;
-        }
-
-        .score-header-text,
-        .score-header-text::before{
-          text-align:center;
-          margin-left:auto;
-          margin-right:auto;
-        }
       }
     </style>
 
@@ -142606,67 +143137,155 @@ def proponentes_scorecard_parametros():
               <label class="form-label fw-bold">Peso DNS Health</label>
               <input type="number" step="0.01" name="peso_dns" class="form-control"
                      value="{{ parametros.get('peso_dns').valor if parametros.get('peso_dns') else 20 }}">
-              <div class="param-help">Peso para validaciones DNS.</div>
             </div>
 
             <div class="col-md-4">
               <label class="form-label fw-bold">Peso IP Reputation</label>
               <input type="number" step="0.01" name="peso_ip" class="form-control"
                      value="{{ parametros.get('peso_ip').valor if parametros.get('peso_ip') else 15 }}">
-              <div class="param-help">Peso para reputación IP.</div>
             </div>
 
             <div class="col-md-4">
               <label class="form-label fw-bold">Peso Kali Linux</label>
               <input type="number" step="0.01" name="peso_kali" class="form-control"
                      value="{{ parametros.get('peso_kali').valor if parametros.get('peso_kali') else 35 }}">
-              <div class="param-help">Peso para herramientas Kali.</div>
             </div>
 
             <div class="col-md-4">
               <label class="form-label fw-bold">Peso Incidentes / Brechas</label>
               <input type="number" step="0.01" name="peso_incidentes" class="form-control"
                      value="{{ parametros.get('peso_incidentes').valor if parametros.get('peso_incidentes') else 15 }}">
-              <div class="param-help">Peso de historial de incidentes.</div>
             </div>
 
             <div class="col-md-4">
               <label class="form-label fw-bold">Peso Dark Web / Exposure Intelligence</label>
               <input type="number" step="0.01" name="peso_darkweb" class="form-control"
                      value="{{ parametros.get('peso_darkweb').valor if parametros.get('peso_darkweb') else 15 }}">
-              <div class="param-help">Peso de Hacker Chatter / exposición.</div>
             </div>
 
           </div>
 
           <hr>
 
-          <h6 class="fw-bold text-primary">Scoring Hacker Chatter / Exposure Intelligence</h6>
+          <h6 class="fw-bold text-primary">
+            Scoring DNS Health
+          </h6>
+
+          <div class="param-help mb-3">
+            Configuración de scoring por control DNS: A/CNAME, MX, NS, SPF y DMARC.
+          </div>
 
           <div class="row g-3 mt-1">
 
             <div class="col-md-4">
-              <label class="form-label fw-bold">Sin hallazgos</label>
+              <label class="form-label fw-bold">Registro A/CNAME OK</label>
+              <input type="number" step="0.01" name="dns_score_a_ok" class="form-control"
+                     value="{{ parametros.get('dns_score_a_ok').valor if parametros.get('dns_score_a_ok') else 100 }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">Registro A/CNAME No Detectado</label>
+              <input type="number" step="0.01" name="dns_score_a_no_detectado" class="form-control"
+                     value="{{ parametros.get('dns_score_a_no_detectado').valor if parametros.get('dns_score_a_no_detectado') else 0 }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">MX OK</label>
+              <input type="number" step="0.01" name="dns_score_mx_ok" class="form-control"
+                     value="{{ parametros.get('dns_score_mx_ok').valor if parametros.get('dns_score_mx_ok') else 100 }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">MX No Detectado</label>
+              <input type="number" step="0.01" name="dns_score_mx_no_detectado" class="form-control"
+                     value="{{ parametros.get('dns_score_mx_no_detectado').valor if parametros.get('dns_score_mx_no_detectado') else 70 }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">NS OK</label>
+              <input type="number" step="0.01" name="dns_score_ns_ok" class="form-control"
+                     value="{{ parametros.get('dns_score_ns_ok').valor if parametros.get('dns_score_ns_ok') else 100 }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">NS No Detectado</label>
+              <input type="number" step="0.01" name="dns_score_ns_no_detectado" class="form-control"
+                     value="{{ parametros.get('dns_score_ns_no_detectado').valor if parametros.get('dns_score_ns_no_detectado') else 0 }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">SPF OK</label>
+              <input type="number" step="0.01" name="dns_score_spf_ok" class="form-control"
+                     value="{{ parametros.get('dns_score_spf_ok').valor if parametros.get('dns_score_spf_ok') else 100 }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">SPF No Configurado</label>
+              <input type="number" step="0.01" name="dns_score_spf_no_configurado" class="form-control"
+                     value="{{ parametros.get('dns_score_spf_no_configurado').valor if parametros.get('dns_score_spf_no_configurado') else 0 }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">DMARC OK</label>
+              <input type="number" step="0.01" name="dns_score_dmarc_ok" class="form-control"
+                     value="{{ parametros.get('dns_score_dmarc_ok').valor if parametros.get('dns_score_dmarc_ok') else 100 }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">DMARC p=none</label>
+              <input type="number" step="0.01" name="dns_score_dmarc_p_none" class="form-control"
+                     value="{{ parametros.get('dns_score_dmarc_p_none').valor if parametros.get('dns_score_dmarc_p_none') else 70 }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">DMARC No Configurado</label>
+              <input type="number" step="0.01" name="dns_score_dmarc_no_configurado" class="form-control"
+                     value="{{ parametros.get('dns_score_dmarc_no_configurado').valor if parametros.get('dns_score_dmarc_no_configurado') else 0 }}">
+            </div>
+
+          </div>
+
+          <hr>
+
+          <h6 class="fw-bold text-primary">
+            Scoring Hacker Chatter / Exposure Intelligence por Severidad
+          </h6>
+
+          <div class="param-help mb-3">
+            Este scoring se calcula por la severidad máxima detectada:
+            Sin hallazgos, Bajo, Medio, Alto, Crítico o Credenciales confirmadas.
+          </div>
+
+          <div class="row g-3 mt-1">
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">Sin hallazgos de riesgo</label>
               <input type="number" step="0.01" name="darkweb_score_sin_hallazgos" class="form-control"
                      value="{{ parametros.get('darkweb_score_sin_hallazgos').valor if parametros.get('darkweb_score_sin_hallazgos') else 100 }}">
             </div>
 
             <div class="col-md-4">
-              <label class="form-label fw-bold">1 a 2 hallazgos</label>
-              <input type="number" step="0.01" name="darkweb_score_1_2" class="form-control"
-                     value="{{ parametros.get('darkweb_score_1_2').valor if parametros.get('darkweb_score_1_2') else 80 }}">
+              <label class="form-label fw-bold">Severidad Baja</label>
+              <input type="number" step="0.01" name="darkweb_score_bajo" class="form-control"
+                     value="{{ parametros.get('darkweb_score_bajo').valor if parametros.get('darkweb_score_bajo') else 90 }}">
             </div>
 
             <div class="col-md-4">
-              <label class="form-label fw-bold">3 a 5 hallazgos</label>
-              <input type="number" step="0.01" name="darkweb_score_3_5" class="form-control"
-                     value="{{ parametros.get('darkweb_score_3_5').valor if parametros.get('darkweb_score_3_5') else 60 }}">
+              <label class="form-label fw-bold">Severidad Media</label>
+              <input type="number" step="0.01" name="darkweb_score_medio" class="form-control"
+                     value="{{ parametros.get('darkweb_score_medio').valor if parametros.get('darkweb_score_medio') else 75 }}">
             </div>
 
             <div class="col-md-4">
-              <label class="form-label fw-bold">Más de 5 hallazgos</label>
-              <input type="number" step="0.01" name="darkweb_score_mas_5" class="form-control"
-                     value="{{ parametros.get('darkweb_score_mas_5').valor if parametros.get('darkweb_score_mas_5') else 40 }}">
+              <label class="form-label fw-bold">Severidad Alta</label>
+              <input type="number" step="0.01" name="darkweb_score_alto" class="form-control"
+                     value="{{ parametros.get('darkweb_score_alto').valor if parametros.get('darkweb_score_alto') else 55 }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">Severidad Crítica</label>
+              <input type="number" step="0.01" name="darkweb_score_critico" class="form-control"
+                     value="{{ parametros.get('darkweb_score_critico').valor if parametros.get('darkweb_score_critico') else 25 }}">
             </div>
 
             <div class="col-md-4">
