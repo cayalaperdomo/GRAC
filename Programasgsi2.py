@@ -8071,9 +8071,8 @@ MENU_SECTIONS = [
         "items": [
             {"label": "Cuestionarios de Proponentes", "href": "/cuestionarios_proveedores", "icon": "bi-ui-checks", "btn": "btn-info text-white", "module": "Cuestionarios de Proponentes"},
             {"label": "Revisión en Listas Restrictivas", "href": "/listas_restrictivas", "icon": "bi-shield-exclamation", "btn": "btn-danger", "module": "/Listas Restrictivas"},
-            {"label": "Security Scorecard de Proponentes", "href": "/proponentes/scorecard", "icon": "bi-speedometer", "btn": "btn-warning text-dark", "module": "Cuestionarios de Proponentes"},
+            {"label": "Security Scorecard de Proponentes y Proveedores", "href": "/proponentes/scorecard", "icon": "bi-speedometer", "btn": "btn-warning text-dark", "module": "Cuestionarios de Proponentes"},
             {"label": "Registro de Proveedores", "href": "/proveedores_menu", "icon": "bi-building", "btn": "btn-primary", "module": "Registro de Proveedores"},
-            {"label": "Security Scorecard de Proveedores", "href": "/proveedores/scorecard", "icon": "bi-speedometer2", "btn": "btn-success", "module": "Registro de Proveedores"},          
         ],
     },
     {
@@ -137021,7 +137020,10 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
 
     hallazgos = []
 
+    # ============================================================
     # LeakCheck independiente Proponentes
+    # SOLO penaliza si hay found > 0 real y respuesta HTTP 200 válida
+    # ============================================================
     try:
         api_key_leakcheck = scorecard_proponentes_get_api_key("leakcheck")
 
@@ -137046,22 +137048,45 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
                         "indicador": f"{dominio_base} - {found} registros encontrados",
                         "severidad": "Crítico" if found > 10 else "Alto" if found > 2 else "Medio",
                         "fecha": datetime.now().strftime("%Y-%m-%d"),
-                        "evidencia": f"LeakCheck reportó {found} registros asociados al dominio {dominio_base}.",
+                        "evidencia": f"LeakCheck reportó {found} registros reales asociados al dominio {dominio_base}.",
                         "recomendacion": "Solicitar al proponente investigación formal, rotación de credenciales, MFA obligatorio y evidencia de remediación.",
                         "url": "https://leakcheck.io/",
                         "credencial_confirmada": True,
                         "detalle": {
                             "found": found,
-                            "raw_passwords_omitted": True
+                            "raw_passwords_omitted": True,
+                            "penaliza_score": True,
+                            "fuente_valida": True
                         }
                     })
+
             elif resp.status_code in [400, 401, 403, 422, 429]:
-                hallazgos.append(scorecard_api_error_item("LeakCheck API - Proponentes", f"HTTP {resp.status_code}: {resp.text[:300]}"))
+                hallazgos.append({
+                    **scorecard_api_error_item(
+                        "LeakCheck API - Proponentes",
+                        f"HTTP {resp.status_code}: {resp.text[:300]}"
+                    ),
+                    "detalle": {
+                        "no_penaliza_score": True,
+                        "api_error": True,
+                        "fuente_valida": False
+                    }
+                })
 
     except Exception as e:
-        hallazgos.append(scorecard_api_error_item("LeakCheck API - Proponentes", repr(e)))
+        hallazgos.append({
+            **scorecard_api_error_item("LeakCheck API - Proponentes", repr(e)),
+            "detalle": {
+                "no_penaliza_score": True,
+                "api_error": True,
+                "fuente_valida": False
+            }
+        })
 
+    # ============================================================
     # HIBP independiente Proponentes
+    # SOLO penaliza si total_accounts > 0 real y HTTP 200 válido
+    # ============================================================
     try:
         api_key_hibp = scorecard_proponentes_get_api_key("hibp")
 
@@ -137092,23 +137117,50 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
                         "indicador": f"{dominio_base} - {total_accounts} cuentas afectadas",
                         "severidad": "Crítico" if total_accounts > 10 else "Alto" if total_accounts > 2 else "Medio",
                         "fecha": datetime.now().strftime("%Y-%m-%d"),
-                        "evidencia": f"HIBP reportó {total_accounts} cuentas del dominio {dominio_base} asociadas a brechas.",
+                        "evidencia": f"HIBP reportó {total_accounts} cuentas reales del dominio {dominio_base} asociadas a brechas.",
                         "recomendacion": "Exigir al proponente revisión de cuentas afectadas, rotación de credenciales, MFA y detección de password reuse.",
                         "url": "https://haveibeenpwned.com/",
                         "credencial_confirmada": True,
                         "detalle": {
                             "total_accounts": total_accounts,
-                            "raw_accounts_masked": True
+                            "raw_accounts_masked": True,
+                            "penaliza_score": True,
+                            "fuente_valida": True
                         }
                     })
 
+            elif resp.status_code == 404:
+                pass
+
             elif resp.status_code in [400, 401, 403, 429]:
-                hallazgos.append(scorecard_api_error_item("Have I Been Pwned API - Proponentes", f"HTTP {resp.status_code}: dominio no verificado, API key inválida, cuota o rate limit."))
+                hallazgos.append({
+                    **scorecard_api_error_item(
+                        "Have I Been Pwned API - Proponentes",
+                        f"HTTP {resp.status_code}: dominio no verificado, API key inválida, cuota o rate limit."
+                    ),
+                    "detalle": {
+                        "no_penaliza_score": True,
+                        "api_error": True,
+                        "fuente_valida": False
+                    }
+                })
 
     except Exception as e:
-        hallazgos.append(scorecard_api_error_item("Have I Been Pwned API - Proponentes", repr(e)))
+        hallazgos.append({
+            **scorecard_api_error_item("Have I Been Pwned API - Proponentes", repr(e)),
+            "detalle": {
+                "no_penaliza_score": True,
+                "api_error": True,
+                "fuente_valida": False
+            }
+        })
 
+    # ============================================================
     # Shodan independiente Proponentes
+    # SOLO penaliza si hay CVEs reales.
+    # Puertos sin CVE quedan informativos.
+    # Error de API NO penaliza.
+    # ============================================================
     try:
         api_key_shodan = scorecard_proponentes_get_api_key("shodan")
 
@@ -137149,20 +137201,19 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
                     severidad = "Crítico"
                 elif high_cves or len(cves) > 0:
                     severidad = "Alto"
-                elif len(ports) >= 8:
-                    severidad = "Medio"
                 else:
                     severidad = "Bajo"
 
-                if ports or cves:
+                # Penaliza SOLO si hay CVEs reales.
+                if cves:
                     hallazgos.append({
                         "fuente": "Shodan API - Proponentes",
-                        "tipo_exposicion": "Servicios expuestos / CVEs",
-                        "indicador": f"{ip} - puertos: {', '.join(str(p) for p in ports[:20])}",
+                        "tipo_exposicion": "CVEs / servicios vulnerables expuestos",
+                        "indicador": f"{ip} - CVEs: {len(cves)} - Puertos: {', '.join(str(p) for p in ports[:20])}",
                         "severidad": severidad,
                         "fecha": datetime.now().strftime("%Y-%m-%d"),
-                        "evidencia": f"Shodan reportó {len(ports)} puertos observados y {len(cves)} CVEs para la IP {ip}.",
-                        "recomendacion": "Validar exposición de servicios, cerrar puertos innecesarios, aplicar hardening y corregir CVEs.",
+                        "evidencia": f"Shodan reportó {len(cves)} CVEs reales para la IP {ip}.",
+                        "recomendacion": "Validar exposición de servicios, aplicar parches, cerrar puertos innecesarios y corregir CVEs.",
                         "url": f"https://www.shodan.io/host/{ip}",
                         "credencial_confirmada": False,
                         "detalle": {
@@ -137174,31 +137225,97 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
                             "high_cves": high_cves[:20],
                             "org": data.get("org"),
                             "isp": data.get("isp"),
-                            "country": data.get("country_name")
+                            "country": data.get("country_name"),
+                            "penaliza_score": True,
+                            "fuente_valida": True
                         }
                     })
 
+                elif ports:
+                    hallazgos.append({
+                        "fuente": "Shodan API - Proponentes",
+                        "tipo_exposicion": "Servicios observados sin CVEs",
+                        "indicador": f"{ip} - puertos observados: {', '.join(str(p) for p in ports[:20])}",
+                        "severidad": "Bajo",
+                        "fecha": datetime.now().strftime("%Y-%m-%d"),
+                        "evidencia": f"Shodan reportó {len(ports)} puertos observados, pero sin CVEs asociadas.",
+                        "recomendacion": "Validar que los servicios expuestos sean esperados. No penaliza score por ausencia de CVEs.",
+                        "url": f"https://www.shodan.io/host/{ip}",
+                        "credencial_confirmada": False,
+                        "detalle": {
+                            "ip": ip,
+                            "ports": ports,
+                            "hostnames": hostnames,
+                            "cves": [],
+                            "no_penaliza_score": True,
+                            "fuente_valida": True,
+                            "informativo": True
+                        }
+                    })
+
+            elif resp.status_code == 404:
+                pass
+
             elif resp.status_code in [400, 401, 403, 429]:
-                hallazgos.append(scorecard_api_error_item("Shodan API - Proponentes", f"HTTP {resp.status_code}: API key inválida, sin créditos o rate limit."))
+                hallazgos.append({
+                    **scorecard_api_error_item(
+                        "Shodan API - Proponentes",
+                        f"HTTP {resp.status_code}: API key inválida, sin créditos o rate limit."
+                    ),
+                    "detalle": {
+                        "no_penaliza_score": True,
+                        "api_error": True,
+                        "fuente_valida": False
+                    }
+                })
 
     except Exception as e:
-        hallazgos.append(scorecard_api_error_item("Shodan API - Proponentes", repr(e)))
+        hallazgos.append({
+            **scorecard_api_error_item("Shodan API - Proponentes", repr(e)),
+            "detalle": {
+                "no_penaliza_score": True,
+                "api_error": True,
+                "fuente_valida": False
+            }
+        })
 
-    # Fuentes OSINT sin API key
-    try:
-        hallazgos.extend(consultar_hacker_chatter_gdelt_scorecard(proponente_nombre, dominio))
-    except Exception as e:
-        print("Error GDELT proponentes:", repr(e))
+    # ============================================================
+    # OSINT público
+    # Se guarda como informativo, NO penaliza score salvo que
+    # venga con credencial_confirmada=True, lo cual normalmente no aplica.
+    # ============================================================
+    for fuente_func, nombre_fuente in [
+        (consultar_hacker_chatter_gdelt_scorecard, "GDELT"),
+        (consultar_certificados_ct_scorecard, "crt.sh"),
+        (consultar_github_exposure_scorecard, "GitHub OSINT"),
+    ]:
+        try:
+            if nombre_fuente == "GDELT":
+                items = fuente_func(proponente_nombre, dominio)
+            elif nombre_fuente == "GitHub OSINT":
+                items = fuente_func(proponente_nombre, dominio)
+            else:
+                items = fuente_func(dominio)
 
-    try:
-        hallazgos.extend(consultar_certificados_ct_scorecard(dominio))
-    except Exception as e:
-        print("Error crt.sh proponentes:", repr(e))
+            for item in items or []:
+                detalle = item.get("detalle") if isinstance(item.get("detalle"), dict) else {}
+                detalle["no_penaliza_score"] = True
+                detalle["informativo_osint"] = True
+                detalle["fuente_valida"] = True
+                item["detalle"] = detalle
+                item["credencial_confirmada"] = False
+                hallazgos.append(item)
 
-    try:
-        hallazgos.extend(consultar_github_exposure_scorecard(proponente_nombre, dominio))
-    except Exception as e:
-        print("Error GitHub exposure proponentes:", repr(e))
+        except Exception as e:
+            print(f"Error {nombre_fuente} proponentes:", repr(e))
+
+    # ============================================================
+    # Clasificación final:
+    # Solo penalizan:
+    # - LeakCheck con found > 0
+    # - HIBP con cuentas > 0
+    # - Shodan con CVEs reales
+    # ============================================================
 
     severidad_orden = {
         "Bajo": 1,
@@ -137213,29 +137330,34 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
     total_riesgo = 0
     total_info = 0
     total_cves = 0
+    fuentes_penalizadas = []
+    fuentes_informativas = []
 
     for item in hallazgos:
         detalle = item.get("detalle") or {}
+
+        penaliza = bool(detalle.get("penaliza_score"))
         no_penaliza = bool(detalle.get("no_penaliza_score"))
 
-        if no_penaliza:
-            total_info += 1
-        else:
+        if penaliza and not no_penaliza:
             total_riesgo += 1
+            fuentes_penalizadas.append(item.get("fuente") or "Fuente no identificada")
 
-        sev = item.get("severidad") or "Bajo"
+            sev = item.get("severidad") or "Bajo"
+            if severidad_orden.get(sev, 0) > severidad_orden.get(severidad_max, 0):
+                severidad_max = sev
 
-        if severidad_orden.get(sev, 0) > severidad_orden.get(severidad_max, 0):
-            severidad_max = sev
+            if item.get("credencial_confirmada"):
+                credencial_confirmada = True
 
-        if item.get("credencial_confirmada"):
-            credencial_confirmada = True
-
-        try:
-            if isinstance(detalle, dict):
-                total_cves += len(detalle.get("cves") or [])
-        except Exception:
-            pass
+            try:
+                if isinstance(detalle, dict):
+                    total_cves += len(detalle.get("cves") or [])
+            except Exception:
+                pass
+        else:
+            total_info += 1
+            fuentes_informativas.append(item.get("fuente") or "Fuente informativa")
 
         guardar_scorecard_proponentes_darkweb_exposure(
             run_id,
@@ -137244,26 +137366,29 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
             item
         )
 
-    score, riesgo = scorecard_score_hacker_chatter(
-        total_riesgo,
-        credencial_confirmada=credencial_confirmada,
-        severidad_max=severidad_max
-    )
+    if total_riesgo <= 0:
+        score = 100
+        riesgo = "Bajo"
+    else:
+        score, riesgo = scorecard_proponentes_score_hacker_chatter(
+            total_riesgo,
+            credencial_confirmada=credencial_confirmada,
+            severidad_max=severidad_max
+        )
 
-    estado = "Con hallazgos" if total_riesgo else "Sin hallazgos de riesgo"
+    estado = "Con hallazgos de riesgo" if total_riesgo else "Sin hallazgos de riesgo"
 
     evidencia = (
-        f"Se identificaron {total_riesgo} hallazgos de riesgo y {total_info} hallazgos informativos "
-        f"en Exposure Intelligence / Hacker Chatter."
-        if total_riesgo or total_info else
-        "No se identificaron hallazgos relevantes en las fuentes consultadas."
+        f"Se identificaron {total_riesgo} hallazgos válidos que penalizan el score "
+        f"y {total_info} hallazgos informativos que no afectan el cálculo. "
+        f"Fuentes que penalizan: {', '.join(sorted(set(fuentes_penalizadas))) if fuentes_penalizadas else 'Ninguna'}."
     )
 
     recomendacion = (
         "Validar hallazgos con el proponente, solicitar evidencias de remediación, rotación de credenciales, "
         "MFA, hardening, cierre de servicios expuestos y confirmación formal de contención."
         if total_riesgo else
-        "Mantener monitoreo periódico de exposición externa y fuentes OSINT."
+        "No se encontraron hallazgos válidos que afecten el score. Mantener monitoreo periódico."
     )
 
     guardar_scorecard_proponentes_finding(run_id, {
@@ -137282,7 +137407,10 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
             "severidad_max": severidad_max,
             "credencial_confirmada": credencial_confirmada,
             "total_cves": total_cves,
-            "api_scope": "proponentes_independiente"
+            "fuentes_penalizadas": list(sorted(set(fuentes_penalizadas))),
+            "fuentes_informativas": list(sorted(set(fuentes_informativas))),
+            "api_scope": "proponentes_independiente",
+            "regla_calculo": "Solo penalizan LeakCheck/HIBP con credenciales reales y Shodan con CVEs reales. Errores API y OSINT informativo no suman ni restan."
         }
     })
 
@@ -137299,261 +137427,526 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
 # KALI SCAN INDEPENDIENTE PROPONENTES
 # ============================================================
 
-def ejecutar_scorecard_proponentes_kali_independiente(run_id, dominio):
-    cfg = _scan_cfg()
-    run_dir = scorecard_proponentes_run_dir(run_id, dominio)
-    url = target_url_scorecard(dominio)
-    ip = resolver_ip_scorecard(dominio)
+# ============================================================
+# KALI SCORECARD PROPONENTES USANDO EL MISMO MOTOR DE
+# REGISTRO DE VULNERABILIDADES
+# ============================================================
 
-    modo = scorecard_kali_modo(cfg)
+def scorecard_proponentes_map_severidad_vuln(sev):
+    sev = (sev or "").strip()
 
-    herramientas = {
-        "nmap": scorecard_tool_path(cfg, "nmap"),
-        "whatweb": scorecard_tool_path(cfg, "whatweb"),
-        "nikto": scorecard_tool_path(cfg, "nikto"),
-        "nuclei": scorecard_tool_path(cfg, "nuclei"),
-        "testssl": scorecard_tool_path(cfg, "testssl"),
+    if sev in ["Crítica", "Critica", "Critical"]:
+        return "Crítico"
+
+    if sev in ["Alta", "High"]:
+        return "Alto"
+
+    if sev in ["Media", "Medium"]:
+        return "Medio"
+
+    return "Bajo"
+
+
+def scorecard_proponentes_score_kali_desde_findings(findings):
+    criticas = 0
+    altas = 0
+    medias = 0
+    bajas = 0
+
+    for f in findings:
+        sev = (f.severidad or "").strip()
+
+        if sev in ["Crítica", "Critica"]:
+            criticas += 1
+        elif sev == "Alta":
+            altas += 1
+        elif sev == "Media":
+            medias += 1
+        else:
+            bajas += 1
+
+    descuento = (criticas * 25) + (altas * 15) + (medias * 7) + (bajas * 3)
+    score = 100 - min(100, descuento)
+
+    return max(0, min(100, score)), {
+        "criticas": criticas,
+        "altas": altas,
+        "medias": medias,
+        "bajas": bajas,
+        "total": len(findings)
     }
 
-    conn = get_scorecard_proponentes_db_connection()
-    cur = conn.cursor()
 
-    cur.execute("""
-        UPDATE scorecard_proponentes_runs
-        SET modo_kali = ?, herramientas_json = ?, estado = ?, fecha_inicio = ?,
-            progress_pct = ?, current_stage = ?, current_tool = ?
-        WHERE id = ?
-    """, (
-        modo,
-        json.dumps(herramientas, ensure_ascii=False),
-        "ejecutando",
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        45,
-        "Inicializando escaneo Kali independiente",
-        "dispatcher",
-        run_id
-    ))
+def scorecard_proponentes_copiar_findings_vuln(scorecard_run_id, vuln_run_id):
+    findings = VulnerabilityScanFinding.query.filter_by(
+        run_id=vuln_run_id
+    ).order_by(VulnerabilityScanFinding.id.asc()).all()
 
-    conn.commit()
-    conn.close()
+    for f in findings:
+        riesgo = scorecard_proponentes_map_severidad_vuln(f.severidad)
 
+        guardar_scorecard_proponentes_finding(scorecard_run_id, {
+            "categoria": "Kali Linux Scan",
+            "herramienta": f.fuente or "Kali Linux",
+            "control": f.titulo or "Hallazgo técnico",
+            "estado": "Detectado",
+            "riesgo": riesgo,
+            "severidad": riesgo,
+            "score": (
+                20 if riesgo == "Crítico"
+                else 45 if riesgo == "Alto"
+                else 70 if riesgo == "Medio"
+                else 100
+            ),
+            "evidencia": f.evidencia or f.descripcion or "Hallazgo detectado por el motor de vulnerabilidades.",
+            "recomendacion": f.recomendacion_base or "Validar el hallazgo, aplicar remediación y repetir el escaneo.",
+            "archivo_salida": "",
+            "detalle": {
+                "vulnerability_scan_run_id": vuln_run_id,
+                "vulnerability_finding_id": f.id,
+                "fuente_original": f.fuente,
+                "titulo_original": f.titulo,
+                "severidad_original": f.severidad,
+                "cvss": f.cvss,
+                "cve": f.cve,
+                "puerto": f.puerto,
+                "protocolo": f.protocolo,
+                "servicio": f.servicio
+            }
+        })
+
+    return findings
+
+def scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, vuln_run_id, min_pct=45, max_pct=95):
+    vuln_run = VulnerabilityScanRun.query.get(vuln_run_id)
+    if not vuln_run:
+        return
+
+    vuln_pct = int(vuln_run.progress_pct or 0)
+    mapped_pct = min_pct + int((vuln_pct / 100) * (max_pct - min_pct))
+
+    stage = vuln_run.current_stage or "Ejecutando escaneo Kali Linux"
+    tool = vuln_run.current_tool or "Kali Linux"
+
+    if tool == "dispatcher":
+        tool = "Inicializando"
+
+    scorecard_proponentes_set_progress(
+        scorecard_run_id,
+        pct=mapped_pct,
+        stage=stage,
+        tool=tool,
+        estado="ejecutando"
+    )
+
+
+def ejecutar_scan_web_scorecard_proponentes_sin_whatweb(run, cfg, run_dir, crear_vulns=False, crear_planes=False, scorecard_run_id=None):
+    target = normalizar_target_para_scan(run.target)
     logs = []
 
-    resumen_global = {
-        "criticas": 0,
-        "altas": 0,
-        "medias": 0,
-        "bajas": 0,
-        "errores": 0,
-        "herramientas": {}
-    }
+    # =========================
+    # NIKTO
+    # =========================
+    if scan_check_cancel(run.id):
+        scan_mark_stopped(run.id)
+        return logs
 
-    comandos = []
+    scan_set_progress(run.id, pct=25, stage="Ejecutando Nikto", tool="nikto")
+    db.session.commit()
 
-    if ip:
-        comandos.append(("Nmap", [
-            herramientas["nmap"],
-            "-Pn",
-            "-sV",
-            "--top-ports",
-            "100",
-            ip
-        ], 240))
+    if scorecard_run_id:
+        scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
 
-    comandos.append(("WhatWeb", [
-        herramientas["whatweb"],
-        "--no-errors",
-        url
-    ], 180))
+    res_nikto = ejecutar_nikto(run.id, cfg, target, run_dir)
+    logs.append(f"[NIKTO]\nSTDOUT:\n{res_nikto['stdout']}\nSTDERR:\n{res_nikto['stderr']}\n")
 
-    comandos.append(("Nikto", [
-        herramientas["nikto"],
-        "-host",
-        url,
-        "-nointeractive"
-    ], 300))
+    findings = parse_txt_findings_generic(
+        scan_output_file(run_dir, "nikto_scan", "txt"),
+        "nikto"
+    )
+    guardar_findings_y_sincronizar(run, findings, run_dir, crear_vulns, crear_planes)
 
-    comandos.append(("Nuclei", [
-        herramientas["nuclei"],
-        "-u",
-        url,
-        "-severity",
-        "critical,high,medium,low",
-        "-silent"
-    ], 420))
+    if scorecard_run_id:
+        scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
 
-    comandos.append(("testssl", [
-        herramientas["testssl"],
-        "--fast",
-        "--warnings",
-        "batch",
-        url
-    ], 420))
+    # =========================
+    # TESTSSL
+    # =========================
+    if scan_check_cancel(run.id):
+        scan_mark_stopped(run.id)
+        return logs
 
-    total_tools = len(comandos)
+    if target.lower().startswith("https://"):
+        scan_set_progress(run.id, pct=50, stage="Ejecutando testssl", tool="testssl")
+        db.session.commit()
 
-    for idx, (nombre, cmd, timeout) in enumerate(comandos, start=1):
-        pct = 45 + int((idx / max(total_tools, 1)) * 45)
-        scorecard_proponentes_set_progress(run_id, pct=pct, stage=f"Ejecutando {nombre}", tool=nombre)
+        if scorecard_run_id:
+            scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
 
-        archivo = scorecard_proponentes_output_file(run_dir, nombre.lower(), "txt")
+        res_testssl = ejecutar_testssl(run.id, cfg, target, run_dir)
+        logs.append(f"[TESTSSL]\nSTDOUT:\n{res_testssl['stdout']}\nSTDERR:\n{res_testssl['stderr']}\n")
+
+        findings = parse_txt_findings_generic(
+            scan_output_file(run_dir, "testssl_scan", "txt"),
+            "testssl"
+        )
+        guardar_findings_y_sincronizar(run, findings, run_dir, crear_vulns, crear_planes)
+
+        if scorecard_run_id:
+            scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
+
+    # =========================
+    # NUCLEI
+    # =========================
+    if scan_check_cancel(run.id):
+        scan_mark_stopped(run.id)
+        return logs
+
+    scan_set_progress(run.id, pct=75, stage="Ejecutando Nuclei", tool="nuclei")
+    db.session.commit()
+
+    if scorecard_run_id:
+        scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
+
+    res_nuclei = ejecutar_nuclei(run.id, cfg, target, run_dir)
+    logs.append(f"[NUCLEI]\nSTDOUT:\n{res_nuclei['stdout']}\nSTDERR:\n{res_nuclei['stderr']}\n")
+
+    findings = parse_nuclei_jsonl(run_dir)
+    guardar_findings_y_sincronizar(run, findings, run_dir, crear_vulns, crear_planes)
+
+    if scorecard_run_id:
+        scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
+
+    return logs
+
+
+def ejecutar_full_scan_scorecard_proponentes_sin_whatweb(run_id, scorecard_run_id, crear_vulns=False, crear_planes=False):
+    run = VulnerabilityScanRun.query.get_or_404(run_id)
+
+    run.estado = "ejecutando"
+    run.fecha_inicio = datetime.utcnow()
+    run.progress_pct = 1
+    run.current_tool = "Inicializando"
+    run.current_stage = "Preparando herramientas de escaneo"
+    run.cancel_requested = False
+    run.stopped_by_user = False
+    run.active_pid = None
+    run.active_command = None
+    db.session.commit()
+
+    scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
+
+    run_dir = scan_run_dir(run.id, run.target)
+    log_path = scan_output_file(run_dir, "scan_log", "txt")
+
+    try:
+        cfg = _scan_cfg()
+
+        faltantes = validar_herramientas_scan(cfg)
+        if faltantes:
+            raise RuntimeError("Herramientas no encontradas: " + " | ".join(faltantes))
+
+        if run.target_type == "url":
+            logs = ejecutar_scan_web_scorecard_proponentes_sin_whatweb(
+                run,
+                cfg,
+                run_dir,
+                crear_vulns,
+                crear_planes,
+                scorecard_run_id=scorecard_run_id
+            )
+        else:
+            logs = ejecutar_scan_ip(
+                run,
+                cfg,
+                run_dir,
+                crear_vulns,
+                crear_planes
+            )
+
+        scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
+
+        run = VulnerabilityScanRun.query.get(run.id)
+
+        if run.estado == "detenido" or run.cancel_requested:
+            with open(log_path, "w", encoding="utf-8") as f:
+                f.write("\n\n".join(logs or []))
+
+            run.archivo_log = log_path
+            run.salida_consola = ("\n\n".join(logs or []))[:20000]
+            run.current_stage = "Escaneo detenido"
+            run.current_tool = None
+            run.active_pid = None
+            run.active_command = None
+            db.session.commit()
+
+            scorecard_proponentes_set_progress(
+                scorecard_run_id,
+                pct=99,
+                stage="Escaneo Kali detenido",
+                tool=None,
+                estado="error",
+                error="Escaneo detenido por el usuario."
+            )
+
+            return {"ok": False, "stopped": True}
+
+        scan_set_progress(run.id, pct=95, stage="Consolidando resultados", tool="sync")
+        scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
+
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write("\n\n".join(logs or []))
+
+        run = VulnerabilityScanRun.query.get(run.id)
+        run.archivo_log = log_path
+        run.salida_consola = ("\n\n".join(logs or []))[:20000]
+
+        resumir_hallazgos_run(run)
+
+        run.estado = "finalizado"
+        run.progress_pct = 100
+        run.current_stage = "Escaneo Kali finalizado"
+        run.current_tool = None
+        run.active_pid = None
+        run.active_command = None
+        run.fecha_fin = datetime.utcnow()
+        db.session.commit()
+
+        scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
 
         try:
-            resultado = scorecard_run_command(cfg, cmd, timeout=timeout)
+            pdf_path = build_vulnerability_scan_pdf(run.id)
+            run.archivo_reporte_pdf = pdf_path
+            db.session.commit()
+        except Exception:
+            pass
 
-            with open(archivo, "w", encoding="utf-8", errors="ignore") as f:
-                f.write(resultado.get("output") or "")
+        return {
+            "ok": True,
+            "findings": run.total_hallazgos or 0,
+            "vulns": run.created_vulns or 0,
+            "planes": run.created_plans or 0
+        }
 
-            guardar_scorecard_proponentes_output(
-                run_id,
-                nombre,
-                resultado.get("cmd"),
-                archivo,
-                resultado.get("exit_code"),
-                resultado.get("duracion")
-            )
+    except Exception as e:
+        tb = traceback.format_exc()
 
-            salida = resultado.get("output") or ""
-            severidades = scorecard_detectar_severidades(salida)
+        run = VulnerabilityScanRun.query.get(run_id)
+        if run:
+            run.estado = "error"
+            run.error_detalle = f"{str(e)}\n\n{tb}"
+            run.fecha_fin = datetime.utcnow()
+            run.current_stage = "Error en la ejecución"
+            run.current_tool = None
+            run.active_pid = None
+            run.active_command = None
+            run.salida_consola = ((run.salida_consola or "") + "\n\n[TRACEBACK]\n" + tb)[-20000:]
+            run.archivo_log = log_path if os.path.exists(os.path.dirname(log_path)) else None
+            db.session.commit()
 
-            for k in ["criticas", "altas", "medias", "bajas"]:
-                resumen_global[k] += severidades.get(k, 0)
+        scorecard_proponentes_set_progress(
+            scorecard_run_id,
+            pct=100,
+            stage="Error ejecutando Kali",
+            tool=None,
+            estado="error",
+            error=tb
+        )
 
-            resumen_global["herramientas"][nombre] = {
-                "exit_code": resultado.get("exit_code"),
-                "archivo": archivo,
-                "duracion": resultado.get("duracion"),
-                "severidades": severidades
-            }
+        return {"ok": False, "error": str(e)}
 
-            riesgo = "Bajo"
+def ejecutar_scorecard_proponentes_kali_independiente(run_id, dominio):
+    """
+    Ejecuta Kali Linux para Proponentes usando el MISMO motor del módulo
+    Registro de Vulnerabilidades:
+    - _scan_cfg()
+    - VulnerabilityScanRun
+    - ejecutar_full_scan()
+    - ejecutar_scan_web()
+    - ejecutar_scan_ip()
+    - ejecutar_nmap()
+    - ejecutar_nikto()
+    - ejecutar_testssl()
+    - ejecutar_nuclei()
 
-            if severidades["criticas"] > 0:
-                riesgo = "Crítico"
-            elif severidades["altas"] > 0:
-                riesgo = "Alto"
-            elif severidades["medias"] > 0:
-                riesgo = "Medio"
+    No crea vulnerabilidades ni planes desde Scorecard.
+    Solo copia los hallazgos técnicos al Scorecard de Proponentes.
+    """
 
-            evidencia = salida[:1200] if salida else "La herramienta no retornó hallazgos relevantes."
-
-            guardar_scorecard_proponentes_finding(run_id, {
-                "categoria": "Kali Linux Scan",
-                "herramienta": nombre,
-                "control": f"Ejecución {nombre}",
-                "estado": "Ejecutado" if resultado.get("exit_code") in [0, None] else f"Finalizó con código {resultado.get('exit_code')}",
-                "riesgo": riesgo,
-                "severidad": riesgo,
-                "score": 100 if riesgo == "Bajo" else 70 if riesgo == "Medio" else 45 if riesgo == "Alto" else 20,
-                "evidencia": evidencia,
-                "recomendacion": "Revisar la salida técnica y validar remediación con el proponente.",
-                "archivo_salida": archivo,
-                "detalle": resumen_global["herramientas"][nombre]
-            })
-
-            logs.append(f"\n\n===== {nombre} =====\n{salida[:5000]}")
-
-        except Exception as e:
-            resumen_global["errores"] += 1
-            error_text = traceback.format_exc()
-
-            with open(archivo, "w", encoding="utf-8", errors="ignore") as f:
-                f.write(error_text)
-
-            guardar_scorecard_proponentes_output(
-                run_id,
-                nombre,
-                " ".join(str(x) for x in cmd),
-                archivo,
-                99,
-                0
-            )
-
-            guardar_scorecard_proponentes_finding(run_id, {
-                "categoria": "Kali Linux Scan",
-                "herramienta": nombre,
-                "control": f"Ejecución {nombre}",
-                "estado": "Error",
-                "riesgo": "Medio",
-                "severidad": "Medio",
-                "score": 50,
-                "evidencia": str(e),
-                "recomendacion": "Validar instalación, rutas y conectividad con Kali.",
-                "archivo_salida": archivo,
-                "detalle": {"error": str(e)}
-            })
-
-            logs.append(f"\n\n===== {nombre} ERROR =====\n{error_text[:5000]}")
-
-    score_kali = scorecard_score_kali_desde_resumen(resumen_global)
+    scorecard_proponentes_set_progress(
+        run_id,
+        pct=45,
+        stage="Inicializando escaneo Kali con motor de Vulnerabilidades",
+        tool="Inicializando",
+        estado="ejecutando"
+    )
 
     conn = get_scorecard_proponentes_db_connection()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT score_dns, score_ip, score_incidentes, score_darkweb, resumen_json
+        SELECT *
         FROM scorecard_proponentes_runs
         WHERE id = ?
     """, (run_id,))
+    scorecard_run = cur.fetchone()
+    conn.close()
 
-    row = cur.fetchone()
+    if not scorecard_run:
+        raise RuntimeError("Scorecard de Proponentes no encontrado.")
 
-    score_dns = float(row["score_dns"] or 0) if row else 0
-    score_ip = float(row["score_ip"] or 0) if row else 0
-    score_incidentes = float(row["score_incidentes"] or 100) if row else 100
-    score_darkweb = float(row["score_darkweb"] or 100) if row else 100
+    target = target_url_scorecard(dominio)
+    target_type = detectar_tipo_objetivo(target)
+    cfg = _scan_cfg()
 
-    score_total = scorecard_proponentes_calcular_total(
-        score_dns,
-        score_ip,
-        score_kali,
-        score_incidentes,
-        score_darkweb,
-        incluir_kali=True
+    vuln_run = VulnerabilityScanRun(
+        target=normalizar_target_para_scan(target) if target_type == "url" else target,
+        target_type=target_type,
+        scan_mode="scorecard_proponentes",
+        scanner_mode=cfg.modo,
+        estado="ejecutando",
+        fecha_inicio=datetime.utcnow(),
+        fecha_fin=None,
+        ejecutado_por=scorecard_run["usuario"] or "Sistema",
+        responsable_asignado=scorecard_run["usuario"] or "Sistema",
+        progress_pct=1,
+        current_stage="Encolando escaneo Scorecard de Proponentes",
+        current_tool="Inicializando",
+        cancel_requested=False,
+        stopped_by_user=False,
+        findings_streamed=0,
+        created_vulns=0,
+        created_plans=0
     )
 
-    nivel = nivel_riesgo_scorecard_proponentes(score_total)
+    db.session.add(vuln_run)
+    db.session.commit()
 
-    resumen_base = {}
+    scorecard_proponentes_set_progress(
+        run_id,
+        pct=50,
+        stage=f"Escaneo Kali iniciado en Registro de Vulnerabilidades #{vuln_run.id}",
+        tool="Kali Linux"
+    )
 
     try:
-        resumen_base = json.loads(row["resumen_json"] or "{}") if row else {}
-    except Exception:
-        resumen_base = {}
+        # Ejecuta exactamente el mismo motor de Registro de Vulnerabilidades.
+        ejecutar_full_scan_scorecard_proponentes_sin_whatweb(
+            vuln_run.id,
+            run_id,
+            crear_vulns=False,
+            crear_planes=False
+        )
 
-    resumen_final = {
-        **resumen_base,
-        "dns_score": score_dns,
-        "ip_score": score_ip,
-        "kali_score": score_kali,
-        "incident_score": score_incidentes,
-        "darkweb_score": score_darkweb,
-        "score_total": score_total,
-        "nivel_riesgo": nivel,
-        "kali": resumen_global
-    }
+        vuln_run = VulnerabilityScanRun.query.get(vuln_run.id)
 
-    cur.execute("""
-        UPDATE scorecard_proponentes_runs
-        SET score_kali = ?, score_total = ?, nivel_riesgo = ?, estado = ?, progress_pct = ?,
-            current_stage = ?, current_tool = ?, resumen_json = ?, salida_consola = ?, fecha_fin = ?
-        WHERE id = ?
-    """, (
-        score_kali,
-        score_total,
-        nivel,
-        "finalizado",
-        100,
-        "Escaneo Scorecard de Proponentes finalizado",
-        None,
-        json.dumps(resumen_final, ensure_ascii=False),
-        ("\n".join(logs))[:25000],
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        run_id
-    ))
+        findings = scorecard_proponentes_copiar_findings_vuln(
+            run_id,
+            vuln_run.id
+        )
 
-    conn.commit()
-    conn.close()
+        score_kali, resumen_kali = scorecard_proponentes_score_kali_desde_findings(findings)
+
+        conn = get_scorecard_proponentes_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT score_dns, score_ip, score_incidentes, score_darkweb, resumen_json
+            FROM scorecard_proponentes_runs
+            WHERE id = ?
+        """, (run_id,))
+        row = cur.fetchone()
+
+        score_dns = float(row["score_dns"] or 0) if row else 0
+        score_ip = float(row["score_ip"] or 0) if row else 0
+        score_incidentes = float(row["score_incidentes"] or 100) if row else 100
+        score_darkweb = float(row["score_darkweb"] or 100) if row else 100
+
+        score_total = scorecard_proponentes_calcular_total(
+            score_dns,
+            score_ip,
+            score_kali,
+            score_incidentes,
+            score_darkweb,
+            incluir_kali=True
+        )
+
+        nivel = nivel_riesgo_scorecard_proponentes(score_total)
+
+        try:
+            resumen_base = json.loads(row["resumen_json"] or "{}") if row else {}
+        except Exception:
+            resumen_base = {}
+
+        resumen_final = {
+            **resumen_base,
+            "dns_score": score_dns,
+            "ip_score": score_ip,
+            "kali_score": score_kali,
+            "kali_ejecutado": True,
+            "kali_motor": "Registro de Vulnerabilidades",
+            "vulnerability_scan_run_id": vuln_run.id,
+            "incident_score": score_incidentes,
+            "darkweb_score": score_darkweb,
+            "score_total": score_total,
+            "nivel_riesgo": nivel,
+            "kali": resumen_kali
+        }
+
+        salida = vuln_run.salida_consola or ""
+
+        cur.execute("""
+            UPDATE scorecard_proponentes_runs
+            SET score_kali = ?,
+                score_total = ?,
+                nivel_riesgo = ?,
+                estado = ?,
+                progress_pct = ?,
+                current_stage = ?,
+                current_tool = ?,
+                resumen_json = ?,
+                salida_consola = ?,
+                fecha_fin = ?
+            WHERE id = ?
+        """, (
+            score_kali,
+            score_total,
+            nivel,
+            "finalizado",
+            100,
+            "Escaneo Kali finalizado con motor de Registro de Vulnerabilidades",
+            None,
+            json.dumps(resumen_final, ensure_ascii=False),
+            salida[:25000],
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            run_id
+        ))
+
+        conn.commit()
+        conn.close()
+
+        guardar_scorecard_proponentes_output(
+            run_id,
+            "Registro de Vulnerabilidades",
+            f"VulnerabilityScanRun #{vuln_run.id}",
+            vuln_run.archivo_log or "",
+            0,
+            0
+        )
+
+    except Exception as e:
+        tb = traceback.format_exc()
+
+        scorecard_proponentes_set_progress(
+            run_id,
+            pct=100,
+            stage="Error ejecutando Kali con motor de Registro de Vulnerabilidades",
+            tool=None,
+            estado="error",
+            error=tb
+        )
+
+        raise e
 
 
 def scorecard_proponentes_kali_worker(run_id, dominio):
@@ -137565,7 +137958,7 @@ def scorecard_proponentes_kali_worker(run_id, dominio):
             scorecard_proponentes_set_progress(
                 run_id,
                 pct=100,
-                stage="Error en escaneo Kali independiente de Proponentes",
+                stage="Error en escaneo Kali de Proponentes usando Registro de Vulnerabilidades",
                 tool=None,
                 estado="error",
                 error=tb
@@ -137984,7 +138377,7 @@ def proponentes_scorecard_dashboard():
           <div class="prop-score-icon">⚡</div>
           <div>
             <div class="prop-score-pill">SGSI · Scorecard</div>
-            <h2>Security Scorecard de Proponentes</h2>
+            <h2>Security Scorecard de Terceros</h2>
           </div>
         </div>
       </div>
@@ -138050,7 +138443,7 @@ def proponentes_scorecard_dashboard():
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Proponente</th>
+                <th>Tercero</th>
                 <th>Dominio</th>
                 <th>IP</th>
                 <th>DNS</th>
@@ -139627,7 +140020,7 @@ def proponentes_scorecard_scan_nuevo():
             score_kali,
             score_incidentes,
             score_darkweb,
-            incluir_kali=ejecutar_kali
+            incluir_kali=False
         )
 
         nivel = nivel_riesgo_scorecard_proponentes(score_total)
@@ -139876,7 +140269,7 @@ def proponentes_scorecard_scan_nuevo():
 
       <div class="prop-score-header-card">
         <div class="prop-score-header-overlay">
-          <h2>Nuevo Security Scorecard de Proponentes</h2>
+          <h2>Nuevo Security Scorecard de Terceros</h2>
         </div>
       </div>
 
@@ -140316,7 +140709,7 @@ def proponentes_scorecard_detalle(scorecard_id):
     <div class="score-shell">
 
       <div class="score-header-card">
-        <h1 class="score-header-text">Detalle Security Scorecard de Proponentes</h1>
+        <h1 class="score-header-text">Detalle Security Scorecard de Terceros</h1>
       </div>
 
       <div class="action-bar">
@@ -140831,7 +141224,7 @@ def proponentes_scorecard_kali_detalle(scorecard_id):
     <div class="score-shell">
 
       <div class="score-header-card">
-        <h1 class="score-header-text">Detalle Kali Linux — Proponentes</h1>
+        <h1 class="score-header-text">Detalle Kali Linux — Terceros</h1>
       </div>
 
       <div class="action-bar">
@@ -140845,13 +141238,56 @@ def proponentes_scorecard_kali_detalle(scorecard_id):
       </div>
 
       <div class="section-card">
-        <h5 class="section-title">🧾 Información del Escaneo</h5>
-        <p class="fw-bold mb-1">Proponente: {{ run.proponente_nombre }}</p>
-        <p class="fw-bold mb-1">Dominio: {{ run.dominio }}</p>
-        <p class="fw-bold mb-1">IP: {{ run.ip_resuelta or "—" }}</p>
-        <p class="fw-bold mb-1">Modo Kali: {{ run.modo_kali or "—" }}</p>
-        <p class="fw-bold mb-0">Score Kali: {{ "%.1f"|format(run.score_kali or 0) }}</p>
-      </div>
+          <h5 class="section-title">🧾 Información del Escaneo</h5>
+
+          <p class="fw-bold mb-1">Proponente: {{ run.proponente_nombre }}</p>
+          <p class="fw-bold mb-1">Dominio: {{ run.dominio }}</p>
+          <p class="fw-bold mb-1">IP: {{ run.ip_resuelta or "—" }}</p>
+          <p class="fw-bold mb-1">Modo Kali: {{ run.modo_kali or "Motor Registro de Vulnerabilidades" }}</p>
+          <p class="fw-bold mb-1">Score Kali: <span id="scoreKali">{{ "%.1f"|format(run.score_kali or 0) }}</span></p>
+
+          <div class="mt-3 p-3 rounded-4" style="background:#eef5ff;border:1px solid #cfe0f7;">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+              <div class="fw-bold text-primary">
+                Estado:
+                <span id="estadoBadge" class="badge bg-primary">{{ run.estado or "pendiente" }}</span>
+              </div>
+
+              <div class="fw-bold text-primary">
+                Progreso: <span id="progressLabel">{{ run.progress_pct or 0 }}</span>%
+              </div>
+            </div>
+
+            <div class="progress" style="height:24px;border-radius:999px;background:#dbeafe;overflow:hidden;">
+              <div id="progressBar"
+                   class="progress-bar progress-bar-striped progress-bar-animated"
+                   style="width:{{ run.progress_pct or 0 }}%;font-weight:950;">
+                {{ run.progress_pct or 0 }}%
+              </div>
+            </div>
+
+            <div class="row mt-3">
+              <div class="col-md-6">
+                <div class="fw-bold text-muted">Etapa actual</div>
+                <div id="currentStage" class="fw-bold">{{ run.current_stage or "—" }}</div>
+              </div>
+              <div class="col-md-6">
+                <div class="fw-bold text-muted">Herramienta actual</div>
+                <div id="currentTool" class="fw-bold">{{ run.current_tool or "—" }}</div>
+              </div>
+            </div>
+
+            <div id="progressNote" class="mt-2 text-muted fw-bold">
+              {% if run.estado == 'finalizado' %}
+                Escaneo Kali finalizado.
+              {% elif run.estado == 'error' %}
+                Escaneo Kali finalizado con error.
+              {% else %}
+                Escaneo Kali en ejecución. Esta pantalla se actualiza automáticamente.
+              {% endif %}
+            </div>
+          </div>
+        </div>
 
       <div class="section-card">
         <h5 class="section-title">🧪 Hallazgos Kali Linux</h5>
@@ -140941,6 +141377,72 @@ def proponentes_scorecard_kali_detalle(scorecard_id):
       {% endif %}
 
     </div>
+    <script>
+      const KALI_ESTADO_URL = "{{ url_for('proponentes_scorecard_estado', scorecard_id=run.id) }}";
+
+      function setKaliBadge(estado){
+        const badge = document.getElementById("estadoBadge");
+        if(!badge){ return; }
+
+        badge.className = "badge";
+
+        if(estado === "finalizado"){
+          badge.classList.add("bg-success");
+          badge.textContent = "Finalizado";
+        }else if(estado === "error"){
+          badge.classList.add("bg-danger");
+          badge.textContent = "Error";
+        }else if(estado === "ejecutando"){
+          badge.classList.add("bg-primary");
+          badge.textContent = "Ejecutando";
+        }else{
+          badge.classList.add("bg-secondary");
+          badge.textContent = estado || "Pendiente";
+        }
+      }
+
+      async function refreshKaliStatus(){
+        try{
+          const resp = await fetch(KALI_ESTADO_URL, {cache:"no-store"});
+          const data = await resp.json();
+
+          if(!data.ok){
+            return;
+          }
+
+          const pct = Number(data.progress_pct || 0);
+
+          document.getElementById("progressLabel").textContent = pct;
+          document.getElementById("progressBar").style.width = pct + "%";
+          document.getElementById("progressBar").textContent = pct + "%";
+
+          document.getElementById("currentStage").textContent = data.current_stage || "—";
+          document.getElementById("currentTool").textContent = data.current_tool || "—";
+          document.getElementById("scoreKali").textContent = Number(data.score_kali || 0).toFixed(1);
+
+          setKaliBadge(data.estado);
+
+          if(data.estado === "finalizado"){
+            document.getElementById("progressNote").textContent = "Escaneo Kali finalizado.";
+            clearInterval(window.kaliTimer);
+            setTimeout(() => window.location.reload(), 1200);
+          }
+
+          if(data.estado === "error"){
+            document.getElementById("progressNote").textContent = "Escaneo Kali finalizado con error.";
+            clearInterval(window.kaliTimer);
+          }
+
+        }catch(e){
+          console.log("No se pudo actualizar el estado Kali Proponentes", e);
+        }
+      }
+
+      {% if run.estado not in ['finalizado', 'error'] %}
+        window.kaliTimer = setInterval(refreshKaliStatus, 3000);
+        refreshKaliStatus();
+      {% endif %}
+    </script>
     """
 
     return render_template_string(
@@ -141202,7 +141704,7 @@ def admin_scorecard_proponentes_apis():
 
       <div class="api-prop-header-card">
         <div class="api-prop-header-overlay">
-          <h2>APIs — Security Scorecard de Proponentes</h2>
+          <h2>APIs — Security Scorecard de Terceros</h2>
         </div>
       </div>
 
@@ -141530,8 +142032,19 @@ def scorecard_proponentes_calcular_total(
     score_kali,
     score_incidentes,
     score_darkweb=100,
-    incluir_kali=True
+    incluir_kali=False
 ):
+    """
+    Calcula el score total de Proponentes.
+
+    REGLA:
+    - DNS siempre cuenta.
+    - IP Reputation siempre cuenta.
+    - Incidentes siempre cuenta.
+    - Dark Web / Hacker Chatter siempre cuenta.
+    - Kali Linux SOLO cuenta si realmente se ejecutó.
+    """
+
     peso_dns = scorecard_proponentes_get_param("peso_dns", 20)
     peso_ip = scorecard_proponentes_get_param("peso_ip", 15)
     peso_kali = scorecard_proponentes_get_param("peso_kali", 35)
@@ -141539,14 +142052,14 @@ def scorecard_proponentes_calcular_total(
     peso_darkweb = scorecard_proponentes_get_param("peso_darkweb", 15)
 
     componentes = [
-        (float(score_dns or 0), peso_dns),
-        (float(score_ip or 0), peso_ip),
-        (float(score_incidentes or 0), peso_incidentes),
-        (float(score_darkweb or 0), peso_darkweb),
+        (float(score_dns if score_dns is not None else 0), peso_dns),
+        (float(score_ip if score_ip is not None else 0), peso_ip),
+        (float(score_incidentes if score_incidentes is not None else 100), peso_incidentes),
+        (float(score_darkweb if score_darkweb is not None else 100), peso_darkweb),
     ]
 
     if incluir_kali:
-        componentes.append((float(score_kali or 0), peso_kali))
+        componentes.append((float(score_kali if score_kali is not None else 0), peso_kali))
 
     total_pesos = sum(peso for _, peso in componentes)
 
@@ -141554,8 +142067,41 @@ def scorecard_proponentes_calcular_total(
         return 0
 
     total = sum(valor * peso for valor, peso in componentes) / total_pesos
+
     return round(max(0, min(100, total)), 2)
 
+def scorecard_proponentes_score_hacker_chatter(
+    total_hallazgos,
+    credencial_confirmada=False,
+    severidad_max="Bajo"
+):
+    """
+    Alineado con Proveedores:
+    - OSINT informativo / menciones públicas NO baja score.
+    - Solo baja si hay credenciales confirmadas o severidad real Alta/Crítica.
+    """
+
+    total_hallazgos = int(total_hallazgos or 0)
+    severidad_max = (severidad_max or "Bajo").strip()
+
+    if credencial_confirmada:
+        return scorecard_proponentes_get_param(
+            "darkweb_score_credenciales_confirmadas",
+            20
+        ), "Crítico"
+
+    if severidad_max in ["Crítico", "Critico"]:
+        return 40, "Crítico"
+
+    if severidad_max == "Alto":
+        return 60, "Alto"
+
+    # Menciones OSINT / GDELT / referencias públicas no confirmadas
+    # no deben penalizar el score igual que una credencial real.
+    return scorecard_proponentes_get_param(
+        "darkweb_score_sin_hallazgos",
+        100
+    ), "Bajo"
 
 
 def scorecard_proponentes_nivel_riesgo(score):
@@ -142039,7 +142585,7 @@ def proponentes_scorecard_parametros():
     <div class="score-shell">
 
       <div class="score-header-card">
-        <h1 class="score-header-text">Parámetros Scorecard de Proponentes</h1>
+        <h1 class="score-header-text">Parámetros Scorecard de Terceros</h1>
       </div>
 
       <div class="d-flex justify-content-between align-items-center mb-3">
