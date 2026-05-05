@@ -138436,7 +138436,7 @@ def proponentes_scorecard_dashboard():
       </div>
 
       <div class="soft-card p-3">
-        <h5 class="fw-bold mb-3">📋 Historial de Scorecard de Proponentes</h5>
+        <h5 class="fw-bold mb-3">📋 Historial de Scorecard de Terceros</h5>
 
         <div class="table-wrap">
           <table class="table table-hover align-middle mb-0">
@@ -140718,7 +140718,7 @@ def proponentes_scorecard_detalle(scorecard_id):
         </a>
 
         <a href="{{ url_for('proponentes_scorecard_rating', scorecard_id=run.id) }}" class="btn btn-success">
-          📊 SecurityScorecard Proponentes
+          📊 SecurityScorecard Terceros
         </a>
 
         <a href="{{ url_for('proponentes_scorecard_kali_detalle', scorecard_id=run.id) }}" class="btn btn-warning text-dark">
