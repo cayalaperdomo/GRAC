@@ -7920,6 +7920,7 @@ MENU_SECTIONS = [
             {"label": "Contexto Interno", "href": "/contexto_interno_menu", "icon": "bi-building-fill-gear", "btn": "btn-info text-white", "module": "Contexto Interno"},
             {"label": "Contexto Externo", "href": "/contexto_externo_menu", "icon": "bi-globe2", "btn": "btn-info text-white", "module": "Contexto Externo"},
             {"label": "DOFA", "href": "/dofa_menu", "icon": "bi-grid-3x3-gap-fill", "btn": "btn-info text-white", "module": "DOFA"},
+            {"label": "PESI", "href": "/pesi", "icon": "bi-shield-lock-fill", "btn": "btn-primary", "module": "PESI"},
         ],
     },
     {
@@ -140950,7 +140951,8 @@ def proponentes_scorecard_eliminar(scorecard_id):
 
 
 # ============================================================
-# NUEVO ESCANEO PROPONENTES
+# NUEVO SECURITY SCORECARD DE TERCEROS
+# Proveedor existente / Proponente manual
 # ============================================================
 
 @app.route("/proponentes/scorecard/scan/nuevo", methods=["GET", "POST"])
@@ -140959,45 +140961,65 @@ def proponentes_scorecard_scan_nuevo():
     user, allowed, read_only = scorecard_proponentes_user_permiso()
 
     if not allowed:
-        flash("No tiene permiso para ejecutar Security Scorecard de Proponentes.", "danger")
+        flash("No tiene permiso para ejecutar Security Scorecard de Terceros.", "danger")
         return redirect(url_for("menu"))
 
     if read_only:
         flash("El rol Auditor no puede ejecutar scorecards.", "danger")
         return redirect(url_for("proponentes_scorecard_dashboard"))
 
+    proveedores = ProveedorEvaluacion.query.order_by(
+        ProveedorEvaluacion.nombre_proveedor.asc()
+    ).all()
+
     if request.method == "POST":
-        proponente_nombre = (request.form.get("proponente_nombre") or "").strip()
+        tipo_tercero = (request.form.get("tipo_tercero") or "").strip()
+        proveedor_id = request.form.get("proveedor_id", type=int)
+        proponente_nombre_manual = (request.form.get("proponente_nombre") or "").strip()
         dominio = limpiar_dominio_scorecard(request.form.get("dominio"))
         ejecutar_kali = bool(request.form.get("ejecutar_kali"))
 
-        if not proponente_nombre:
-            flash("Debe ingresar el nombre del proponente.", "danger")
+        if tipo_tercero not in ["proveedor", "proponente"]:
+            flash("Debe seleccionar si el tercero es Proveedor o Proponente.", "danger")
             return redirect(url_for("proponentes_scorecard_scan_nuevo"))
 
+        proveedor = None
+        proveedor_nombre = ""
+        proponente_nombre = ""
+
+        if tipo_tercero == "proveedor":
+            if not proveedor_id:
+                flash("Debe seleccionar un proveedor existente.", "danger")
+                return redirect(url_for("proponentes_scorecard_scan_nuevo"))
+
+            proveedor = ProveedorEvaluacion.query.get(proveedor_id)
+
+            if not proveedor:
+                flash("El proveedor seleccionado no existe.", "danger")
+                return redirect(url_for("proponentes_scorecard_scan_nuevo"))
+
+            proveedor_nombre = proveedor.nombre_proveedor
+            proponente_nombre = proveedor_nombre
+
+        else:
+            if not proponente_nombre_manual:
+                flash("Debe ingresar el nombre del proponente.", "danger")
+                return redirect(url_for("proponentes_scorecard_scan_nuevo"))
+
+            proveedor_id = None
+            proveedor_nombre = ""
+            proponente_nombre = proponente_nombre_manual
+
         if not dominio:
-            flash("Debe indicar el dominio autorizado del proponente.", "danger")
+            flash("Debe indicar el dominio autorizado del tercero.", "danger")
             return redirect(url_for("proponentes_scorecard_scan_nuevo"))
 
         ip = resolver_ip_scorecard(dominio)
-
-        # ============================================================
-        # MISMAS REVISIONES QUE PROVEEDORES
-        # ============================================================
-
-        scorecard_proponentes_set_progress(
-            run_id if "run_id" in locals() else 0,
-            pct=5,
-            stage="Resolviendo dominio e IP del proponente",
-            tool="Resolver IP"
-        )
 
         score_dns, findings_dns = evaluar_dns_health_proponentes_scorecard(dominio)
         score_ip, findings_ip = evaluar_ip_reputation_scorecard(ip)
 
         score_kali = 0
-
-        # Valores iniciales, luego se recalculan con OSINT / Dark Web
         score_incidentes = 100
         score_darkweb = 100
 
@@ -141011,6 +141033,10 @@ def proponentes_scorecard_scan_nuevo():
             current_stage = "Escaneo Kali pendiente"
 
         resumen = {
+            "tipo_tercero": tipo_tercero,
+            "proveedor_id": proveedor_id,
+            "proveedor_nombre": proveedor_nombre,
+            "proponente_nombre": proponente_nombre,
             "dns_score": score_dns,
             "ip_score": score_ip,
             "kali_score": score_kali,
@@ -141053,10 +141079,6 @@ def proponentes_scorecard_scan_nuevo():
         conn.commit()
         conn.close()
 
-        # ============================================================
-        # GUARDAR HALLAZGOS DNS HEALTH
-        # ============================================================
-
         scorecard_proponentes_set_progress(
             run_id,
             pct=10,
@@ -141067,11 +141089,6 @@ def proponentes_scorecard_scan_nuevo():
         for item in findings_dns:
             guardar_scorecard_proponentes_finding(run_id, item)
 
-
-        # ============================================================
-        # GUARDAR HALLAZGOS IP REPUTATION / DNSBL
-        # ============================================================
-
         scorecard_proponentes_set_progress(
             run_id,
             pct=15,
@@ -141081,11 +141098,6 @@ def proponentes_scorecard_scan_nuevo():
 
         for item in findings_ip:
             guardar_scorecard_proponentes_finding(run_id, item)
-
-
-        # ============================================================
-        # INCIDENT HISTORY / OSINT
-        # ============================================================
 
         scorecard_proponentes_set_progress(
             run_id,
@@ -141100,12 +141112,6 @@ def proponentes_scorecard_scan_nuevo():
             dominio
         )
 
-
-        # ============================================================
-        # DARK WEB / EXPOSURE INTELLIGENCE
-        # LeakCheck + HIBP + Shodan + GDELT + crt.sh + GitHub
-        # ============================================================
-
         scorecard_proponentes_set_progress(
             run_id,
             pct=35,
@@ -141119,11 +141125,6 @@ def proponentes_scorecard_scan_nuevo():
             dominio,
             ip
         )
-
-
-        # ============================================================
-        # RECALCULAR SCORE TOTAL PROPONENTES
-        # ============================================================
 
         score_total = scorecard_proponentes_calcular_total(
             score_dns,
@@ -141141,6 +141142,8 @@ def proponentes_scorecard_scan_nuevo():
             "darkweb_score": score_darkweb,
             "incident_total": total_incidentes,
             "darkweb_total": total_darkweb,
+            "riesgo_incidentes": riesgo_incidentes,
+            "riesgo_darkweb": riesgo_darkweb,
             "credencial_confirmada": credencial_confirmada,
             "score_total": score_total,
             "nivel_riesgo": nivel
@@ -141151,8 +141154,13 @@ def proponentes_scorecard_scan_nuevo():
 
         cur.execute("""
             UPDATE scorecard_proponentes_runs
-            SET score_incidentes = ?, score_darkweb = ?, score_total = ?, nivel_riesgo = ?,
-                resumen_json = ?, progress_pct = ?, current_stage = ?
+            SET score_incidentes = ?,
+                score_darkweb = ?,
+                score_total = ?,
+                nivel_riesgo = ?,
+                resumen_json = ?,
+                progress_pct = ?,
+                current_stage = ?
             WHERE id = ?
         """, (
             score_incidentes,
@@ -141179,7 +141187,7 @@ def proponentes_scorecard_scan_nuevo():
             scorecard_proponentes_set_progress(
                 run_id,
                 pct=100,
-                stage="Scorecard de Proponentes finalizado",
+                stage="Scorecard de Terceros finalizado",
                 tool=None,
                 estado="finalizado"
             )
@@ -141187,12 +141195,12 @@ def proponentes_scorecard_scan_nuevo():
         try:
             registrar_log(
                 getattr(user, "username", "Sistema"),
-                f"Ejecutó Security Scorecard de Proponentes para {proponente_nombre} - dominio {dominio}"
+                f"Ejecutó Security Scorecard de Terceros tipo {tipo_tercero}: {proponente_nombre} - dominio {dominio}"
             )
         except Exception:
             pass
 
-        flash("Security Scorecard de Proponentes iniciado correctamente.", "success")
+        flash("Security Scorecard de Terceros iniciado correctamente.", "success")
         return redirect(url_for("proponentes_scorecard_detalle", scorecard_id=run_id))
 
     body = """
@@ -141273,7 +141281,7 @@ def proponentes_scorecard_scan_nuevo():
       }
 
       .prop-score-header-overlay h2::before{
-        content:"SGSI · Scorecard de Proponentes";
+        content:"SGSI · Scorecard de Terceros";
         display:block;
         width:max-content;
         max-width:100%;
@@ -141328,6 +141336,27 @@ def proponentes_scorecard_scan_nuevo():
         background:#ffffff;
       }
 
+      .selector-box{
+        background:#f8fafc;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        padding:16px;
+        margin-bottom:16px;
+      }
+
+      .selector-title{
+        font-weight:950;
+        color:#0b3a6e;
+        font-size:.95rem;
+        margin-bottom:8px;
+      }
+
+      .help-soft{
+        font-size:.78rem;
+        color:#64748b;
+        font-weight:700;
+      }
+
       .btn{
         border-radius:10px !important;
         font-weight:900;
@@ -141339,6 +141368,10 @@ def proponentes_scorecard_scan_nuevo():
         font-size:.70rem;
         padding:.35rem .65rem;
         font-weight:900;
+      }
+
+      .hidden-field{
+        display:none !important;
       }
 
       @media (max-width:992px){
@@ -141385,19 +141418,53 @@ def proponentes_scorecard_scan_nuevo():
       </div>
 
       <div class="soft-card p-4">
-        <form method="POST">
+        <form method="POST" id="formScorecardTerceros">
 
-          <div class="mb-3">
-            <label class="form-label fw-bold">Nombre del proponente</label>
-            <input type="text" name="proponente_nombre" class="form-control form-control-lg"
-                   placeholder="Ejemplo: Proponente ABC S.A.S." required>
+          <div class="selector-box">
+            <div class="selector-title">Tipo de tercero a evaluar</div>
+
+            <div class="row g-3">
+              <div class="col-md-12">
+                <label class="form-label fw-bold">Seleccione el tipo</label>
+                <select name="tipo_tercero" id="tipo_tercero" class="form-select form-select-lg" required>
+                  <option value="">Seleccione...</option>
+                  <option value="proveedor">Proveedor existente</option>
+                  <option value="proponente">Proponente nuevo / manual</option>
+                </select>
+
+                <div class="help-soft mt-2">
+                  Si selecciona Proveedor, se cargará la lista de proveedores ya registrados.
+                  Si selecciona Proponente, deberá ingresar el nombre manualmente.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="bloque_proveedor" class="mb-3 hidden-field">
+            <label class="form-label fw-bold">Proveedor existente</label>
+            <select name="proveedor_id" id="proveedor_id" class="form-select form-select-lg">
+              <option value="">Seleccione un proveedor...</option>
+              {% for p in proveedores %}
+                <option value="{{ p.id }}">{{ p.nombre_proveedor }}</option>
+              {% endfor %}
+            </select>
             <div class="form-text">
-              Este campo reemplaza la lista desplegable de proveedores. No se crea ni se consulta proveedor existente.
+              Lista tomada del módulo Registro de Proveedores.
+            </div>
+          </div>
+
+          <div id="bloque_proponente" class="mb-3 hidden-field">
+            <label class="form-label fw-bold">Nombre del proponente</label>
+            <input type="text" name="proponente_nombre" id="proponente_nombre"
+                   class="form-control form-control-lg"
+                   placeholder="Ejemplo: Proponente ABC S.A.S.">
+            <div class="form-text">
+              Este campo solo aplica cuando el tercero es un proponente.
             </div>
           </div>
 
           <div class="mb-3">
-            <label class="form-label fw-bold">Dominio autorizado del proponente</label>
+            <label class="form-label fw-bold">Dominio autorizado del tercero</label>
             <input type="text" name="dominio" class="form-control form-control-lg"
                    placeholder="Ejemplo: empresa.com" required>
             <div class="form-text">
@@ -141413,7 +141480,7 @@ def proponentes_scorecard_scan_nuevo():
           </div>
 
           <div class="alert alert-warning">
-            <strong>Importante:</strong> use este módulo solo con autorización expresa del proponente para evaluar su dominio.
+            <strong>Importante:</strong> use este módulo solo con autorización expresa del proveedor o proponente para evaluar su dominio.
           </div>
 
           <div class="d-flex justify-content-between">
@@ -141429,9 +141496,59 @@ def proponentes_scorecard_scan_nuevo():
       </div>
 
     </div>
+
+    <script>
+      function actualizarTipoTercero(){
+        const tipo = document.getElementById("tipo_tercero").value;
+        const bloqueProveedor = document.getElementById("bloque_proveedor");
+        const bloqueProponente = document.getElementById("bloque_proponente");
+        const proveedor = document.getElementById("proveedor_id");
+        const proponente = document.getElementById("proponente_nombre");
+
+        if(tipo === "proveedor"){
+          bloqueProveedor.classList.remove("hidden-field");
+          bloqueProponente.classList.add("hidden-field");
+
+          proveedor.setAttribute("required", "required");
+          proponente.removeAttribute("required");
+          proponente.value = "";
+        }
+        else if(tipo === "proponente"){
+          bloqueProveedor.classList.add("hidden-field");
+          bloqueProponente.classList.remove("hidden-field");
+
+          proveedor.removeAttribute("required");
+          proveedor.value = "";
+          proponente.setAttribute("required", "required");
+        }
+        else{
+          bloqueProveedor.classList.add("hidden-field");
+          bloqueProponente.classList.add("hidden-field");
+
+          proveedor.removeAttribute("required");
+          proveedor.value = "";
+          proponente.removeAttribute("required");
+          proponente.value = "";
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", function(){
+        const tipo = document.getElementById("tipo_tercero");
+        if(tipo){
+          tipo.addEventListener("change", actualizarTipoTercero);
+          actualizarTipoTercero();
+        }
+      });
+    </script>
     """
 
-    return render_template_string(BASE, content=Markup(render_template_string(body)))
+    return render_template_string(
+        BASE,
+        content=Markup(render_template_string(
+            body,
+            proveedores=proveedores
+        ))
+    )
 
 
 # ============================================================
@@ -144349,6 +144466,1611 @@ def proponentes_scorecard_parametros():
             risk_levels=risk_levels
         ))
     )
+
+# ========================================================================================================================================
+#                                                   MÓDULO PESI - PLAN ESTRATÉGICO SI
+# ========================================================================================================================================
+
+# ============================================================
+# DB INDEPENDIENTE PESI
+# ============================================================
+
+PESI_DB_PATH = os.path.join(app.instance_path, "pesi.db")
+
+
+def get_pesi_db_connection():
+    os.makedirs(app.instance_path, exist_ok=True)
+    conn = sqlite3.connect(PESI_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_pesi_db():
+    conn = get_pesi_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS pesi_planes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entidad TEXT NOT NULL,
+            anio TEXT,
+            vigencia_inicio TEXT,
+            vigencia_fin TEXT,
+
+            version TEXT DEFAULT '1.0',
+            fecha_version TEXT,
+            modificacion TEXT,
+            versiones_json TEXT,
+
+            objetivo TEXT,
+            objetivos_especificos TEXT,
+            alcance TEXT,
+            documentos_referencia TEXT,
+            estado_actual TEXT,
+            estrategia_seguridad TEXT,
+
+            estrategias_json TEXT,
+            portafolio_json TEXT,
+            cronograma_json TEXT,
+            presupuesto_json TEXT,
+
+            responsables TEXT,
+
+            elaboro_nombre TEXT,
+            elaboro_cargo TEXT,
+            reviso_nombre TEXT,
+            reviso_cargo TEXT,
+            aprobo_nombre TEXT,
+            aprobo_cargo TEXT,
+            fecha_aprobacion TEXT,
+
+            creado_por TEXT,
+            fecha_creacion TEXT,
+            fecha_actualizacion TEXT
+        )
+    """)
+
+    cur.execute("PRAGMA table_info(pesi_planes)")
+    cols = [r[1] for r in cur.fetchall()]
+
+    if "versiones_json" not in cols:
+        cur.execute("ALTER TABLE pesi_planes ADD COLUMN versiones_json TEXT")
+
+    conn.commit()
+    conn.close()
+
+
+init_pesi_db()
+
+
+# ============================================================
+# HELPERS PESI
+# ============================================================
+
+def _pesi_user_actual():
+    try:
+        return User.query.get(session.get("user_id"))
+    except Exception:
+        return None
+
+
+def _pesi_permiso():
+    user = _pesi_user_actual()
+
+    if not user:
+        flash("Debe iniciar sesión.", "danger")
+        return None
+
+    if user.role not in ("admin", "auditor") and not verificar_permiso(user, "PESI"):
+        flash("No tiene permiso para acceder al módulo PESI.", "danger")
+        return None
+
+    return user
+
+
+def _pesi_default_json():
+    versiones = [
+        {
+            "version": "1.0",
+            "fecha": datetime.now().strftime("%Y-%m-%d"),
+            "modificacion": "Versión inicial del documento"
+        }
+    ]
+
+    estrategias = [
+        {
+            "estrategia": "Liderazgo de seguridad de la información",
+            "descripcion": "Asegurar que se establezca el Modelo de Seguridad y Privacidad de la Información (MSPI) mediante la aprobación de políticas, lineamientos, roles y responsabilidades."
+        },
+        {
+            "estrategia": "Gestión de riesgos",
+            "descripcion": "Determinar, valorar y tratar los riesgos de seguridad de la información mediante controles orientados a reducir efectos indeseados."
+        },
+        {
+            "estrategia": "Concientización",
+            "descripcion": "Fortalecer la cultura organizacional en seguridad de la información mediante sensibilización, formación y transferencia de conocimiento."
+        },
+        {
+            "estrategia": "Implementación de controles",
+            "descripcion": "Planificar e implementar controles administrativos, tecnológicos y operativos para proteger la información."
+        },
+        {
+            "estrategia": "Gestión de incidentes",
+            "descripcion": "Gestionar eventos e incidentes de seguridad de la información mediante identificación, análisis, comunicación, respuesta y mejora."
+        }
+    ]
+
+    portafolio = [
+        {
+            "estrategia": "Liderazgo de seguridad de la información",
+            "proyecto": "Desarrollar e implementar una política de seguridad de la información.",
+            "producto": "Política de Seguridad formalizada e implementada."
+        },
+        {
+            "estrategia": "Gestión de riesgos",
+            "proyecto": "Identificar, valorar y clasificar los riesgos asociados a los activos de información.",
+            "producto": "Matriz de riesgos de seguridad digital."
+        },
+        {
+            "estrategia": "Concientización",
+            "proyecto": "Realizar jornadas de sensibilización a todo el personal.",
+            "producto": "Evidencias de sensibilización y resultados de medición."
+        },
+        {
+            "estrategia": "Implementación de controles",
+            "proyecto": "Implementar controles de seguridad priorizados.",
+            "producto": "Controles implementados y evidenciados."
+        },
+        {
+            "estrategia": "Gestión de incidentes",
+            "proyecto": "Definir y formalizar el procedimiento de gestión de incidentes.",
+            "producto": "Procedimiento de gestión de incidentes formalizado."
+        }
+    ]
+
+    cronograma = [
+        {
+            "anio": "2026",
+            "trimestre": "Trimestre 1",
+            "actividad": "Realizar diagnóstico de seguridad y privacidad de la información.",
+            "responsable": "Responsable de Seguridad Digital",
+            "estado": "Planeado"
+        }
+    ]
+
+    presupuesto = [
+        {
+            "anio": "2026",
+            "proyecto": "Implementación de controles de seguridad priorizados.",
+            "inversion": "$ 0"
+        }
+    ]
+
+    return versiones, estrategias, portafolio, cronograma, presupuesto
+
+
+def _pesi_json_load(txt, default):
+    try:
+        data = json.loads(txt or "")
+        return data if isinstance(data, list) else default
+    except Exception:
+        return default
+
+
+def _pesi_json_dump_from_form(prefix, campos):
+    filas = []
+    total = int(request.form.get(prefix + "_count") or 0)
+
+    for i in range(total):
+        row = {}
+        vacia = True
+
+        for campo in campos:
+            val = (request.form.get(f"{prefix}_{campo}_{i}") or "").strip()
+            row[campo] = val
+
+            if val:
+                vacia = False
+
+        if not vacia:
+            filas.append(row)
+
+    return json.dumps(filas, ensure_ascii=False)
+
+
+def _pesi_form_data():
+    versiones_json = _pesi_json_dump_from_form(
+        "versiones",
+        ["version", "fecha", "modificacion"]
+    )
+
+    versiones = _pesi_json_load(versiones_json, [])
+    primera_version = versiones[0] if versiones else {}
+
+    return {
+        "entidad": (request.form.get("entidad") or "").strip(),
+        "anio": (request.form.get("anio") or "").strip(),
+        "vigencia_inicio": (request.form.get("vigencia_inicio") or "").strip(),
+        "vigencia_fin": (request.form.get("vigencia_fin") or "").strip(),
+
+        "version": (primera_version.get("version") or "1.0").strip(),
+        "fecha_version": (primera_version.get("fecha") or "").strip(),
+        "modificacion": (primera_version.get("modificacion") or "").strip(),
+        "versiones_json": versiones_json,
+
+        "objetivo": (request.form.get("objetivo") or "").strip(),
+        "objetivos_especificos": (request.form.get("objetivos_especificos") or "").strip(),
+        "alcance": (request.form.get("alcance") or "").strip(),
+        "documentos_referencia": (request.form.get("documentos_referencia") or "").strip(),
+        "estado_actual": (request.form.get("estado_actual") or "").strip(),
+        "estrategia_seguridad": (request.form.get("estrategia_seguridad") or "").strip(),
+
+        "estrategias_json": _pesi_json_dump_from_form("estrategias", ["estrategia", "descripcion"]),
+        "portafolio_json": _pesi_json_dump_from_form("portafolio", ["estrategia", "proyecto", "producto"]),
+        "cronograma_json": _pesi_json_dump_from_form("cronograma", ["anio", "trimestre", "actividad", "responsable", "estado"]),
+        "presupuesto_json": _pesi_json_dump_from_form("presupuesto", ["anio", "proyecto", "inversion"]),
+
+        "responsables": (request.form.get("responsables") or "").strip(),
+
+        "elaboro_nombre": (request.form.get("elaboro_nombre") or "").strip(),
+        "elaboro_cargo": (request.form.get("elaboro_cargo") or "").strip(),
+        "reviso_nombre": (request.form.get("reviso_nombre") or "").strip(),
+        "reviso_cargo": (request.form.get("reviso_cargo") or "").strip(),
+        "aprobo_nombre": (request.form.get("aprobo_nombre") or "").strip(),
+        "aprobo_cargo": (request.form.get("aprobo_cargo") or "").strip(),
+        "fecha_aprobacion": (request.form.get("fecha_aprobacion") or "").strip(),
+    }
+
+
+def _pesi_get_plan(plan_id):
+    conn = get_pesi_db_connection()
+    row = conn.execute("""
+        SELECT *
+        FROM pesi_planes
+        WHERE id = ?
+    """, (plan_id,)).fetchone()
+    conn.close()
+
+    if not row:
+        abort(404)
+
+    plan = dict(row)
+
+    # Compatibilidad con planes ya creados antes de versiones_json
+    if not plan.get("versiones_json"):
+        plan["versiones_json"] = json.dumps([
+            {
+                "version": plan.get("version") or "1.0",
+                "fecha": plan.get("fecha_version") or "",
+                "modificacion": plan.get("modificacion") or "Versión inicial del documento"
+            }
+        ], ensure_ascii=False)
+
+    return plan
+
+
+def _pesi_insertar_desde_form(user):
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data = _pesi_form_data()
+
+    data["creado_por"] = getattr(user, "username", "Sistema")
+    data["fecha_creacion"] = ahora
+    data["fecha_actualizacion"] = ahora
+
+    if not data["entidad"]:
+        data["entidad"] = "Entidad sin nombre"
+
+    conn = get_pesi_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO pesi_planes (
+            entidad, anio, vigencia_inicio, vigencia_fin,
+            version, fecha_version, modificacion, versiones_json,
+            objetivo, objetivos_especificos, alcance, documentos_referencia,
+            estado_actual, estrategia_seguridad,
+            estrategias_json, portafolio_json, cronograma_json, presupuesto_json,
+            responsables,
+            elaboro_nombre, elaboro_cargo, reviso_nombre, reviso_cargo,
+            aprobo_nombre, aprobo_cargo, fecha_aprobacion,
+            creado_por, fecha_creacion, fecha_actualizacion
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        data["entidad"], data["anio"], data["vigencia_inicio"], data["vigencia_fin"],
+        data["version"], data["fecha_version"], data["modificacion"], data["versiones_json"],
+        data["objetivo"], data["objetivos_especificos"], data["alcance"], data["documentos_referencia"],
+        data["estado_actual"], data["estrategia_seguridad"],
+        data["estrategias_json"], data["portafolio_json"], data["cronograma_json"], data["presupuesto_json"],
+        data["responsables"],
+        data["elaboro_nombre"], data["elaboro_cargo"], data["reviso_nombre"], data["reviso_cargo"],
+        data["aprobo_nombre"], data["aprobo_cargo"], data["fecha_aprobacion"],
+        data["creado_por"], data["fecha_creacion"], data["fecha_actualizacion"]
+    ))
+
+    nuevo_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    try:
+        registrar_log(data["creado_por"], f"Creó PESI: {data['entidad']}")
+    except Exception:
+        pass
+
+    return nuevo_id
+
+
+def _pesi_actualizar_desde_form(plan_id, user):
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data = _pesi_form_data()
+    data["fecha_actualizacion"] = ahora
+
+    if not data["entidad"]:
+        data["entidad"] = "Entidad sin nombre"
+
+    conn = get_pesi_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE pesi_planes
+        SET
+            entidad = ?,
+            anio = ?,
+            vigencia_inicio = ?,
+            vigencia_fin = ?,
+
+            version = ?,
+            fecha_version = ?,
+            modificacion = ?,
+            versiones_json = ?,
+
+            objetivo = ?,
+            objetivos_especificos = ?,
+            alcance = ?,
+            documentos_referencia = ?,
+            estado_actual = ?,
+            estrategia_seguridad = ?,
+
+            estrategias_json = ?,
+            portafolio_json = ?,
+            cronograma_json = ?,
+            presupuesto_json = ?,
+
+            responsables = ?,
+
+            elaboro_nombre = ?,
+            elaboro_cargo = ?,
+            reviso_nombre = ?,
+            reviso_cargo = ?,
+            aprobo_nombre = ?,
+            aprobo_cargo = ?,
+            fecha_aprobacion = ?,
+
+            fecha_actualizacion = ?
+        WHERE id = ?
+    """, (
+        data["entidad"], data["anio"], data["vigencia_inicio"], data["vigencia_fin"],
+        data["version"], data["fecha_version"], data["modificacion"], data["versiones_json"],
+        data["objetivo"], data["objetivos_especificos"], data["alcance"], data["documentos_referencia"],
+        data["estado_actual"], data["estrategia_seguridad"],
+        data["estrategias_json"], data["portafolio_json"], data["cronograma_json"], data["presupuesto_json"],
+        data["responsables"],
+        data["elaboro_nombre"], data["elaboro_cargo"], data["reviso_nombre"], data["reviso_cargo"],
+        data["aprobo_nombre"], data["aprobo_cargo"], data["fecha_aprobacion"],
+        data["fecha_actualizacion"],
+        plan_id
+    ))
+
+    conn.commit()
+    conn.close()
+
+    try:
+        registrar_log(getattr(user, "username", "Sistema"), f"Actualizó PESI: {data['entidad']}")
+    except Exception:
+        pass
+
+
+def _pesi_plan_default_dict(user):
+    versiones, estrategias, portafolio, cronograma, presupuesto = _pesi_default_json()
+    anio_actual = datetime.now().year
+
+    return {
+        "id": None,
+        "entidad": "",
+        "anio": str(anio_actual),
+        "vigencia_inicio": str(anio_actual),
+        "vigencia_fin": str(anio_actual + 1),
+
+        "version": "1.0",
+        "fecha_version": datetime.now().strftime("%Y-%m-%d"),
+        "modificacion": "Versión inicial del documento",
+        "versiones_json": json.dumps(versiones, ensure_ascii=False),
+
+        "objetivo": "Fortalecer la integridad, confidencialidad y disponibilidad de los activos de información de la Entidad, para reducir los riesgos a los que está expuesta la organización hasta niveles aceptables, a partir de la implementación de las estrategias de seguridad digital definidas en este documento.",
+        "objetivos_especificos": "Definir y establecer la estrategia de seguridad digital de la entidad.\nDefinir y establecer las necesidades de la entidad para la implementación del Sistema de Gestión de Seguridad de la Información.\nPriorizar los proyectos a implementar para la correcta implementación del SGSI.\nPlanificar la evaluación y seguimiento de los controles y lineamientos implementados.",
+        "alcance": "El Plan Estratégico de Seguridad de la Información comparte el alcance definido dentro de la Política General de Seguridad de la Información y contempla los procesos de la entidad. Ajustar según el contexto de cada entidad.",
+        "documentos_referencia": "Decreto 612 de 2018.\nResolución 500 de 2021.\nManual de Gobierno Digital – MINTIC.\nModelo de Seguridad y Privacidad de la Información – MINTIC.\nRelacionar otros documentos que el PESI tiene o toma como referencia.",
+        "estado_actual": "Describir el estado actual de la entidad respecto a la implementación de los lineamientos de seguridad de la información requeridos por el MSPI. Esta sección permite establecer la línea base y proyectar el mejoramiento del SGSI.",
+        "estrategia_seguridad": "La entidad establecerá una estrategia de seguridad digital integrando principios, políticas, procedimientos, guías, manuales, formatos y lineamientos para la gestión de la seguridad de la información, teniendo como premisa la implementación del Modelo de Seguridad y Privacidad de la Información - MSPI.",
+
+        "estrategias_json": json.dumps(estrategias, ensure_ascii=False),
+        "portafolio_json": json.dumps(portafolio, ensure_ascii=False),
+        "cronograma_json": json.dumps(cronograma, ensure_ascii=False),
+        "presupuesto_json": json.dumps(presupuesto, ensure_ascii=False),
+
+        "responsables": "Representante Legal: Aprobar los documentos de alto nivel.\nResponsable de Seguridad Digital / CISO : Coordinar las actividades de implementación del MSPI.",
+
+        "elaboro_nombre": "",
+        "elaboro_cargo": "",
+        "reviso_nombre": "",
+        "reviso_cargo": "",
+        "aprobo_nombre": "",
+        "aprobo_cargo": "",
+        "fecha_aprobacion": "",
+
+        "creado_por": getattr(user, "username", "Sistema"),
+        "fecha_creacion": "",
+        "fecha_actualizacion": "",
+    }
+
+
+def _pesi_css():
+    return """
+    <style>
+      body {
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .pesi-shell {
+        width:96%;
+        max-width:1500px;
+        margin:26px auto 30px auto;
+      }
+
+      .pesi-header-card {
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .pesi-header-card::before {
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }
+
+      .pesi-header-overlay {
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }
+
+      .pesi-header-overlay::before {
+        content:"🧭";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .pesi-header-text {
+        max-width:1100px;
+        width:100%;
+      }
+
+      .pesi-header-text::before {
+        content:"SGSI · Plan Estratégico de Seguridad de la Información";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }
+
+      .pesi-title {
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .pesi-subtitle {
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+        line-height:1.25;
+      }
+
+      .pesi-card {
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
+      }
+
+      .pesi-section {
+        background:#ffffff;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        padding:18px;
+        margin-bottom:16px;
+        box-shadow:0 8px 18px rgba(15,23,42,.07);
+      }
+
+      .section-title {
+        font-weight:950;
+        font-size:.95rem;
+        color:#1459a6;
+        margin-bottom:16px;
+        padding-bottom:8px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+      }
+
+      .soft-table-wrap,
+      .table-responsive {
+        overflow-x:auto;
+        background:#ffffff;
+        border-radius:14px;
+        border:1px solid #dbe6f4;
+        box-shadow:0 12px 24px rgba(15,23,42,.10);
+      }
+
+      .pesi-index-table-wrap {
+        max-height:72vh;
+        overflow-y:auto;
+      }
+
+      .table {
+        margin-bottom:0;
+      }
+
+      .table thead th {
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-size:.78rem;
+        font-weight:900 !important;
+        border:none !important;
+        white-space:nowrap;
+        vertical-align:middle !important;
+        text-align:center;
+        padding:9px 8px;
+      }
+
+      .table tbody td,
+      .table td {
+        vertical-align:middle !important;
+        font-size:.82rem;
+        padding:9px 8px;
+        border-bottom:1px solid #e5edf7;
+        color:#1f2937;
+      }
+
+      .table tbody tr:nth-child(even) {
+        background:#f8fbff;
+      }
+
+      .table tbody tr:hover {
+        background:#eef6ff;
+      }
+
+      .pesi-edit-table textarea {
+        min-width:220px;
+        min-height:82px;
+      }
+
+      .form-label {
+        font-size:.72rem;
+        font-weight:900;
+        color:#1459a6;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
+      }
+
+      .form-control,
+      .form-select {
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        box-shadow:none !important;
+      }
+
+      textarea.form-control {
+        min-height:110px;
+        resize:vertical;
+      }
+
+      .form-control:focus,
+      .form-select:focus {
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#ffffff;
+      }
+
+      .approval-box {
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        padding:14px;
+        background:#f8fbff;
+        box-shadow:0 8px 18px rgba(15,23,42,.07);
+        height:100%;
+      }
+
+      .approval-box h6 {
+        font-weight:950;
+        color:#1459a6;
+        text-transform:uppercase;
+        font-size:.82rem;
+        margin-bottom:14px;
+        padding-bottom:8px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+      }
+
+      .btn {
+        border-radius:10px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }
+
+      .btn-primary {
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        border:none !important;
+      }
+
+      .btn-success {
+        background:linear-gradient(135deg,#16803c,#22a55a) !important;
+        border:none !important;
+      }
+
+      .btn-danger {
+        background:linear-gradient(135deg,#b91c1c,#ef4444) !important;
+        border:none !important;
+      }
+
+      .pesi-help {
+        font-size:.78rem;
+        color:#64748b;
+        margin-top:-8px;
+        margin-bottom:12px;
+      }
+
+      @media (max-width:992px) {
+        .pesi-shell {
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .pesi-header-card {
+          min-height:88px;
+        }
+
+        .pesi-title {
+          font-size:1.20rem;
+        }
+
+        .pesi-subtitle {
+          font-size:.76rem;
+        }
+      }
+
+      @media (max-width:768px) {
+        .pesi-header-overlay {
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .pesi-header-overlay::before {
+          margin:0;
+        }
+
+        .pesi-header-text::before {
+          margin-left:auto;
+          margin-right:auto;
+        }
+
+        .pesi-title,
+        .pesi-subtitle {
+          text-align:center;
+        }
+      }
+    </style>
+    """
+
+
+def _pesi_render_rows(prefix, rows, campos, labels, readonly=False):
+    if not rows:
+        rows = [{}]
+
+    html_rows = ""
+
+    for i, row in enumerate(rows):
+        html_rows += "<tr>"
+
+        for campo in campos:
+            val = escape(row.get(campo, "") or "")
+            ro = "readonly disabled" if readonly else ""
+
+            html_rows += f"""
+            <td>
+              <textarea class="form-control form-control-sm" rows="3" name="{prefix}_{campo}_{i}" {ro}>{val}</textarea>
+            </td>
+            """
+
+        if not readonly:
+            html_rows += """
+            <td class="text-center">
+              <button type="button" class="btn btn-sm btn-outline-danger rounded-pill" onclick="pesiRemoveRow(this)">
+                🗑️
+              </button>
+            </td>
+            """
+
+        html_rows += "</tr>"
+
+    ths = "".join(f"<th>{escape(label)}</th>" for label in labels)
+
+    if not readonly:
+        ths += "<th>Acción</th>"
+
+    add_btn = ""
+    if not readonly:
+        add_btn = f"""
+        <button type="button" class="btn btn-sm btn-outline-primary rounded-pill mt-2"
+                onclick="pesiAddRow('{prefix}')">
+          ➕ Agregar fila
+        </button>
+        """
+
+    return f"""
+    <div class="table-responsive">
+      <table class="table table-bordered align-middle pesi-edit-table">
+        <thead>
+          <tr>{ths}</tr>
+        </thead>
+        <tbody id="{prefix}_tbody">
+          {html_rows}
+        </tbody>
+      </table>
+    </div>
+
+    <input type="hidden" id="{prefix}_count" name="{prefix}_count" value="{len(rows)}">
+
+    {add_btn}
+    """
+
+
+# ============================================================
+# RUTAS PESI
+# ============================================================
+
+@app.route("/pesi")
+@login_required
+def pesi_index():
+    user = _pesi_permiso()
+
+    if not user:
+        return redirect(url_for("menu"))
+
+    conn = get_pesi_db_connection()
+    planes = conn.execute("""
+        SELECT *
+        FROM pesi_planes
+        ORDER BY id DESC
+    """).fetchall()
+    conn.close()
+
+    planes = [dict(p) for p in planes]
+
+    html = """
+    <div class="pesi-shell">
+
+      <div class="pesi-header-card">
+        <div class="pesi-header-overlay">
+          <div class="pesi-header-text">
+            <h3 class="pesi-title">PESI — Plan Estratégico de Seguridad de la Información</h3>
+            <div class="pesi-subtitle">
+              Gobierno / Dirección · Plantilla diligenciable y exportable a PDF
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pesi-card p-4">
+
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <div>
+            <div class="section-title">Planes PESI registrados</div>
+            <div class="text-muted small">Desde aquí puedes ver, editar, imprimir o eliminar planes PESI según permisos.</div>
+          </div>
+
+          {% if user.role != 'auditor' %}
+          <a href="{{ url_for('pesi_nuevo') }}" class="btn btn-primary rounded-pill px-4">
+            ➕ Nuevo PESI
+          </a>
+          {% endif %}
+        </div>
+
+        <div class="table-responsive soft-table-wrap pesi-index-table-wrap">
+          <table class="table table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Entidad</th>
+                <th>Año</th>
+                <th>Versión</th>
+                <th>Fecha creación</th>
+                <th class="text-center">Acciones</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {% for p in planes %}
+              <tr>
+                <td>{{ p.id }}</td>
+                <td>{{ p.entidad }}</td>
+                <td>{{ p.anio or '—' }}</td>
+                <td>{{ p.version or '1.0' }}</td>
+                <td>{{ p.fecha_creacion or '—' }}</td>
+                <td class="text-center">
+                  <div class="d-flex justify-content-center gap-2 flex-wrap">
+
+                    <a class="btn btn-sm btn-outline-secondary rounded-pill" href="{{ url_for('pesi_ver', plan_id=p.id) }}">
+                      Ver
+                    </a>
+
+                    {% if user.role != 'auditor' %}
+                    <a class="btn btn-sm btn-outline-primary rounded-pill" href="{{ url_for('pesi_editar', plan_id=p.id) }}">
+                      Editar
+                    </a>
+                    {% endif %}
+
+                    <a class="btn btn-sm btn-danger rounded-pill" data-no-progress="true" href="{{ url_for('pesi_pdf', plan_id=p.id) }}">
+                      PDF
+                    </a>
+
+                    {% if user.role != 'auditor' %}
+                    <form method="POST"
+                          action="{{ url_for('pesi_eliminar', plan_id=p.id) }}"
+                          class="d-inline"
+                          data-no-progress="true"
+                          onsubmit="return confirm('¿Seguro que deseas eliminar este PESI? Esta acción no se puede deshacer.');">
+                      <button type="submit" class="btn btn-sm btn-outline-danger rounded-pill">
+                        Eliminar
+                      </button>
+                    </form>
+                    {% endif %}
+
+                  </div>
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="6" class="text-center text-muted py-4">
+                  No hay planes PESI registrados.
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </div>
+    """
+
+    html += _pesi_css()
+
+    return render_template_string(
+        BASE,
+        content=Markup(render_template_string(html, planes=planes, user=user))
+    )
+
+
+@app.route("/pesi/nuevo", methods=["GET", "POST"])
+@login_required
+def pesi_nuevo():
+    user = _pesi_permiso()
+
+    if not user:
+        return redirect(url_for("menu"))
+
+    if user.role == "auditor":
+        flash("El rol auditor solo puede consultar e imprimir PESI.", "warning")
+        return redirect(url_for("pesi_index"))
+
+    if request.method == "POST":
+        nuevo_id = _pesi_insertar_desde_form(user)
+        flash("PESI creado correctamente.", "success")
+        return redirect(url_for("pesi_editar", plan_id=nuevo_id))
+
+    plan = _pesi_plan_default_dict(user)
+    return _pesi_render_form(plan, user, modo="nuevo")
+
+
+@app.route("/pesi/<int:plan_id>/ver")
+@login_required
+def pesi_ver(plan_id):
+    user = _pesi_permiso()
+
+    if not user:
+        return redirect(url_for("menu"))
+
+    plan = _pesi_get_plan(plan_id)
+    return _pesi_render_form(plan, user, modo="ver")
+
+
+@app.route("/pesi/<int:plan_id>/editar", methods=["GET", "POST"])
+@login_required
+def pesi_editar(plan_id):
+    user = _pesi_permiso()
+
+    if not user:
+        return redirect(url_for("menu"))
+
+    if user.role == "auditor":
+        flash("El rol auditor no puede editar el PESI.", "warning")
+        return redirect(url_for("pesi_ver", plan_id=plan_id))
+
+    plan = _pesi_get_plan(plan_id)
+
+    if request.method == "POST":
+        _pesi_actualizar_desde_form(plan_id, user)
+        flash("PESI actualizado correctamente.", "success")
+        return redirect(url_for("pesi_editar", plan_id=plan_id))
+
+    return _pesi_render_form(plan, user, modo="editar")
+
+
+@app.route("/pesi/<int:plan_id>/eliminar", methods=["POST"])
+@login_required
+def pesi_eliminar(plan_id):
+    user = _pesi_permiso()
+
+    if not user:
+        return redirect(url_for("menu"))
+
+    if user.role == "auditor":
+        flash("El rol auditor no puede eliminar planes PESI.", "warning")
+        return redirect(url_for("pesi_index"))
+
+    plan = _pesi_get_plan(plan_id)
+
+    conn = get_pesi_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM pesi_planes WHERE id = ?", (plan_id,))
+    conn.commit()
+    conn.close()
+
+    try:
+        registrar_log(getattr(user, "username", "Sistema"), f"Eliminó PESI: {plan.get('entidad')}")
+    except Exception:
+        pass
+
+    flash("PESI eliminado correctamente.", "success")
+    return redirect(url_for("pesi_index"))
+
+
+# ============================================================
+# FORMULARIO PESI
+# ============================================================
+
+def _pesi_render_form(plan, user, modo="editar"):
+    readonly = (modo == "ver") or (user.role == "auditor")
+    ro = "readonly disabled" if readonly else ""
+    disabled_submit = "d-none" if readonly else ""
+
+    versiones_default, estrategias_default, portafolio_default, cronograma_default, presupuesto_default = _pesi_default_json()
+
+    versiones_rows = _pesi_json_load(plan.get("versiones_json"), versiones_default)
+    estrategias_rows = _pesi_json_load(plan.get("estrategias_json"), estrategias_default)
+    portafolio_rows = _pesi_json_load(plan.get("portafolio_json"), portafolio_default)
+    cronograma_rows = _pesi_json_load(plan.get("cronograma_json"), cronograma_default)
+    presupuesto_rows = _pesi_json_load(plan.get("presupuesto_json"), presupuesto_default)
+
+    versiones_html = _pesi_render_rows(
+        "versiones",
+        versiones_rows,
+        ["version", "fecha", "modificacion"],
+        ["Versión", "Fecha", "Modificación"],
+        readonly
+    )
+
+    estrategias_html = _pesi_render_rows(
+        "estrategias",
+        estrategias_rows,
+        ["estrategia", "descripcion"],
+        ["Estrategia / Eje", "Descripción / Objetivo"],
+        readonly
+    )
+
+    portafolio_html = _pesi_render_rows(
+        "portafolio",
+        portafolio_rows,
+        ["estrategia", "proyecto", "producto"],
+        ["Estrategia / Eje", "Proyecto", "Productos esperados"],
+        readonly
+    )
+
+    cronograma_html = _pesi_render_rows(
+        "cronograma",
+        cronograma_rows,
+        ["anio", "trimestre", "actividad", "responsable", "estado"],
+        ["Año", "Trimestre", "Actividad / Proyecto", "Responsable", "Estado"],
+        readonly
+    )
+
+    presupuesto_html = _pesi_render_rows(
+        "presupuesto",
+        presupuesto_rows,
+        ["anio", "proyecto", "inversion"],
+        ["Año", "Proyecto", "Inversión"],
+        readonly
+    )
+
+    back_url = url_for("pesi_index")
+
+    titulo_modo = {
+        "nuevo": "Nuevo PESI",
+        "editar": "Editar PESI",
+        "ver": "Ver PESI"
+    }.get(modo, "PESI")
+
+    pdf_button = ""
+
+    if plan.get("id"):
+        pdf_button = f"""
+        <a href="{url_for('pesi_pdf', plan_id=plan.get('id'))}" data-no-progress="true" class="btn btn-danger rounded-pill px-4">
+          📄 Generar PDF
+        </a>
+        """
+
+    html = f"""
+    <div class="pesi-shell">
+
+      <div class="pesi-header-card">
+        <div class="pesi-header-overlay">
+          <div class="pesi-header-text">
+            <h3 class="pesi-title">PESI — Plan Estratégico de Seguridad de la Información</h3>
+            <div class="pesi-subtitle">
+              {titulo_modo} · Gobierno / Dirección · Exportación PDF
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <form method="POST" class="pesi-card p-4">
+
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+          <div>
+            <div class="section-title">{titulo_modo}</div>
+            <div class="text-muted small">
+              {"Consulta en solo lectura." if readonly else "Diligencia los campos y agrega las filas necesarias en cada tabla."}
+            </div>
+          </div>
+
+          <div class="d-flex gap-2 flex-wrap">
+            <a href="{back_url}" class="btn btn-outline-secondary rounded-pill px-4">
+              Volver
+            </a>
+
+            {pdf_button}
+
+            <button type="submit" class="btn btn-success rounded-pill px-4 {disabled_submit}">
+              💾 Guardar PESI
+            </button>
+          </div>
+        </div>
+
+        <div class="row g-3 mb-4">
+          <div class="col-md-6">
+            <label class="form-label">Nombre de la entidad</label>
+            <input class="form-control" name="entidad" value="{escape(plan.get('entidad') or '')}" {ro} required>
+          </div>
+
+          <div class="col-md-2">
+            <label class="form-label">Año</label>
+            <input class="form-control" name="anio" value="{escape(plan.get('anio') or '')}" {ro}>
+          </div>
+
+          <div class="col-md-2">
+            <label class="form-label">Vigencia inicio</label>
+            <input class="form-control" name="vigencia_inicio" value="{escape(plan.get('vigencia_inicio') or '')}" {ro}>
+          </div>
+
+          <div class="col-md-2">
+            <label class="form-label">Vigencia fin</label>
+            <input class="form-control" name="vigencia_fin" value="{escape(plan.get('vigencia_fin') or '')}" {ro}>
+          </div>
+        </div>
+
+        <div class="pesi-section">
+          <div class="section-title">Control de versiones</div>
+          <div class="pesi-help">Agrega una fila por cada versión o modificación del documento.</div>
+          {versiones_html}
+        </div>
+
+        <div class="pesi-section">
+          <div class="section-title">1. Objetivo</div>
+          <textarea class="form-control" rows="5" name="objetivo" {ro}>{escape(plan.get('objetivo') or '')}</textarea>
+        </div>
+
+        <div class="pesi-section">
+          <div class="section-title">1.1 Objetivos específicos</div>
+          <textarea class="form-control" rows="6" name="objetivos_especificos" {ro}>{escape(plan.get('objetivos_especificos') or '')}</textarea>
+        </div>
+
+        <div class="pesi-section">
+          <div class="section-title">2. Alcance</div>
+          <textarea class="form-control" rows="5" name="alcance" {ro}>{escape(plan.get('alcance') or '')}</textarea>
+        </div>
+
+        <div class="pesi-section">
+          <div class="section-title">3. Documentos de referencia</div>
+          <textarea class="form-control" rows="6" name="documentos_referencia" {ro}>{escape(plan.get('documentos_referencia') or '')}</textarea>
+        </div>
+
+        <div class="pesi-section">
+          <div class="section-title">4. Estado actual de la entidad respecto al SGSI</div>
+          <textarea class="form-control" rows="7" name="estado_actual" {ro}>{escape(plan.get('estado_actual') or '')}</textarea>
+        </div>
+
+        <div class="pesi-section">
+          <div class="section-title">5. Estrategia de seguridad digital</div>
+          <textarea class="form-control" rows="6" name="estrategia_seguridad" {ro}>{escape(plan.get('estrategia_seguridad') or '')}</textarea>
+        </div>
+
+        <div class="pesi-section">
+          <div class="section-title">5.1 Descripción de las estrategias específicas / ejes</div>
+          <div class="pesi-help">Agrega las estrategias necesarias según el PESI de la entidad.</div>
+          {estrategias_html}
+        </div>
+
+        <div class="pesi-section">
+          <div class="section-title">5.2 Portafolio de proyectos / actividades</div>
+          <div class="pesi-help">Agrega proyectos, actividades y productos esperados.</div>
+          {portafolio_html}
+        </div>
+
+        <div class="pesi-section">
+          <div class="section-title">5.3 Cronograma de actividades / proyectos</div>
+          <div class="pesi-help">Agrega las actividades por año, trimestre, responsable y estado.</div>
+          {cronograma_html}
+        </div>
+
+        <div class="pesi-section">
+          <div class="section-title">5.4 Análisis presupuestal</div>
+          <div class="pesi-help">Agrega cada proyecto con su inversión estimada.</div>
+          {presupuesto_html}
+        </div>
+
+        <div class="pesi-section">
+          <div class="section-title">6. Responsables</div>
+          <textarea class="form-control" rows="7" name="responsables" {ro}>{escape(plan.get('responsables') or '')}</textarea>
+        </div>
+
+        <div class="pesi-section">
+          <div class="section-title">7. Aprobación</div>
+
+          <div class="row g-3">
+            <div class="col-md-4">
+              <div class="approval-box">
+                <h6>Elaboró</h6>
+
+                <label class="form-label">Nombre</label>
+                <input class="form-control mb-2" name="elaboro_nombre" value="{escape(plan.get('elaboro_nombre') or '')}" {ro}>
+
+                <label class="form-label">Cargo</label>
+                <input class="form-control" name="elaboro_cargo" value="{escape(plan.get('elaboro_cargo') or '')}" {ro}>
+              </div>
+            </div>
+
+            <div class="col-md-4">
+              <div class="approval-box">
+                <h6>Revisó</h6>
+
+                <label class="form-label">Nombre</label>
+                <input class="form-control mb-2" name="reviso_nombre" value="{escape(plan.get('reviso_nombre') or '')}" {ro}>
+
+                <label class="form-label">Cargo</label>
+                <input class="form-control" name="reviso_cargo" value="{escape(plan.get('reviso_cargo') or '')}" {ro}>
+              </div>
+            </div>
+
+            <div class="col-md-4">
+              <div class="approval-box">
+                <h6>Aprobó</h6>
+
+                <label class="form-label">Nombre</label>
+                <input class="form-control mb-2" name="aprobo_nombre" value="{escape(plan.get('aprobo_nombre') or '')}" {ro}>
+
+                <label class="form-label">Cargo</label>
+                <input class="form-control mb-2" name="aprobo_cargo" value="{escape(plan.get('aprobo_cargo') or '')}" {ro}>
+
+                <label class="form-label">Fecha</label>
+                <input class="form-control" type="date" name="fecha_aprobacion" value="{escape(plan.get('fecha_aprobacion') or '')}" {ro}>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="text-center mt-4">
+          <button type="submit" class="btn btn-success rounded-pill px-5 {disabled_submit}">
+            💾 Guardar PESI
+          </button>
+        </div>
+
+      </form>
+    </div>
+
+    <script>
+      const PESI_TABLES = {{
+        versiones: {{
+          fields: ["version", "fecha", "modificacion"]
+        }},
+        estrategias: {{
+          fields: ["estrategia", "descripcion"]
+        }},
+        portafolio: {{
+          fields: ["estrategia", "proyecto", "producto"]
+        }},
+        cronograma: {{
+          fields: ["anio", "trimestre", "actividad", "responsable", "estado"]
+        }},
+        presupuesto: {{
+          fields: ["anio", "proyecto", "inversion"]
+        }}
+      }};
+
+      function pesiAddRow(prefix) {{
+        const cfg = PESI_TABLES[prefix];
+        if (!cfg) return;
+
+        const tbody = document.getElementById(prefix + "_tbody");
+        const countInput = document.getElementById(prefix + "_count");
+
+        if (!tbody || !countInput) return;
+
+        let idx = parseInt(countInput.value || "0");
+        let tr = document.createElement("tr");
+
+        cfg.fields.forEach(function(field) {{
+          let td = document.createElement("td");
+          td.innerHTML = '<textarea class="form-control form-control-sm" rows="3" name="' + prefix + '_' + field + '_' + idx + '"></textarea>';
+          tr.appendChild(td);
+        }});
+
+        let tdAction = document.createElement("td");
+        tdAction.className = "text-center";
+        tdAction.innerHTML = '<button type="button" class="btn btn-sm btn-outline-danger rounded-pill" onclick="pesiRemoveRow(this)">🗑️</button>';
+        tr.appendChild(tdAction);
+
+        tbody.appendChild(tr);
+        countInput.value = idx + 1;
+      }}
+
+      function pesiRemoveRow(btn) {{
+        const tr = btn.closest("tr");
+        const tbody = tr ? tr.parentElement : null;
+
+        if (!tr || !tbody) return;
+
+        if (tbody.querySelectorAll("tr").length <= 1) {{
+          tr.querySelectorAll("textarea").forEach(function(t) {{ t.value = ""; }});
+          return;
+        }}
+
+        tr.remove();
+      }}
+    </script>
+    """
+
+    html += _pesi_css()
+
+    return render_template_string(
+        BASE,
+        content=Markup(render_template_string(html, plan=plan, user=user))
+    )
+
+
+# ============================================================
+# PDF PESI
+# ============================================================
+
+@app.route("/pesi/<int:plan_id>/pdf")
+@login_required
+def pesi_pdf(plan_id):
+    user = _pesi_permiso()
+
+    if not user:
+        return redirect(url_for("menu"))
+
+    plan = _pesi_get_plan(plan_id)
+
+    buffer = BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=1.7 * cm,
+        leftMargin=1.7 * cm,
+        topMargin=1.6 * cm,
+        bottomMargin=1.6 * cm
+    )
+
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "PESITitle",
+        parent=styles["Title"],
+        alignment=TA_CENTER,
+        fontSize=17,
+        leading=22,
+        textColor=colors.HexColor("#1d4f8f"),
+        spaceAfter=16
+    )
+
+    h1 = ParagraphStyle(
+        "PESIH1",
+        parent=styles["Heading1"],
+        fontSize=13,
+        leading=16,
+        textColor=colors.HexColor("#1d4f8f"),
+        spaceBefore=12,
+        spaceAfter=8
+    )
+
+    normal = ParagraphStyle(
+        "PESINormal",
+        parent=styles["BodyText"],
+        fontSize=9,
+        leading=12,
+        alignment=TA_LEFT,
+        spaceAfter=6
+    )
+
+    small = ParagraphStyle(
+        "PESISmall",
+        parent=styles["BodyText"],
+        fontSize=8,
+        leading=10
+    )
+
+    story = []
+
+    def P(txt, style=normal):
+        safe = xml_escape(str(txt or "")).replace("\n", "<br/>")
+        return Paragraph(safe, style)
+
+    def section(title, body):
+        story.append(Paragraph(xml_escape(title), h1))
+        story.append(P(body))
+
+    def make_table(data, widths=None, font_size=8):
+        clean = []
+
+        for row in data:
+            clean.append([P(c, small) for c in row])
+
+        t = Table(clean, colWidths=widths, repeatRows=1)
+
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dbeafe")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#1d4f8f")),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#9bb9d6")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), font_size),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+
+        story.append(t)
+        story.append(Spacer(1, 10))
+
+    versiones_default, estrategias_default, portafolio_default, cronograma_default, presupuesto_default = _pesi_default_json()
+
+    versiones = _pesi_json_load(plan.get("versiones_json"), versiones_default)
+    estrategias = _pesi_json_load(plan.get("estrategias_json"), estrategias_default)
+    portafolio = _pesi_json_load(plan.get("portafolio_json"), portafolio_default)
+    cronograma = _pesi_json_load(plan.get("cronograma_json"), cronograma_default)
+    presupuesto = _pesi_json_load(plan.get("presupuesto_json"), presupuesto_default)
+
+    # Portada
+    story.append(Spacer(1, 80))
+    story.append(Paragraph("PLAN ESTRATÉGICO DE SEGURIDAD DE LA INFORMACIÓN", title_style))
+    story.append(Spacer(1, 30))
+    story.append(Paragraph(xml_escape(plan.get("entidad") or "(NOMBRE DE LA ENTIDAD)"), title_style))
+    story.append(Spacer(1, 24))
+    story.append(Paragraph(xml_escape(plan.get("anio") or "AÑO"), title_style))
+    story.append(PageBreak())
+
+    # Control de versiones
+    story.append(Paragraph("Control de Versiones", h1))
+
+    rows_versiones = [["Versión", "Fecha", "Modificación"]]
+
+    for r in versiones:
+        rows_versiones.append([
+            r.get("version", ""),
+            r.get("fecha", ""),
+            r.get("modificacion", "")
+        ])
+
+    make_table(rows_versiones, [3 * cm, 4 * cm, 10 * cm])
+
+    story.append(PageBreak())
+
+    # Tabla de contenido
+    story.append(Paragraph("Tabla de contenido", h1))
+
+    toc = [
+        "PLAN DE SEGURIDAD Y PRIVACIDAD DE LA INFORMACIÓN",
+        "1. OBJETIVO",
+        "1.1 OBJETIVOS ESPECÍFICOS",
+        "2. ALCANCE",
+        "3. DOCUMENTOS DE REFERENCIA",
+        "4. ESTADO ACTUAL DE LA ENTIDAD RESPECTO AL SISTEMA DE GESTIÓN DE SEGURIDAD DE LA INFORMACIÓN",
+        "5. ESTRATEGIA DE SEGURIDAD DIGITAL",
+        "5.1 DESCRIPCIÓN DE LAS ESTRATEGIAS",
+        "5.2 PORTAFOLIO DE PROYECTOS / ACTIVIDADES",
+        "5.3 CRONOGRAMA DE ACTIVIDADES / PROYECTOS",
+        "5.4 ANÁLISIS PRESUPUESTAL",
+        "6. RESPONSABLES",
+        "7. APROBACIÓN",
+    ]
+
+    for item in toc:
+        story.append(P(item))
+
+    story.append(PageBreak())
+
+    story.append(Paragraph("PLAN DE SEGURIDAD Y PRIVACIDAD DE LA INFORMACIÓN", title_style))
+
+    section("1. OBJETIVO", plan.get("objetivo"))
+    section("1.1 OBJETIVOS ESPECÍFICOS", plan.get("objetivos_especificos"))
+    section("2. ALCANCE", plan.get("alcance"))
+    section("3. DOCUMENTOS DE REFERENCIA", plan.get("documentos_referencia"))
+    section("4. ESTADO ACTUAL DE LA ENTIDAD RESPECTO AL SISTEMA DE GESTIÓN DE SEGURIDAD DE LA INFORMACIÓN", plan.get("estado_actual"))
+    section("5. ESTRATEGIA DE SEGURIDAD DIGITAL", plan.get("estrategia_seguridad"))
+
+    story.append(Paragraph("5.1 DESCRIPCIÓN DE LAS ESTRATEGIAS ESPECÍFICAS / EJES", h1))
+
+    rows = [["ESTRATEGIA / EJE", "DESCRIPCIÓN / OBJETIVO"]]
+
+    for r in estrategias:
+        rows.append([
+            r.get("estrategia", ""),
+            r.get("descripcion", "")
+        ])
+
+    make_table(rows, [5.2 * cm, 11.8 * cm])
+
+    story.append(Paragraph("5.2 PORTAFOLIO DE PROYECTOS / ACTIVIDADES", h1))
+
+    rows = [["ESTRATEGIA / EJE", "PROYECTO", "PRODUCTOS ESPERADOS"]]
+
+    for r in portafolio:
+        rows.append([
+            r.get("estrategia", ""),
+            r.get("proyecto", ""),
+            r.get("producto", "")
+        ])
+
+    make_table(rows, [4.5 * cm, 6.2 * cm, 6.3 * cm])
+
+    story.append(Paragraph("5.3 CRONOGRAMA DE ACTIVIDADES / PROYECTOS", h1))
+
+    rows = [["AÑO", "TRIMESTRE", "ACTIVIDAD / PROYECTO", "RESPONSABLE", "ESTADO"]]
+
+    for r in cronograma:
+        rows.append([
+            r.get("anio", ""),
+            r.get("trimestre", ""),
+            r.get("actividad", ""),
+            r.get("responsable", ""),
+            r.get("estado", "")
+        ])
+
+    make_table(rows, [2 * cm, 3 * cm, 6 * cm, 3.8 * cm, 2.2 * cm], font_size=7)
+
+    story.append(Paragraph("5.4 ANÁLISIS PRESUPUESTAL", h1))
+
+    rows = [["AÑO", "PROYECTO", "INVERSIÓN"]]
+
+    for r in presupuesto:
+        rows.append([
+            r.get("anio", ""),
+            r.get("proyecto", ""),
+            r.get("inversion", "")
+        ])
+
+    make_table(rows, [2.5 * cm, 10.5 * cm, 4 * cm])
+
+    section("6. RESPONSABLES", plan.get("responsables"))
+
+    story.append(Paragraph("7. APROBACIÓN", h1))
+    story.append(P("El presente plan ha sido sometido a consideración y conocimiento de la alta dirección con el objetivo de ser aprobado y aplicado conforme a lo definido."))
+
+    make_table([
+        ["ELABORÓ", "REVISÓ", "APROBÓ"],
+        [
+            f"Nombre: {plan.get('elaboro_nombre') or ''}\nCargo: {plan.get('elaboro_cargo') or ''}",
+            f"Nombre: {plan.get('reviso_nombre') or ''}\nCargo: {plan.get('reviso_cargo') or ''}",
+            f"Nombre: {plan.get('aprobo_nombre') or ''}\nCargo: {plan.get('aprobo_cargo') or ''}\nFecha: {plan.get('fecha_aprobacion') or ''}",
+        ]
+    ], [5.6 * cm, 5.6 * cm, 5.6 * cm])
+
+    def footer(canvas, doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.HexColor("#5b6b7a"))
+        canvas.drawString(1.7 * cm, 1.0 * cm, "SGSI — GRAC | PESI")
+        canvas.drawRightString(19.3 * cm, 1.0 * cm, f"Página {doc.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+
+    buffer.seek(0)
+
+    filename = f"PESI_{secure_filename(plan.get('entidad') or 'Entidad')}_{plan.get('anio') or datetime.now().year}.pdf"
+
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/pdf"
+    )
+
 
 # =========================
 # INICIO
