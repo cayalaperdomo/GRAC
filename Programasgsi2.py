@@ -136815,6 +136815,31 @@ def init_scorecard_proponentes_db():
 init_scorecard_proponentes_db()
 
 
+def migrar_scorecard_proponentes_informe_ai():
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("PRAGMA table_info(scorecard_proponentes_runs)")
+    cols = [r["name"] for r in cur.fetchall()]
+
+    if "informe_ejecutivo_ai" not in cols:
+        cur.execute("ALTER TABLE scorecard_proponentes_runs ADD COLUMN informe_ejecutivo_ai TEXT")
+
+    if "informe_ejecutivo_editado" not in cols:
+        cur.execute("ALTER TABLE scorecard_proponentes_runs ADD COLUMN informe_ejecutivo_editado TEXT")
+
+    if "informe_ejecutivo_fecha" not in cols:
+        cur.execute("ALTER TABLE scorecard_proponentes_runs ADD COLUMN informe_ejecutivo_fecha TEXT")
+
+    if "informe_ejecutivo_usuario" not in cols:
+        cur.execute("ALTER TABLE scorecard_proponentes_runs ADD COLUMN informe_ejecutivo_usuario TEXT")
+
+    conn.commit()
+    conn.close()
+
+
+migrar_scorecard_proponentes_informe_ai()
+
 # ============================================================
 # PERMISOS
 # ============================================================
@@ -138990,6 +139015,95 @@ def scorecard_proponentes_get_peer_comparison(run):
         "mejor": mejor
     }
 
+def scorecard_proponentes_build_contexto_informe_ai(scorecard_id):
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT * FROM scorecard_proponentes_runs WHERE id = ?", (scorecard_id,))
+    run = cur.fetchone()
+
+    cur.execute("""
+        SELECT categoria, herramienta, control, estado, riesgo, severidad, score, evidencia, recomendacion
+        FROM scorecard_proponentes_findings
+        WHERE run_id = ?
+        ORDER BY
+          CASE COALESCE(severidad, riesgo, '')
+            WHEN 'Crítico' THEN 1
+            WHEN 'Critico' THEN 1
+            WHEN 'Alto' THEN 2
+            WHEN 'Medio' THEN 3
+            WHEN 'Bajo' THEN 4
+            ELSE 5
+          END,
+          id ASC
+        LIMIT 25
+    """, (scorecard_id,))
+    findings = cur.fetchall()
+
+    conn.close()
+
+    if not run:
+        return ""
+
+    hallazgos_txt = []
+    for f in findings:
+        hallazgos_txt.append(
+            f"- Categoría: {f['categoria']} | Control: {f['control']} | "
+            f"Riesgo: {f['riesgo'] or f['severidad']} | Score: {f['score']} | "
+            f"Evidencia: {f['evidencia']} | Recomendación: {f['recomendacion']}"
+        )
+
+    return f"""
+Genera un informe ejecutivo profesional para una evaluación SecurityScorecard GRAC de un tercero/proponente.
+
+Datos del tercero:
+- Nombre: {run['proponente_nombre']}
+- Dominio: {run['dominio']}
+- IP: {run['ip_resuelta'] or 'No resuelta'}
+- Score DNS: {run['score_dns']}
+- Score IP Reputation: {run['score_ip']}
+- Score Kali: {run['score_kali']}
+- Score Incidentes: {run['score_incidentes']}
+- Score Dark Web / Exposure Intelligence: {run['score_darkweb']}
+- Score Total: {run['score_total']}
+- Nivel de Riesgo: {run['nivel_riesgo']}
+- Estado: {run['estado']}
+- Fecha evaluación: {run['fecha_ejecucion']}
+
+Hallazgos relevantes:
+{chr(10).join(hallazgos_txt) if hallazgos_txt else 'No hay hallazgos relevantes registrados.'}
+
+Estructura obligatoria:
+1. Resumen ejecutivo
+2. Nivel de riesgo y lectura gerencial
+3. Principales hallazgos
+4. Impacto potencial para la organización
+5. Recomendaciones priorizadas
+6. Conclusión ejecutiva
+
+Redacta en español, tono formal, claro y orientado a auditoría, SGSI, riesgo de terceros y toma de decisiones.
+No uses markdown técnico excesivo ni JSON.
+"""
+
+
+def scorecard_proponentes_generar_informe_ai(scorecard_id):
+    prompt = scorecard_proponentes_build_contexto_informe_ai(scorecard_id)
+
+    system_prompt = """
+Eres un consultor senior de ciberseguridad, SGSI, gestión de riesgos de terceros y auditoría.
+Genera un informe ejecutivo profesional, claro y útil para la alta dirección.
+No uses JSON.
+No uses markdown excesivo.
+No inventes hallazgos.
+Usa solo la información suministrada.
+""".strip()
+
+    return ai_text_general(
+        prompt=prompt,
+        system_prompt=system_prompt,
+        temperature=0.2,
+        max_tokens=900
+    )
 
 @app.route("/proponentes/scorecard/<int:scorecard_id>/rating")
 @login_required
@@ -139022,6 +139136,12 @@ def proponentes_scorecard_rating(scorecard_id):
 
     recent_findings = scorecard_proponentes_get_recent_findings(scorecard_id, limit=4)
     peer = scorecard_proponentes_get_peer_comparison(run)
+
+    informe_ejecutivo = (
+        run["informe_ejecutivo_editado"]
+        or run["informe_ejecutivo_ai"]
+        or ""
+    )
 
     risk_factor_scores = [
         {"label": "Salud DNS", "score": round(float(run["score_dns"] or 0), 1), "canvas": "gaugeDns"},
@@ -139174,6 +139294,10 @@ def proponentes_scorecard_rating(scorecard_id):
         padding:10px 12px;
         height:100%;
         overflow:hidden;
+      }
+
+      .ssc-card.full{
+        grid-column:1 / -1;
       }
 
       .ssc-top{
@@ -139481,6 +139605,35 @@ def proponentes_scorecard_rating(scorecard_id):
       .sev-medium{background:#d97706;}
       .sev-low{background:#1459a6;}
 
+      .ai-report-card{
+        margin-top:9px;
+      }
+
+      .ai-report-actions{
+        display:flex;
+        justify-content:flex-end;
+        align-items:center;
+        gap:8px;
+        flex-wrap:wrap;
+      }
+
+      .ai-report-textarea{
+        border-radius:14px !important;
+        font-size:.86rem;
+        font-weight:700;
+        line-height:1.45;
+        min-height:235px;
+        background:#f8fafc;
+        color:#334155;
+        resize:vertical;
+      }
+
+      .ai-report-textarea.ai-editable{
+        background:#ffffff;
+        border:2px solid #f59e0b;
+        box-shadow:0 0 0 .15rem rgba(245,158,11,.18);
+      }
+
       @media(max-width:1200px){
         .ssc-top,
         .main-grid,
@@ -139540,13 +139693,22 @@ def proponentes_scorecard_rating(scorecard_id):
       </div>
 
       <div class="action-bar">
-        <a href="{{ url_for('proponentes_scorecard_detalle', scorecard_id=run.id) }}" class="btn btn-outline-secondary px-4">
-          Volver al detalle
-        </a>
+          <a href="{{ url_for('proponentes_scorecard_detalle', scorecard_id=run.id) }}" class="btn btn-outline-secondary px-4">
+            Volver al detalle
+          </a>
 
-        <a href="{{ url_for('proponentes_scorecard_dashboard') }}" class="btn btn-primary px-4">
-          Dashboard Scorecard
-        </a>
+          <div class="d-flex gap-2 flex-wrap">
+            <a href="{{ url_for('proponentes_scorecard_rating_pdf', scorecard_id=run.id) }}"
+               class="btn btn-danger px-4"
+               target="_blank"
+               data-no-progress="true">
+              📄 PDF
+            </a>
+
+            <a href="{{ url_for('proponentes_scorecard_dashboard') }}" class="btn btn-primary px-4">
+              Dashboard Scorecard
+            </a>
+          </div>
       </div>
 
       <div class="ssc-frame">
@@ -139578,6 +139740,60 @@ def proponentes_scorecard_rating(scorecard_id):
               </div>
             {% endif %}
           </div>
+        </div>
+
+        <div class="ssc-card ai-report-card full">
+          <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+            <div>
+              <h5 class="mb-1 fw-bold text-primary">🤖 Informe Ejecutivo AI</h5>
+              <div class="small text-muted">
+                Generado con el proveedor activo en Administración AI: OpenRouter u Ollama.
+              </div>
+            </div>
+
+            {% if not read_only %}
+              <div class="ai-report-actions">
+                <form method="POST"
+                      action="{{ url_for('proponentes_scorecard_rating_generar_informe_ai', scorecard_id=run.id) }}"
+                      data-progress-text="Generando informe ejecutivo con IA...">
+                  <button type="submit" class="btn btn-primary btn-sm">
+                    ✨ Generar AI
+                  </button>
+                </form>
+
+                <button type="button"
+                        class="btn btn-warning btn-sm text-dark"
+                        onclick="habilitarEdicionInformeAI()">
+                  ✏️ Editar Informe
+                </button>
+              </div>
+            {% endif %}
+          </div>
+
+          <form method="POST"
+                action="{{ url_for('proponentes_scorecard_rating_guardar_informe_ai', scorecard_id=run.id) }}"
+                data-progress-text="Guardando informe ejecutivo...">
+
+            <textarea id="informeEjecutivoAI"
+                      name="informe_ejecutivo_editado"
+                      class="form-control ai-report-textarea"
+                      rows="10"
+                      readonly>{{ informe_ejecutivo }}</textarea>
+
+            {% if read_only %}
+              <div class="alert alert-warning mt-3 mb-0">
+                Rol Auditor: puede consultar el informe, pero no puede editarlo.
+              </div>
+            {% else %}
+              <div class="text-end mt-3">
+                <button id="btnGuardarInformeAI"
+                        class="btn btn-success px-4"
+                        style="display:none;">
+                  💾 Guardar Informe
+                </button>
+              </div>
+            {% endif %}
+          </form>
         </div>
 
         <div class="ssc-card issue-card">
@@ -139717,6 +139933,21 @@ def proponentes_scorecard_rating(scorecard_id):
       const gaugeLabels = {{ gauge_labels|tojson }};
       const gaugeScores = {{ gauge_scores|tojson }};
       const gaugeCanvasIds = {{ gauge_canvas_ids|tojson }};
+
+      function habilitarEdicionInformeAI(){
+        const txt = document.getElementById("informeEjecutivoAI");
+        const btn = document.getElementById("btnGuardarInformeAI");
+
+        if(txt){
+          txt.removeAttribute("readonly");
+          txt.classList.add("ai-editable");
+          txt.focus();
+        }
+
+        if(btn){
+          btn.style.display = "inline-block";
+        }
+      }
 
       function chartBaseOptions(maxY=true){
         return {
@@ -139997,9 +140228,684 @@ def proponentes_scorecard_rating(scorecard_id):
             monthly_scores=monthly_scores,
             gauge_labels=gauge_labels,
             gauge_scores=gauge_scores,
-            gauge_canvas_ids=gauge_canvas_ids
+            gauge_canvas_ids=gauge_canvas_ids,
+            informe_ejecutivo=informe_ejecutivo,
+            read_only=read_only
         ))
     )
+
+@app.route("/proponentes/scorecard/<int:scorecard_id>/rating/pdf")
+@login_required
+def proponentes_scorecard_rating_pdf(scorecard_id):
+    user, allowed, read_only = scorecard_proponentes_user_permiso()
+
+    if not allowed:
+        flash("No tiene permiso para generar el PDF del Scorecard.", "danger")
+        return redirect(url_for("menu"))
+
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT * FROM scorecard_proponentes_runs WHERE id = ?", (scorecard_id,))
+    run = cur.fetchone()
+
+    if not run:
+        conn.close()
+        abort(404)
+
+    cur.execute("""
+        SELECT categoria, herramienta, control, estado, riesgo, severidad, score, evidencia, recomendacion
+        FROM scorecard_proponentes_findings
+        WHERE run_id = ?
+        ORDER BY
+          CASE COALESCE(severidad, riesgo, '')
+            WHEN 'Crítico' THEN 1
+            WHEN 'Critico' THEN 1
+            WHEN 'Alto' THEN 2
+            WHEN 'Medio' THEN 3
+            WHEN 'Bajo' THEN 4
+            ELSE 5
+          END,
+          score ASC,
+          id ASC
+    """, (scorecard_id,))
+    all_findings = cur.fetchall()
+    conn.close()
+
+    informe_ejecutivo = (
+        run["informe_ejecutivo_editado"]
+        or run["informe_ejecutivo_ai"]
+        or "No se ha generado informe ejecutivo AI."
+    )
+
+    score_total = round(float(run["score_total"] or 0), 1)
+    letra, texto_rating = scorecard_proponentes_rating_letra(score_total)
+
+    factores = [
+        ("DNS", float(run["score_dns"] or 0)),
+        ("IP Rep.", float(run["score_ip"] or 0)),
+        ("Kali", float(run["score_kali"] or 0)),
+        ("Incidentes", float(run["score_incidentes"] or 100)),
+        ("Exposure", float(run["score_darkweb"] or 100)),
+    ]
+
+    riesgos_count = {"Crítico": 0, "Alto": 0, "Medio": 0, "Bajo": 0}
+    categorias_count = {}
+
+    for f in all_findings:
+        sev = f["severidad"] or f["riesgo"] or "Bajo"
+        if sev == "Critico":
+            sev = "Crítico"
+        if sev not in riesgos_count:
+            sev = "Bajo"
+
+        riesgos_count[sev] += 1
+
+        cat = f["categoria"] or "Otros"
+        categorias_count[cat] = categorias_count.get(cat, 0) + 1
+
+    def clean_txt(txt, max_len=None):
+        txt = str(txt or "—")
+        txt = txt.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+        txt = re.sub(r"<[^>]+>", " ", txt)
+        txt = txt.replace("**", "")
+        txt = txt.replace("Conclusión. Ejecutiva", "Conclusión Ejecutiva")
+        txt = re.sub(r"\n{3,}", "\n\n", txt)
+        txt = re.sub(r"[ \t]+", " ", txt)
+        txt = txt.strip()
+
+        if max_len and len(txt) > max_len:
+            return txt[:max_len] + "..."
+        return txt
+
+    def clean_ai_text(txt):
+        txt = clean_txt(txt, None)
+
+        # Elimina encabezados generados por la IA:
+        # "Informe Ejecutivo: Evaluación SecurityScorecard GRAC del Tercero/Proponente Yahoo"
+        txt = re.sub(
+            r"^\s*Informe\s+Ejecutivo\s*:\s*Evaluación\s+SecurityScorecard\s+GRAC\s*(del\s+Tercero\/Proponente\s+[^\n\.]*)?\.?\s*",
+            "",
+            txt,
+            flags=re.IGNORECASE
+        )
+
+        # Elimina cualquier línea suelta tipo "del Tercero/Proponente Yahoo"
+        txt = re.sub(
+            r"^\s*del\s+Tercero\/Proponente\s+[^\n\.]*\.?\s*",
+            "",
+            txt,
+            flags=re.IGNORECASE
+        )
+
+        # Elimina "Resumen Ejecutivo" inicial porque el PDF ya lo pone como título
+        txt = re.sub(
+            r"^\s*Resumen\s+Ejecutivo\s*[:\-]?\s*",
+            "",
+            txt,
+            flags=re.IGNORECASE
+        )
+
+        # Normaliza errores de IA
+        txt = txt.replace("Conclusión. Ejecutiva", "Conclusión Ejecutiva")
+
+        secciones = [
+            "Nivel de Riesgo y Lectura Gerencial",
+            "Principales Hallazgos",
+            "Impacto Potencial para la Organización",
+            "Recomendaciones Priorizadas",
+            "Conclusión Ejecutiva",
+            "Conclusión"
+        ]
+
+        # Fuerza saltos antes/después de títulos
+        for titulo in secciones:
+            txt = re.sub(
+                rf"\s*({re.escape(titulo)})\s*",
+                rf"\n\n\1\n",
+                txt,
+                flags=re.IGNORECASE
+            )
+
+        # Quita frases repetidas bajo la sección Principales Hallazgos
+        txt = re.sub(
+            r"(?i)(\n\s*Principales\s+Hallazgos\s*\n)\s*Los\s+principales\s+hallazgos\s*(de\s+la\s+evaluación\s+son\s*:?)?",
+            r"\1",
+            txt
+        )
+
+        txt = re.sub(
+            r"(?i)\bLos\s+principales\s+hallazgos\s*(de\s+la\s+evaluación\s+son\s*:?)?\s*",
+            "",
+            txt
+        )
+
+        # Quita títulos duplicados consecutivos
+        for titulo in secciones:
+            txt = re.sub(
+                rf"(?i)(\n\s*{re.escape(titulo)}\s*\n)(\s*{re.escape(titulo)}\s*\n)+",
+                rf"\1",
+                txt
+            )
+
+        txt = re.sub(r"\n{3,}", "\n\n", txt)
+        txt = re.sub(r"[ ]{2,}", " ", txt)
+
+        return txt.strip()
+
+    def p(txt, style, max_len=None):
+        return Paragraph(escape(clean_txt(txt, max_len)), style)
+
+    def score_color(v):
+        if v >= 85:
+            return "#16a34a"
+        if v >= 70:
+            return "#f59e0b"
+        if v >= 50:
+            return "#f97316"
+        return "#dc2626"
+
+    def fig_to_image(fig, width, height):
+        img = BytesIO()
+        fig.savefig(
+            img,
+            format="png",
+            dpi=180,
+            bbox_inches="tight",
+            pad_inches=0.25,
+            facecolor="white"
+        )
+        plt.close(fig)
+        img.seek(0)
+        return RLImage(img, width=width, height=height)
+
+    # ============================================================
+    # GRÁFICAS
+    # ============================================================
+
+    fig0, ax0 = plt.subplots(figsize=(3.0, 2.2))
+    fig0.patch.set_facecolor("white")
+    ax0.pie(
+        [score_total, max(0, 100 - score_total)],
+        startangle=90,
+        counterclock=False,
+        colors=[score_color(score_total), "#e5e7eb"],
+        wedgeprops={"width": 0.30, "edgecolor": "white"}
+    )
+    ax0.text(0, 0.12, f"{score_total:.1f}%", ha="center", va="center",
+             fontsize=20, fontweight="bold", color="#0f172a")
+    ax0.text(0, -0.18, f"Rating {letra}", ha="center", va="center",
+             fontsize=10, fontweight="bold", color="#334155")
+    ax0.set_title("Score General", fontsize=11, fontweight="bold", color="#0b3a6e", pad=18)
+    ax0.axis("equal")
+    fig0.subplots_adjust(left=0.06, right=0.94, top=0.76, bottom=0.04)
+    chart_score = fig_to_image(fig0, 190, 142)
+
+    fig1, ax1 = plt.subplots(figsize=(6.2, 2.75))
+    fig1.patch.set_facecolor("white")
+
+    labels = [x[0] for x in factores]
+    values = [x[1] for x in factores]
+    bar_colors = [score_color(v) for v in values]
+
+    bars = ax1.barh(labels, values, color=bar_colors, height=0.45)
+    ax1.set_xlim(0, 112)
+    ax1.set_title("Componentes Evaluados", fontsize=11, fontweight="bold", color="#0b3a6e", pad=18)
+    ax1.grid(axis="x", alpha=.16)
+    ax1.invert_yaxis()
+    ax1.tick_params(axis="both", labelsize=8)
+
+    for bar, v in zip(bars, values):
+        ax1.text(
+            min(v + 2.5, 104),
+            bar.get_y() + bar.get_height() / 2,
+            f"{v:.1f}%",
+            va="center",
+            fontsize=8,
+            fontweight="bold",
+            color="#111827"
+        )
+
+    ax1.spines["top"].set_visible(False)
+    ax1.spines["right"].set_visible(False)
+    ax1.spines["left"].set_visible(False)
+    fig1.subplots_adjust(left=0.23, right=0.90, top=0.78, bottom=0.16)
+    chart_factores = fig_to_image(fig1, 360, 155)
+
+    risk_labs = ["Crítico", "Alto", "Medio", "Bajo"]
+    risk_vals = [riesgos_count[x] for x in risk_labs]
+
+    if sum(risk_vals) == 0:
+        risk_labs = ["Sin hallazgos"]
+        risk_vals = [1]
+        risk_colors = ["#16a34a"]
+    else:
+        risk_colors = ["#7f1d1d", "#dc2626", "#f59e0b", "#16a34a"]
+
+    fig2, ax2 = plt.subplots(figsize=(3.7, 2.85))
+    fig2.patch.set_facecolor("white")
+    ax2.pie(
+        risk_vals,
+        labels=None,
+        autopct=lambda pct: f"{pct:.0f}%" if pct >= 5 else "",
+        startangle=90,
+        pctdistance=0.52,
+        colors=risk_colors,
+        wedgeprops={
+            "width": 0.32,
+            "edgecolor": "white",
+            "linewidth": 1.2
+        },
+        textprops={
+            "fontsize": 8,
+            "fontweight": "bold",
+            "color": "#111827"
+        }
+    )
+    ax2.legend(
+        risk_labs,
+        loc="center left",
+        bbox_to_anchor=(1.32, 0.5),
+        fontsize=7,
+        frameon=False,
+        borderaxespad=0.0
+    )
+    ax2.set_title("Distribución de Riesgos", fontsize=11, fontweight="bold", color="#0b3a6e", pad=28)
+    ax2.axis("equal")
+    fig2.subplots_adjust(left=0.02, right=0.60, top=0.74, bottom=0.04)
+    chart_riesgos = fig_to_image(fig2, 240, 168)
+
+    cat_items = sorted(categorias_count.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    if not cat_items:
+        cat_items = [("Sin hallazgos", 1)]
+
+    fig3, ax3 = plt.subplots(figsize=(5.8, 2.45))
+    fig3.patch.set_facecolor("white")
+
+    cat_labels = [x[0][:28] for x in cat_items]
+    cat_values = [x[1] for x in cat_items]
+
+    bars = ax3.barh(cat_labels, cat_values, color="#2563eb", height=0.48)
+    ax3.set_title("Hallazgos por Categoría", fontsize=11, fontweight="bold", color="#0b3a6e", pad=18)
+    ax3.invert_yaxis()
+    ax3.grid(axis="x", alpha=.16)
+    ax3.tick_params(axis="both", labelsize=8)
+
+    for bar, v in zip(bars, cat_values):
+        ax3.text(
+            v + 0.08,
+            bar.get_y() + bar.get_height() / 2,
+            str(v),
+            va="center",
+            fontsize=8,
+            fontweight="bold"
+        )
+
+    ax3.spines["top"].set_visible(False)
+    ax3.spines["right"].set_visible(False)
+    ax3.spines["left"].set_visible(False)
+    fig3.subplots_adjust(left=0.28, right=0.92, top=0.78, bottom=0.14)
+    chart_categorias = fig_to_image(fig3, 350, 145)
+
+    # ============================================================
+    # PDF
+    # ============================================================
+
+    buffer = BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        rightMargin=20,
+        leftMargin=20,
+        topMargin=18,
+        bottomMargin=18
+    )
+
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "TitleSGSI",
+        parent=styles["Heading1"],
+        fontSize=15,
+        leading=17,
+        textColor=colors.white,
+        alignment=TA_LEFT,
+        spaceAfter=0
+    )
+
+    subtitle_style = ParagraphStyle(
+        "SubtitleSGSI",
+        parent=styles["Normal"],
+        fontSize=7.5,
+        leading=9,
+        textColor=colors.HexColor("#dbeafe"),
+        alignment=TA_LEFT
+    )
+
+    h2_style = ParagraphStyle(
+        "H2SGSI",
+        parent=styles["Heading2"],
+        fontSize=10,
+        leading=12,
+        textColor=colors.HexColor("#0b3a6e"),
+        spaceBefore=6,
+        spaceAfter=6
+    )
+
+    normal_style = ParagraphStyle(
+        "NormalSGSI",
+        parent=styles["Normal"],
+        fontSize=7.2,
+        leading=9,
+        textColor=colors.HexColor("#1f2937"),
+        spaceAfter=4
+    )
+
+    small_style = ParagraphStyle(
+        "SmallSGSI",
+        parent=styles["Normal"],
+        fontSize=6.3,
+        leading=7.6,
+        textColor=colors.HexColor("#334155")
+    )
+
+    label_style = ParagraphStyle(
+        "LabelSGSI",
+        parent=styles["Normal"],
+        fontSize=6.2,
+        leading=7.2,
+        textColor=colors.HexColor("#1459a6"),
+        fontName="Helvetica-Bold"
+    )
+
+    white_small = ParagraphStyle(
+        "WhiteSmall",
+        parent=styles["Normal"],
+        fontSize=6.5,
+        leading=7.5,
+        textColor=colors.white
+    )
+
+    story = []
+
+    header = Table([
+        [
+            Paragraph("<b>SecurityScorecard GRAC</b>", title_style),
+            Paragraph(
+                f"Score: {score_total:.1f}%    Rating: {escape(letra)} - {escape(texto_rating)}    Riesgo: {escape(run['nivel_riesgo'] or '—')}",
+                white_small
+            )
+        ],
+        [
+            Paragraph("Reporte ejecutivo visual de riesgo de terceros", subtitle_style),
+            Paragraph(f"Fecha evaluación: {escape(run['fecha_ejecucion'] or '—')}", white_small)
+        ]
+    ], colWidths=[470, 350])
+
+    header.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#0b3a6e")),
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#0b3a6e")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ("LEFTPADDING", (0, 0), (-1, -1), 12),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+    ]))
+
+    story.append(header)
+    story.append(Spacer(1, 8))
+
+    resumen_table = Table([
+        [
+            [Paragraph("Tercero", label_style), p(run["proponente_nombre"], small_style, 80)],
+            [Paragraph("Dominio", label_style), p(run["dominio"], small_style, 80)],
+            [Paragraph("IP", label_style), p(run["ip_resuelta"], small_style, 70)],
+            [Paragraph("Estado", label_style), p(run["estado"], small_style, 60)],
+        ]
+    ], colWidths=[205, 205, 205, 205])
+
+    resumen_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fafc")),
+        ("BOX", (0, 0), (-1, -1), 0.35, colors.HexColor("#dbe6f4")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#dbe6f4")),
+        ("TOPPADDING", (0, 0), (-1, -1), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ("LEFTPADDING", (0, 0), (-1, -1), 9),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+
+    story.append(resumen_table)
+    story.append(Spacer(1, 10))
+
+    # ============================================================
+    # RESUMEN EJECUTIVO LIMPIO
+    # ============================================================
+
+    story.append(Paragraph("Resumen Ejecutivo", h2_style))
+
+    texto_ai_completo = clean_ai_text(informe_ejecutivo)
+
+    secciones = [
+        "Nivel de Riesgo y Lectura Gerencial",
+        "Principales Hallazgos",
+        "Impacto Potencial para la Organización",
+        "Recomendaciones Priorizadas",
+        "Conclusión Ejecutiva",
+        "Conclusión"
+    ]
+
+    bloques = [b.strip() for b in texto_ai_completo.split("\n") if b.strip()]
+
+    for bloque in bloques:
+        limpio = bloque.strip()
+
+        if limpio.lower() in [s.lower() for s in secciones]:
+            story.append(Paragraph(escape(limpio), h2_style))
+        else:
+            story.append(Paragraph(escape(limpio), normal_style))
+
+    story.append(Spacer(1, 10))
+
+    # ============================================================
+    # GRÁFICAS DESPUÉS DEL RESUMEN, SIN HOJA EXCLUSIVA
+    # ============================================================
+
+    charts_row_1 = Table(
+        [[chart_score, chart_factores, chart_riesgos]],
+        colWidths=[205, 390, 225],
+        rowHeights=[178]
+    )
+
+    charts_row_1.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+    ]))
+
+    story.append(charts_row_1)
+    story.append(Spacer(1, 10))
+
+    charts_row_2 = Table([[chart_categorias]], colWidths=[820])
+    charts_row_2.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+
+    story.append(charts_row_2)
+    story.append(PageBreak())
+
+    # ============================================================
+    # HALLAZGOS Y MATRIZ
+    # ============================================================
+
+    story.append(header)
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("Top hallazgos priorizados", h2_style))
+
+    top_findings = all_findings[:7]
+    findings_data = [["Categoría", "Control", "Riesgo", "Score", "Recomendación ejecutiva"]]
+
+    for f in top_findings:
+        findings_data.append([
+            p(f["categoria"], small_style, 45),
+            p(f["control"], small_style, 60),
+            p(f["riesgo"] or f["severidad"], small_style, 22),
+            Paragraph(f"{float(f['score'] or 0):.1f}", small_style),
+            p(f["recomendacion"] or f["evidencia"], small_style, 190),
+        ])
+
+    findings_table = Table(findings_data, colWidths=[125, 180, 65, 45, 385], repeatRows=1)
+
+    findings_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1459a6")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#dbe6f4")),
+        ("FONTSIZE", (0, 0), (-1, -1), 6.3),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+
+    story.append(findings_table)
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("Matriz ejecutiva de componentes", h2_style))
+
+    matriz = [["Componente", "Score", "Estado ejecutivo", "Acción sugerida"]]
+
+    for label, value in factores:
+        if value >= 85:
+            estado = "Adecuado"
+            accion = "Mantener monitoreo periódico."
+        elif value >= 70:
+            estado = "Monitorear"
+            accion = "Validar desviaciones y documentar seguimiento."
+        elif value >= 50:
+            estado = "Plan de acción"
+            accion = "Solicitar remediación y evidencia al tercero."
+        else:
+            estado = "No aceptable / crítico"
+            accion = "Escalar decisión de riesgo y exigir corrección prioritaria."
+
+        matriz.append([
+            p(label, small_style, 40),
+            Paragraph(f"{value:.1f}%", small_style),
+            p(estado, small_style, 60),
+            p(accion, small_style, 160),
+        ])
+
+    matriz_table = Table(matriz, colWidths=[160, 80, 180, 380])
+
+    matriz_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1459a6")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#dbe6f4")),
+        ("FONTSIZE", (0, 0), (-1, -1), 6.8),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+
+    story.append(matriz_table)
+
+    doc.build(story)
+
+    buffer.seek(0)
+
+    filename = f"SecurityScorecard_GRAC_ejecutivo_{scorecard_id}.pdf"
+
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/pdf"
+    )
+
+@app.route("/proponentes/scorecard/<int:scorecard_id>/rating/informe-ai/generar", methods=["POST"])
+@login_required
+def proponentes_scorecard_rating_generar_informe_ai(scorecard_id):
+    user, allowed, read_only = scorecard_proponentes_user_permiso()
+
+    if not allowed:
+        flash("No tiene permiso para acceder al Scorecard de Proponentes.", "danger")
+        return redirect(url_for("menu"))
+
+    if read_only:
+        flash("El rol Auditor no puede generar ni editar el informe ejecutivo AI.", "danger")
+        return redirect(url_for("proponentes_scorecard_rating", scorecard_id=scorecard_id))
+
+    informe_ai = scorecard_proponentes_generar_informe_ai(scorecard_id)
+
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE scorecard_proponentes_runs
+        SET informe_ejecutivo_ai = ?,
+            informe_ejecutivo_editado = ?,
+            informe_ejecutivo_fecha = ?,
+            informe_ejecutivo_usuario = ?
+        WHERE id = ?
+    """, (
+        informe_ai,
+        informe_ai,
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        getattr(user, "username", "Sistema"),
+        scorecard_id
+    ))
+
+    conn.commit()
+    conn.close()
+
+    flash("Informe ejecutivo AI generado correctamente.", "success")
+    return redirect(url_for("proponentes_scorecard_rating", scorecard_id=scorecard_id))
+
+
+@app.route("/proponentes/scorecard/<int:scorecard_id>/rating/informe-ai/guardar", methods=["POST"])
+@login_required
+def proponentes_scorecard_rating_guardar_informe_ai(scorecard_id):
+    user, allowed, read_only = scorecard_proponentes_user_permiso()
+
+    if not allowed:
+        flash("No tiene permiso para acceder al Scorecard de Proponentes.", "danger")
+        return redirect(url_for("menu"))
+
+    if read_only:
+        flash("El rol Auditor no puede editar el informe ejecutivo AI.", "danger")
+        return redirect(url_for("proponentes_scorecard_rating", scorecard_id=scorecard_id))
+
+    informe = (request.form.get("informe_ejecutivo_editado") or "").strip()
+
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE scorecard_proponentes_runs
+        SET informe_ejecutivo_editado = ?,
+            informe_ejecutivo_fecha = ?,
+            informe_ejecutivo_usuario = ?
+        WHERE id = ?
+    """, (
+        informe,
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        getattr(user, "username", "Sistema"),
+        scorecard_id
+    ))
+
+    conn.commit()
+    conn.close()
+
+    flash("Informe ejecutivo actualizado correctamente.", "success")
+    return redirect(url_for("proponentes_scorecard_rating", scorecard_id=scorecard_id))
 
 
 # ============================================================
