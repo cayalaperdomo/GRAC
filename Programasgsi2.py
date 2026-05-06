@@ -7921,6 +7921,7 @@ MENU_SECTIONS = [
             {"label": "Contexto Externo", "href": "/contexto_externo_menu", "icon": "bi-globe2", "btn": "btn-info text-white", "module": "Contexto Externo"},
             {"label": "DOFA", "href": "/dofa_menu", "icon": "bi-grid-3x3-gap-fill", "btn": "btn-info text-white", "module": "DOFA"},
             {"label": "PESI", "href": "/pesi", "icon": "bi-shield-lock-fill", "btn": "btn-primary", "module": "PESI"},
+            {"label": "Informe Revisión por la Dirección", "href": "/revision_direccion", "icon": "bi-clipboard-data-fill", "btn": "btn-primary", "module": "Informe Revisión por la Dirección"},
         ],
     },
     {
@@ -146063,6 +146064,1615 @@ def pesi_pdf(plan_id):
     buffer.seek(0)
 
     filename = f"PESI_{secure_filename(plan.get('entidad') or 'Entidad')}_{plan.get('anio') or datetime.now().year}.pdf"
+
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/pdf"
+    )
+
+# ========================================================================================================================================
+#                                   MÓDULO INFORME DE RESULTADOS PARA REVISIÓN POR LA DIRECCIÓN
+# ========================================================================================================================================
+
+REV_DIR_DB_PATH = os.path.join(app.instance_path, "revision_direccion.db")
+
+
+def get_rev_dir_db_connection():
+    os.makedirs(app.instance_path, exist_ok=True)
+    conn = sqlite3.connect(REV_DIR_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_rev_dir_db():
+    conn = get_rev_dir_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS revision_direccion_informes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entidad TEXT,
+            anio TEXT,
+            periodo TEXT,
+            fecha_informe TEXT,
+
+            objetivos_json TEXT,
+            riesgos_intro TEXT,
+            riesgos_json TEXT,
+            riesgos_conclusion TEXT,
+
+            auditorias_texto TEXT,
+            cuestiones_texto TEXT,
+            dofa_json TEXT,
+
+            desempeno_texto TEXT,
+            partes_json TEXT,
+
+            mejora_texto TEXT,
+            mejora_json TEXT,
+
+            elaboro_nombre TEXT,
+            elaboro_cargo TEXT,
+            reviso_nombre TEXT,
+            reviso_cargo TEXT,
+            aprobo_nombre TEXT,
+            aprobo_cargo TEXT,
+            fecha_aprobacion TEXT,
+
+            creado_por TEXT,
+            fecha_creacion TEXT,
+            fecha_actualizacion TEXT
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+init_rev_dir_db()
+
+
+def _revdir_user_actual():
+    try:
+        return User.query.get(session.get("user_id"))
+    except Exception:
+        return None
+
+
+def _revdir_permiso():
+    user = _revdir_user_actual()
+
+    if not user:
+        flash("Debe iniciar sesión.", "danger")
+        return None
+
+    if user.role not in ("admin", "auditor") and not verificar_permiso(user, "Informe Revisión por la Dirección"):
+        flash("No tiene permiso para acceder al Informe de Revisión por la Dirección.", "danger")
+        return None
+
+    return user
+
+
+def _revdir_json_load(txt, default=None):
+    try:
+        data = json.loads(txt or "")
+        return data if isinstance(data, list) else (default or [])
+    except Exception:
+        return default or []
+
+
+def _revdir_json_dump_from_form(prefix, campos):
+    filas = []
+    total = int(request.form.get(prefix + "_count") or 0)
+
+    for i in range(total):
+        row = {}
+        vacia = True
+
+        for campo in campos:
+            val = (request.form.get(f"{prefix}_{campo}_{i}") or "").strip()
+            row[campo] = val
+            if val:
+                vacia = False
+
+        if not vacia:
+            filas.append(row)
+
+    return json.dumps(filas, ensure_ascii=False)
+
+
+def _revdir_get_plan(informe_id):
+    conn = get_rev_dir_db_connection()
+    row = conn.execute("""
+        SELECT *
+        FROM revision_direccion_informes
+        WHERE id = ?
+    """, (informe_id,)).fetchone()
+    conn.close()
+
+    if not row:
+        abort(404)
+
+    return dict(row)
+
+
+# ============================================================
+# AUTOCARGA DESDE MÓDULOS EXISTENTES
+# ============================================================
+
+def _revdir_autocargar_objetivos():
+    rows = []
+
+    try:
+        items = ObjetivoSGSI.query.order_by(ObjetivoSGSI.id.asc()).all()
+
+        for it in items:
+            rows.append({
+                "objetivo": getattr(it, "objetivo", "") or "",
+                "meta": str(getattr(it, "meta_pct", "") or ""),
+                "resultado": "",
+                "analisis": ""
+            })
+    except Exception as e:
+        print("Error cargando objetivos para Revisión Dirección:", repr(e))
+
+    if not rows:
+        rows = [{"objetivo": "", "meta": "", "resultado": "", "analisis": ""}]
+
+    return rows
+
+
+def _revdir_autocargar_riesgos(anio=None):
+    rows = []
+
+    try:
+        items = Riesgo.query.order_by(Riesgo.id.desc()).all()
+
+        for r in items:
+            fecha_base = (
+                getattr(r, "fecha_revision", None)
+                or getattr(r, "fecha_identificacion", None)
+                or getattr(r, "fecha_implementacion", None)
+                or ""
+            )
+
+            fecha_txt = str(fecha_base or "")
+
+            if anio and fecha_txt and str(anio) not in fecha_txt:
+                continue
+
+            rows.append({
+                "codigo": str(getattr(r, "codigo_riesgo", "") or ""),
+                "riesgo": str(getattr(r, "riesgo", "") or getattr(r, "nombre_activo", "") or ""),
+                "prob_inh": str(getattr(r, "prob_inh", "") or ""),
+                "impacto_inh": str(getattr(r, "imp_inh", "") or ""),
+                "riesgo_inh": str(getattr(r, "riesgo_inherente", "") or ""),
+                "riesgo_residual": str(getattr(r, "riesgo_residual", "") or "")
+            })
+
+    except Exception as e:
+        print("Error cargando riesgos para Revisión Dirección:", repr(e))
+
+    if not rows:
+        rows = [{
+            "codigo": "",
+            "riesgo": "",
+            "prob_inh": "",
+            "impacto_inh": "",
+            "riesgo_inh": "",
+            "riesgo_residual": ""
+        }]
+
+    return rows
+
+
+def _revdir_autocargar_dofa():
+    data = {
+        "fortalezas": "",
+        "debilidades": "",
+        "oportunidades": "",
+        "amenazas": "",
+        "estrategias_fo": "",
+        "estrategias_fa": "",
+        "estrategias_do": "",
+        "estrategias_da": ""
+    }
+
+    try:
+        dofa = DofaAnalisis.query.order_by(DofaAnalisis.id.desc()).first()
+
+        if dofa:
+            data = {
+                "fortalezas": getattr(dofa, "fortalezas", "") or "",
+                "debilidades": getattr(dofa, "debilidades", "") or "",
+                "oportunidades": getattr(dofa, "oportunidades", "") or "",
+                "amenazas": getattr(dofa, "amenazas", "") or "",
+                "estrategias_fo": getattr(dofa, "estrategias_fo", "") or "",
+                "estrategias_fa": getattr(dofa, "estrategias_fa", "") or "",
+                "estrategias_do": getattr(dofa, "estrategias_do", "") or "",
+                "estrategias_da": getattr(dofa, "estrategias_da", "") or ""
+            }
+    except Exception as e:
+        print("Error cargando DOFA para Revisión Dirección:", repr(e))
+
+    return [data]
+
+
+def _revdir_autocargar_partes_interesadas():
+    rows = []
+
+    posibles_modelos = [
+        "ParteInteresada",
+        "PartesInteresadas",
+        "ParteInteresadaSGSI",
+        "PartesInteresadasSGSI",
+        "Interesado",
+        "Stakeholder"
+    ]
+
+    for nombre_modelo in posibles_modelos:
+        cls = globals().get(nombre_modelo)
+
+        if not cls:
+            continue
+
+        try:
+            items = cls.query.all()
+
+            for it in items:
+                nombre = (
+                    getattr(it, "nombre", None)
+                    or getattr(it, "parte_interesada", None)
+                    or getattr(it, "interesado", None)
+                    or getattr(it, "descripcion", None)
+                    or ""
+                )
+
+                rows.append({
+                    "parte": str(nombre or ""),
+                    "analisis": ""
+                })
+
+            if rows:
+                break
+        except Exception:
+            continue
+
+    if not rows:
+        rows = [{"parte": "", "analisis": ""}]
+
+    return rows
+
+
+def _revdir_default_mejora():
+    return [
+        {
+            "perspectiva": "",
+            "objetivo_seg_inf": "",
+            "proyecto": ""
+        }
+    ]
+
+
+def _revdir_default_dict(user):
+    anio = str(datetime.now().year)
+
+    objetivos = _revdir_autocargar_objetivos()
+    riesgos = _revdir_autocargar_riesgos(anio)
+    dofa = _revdir_autocargar_dofa()
+    partes = _revdir_autocargar_partes_interesadas()
+    mejora = _revdir_default_mejora()
+
+    return {
+        "id": None,
+        "entidad": "",
+        "anio": anio,
+        "periodo": f"Enero - Diciembre {anio}",
+        "fecha_informe": datetime.now().strftime("%Y-%m-%d"),
+
+        "objetivos_json": json.dumps(objetivos, ensure_ascii=False),
+
+        "riesgos_intro": "Describa el resultado general de la valoración de riesgos y el estado del plan de tratamiento para el año evaluado.",
+        "riesgos_json": json.dumps(riesgos, ensure_ascii=False),
+        "riesgos_conclusion": "",
+
+        "auditorias_texto": "Describa los resultados de auditorías internas realizadas al Sistema de Gestión de Seguridad de la Información.",
+        "cuestiones_texto": "Describa los cambios o actualizaciones relevantes en las cuestiones externas e internas que afectan el SGSI.",
+        "dofa_json": json.dumps(dofa, ensure_ascii=False),
+
+        "desempeno_texto": "Describa la retroalimentación sobre el desempeño de la seguridad de la información.",
+        "partes_json": json.dumps(partes, ensure_ascii=False),
+
+        "mejora_texto": "Describa las oportunidades de mejora continua identificadas para el SGSI.",
+        "mejora_json": json.dumps(mejora, ensure_ascii=False),
+
+        "elaboro_nombre": "",
+        "elaboro_cargo": "",
+        "reviso_nombre": "",
+        "reviso_cargo": "",
+        "aprobo_nombre": "",
+        "aprobo_cargo": "",
+        "fecha_aprobacion": "",
+
+        "creado_por": getattr(user, "username", "Sistema"),
+        "fecha_creacion": "",
+        "fecha_actualizacion": "",
+    }
+
+
+def _revdir_form_data():
+    return {
+        "entidad": (request.form.get("entidad") or "").strip(),
+        "anio": (request.form.get("anio") or "").strip(),
+        "periodo": (request.form.get("periodo") or "").strip(),
+        "fecha_informe": (request.form.get("fecha_informe") or "").strip(),
+
+        "objetivos_json": _revdir_json_dump_from_form(
+            "objetivos",
+            ["objetivo", "meta", "resultado", "analisis"]
+        ),
+
+        "riesgos_intro": (request.form.get("riesgos_intro") or "").strip(),
+        "riesgos_json": _revdir_json_dump_from_form(
+            "riesgos",
+            ["codigo", "riesgo", "prob_inh", "impacto_inh", "riesgo_inh", "riesgo_residual"]
+        ),
+        "riesgos_conclusion": (request.form.get("riesgos_conclusion") or "").strip(),
+
+        "auditorias_texto": (request.form.get("auditorias_texto") or "").strip(),
+        "cuestiones_texto": (request.form.get("cuestiones_texto") or "").strip(),
+        "dofa_json": _revdir_json_dump_from_form(
+            "dofa",
+            ["fortalezas", "debilidades", "oportunidades", "amenazas", "estrategias_fo", "estrategias_fa", "estrategias_do", "estrategias_da"]
+        ),
+
+        "desempeno_texto": (request.form.get("desempeno_texto") or "").strip(),
+        "partes_json": _revdir_json_dump_from_form(
+            "partes",
+            ["parte", "analisis"]
+        ),
+
+        "mejora_texto": (request.form.get("mejora_texto") or "").strip(),
+        "mejora_json": _revdir_json_dump_from_form(
+            "mejora",
+            ["perspectiva", "objetivo_seg_inf", "proyecto"]
+        ),
+
+        "elaboro_nombre": (request.form.get("elaboro_nombre") or "").strip(),
+        "elaboro_cargo": (request.form.get("elaboro_cargo") or "").strip(),
+        "reviso_nombre": (request.form.get("reviso_nombre") or "").strip(),
+        "reviso_cargo": (request.form.get("reviso_cargo") or "").strip(),
+        "aprobo_nombre": (request.form.get("aprobo_nombre") or "").strip(),
+        "aprobo_cargo": (request.form.get("aprobo_cargo") or "").strip(),
+        "fecha_aprobacion": (request.form.get("fecha_aprobacion") or "").strip(),
+    }
+
+
+def _revdir_insertar_desde_form(user):
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data = _revdir_form_data()
+
+    if not data["entidad"]:
+        data["entidad"] = "Entidad sin nombre"
+
+    data["creado_por"] = getattr(user, "username", "Sistema")
+    data["fecha_creacion"] = ahora
+    data["fecha_actualizacion"] = ahora
+
+    conn = get_rev_dir_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO revision_direccion_informes (
+            entidad, anio, periodo, fecha_informe,
+            objetivos_json,
+            riesgos_intro, riesgos_json, riesgos_conclusion,
+            auditorias_texto, cuestiones_texto, dofa_json,
+            desempeno_texto, partes_json,
+            mejora_texto, mejora_json,
+            elaboro_nombre, elaboro_cargo, reviso_nombre, reviso_cargo,
+            aprobo_nombre, aprobo_cargo, fecha_aprobacion,
+            creado_por, fecha_creacion, fecha_actualizacion
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        data["entidad"], data["anio"], data["periodo"], data["fecha_informe"],
+        data["objetivos_json"],
+        data["riesgos_intro"], data["riesgos_json"], data["riesgos_conclusion"],
+        data["auditorias_texto"], data["cuestiones_texto"], data["dofa_json"],
+        data["desempeno_texto"], data["partes_json"],
+        data["mejora_texto"], data["mejora_json"],
+        data["elaboro_nombre"], data["elaboro_cargo"], data["reviso_nombre"], data["reviso_cargo"],
+        data["aprobo_nombre"], data["aprobo_cargo"], data["fecha_aprobacion"],
+        data["creado_por"], data["fecha_creacion"], data["fecha_actualizacion"]
+    ))
+
+    nuevo_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    try:
+        registrar_log(data["creado_por"], f"Creó Informe Revisión por la Dirección: {data['entidad']} - {data['anio']}")
+    except Exception:
+        pass
+
+    return nuevo_id
+
+
+def _revdir_actualizar_desde_form(informe_id, user):
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data = _revdir_form_data()
+
+    if not data["entidad"]:
+        data["entidad"] = "Entidad sin nombre"
+
+    conn = get_rev_dir_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE revision_direccion_informes
+        SET
+            entidad = ?,
+            anio = ?,
+            periodo = ?,
+            fecha_informe = ?,
+            objetivos_json = ?,
+            riesgos_intro = ?,
+            riesgos_json = ?,
+            riesgos_conclusion = ?,
+            auditorias_texto = ?,
+            cuestiones_texto = ?,
+            dofa_json = ?,
+            desempeno_texto = ?,
+            partes_json = ?,
+            mejora_texto = ?,
+            mejora_json = ?,
+            elaboro_nombre = ?,
+            elaboro_cargo = ?,
+            reviso_nombre = ?,
+            reviso_cargo = ?,
+            aprobo_nombre = ?,
+            aprobo_cargo = ?,
+            fecha_aprobacion = ?,
+            fecha_actualizacion = ?
+        WHERE id = ?
+    """, (
+        data["entidad"], data["anio"], data["periodo"], data["fecha_informe"],
+        data["objetivos_json"],
+        data["riesgos_intro"], data["riesgos_json"], data["riesgos_conclusion"],
+        data["auditorias_texto"], data["cuestiones_texto"], data["dofa_json"],
+        data["desempeno_texto"], data["partes_json"],
+        data["mejora_texto"], data["mejora_json"],
+        data["elaboro_nombre"], data["elaboro_cargo"], data["reviso_nombre"], data["reviso_cargo"],
+        data["aprobo_nombre"], data["aprobo_cargo"], data["fecha_aprobacion"],
+        ahora,
+        informe_id
+    ))
+
+    conn.commit()
+    conn.close()
+
+    try:
+        registrar_log(getattr(user, "username", "Sistema"), f"Actualizó Informe Revisión por la Dirección: {data['entidad']} - {data['anio']}")
+    except Exception:
+        pass
+
+
+def _revdir_css():
+    return """
+    <style>
+      body {
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .revdir-shell {
+        width:96%;
+        max-width:1550px;
+        margin:26px auto 30px auto;
+      }
+
+      .revdir-header-card {
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .revdir-header-overlay {
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }
+
+      .revdir-header-overlay::before {
+        content:"📊";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .revdir-title {
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .revdir-subtitle {
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+        line-height:1.25;
+      }
+
+      .revdir-card {
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
+      }
+
+      .revdir-section {
+        background:#ffffff;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        padding:18px;
+        margin-bottom:16px;
+        box-shadow:0 8px 18px rgba(15,23,42,.07);
+      }
+
+      .section-title {
+        font-weight:950;
+        font-size:.95rem;
+        color:#1459a6;
+        margin-bottom:16px;
+        padding-bottom:8px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+      }
+
+      .table-responsive {
+        overflow-x:auto;
+        background:#ffffff;
+        border-radius:14px;
+        border:1px solid #dbe6f4;
+      }
+
+      .table thead th {
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-size:.78rem;
+        font-weight:900 !important;
+        border:none !important;
+        white-space:nowrap;
+        text-align:center;
+        vertical-align:middle !important;
+      }
+
+      .table td {
+        vertical-align:middle !important;
+        font-size:.82rem;
+      }
+
+      .revdir-edit-table textarea {
+        min-width:220px;
+        min-height:82px;
+      }
+
+      .form-label {
+        font-size:.72rem;
+        font-weight:900;
+        color:#1459a6;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
+      }
+
+      .form-control {
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        box-shadow:none !important;
+      }
+
+      textarea.form-control {
+        min-height:110px;
+        resize:vertical;
+      }
+
+      textarea[readonly],
+      input[readonly] {
+        background:#eef5ff !important;
+        color:#334155 !important;
+        cursor:not-allowed;
+      }
+
+      .btn {
+        border-radius:10px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }
+
+      .btn-primary {
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        border:none !important;
+      }
+
+      .btn-success {
+        background:linear-gradient(135deg,#16803c,#22a55a) !important;
+        border:none !important;
+      }
+
+      .btn-danger {
+        background:linear-gradient(135deg,#b91c1c,#ef4444) !important;
+        border:none !important;
+      }
+
+      .revdir-help {
+        font-size:.78rem;
+        color:#64748b;
+        margin-top:-8px;
+        margin-bottom:12px;
+      }
+
+      .dofa-grid {
+        display:grid;
+        grid-template-columns:1fr 1fr;
+        gap:14px;
+      }
+
+      .dofa-quad {
+        border-radius:16px;
+        padding:14px;
+        min-height:190px;
+        border:1px solid #dbe6f4;
+        background:#f8fbff;
+        box-shadow:0 8px 18px rgba(15,23,42,.06);
+      }
+
+      .dofa-quad-title {
+        font-weight:950;
+        font-size:.9rem;
+        margin-bottom:8px;
+        color:#1459a6;
+      }
+
+      .dofa-quad textarea {
+        min-height:140px;
+      }
+
+      @media (max-width:768px) {
+        .dofa-grid {
+          grid-template-columns:1fr;
+        }
+      }
+    </style>
+    """
+
+
+def _revdir_render_rows(prefix, rows, campos, labels, readonly=False, locked_fields=None, allow_add=True, allow_delete=True):
+    locked_fields = locked_fields or []
+
+    if not rows:
+        rows = [{}]
+
+    html_rows = ""
+
+    for i, row in enumerate(rows):
+        html_rows += "<tr>"
+
+        for campo in campos:
+            val = escape(row.get(campo, "") or "")
+
+            # IMPORTANTE:
+            # readonly sí se envía en POST.
+            # disabled NO se envía, por eso no se usa aquí.
+            ro = "readonly" if (readonly or campo in locked_fields) else ""
+
+            html_rows += f"""
+            <td>
+              <textarea class="form-control form-control-sm" rows="3" name="{prefix}_{campo}_{i}" {ro}>{val}</textarea>
+            </td>
+            """
+
+        if not readonly and allow_delete:
+            html_rows += """
+            <td class="text-center">
+              <button type="button" class="btn btn-sm btn-outline-danger rounded-pill" onclick="revdirRemoveRow(this)">
+                🗑️
+              </button>
+            </td>
+            """
+
+        html_rows += "</tr>"
+
+    ths = "".join(f"<th>{escape(label)}</th>" for label in labels)
+
+    if not readonly and allow_delete:
+        ths += "<th>Acción</th>"
+
+    add_btn = ""
+
+    if not readonly and allow_add:
+        add_btn = f"""
+        <button type="button" class="btn btn-sm btn-outline-primary rounded-pill mt-2"
+                onclick="revdirAddRow('{prefix}')">
+          ➕ Agregar fila
+        </button>
+        """
+
+    return f"""
+    <div class="table-responsive">
+      <table class="table table-bordered align-middle revdir-edit-table">
+        <thead>
+          <tr>{ths}</tr>
+        </thead>
+        <tbody id="{prefix}_tbody">
+          {html_rows}
+        </tbody>
+      </table>
+    </div>
+
+    <input type="hidden" id="{prefix}_count" name="{prefix}_count" value="{len(rows)}">
+
+    {add_btn}
+    """
+
+
+def _revdir_render_dofa_grid(dofa_rows, readonly=False):
+    if not dofa_rows:
+        dofa_rows = _revdir_autocargar_dofa()
+
+    d = dofa_rows[0] if isinstance(dofa_rows, list) and dofa_rows else {}
+    ro = "readonly"
+
+    campos = {
+        "fortalezas": "✅ Fortalezas",
+        "oportunidades": "🌟 Oportunidades",
+        "debilidades": "⚠️ Debilidades",
+        "amenazas": "🚨 Amenazas",
+        "estrategias_fo": "Estrategias FO",
+        "estrategias_fa": "Estrategias FA",
+        "estrategias_do": "Estrategias DO",
+        "estrategias_da": "Estrategias DA"
+    }
+
+    hidden = ""
+    for campo in campos:
+        hidden += f"""
+        <input type="hidden" name="dofa_{campo}_0" value="{escape(d.get(campo, '') or '')}">
+        """
+
+    html = f"""
+    <input type="hidden" id="dofa_count" name="dofa_count" value="1">
+    {hidden}
+
+    <div class="dofa-grid">
+      <div class="dofa-quad">
+        <div class="dofa-quad-title">✅ Fortalezas</div>
+        <textarea class="form-control" rows="7" {ro}>{escape(d.get('fortalezas', '') or '')}</textarea>
+      </div>
+
+      <div class="dofa-quad">
+        <div class="dofa-quad-title">🌟 Oportunidades</div>
+        <textarea class="form-control" rows="7" {ro}>{escape(d.get('oportunidades', '') or '')}</textarea>
+      </div>
+
+      <div class="dofa-quad">
+        <div class="dofa-quad-title">⚠️ Debilidades</div>
+        <textarea class="form-control" rows="7" {ro}>{escape(d.get('debilidades', '') or '')}</textarea>
+      </div>
+
+      <div class="dofa-quad">
+        <div class="dofa-quad-title">🚨 Amenazas</div>
+        <textarea class="form-control" rows="7" {ro}>{escape(d.get('amenazas', '') or '')}</textarea>
+      </div>
+
+      <div class="dofa-quad">
+        <div class="dofa-quad-title">Estrategias FO</div>
+        <textarea class="form-control" rows="6" {ro}>{escape(d.get('estrategias_fo', '') or '')}</textarea>
+      </div>
+
+      <div class="dofa-quad">
+        <div class="dofa-quad-title">Estrategias FA</div>
+        <textarea class="form-control" rows="6" {ro}>{escape(d.get('estrategias_fa', '') or '')}</textarea>
+      </div>
+
+      <div class="dofa-quad">
+        <div class="dofa-quad-title">Estrategias DO</div>
+        <textarea class="form-control" rows="6" {ro}>{escape(d.get('estrategias_do', '') or '')}</textarea>
+      </div>
+
+      <div class="dofa-quad">
+        <div class="dofa-quad-title">Estrategias DA</div>
+        <textarea class="form-control" rows="6" {ro}>{escape(d.get('estrategias_da', '') or '')}</textarea>
+      </div>
+    </div>
+    """
+
+    return html
+
+
+# ============================================================
+# RUTAS
+# ============================================================
+
+@app.route("/revision_direccion")
+@login_required
+def revdir_index():
+    user = _revdir_permiso()
+
+    if not user:
+        return redirect(url_for("menu"))
+
+    conn = get_rev_dir_db_connection()
+    informes = conn.execute("""
+        SELECT *
+        FROM revision_direccion_informes
+        ORDER BY id DESC
+    """).fetchall()
+    conn.close()
+
+    informes = [dict(x) for x in informes]
+
+    html = """
+    <div class="revdir-shell">
+      <div class="revdir-header-card">
+        <div class="revdir-header-overlay">
+          <div class="revdir-header-text">
+            <h3 class="revdir-title">Informe de Resultados para Revisión por la Dirección</h3>
+            <div class="revdir-subtitle">Gobierno / Dirección · SGSI</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="revdir-card p-4">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <div>
+            <div class="section-title">Informes registrados</div>
+            <div class="text-muted small">Consulta, edición, PDF y eliminación según permisos.</div>
+          </div>
+
+          {% if user.role != 'auditor' %}
+          <a href="{{ url_for('revdir_nuevo') }}" class="btn btn-primary rounded-pill px-4">
+            ➕ Nuevo Informe
+          </a>
+          {% endif %}
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Entidad</th>
+                <th>Año</th>
+                <th>Periodo</th>
+                <th>Fecha</th>
+                <th class="text-center">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in informes %}
+              <tr>
+                <td>{{ r.id }}</td>
+                <td>{{ r.entidad or '—' }}</td>
+                <td>{{ r.anio or '—' }}</td>
+                <td>{{ r.periodo or '—' }}</td>
+                <td>{{ r.fecha_informe or '—' }}</td>
+                <td class="text-center">
+                  <div class="d-flex justify-content-center gap-2 flex-wrap">
+                    <a class="btn btn-sm btn-outline-secondary rounded-pill" href="{{ url_for('revdir_ver', informe_id=r.id) }}">Ver</a>
+
+                    {% if user.role != 'auditor' %}
+                    <a class="btn btn-sm btn-outline-primary rounded-pill" href="{{ url_for('revdir_editar', informe_id=r.id) }}">Editar</a>
+                    {% endif %}
+
+                    <a class="btn btn-sm btn-danger rounded-pill" data-no-progress="true" href="{{ url_for('revdir_pdf', informe_id=r.id) }}">PDF</a>
+
+                    {% if user.role != 'auditor' %}
+                    <form method="POST"
+                          action="{{ url_for('revdir_eliminar', informe_id=r.id) }}"
+                          class="d-inline"
+                          data-no-progress="true"
+                          onsubmit="return confirm('¿Seguro que deseas eliminar este informe?');">
+                      <button type="submit" class="btn btn-sm btn-outline-danger rounded-pill">Eliminar</button>
+                    </form>
+                    {% endif %}
+                  </div>
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="6" class="text-center text-muted py-4">No hay informes registrados.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    """
+
+    html += _revdir_css()
+
+    return render_template_string(BASE, content=Markup(render_template_string(html, informes=informes, user=user)))
+
+
+@app.route("/revision_direccion/nuevo", methods=["GET", "POST"])
+@login_required
+def revdir_nuevo():
+    user = _revdir_permiso()
+
+    if not user:
+        return redirect(url_for("menu"))
+
+    if user.role == "auditor":
+        flash("El rol auditor solo puede consultar e imprimir informes.", "warning")
+        return redirect(url_for("revdir_index"))
+
+    if request.method == "POST":
+        nuevo_id = _revdir_insertar_desde_form(user)
+        flash("Informe creado correctamente.", "success")
+        return redirect(url_for("revdir_editar", informe_id=nuevo_id))
+
+    informe = _revdir_default_dict(user)
+    return _revdir_render_form(informe, user, modo="nuevo")
+
+
+@app.route("/revision_direccion/<int:informe_id>/ver")
+@login_required
+def revdir_ver(informe_id):
+    user = _revdir_permiso()
+
+    if not user:
+        return redirect(url_for("menu"))
+
+    informe = _revdir_get_plan(informe_id)
+    return _revdir_render_form(informe, user, modo="ver")
+
+
+@app.route("/revision_direccion/<int:informe_id>/editar", methods=["GET", "POST"])
+@login_required
+def revdir_editar(informe_id):
+    user = _revdir_permiso()
+
+    if not user:
+        return redirect(url_for("menu"))
+
+    if user.role == "auditor":
+        flash("El rol auditor no puede editar informes.", "warning")
+        return redirect(url_for("revdir_ver", informe_id=informe_id))
+
+    informe = _revdir_get_plan(informe_id)
+
+    if request.method == "POST":
+        _revdir_actualizar_desde_form(informe_id, user)
+        flash("Informe actualizado correctamente.", "success")
+        return redirect(url_for("revdir_editar", informe_id=informe_id))
+
+    return _revdir_render_form(informe, user, modo="editar")
+
+
+@app.route("/revision_direccion/<int:informe_id>/eliminar", methods=["POST"])
+@login_required
+def revdir_eliminar(informe_id):
+    user = _revdir_permiso()
+
+    if not user:
+        return redirect(url_for("menu"))
+
+    if user.role == "auditor":
+        flash("El rol auditor no puede eliminar informes.", "warning")
+        return redirect(url_for("revdir_index"))
+
+    informe = _revdir_get_plan(informe_id)
+
+    conn = get_rev_dir_db_connection()
+    conn.execute("DELETE FROM revision_direccion_informes WHERE id = ?", (informe_id,))
+    conn.commit()
+    conn.close()
+
+    try:
+        registrar_log(getattr(user, "username", "Sistema"), f"Eliminó Informe Revisión Dirección: {informe.get('entidad')} - {informe.get('anio')}")
+    except Exception:
+        pass
+
+    flash("Informe eliminado correctamente.", "success")
+    return redirect(url_for("revdir_index"))
+
+
+def _revdir_render_form(informe, user, modo="editar"):
+    readonly = (modo == "ver") or (user.role == "auditor")
+    ro = "readonly" if readonly else ""
+    disabled_submit = "d-none" if readonly else ""
+
+    objetivos_rows = _revdir_json_load(informe.get("objetivos_json"), [])
+    if not objetivos_rows:
+        objetivos_rows = _revdir_autocargar_objetivos()
+
+    riesgos_rows = _revdir_json_load(informe.get("riesgos_json"), [])
+    if (
+        not riesgos_rows
+        or all(
+            not str(r.get("prob_inh", "")).strip()
+            and not str(r.get("impacto_inh", "")).strip()
+            for r in riesgos_rows
+        )
+    ):
+        riesgos_rows = _revdir_autocargar_riesgos(informe.get("anio"))
+
+    dofa_rows = _revdir_json_load(informe.get("dofa_json"), [])
+    if not dofa_rows:
+        dofa_rows = _revdir_autocargar_dofa()
+
+    partes_rows = _revdir_json_load(informe.get("partes_json"), [])
+    if not partes_rows:
+        partes_rows = _revdir_autocargar_partes_interesadas()
+
+    mejora_rows = _revdir_json_load(informe.get("mejora_json"), [])
+    if not mejora_rows:
+        mejora_rows = _revdir_default_mejora()
+
+    objetivos_html = _revdir_render_rows(
+        "objetivos",
+        objetivos_rows,
+        ["objetivo", "meta", "resultado", "analisis"],
+        ["Objetivo", "Meta", "Resultado", "Análisis"],
+        readonly,
+        locked_fields=["objetivo", "meta"],
+        allow_add=False,
+        allow_delete=False
+    )
+
+    riesgos_html = _revdir_render_rows(
+        "riesgos",
+        riesgos_rows,
+        ["codigo", "riesgo", "prob_inh", "impacto_inh", "riesgo_inh", "riesgo_residual"],
+        ["Código", "Riesgo", "Prob. Inh", "Impacto Inh", "Riesgo Inherente", "Riesgo Residual"],
+        True,
+        allow_add=False,
+        allow_delete=False
+    )
+
+    dofa_html = _revdir_render_dofa_grid(dofa_rows, readonly=True)
+
+    partes_html = _revdir_render_rows(
+        "partes",
+        partes_rows,
+        ["parte", "analisis"],
+        ["Parte Interesada", "Análisis"],
+        readonly,
+        locked_fields=["parte"],
+        allow_add=False,
+        allow_delete=False
+    )
+
+    mejora_html = _revdir_render_rows(
+        "mejora",
+        mejora_rows,
+        ["perspectiva", "objetivo_seg_inf", "proyecto"],
+        ["PERSPECTIVA", "OBJETIVO DE SEG. INF", "PROYECTO"],
+        readonly,
+        allow_add=True,
+        allow_delete=True
+    )
+
+    titulo_modo = {
+        "nuevo": "Nuevo Informe",
+        "editar": "Editar Informe",
+        "ver": "Ver Informe"
+    }.get(modo, "Informe")
+
+    pdf_button = ""
+    if informe.get("id"):
+        pdf_button = f"""
+        <a href="{url_for('revdir_pdf', informe_id=informe.get('id'))}" data-no-progress="true" class="btn btn-danger rounded-pill px-4">
+          📄 Generar PDF
+        </a>
+        """
+
+    html = f"""
+    <div class="revdir-shell">
+      <div class="revdir-header-card">
+        <div class="revdir-header-overlay">
+          <div class="revdir-header-text">
+            <h3 class="revdir-title">Informe de Resultados para Revisión por la Dirección</h3>
+            <div class="revdir-subtitle">{titulo_modo} · Gobierno / Dirección · SGSI</div>
+          </div>
+        </div>
+      </div>
+
+      <form method="POST" class="revdir-card p-4">
+
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+          <div>
+            <div class="section-title">{titulo_modo}</div>
+            <div class="text-muted small">
+              {"Consulta en solo lectura." if readonly else "Diligencia los campos editables del informe."}
+            </div>
+          </div>
+
+          <div class="d-flex gap-2 flex-wrap">
+            <a href="{url_for('revdir_index')}" class="btn btn-outline-secondary rounded-pill px-4">Volver</a>
+            {pdf_button}
+            <button type="submit" class="btn btn-success rounded-pill px-4 {disabled_submit}">
+              💾 Guardar Informe
+            </button>
+          </div>
+        </div>
+
+        <div class="row g-3 mb-4">
+          <div class="col-md-5">
+            <label class="form-label">Entidad</label>
+            <input class="form-control" name="entidad" value="{escape(informe.get('entidad') or '')}" {ro}>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Año</label>
+            <input class="form-control" name="anio" value="{escape(informe.get('anio') or '')}" {ro}>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Periodo</label>
+            <input class="form-control" name="periodo" value="{escape(informe.get('periodo') or '')}" {ro}>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Fecha informe</label>
+            <input type="date" class="form-control" name="fecha_informe" value="{escape(informe.get('fecha_informe') or '')}" {ro}>
+          </div>
+        </div>
+
+        <div class="revdir-section">
+          <div class="section-title">A. RESULTADOS - MEDICIÓN OBJETIVOS DEL SGSI</div>
+          <div class="revdir-help">Objetivo y meta se cargan automáticamente desde el módulo Objetivos del Sistema de Gestión. Resultado y análisis son editables.</div>
+          {objetivos_html}
+        </div>
+
+        <div class="revdir-section">
+          <div class="section-title">B. RESULTADOS DE LA VALORACIÓN DE RIESGOS Y ESTADO DEL PLAN DE TRATAMIENTO</div>
+          <textarea class="form-control mb-3" rows="5" name="riesgos_intro" {ro}>{escape(informe.get('riesgos_intro') or '')}</textarea>
+          <div class="revdir-help">La matriz se carga automáticamente desde Gestión de Riesgos para el año del informe y queda guardada al guardar el informe.</div>
+          {riesgos_html}
+          <label class="form-label mt-3">Conclusión</label>
+          <textarea class="form-control" rows="4" name="riesgos_conclusion" {ro}>{escape(informe.get('riesgos_conclusion') or '')}</textarea>
+        </div>
+
+        <div class="revdir-section">
+          <div class="section-title">C. AUDITORÍAS INTERNAS AL SGSI</div>
+          <textarea class="form-control" rows="7" name="auditorias_texto" {ro}>{escape(informe.get('auditorias_texto') or '')}</textarea>
+        </div>
+
+        <div class="revdir-section">
+          <div class="section-title">D. DEFINICIÓN EN LAS CUESTIONES EXTERNAS E INTERNAS</div>
+          <textarea class="form-control mb-3" rows="6" name="cuestiones_texto" {ro}>{escape(informe.get('cuestiones_texto') or '')}</textarea>
+          <div class="revdir-help">DOFA cargado automáticamente desde el módulo DOFA y queda guardado al guardar el informe.</div>
+          {dofa_html}
+        </div>
+
+        <div class="revdir-section">
+          <div class="section-title">E. RETROALIMENTACIÓN SOBRE EL DESEMPEÑO DE LA SEGURIDAD DE LA INFORMACIÓN</div>
+          <textarea class="form-control" rows="7" name="desempeno_texto" {ro}>{escape(informe.get('desempeno_texto') or '')}</textarea>
+        </div>
+
+        <div class="revdir-section">
+          <div class="section-title">F. RETROALIMENTACIÓN DE LAS PARTES INTERESADAS</div>
+          <div class="revdir-help">Partes interesadas cargadas automáticamente; la columna Análisis es editable por el usuario.</div>
+          {partes_html}
+        </div>
+
+        <div class="revdir-section">
+          <div class="section-title">G. LAS OPORTUNIDADES DE MEJORA CONTINUA</div>
+          <textarea class="form-control mb-3" rows="6" name="mejora_texto" {ro}>{escape(informe.get('mejora_texto') or '')}</textarea>
+          {mejora_html}
+        </div>
+
+        <div class="revdir-section">
+          <div class="section-title">Aprobación</div>
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label">Elaboró - Nombre</label>
+              <input class="form-control mb-2" name="elaboro_nombre" value="{escape(informe.get('elaboro_nombre') or '')}" {ro}>
+              <label class="form-label">Elaboró - Cargo</label>
+              <input class="form-control" name="elaboro_cargo" value="{escape(informe.get('elaboro_cargo') or '')}" {ro}>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Revisó - Nombre</label>
+              <input class="form-control mb-2" name="reviso_nombre" value="{escape(informe.get('reviso_nombre') or '')}" {ro}>
+              <label class="form-label">Revisó - Cargo</label>
+              <input class="form-control" name="reviso_cargo" value="{escape(informe.get('reviso_cargo') or '')}" {ro}>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Aprobó - Nombre</label>
+              <input class="form-control mb-2" name="aprobo_nombre" value="{escape(informe.get('aprobo_nombre') or '')}" {ro}>
+              <label class="form-label">Aprobó - Cargo</label>
+              <input class="form-control mb-2" name="aprobo_cargo" value="{escape(informe.get('aprobo_cargo') or '')}" {ro}>
+              <label class="form-label">Fecha aprobación</label>
+              <input type="date" class="form-control" name="fecha_aprobacion" value="{escape(informe.get('fecha_aprobacion') or '')}" {ro}>
+            </div>
+          </div>
+        </div>
+
+        <div class="text-center mt-4">
+          <button type="submit" class="btn btn-success rounded-pill px-5 {disabled_submit}">
+            💾 Guardar Informe
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <script>
+      const REVDIR_TABLES = {{
+        mejora: {{ fields: ["perspectiva", "objetivo_seg_inf", "proyecto"] }}
+      }};
+
+      function revdirAddRow(prefix) {{
+        const cfg = REVDIR_TABLES[prefix];
+        if (!cfg) return;
+
+        const tbody = document.getElementById(prefix + "_tbody");
+        const countInput = document.getElementById(prefix + "_count");
+
+        if (!tbody || !countInput) return;
+
+        let idx = parseInt(countInput.value || "0");
+        let tr = document.createElement("tr");
+
+        cfg.fields.forEach(function(field) {{
+          let td = document.createElement("td");
+          td.innerHTML = '<textarea class="form-control form-control-sm" rows="3" name="' + prefix + '_' + field + '_' + idx + '"></textarea>';
+          tr.appendChild(td);
+        }});
+
+        let tdAction = document.createElement("td");
+        tdAction.className = "text-center";
+        tdAction.innerHTML = '<button type="button" class="btn btn-sm btn-outline-danger rounded-pill" onclick="revdirRemoveRow(this)">🗑️</button>';
+        tr.appendChild(tdAction);
+
+        tbody.appendChild(tr);
+        countInput.value = idx + 1;
+      }}
+
+      function revdirRemoveRow(btn) {{
+        const tr = btn.closest("tr");
+        const tbody = tr ? tr.parentElement : null;
+
+        if (!tr || !tbody) return;
+
+        if (tbody.querySelectorAll("tr").length <= 1) {{
+          tr.querySelectorAll("textarea").forEach(function(t) {{ t.value = ""; }});
+          return;
+        }}
+
+        tr.remove();
+      }}
+    </script>
+    """
+
+    html += _revdir_css()
+
+    return render_template_string(BASE, content=Markup(render_template_string(html, informe=informe, user=user)))
+
+
+# ============================================================
+# PDF CON PORTADA Y TABLA DE CONTENIDO EMPRESARIAL
+# ============================================================
+
+@app.route("/revision_direccion/<int:informe_id>/pdf")
+@login_required
+def revdir_pdf(informe_id):
+    user = _revdir_permiso()
+
+    if not user:
+        return redirect(url_for("menu"))
+
+    informe = _revdir_get_plan(informe_id)
+
+    objetivos = _revdir_json_load(informe.get("objetivos_json"), [])
+    riesgos = _revdir_json_load(informe.get("riesgos_json"), [])
+    dofa = _revdir_json_load(informe.get("dofa_json"), [])
+    partes = _revdir_json_load(informe.get("partes_json"), [])
+    mejora = _revdir_json_load(informe.get("mejora_json"), [])
+
+    dofa_data = dofa[0] if dofa else {}
+
+    buffer = BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=1.5 * cm,
+        leftMargin=1.5 * cm,
+        topMargin=1.4 * cm,
+        bottomMargin=1.4 * cm
+    )
+
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "RevDirTitle",
+        parent=styles["Title"],
+        alignment=TA_CENTER,
+        fontSize=17,
+        leading=22,
+        textColor=colors.HexColor("#1d4f8f"),
+        spaceAfter=14
+    )
+
+    cover_subtitle_style = ParagraphStyle(
+        "RevDirCoverSubtitle",
+        parent=styles["BodyText"],
+        alignment=TA_CENTER,
+        fontSize=10,
+        leading=14,
+        textColor=colors.HexColor("#334155"),
+        spaceAfter=6
+    )
+
+    h1 = ParagraphStyle(
+        "RevDirH1",
+        parent=styles["Heading1"],
+        fontSize=11,
+        leading=14,
+        textColor=colors.HexColor("#1d4f8f"),
+        spaceBefore=10,
+        spaceAfter=6
+    )
+
+    toc_title_style = ParagraphStyle(
+        "RevDirTocTitle",
+        parent=styles["Heading1"],
+        fontSize=14,
+        leading=18,
+        textColor=colors.HexColor("#1d4f8f"),
+        spaceAfter=14
+    )
+
+    toc_item_style = ParagraphStyle(
+        "RevDirTocItem",
+        parent=styles["BodyText"],
+        fontSize=9,
+        leading=12,
+        leftIndent=18,
+        firstLineIndent=-14,
+        spaceAfter=7,
+        textColor=colors.HexColor("#1f2937")
+    )
+
+    normal = ParagraphStyle(
+        "RevDirNormal",
+        parent=styles["BodyText"],
+        fontSize=8,
+        leading=10,
+        alignment=TA_LEFT,
+        spaceAfter=5
+    )
+
+    small = ParagraphStyle(
+        "RevDirSmall",
+        parent=styles["BodyText"],
+        fontSize=7,
+        leading=9
+    )
+
+    story = []
+
+    def P(txt, style=normal):
+        safe = xml_escape(str(txt or "")).replace("\n", "<br/>")
+        return Paragraph(safe, style)
+
+    def make_table(data, widths=None, font_size=7):
+        clean = []
+        for row in data:
+            clean.append([P(c, small) for c in row])
+
+        t = Table(clean, colWidths=widths, repeatRows=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dbeafe")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#1d4f8f")),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#9bb9d6")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), font_size),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(t)
+        story.append(Spacer(1, 8))
+
+    def info_table():
+        data = [
+            ["Periodo", informe.get("periodo") or ""],
+            ["Fecha del informe", informe.get("fecha_informe") or ""],
+        ]
+
+        clean = [[P(a, small), P(b, small)] for a, b in data]
+
+        t = Table(clean, colWidths=[5 * cm, 9 * cm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#eaf3ff")),
+            ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#9bb9d6")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 7),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+            ("TOPPADDING", (0, 0), (-1, -1), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ]))
+
+        story.append(t)
+
+    # ========================================================
+    # PORTADA
+    # ========================================================
+
+    story.append(Spacer(1, 70))
+    story.append(Paragraph("INFORME DE RESULTADOS", title_style))
+    story.append(Paragraph("PARA REVISIÓN POR LA DIRECCIÓN", title_style))
+    story.append(Spacer(1, 18))
+    story.append(Paragraph("Sistema de Gestión de Seguridad de la Información — SGSI", cover_subtitle_style))
+    story.append(Spacer(1, 30))
+    story.append(Paragraph(xml_escape(informe.get("entidad") or "(NOMBRE DE LA ENTIDAD)"), title_style))
+    story.append(Spacer(1, 24))
+    info_table()
+    story.append(PageBreak())
+
+    # ========================================================
+    # TABLA DE CONTENIDO INDENTADA
+    # ========================================================
+
+    story.append(Paragraph("Tabla de contenido", toc_title_style))
+
+    toc = [
+        ("A.", "RESULTADOS - MEDICIÓN OBJETIVOS DEL SISTEMA DE GESTIÓN DE SEGURIDAD DE LA INFORMACIÓN"),
+        ("B.", "RESULTADOS DE LA VALORACIÓN DE RIESGOS Y ESTADO DEL PLAN DE TRATAMIENTO DE RIESGOS"),
+        ("C.", "AUDITORÍAS INTERNAS AL SISTEMA DE GESTIÓN DE SEGURIDAD DE LA INFORMACIÓN"),
+        ("D.", "DEFINICIÓN EN LAS CUESTIONES EXTERNAS E INTERNAS"),
+        ("E.", "RETROALIMENTACIÓN SOBRE EL DESEMPEÑO DE LA SEGURIDAD DE LA INFORMACIÓN"),
+        ("F.", "RETROALIMENTACIÓN DE LAS PARTES INTERESADAS"),
+        ("G.", "LAS OPORTUNIDADES DE MEJORA CONTINUA"),
+    ]
+
+    for letra, texto in toc:
+        story.append(Paragraph(f"<b>{letra}</b>&nbsp;&nbsp;{xml_escape(texto)}", toc_item_style))
+
+    story.append(PageBreak())
+
+    # ========================================================
+    # CONTENIDO DEL INFORME
+    # ========================================================
+
+    story.append(Paragraph("A. RESULTADOS - MEDICIÓN OBJETIVOS DEL SGSI", h1))
+    make_table(
+        [["Objetivo", "Meta", "Resultado", "Análisis"]] +
+        [[r.get("objetivo", ""), r.get("meta", ""), r.get("resultado", ""), r.get("analisis", "")] for r in objetivos],
+        [5.2 * cm, 2.2 * cm, 4.2 * cm, 5.5 * cm]
+    )
+
+    story.append(Paragraph("B. RESULTADOS DE LA VALORACIÓN DE RIESGOS Y ESTADO DEL PLAN DE TRATAMIENTO", h1))
+    story.append(P(informe.get("riesgos_intro")))
+
+    make_table(
+        [["Código", "Riesgo", "Prob. Inh", "Impacto Inh", "Riesgo Inherente", "Riesgo Residual"]] +
+        [[
+            r.get("codigo", ""),
+            r.get("riesgo", ""),
+            r.get("prob_inh", ""),
+            r.get("impacto_inh", ""),
+            r.get("riesgo_inh", ""),
+            r.get("riesgo_residual", "")
+        ] for r in riesgos],
+        [2 * cm, 4.5 * cm, 2.4 * cm, 2.4 * cm, 3 * cm, 3 * cm],
+        font_size=6
+    )
+
+    story.append(P("Conclusión: " + (informe.get("riesgos_conclusion") or "")))
+
+    story.append(Paragraph("C. AUDITORÍAS INTERNAS AL SGSI", h1))
+    story.append(P(informe.get("auditorias_texto")))
+
+    story.append(Paragraph("D. DEFINICIÓN EN LAS CUESTIONES EXTERNAS E INTERNAS", h1))
+    story.append(P(informe.get("cuestiones_texto")))
+
+    make_table([
+        ["Fortalezas", "Oportunidades"],
+        [dofa_data.get("fortalezas", ""), dofa_data.get("oportunidades", "")],
+        ["Debilidades", "Amenazas"],
+        [dofa_data.get("debilidades", ""), dofa_data.get("amenazas", "")]
+    ], [8.5 * cm, 8.5 * cm])
+
+    make_table([
+        ["Estrategias FO", "Estrategias FA"],
+        [dofa_data.get("estrategias_fo", ""), dofa_data.get("estrategias_fa", "")],
+        ["Estrategias DO", "Estrategias DA"],
+        [dofa_data.get("estrategias_do", ""), dofa_data.get("estrategias_da", "")]
+    ], [8.5 * cm, 8.5 * cm])
+
+    story.append(Paragraph("E. RETROALIMENTACIÓN SOBRE EL DESEMPEÑO DE LA SEGURIDAD DE LA INFORMACIÓN", h1))
+    story.append(P(informe.get("desempeno_texto")))
+
+    story.append(Paragraph("F. RETROALIMENTACIÓN DE LAS PARTES INTERESADAS", h1))
+    make_table(
+        [["Parte Interesada", "Análisis"]] +
+        [[r.get("parte", ""), r.get("analisis", "")] for r in partes],
+        [6 * cm, 11 * cm]
+    )
+
+    story.append(Paragraph("G. LAS OPORTUNIDADES DE MEJORA CONTINUA", h1))
+    story.append(P(informe.get("mejora_texto")))
+
+    make_table(
+        [["PERSPECTIVA", "OBJETIVO DE SEG. INF", "PROYECTO"]] +
+        [[r.get("perspectiva", ""), r.get("objetivo_seg_inf", ""), r.get("proyecto", "")] for r in mejora],
+        [4.5 * cm, 6.5 * cm, 6 * cm]
+    )
+
+    story.append(Paragraph("Aprobación", h1))
+
+    make_table([
+        ["Elaboró", "Revisó", "Aprobó"],
+        [
+            f"Nombre: {informe.get('elaboro_nombre') or ''}\nCargo: {informe.get('elaboro_cargo') or ''}",
+            f"Nombre: {informe.get('reviso_nombre') or ''}\nCargo: {informe.get('reviso_cargo') or ''}",
+            f"Nombre: {informe.get('aprobo_nombre') or ''}\nCargo: {informe.get('aprobo_cargo') or ''}\nFecha: {informe.get('fecha_aprobacion') or ''}",
+        ]
+    ], [5.6 * cm, 5.6 * cm, 5.6 * cm])
+
+    def footer(canvas, doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.HexColor("#5b6b7a"))
+        canvas.drawString(1.5 * cm, 1.0 * cm, "SGSI — GRAC | Revisión por la Dirección")
+        canvas.drawRightString(19.5 * cm, 1.0 * cm, f"Página {doc.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+
+    buffer.seek(0)
+
+    filename = f"Informe_Revision_Direccion_{secure_filename(informe.get('entidad') or 'Entidad')}_{informe.get('anio') or datetime.now().year}.pdf"
 
     return send_file(
         buffer,
