@@ -17580,7 +17580,16 @@ def mapa_calor():
         {"min": 13, "max": 20, "class": "nivel4", "color": "#e74c3c"},
         {"min": 21, "max": 25, "class": "nivel5", "color": "#8e44ad"},
     ]
-    color_ranges = [{"min": c["min"], "max": c["max"], "class": c["class"], "color": c["color"]} for c in colorPorValor]
+
+    color_ranges = [
+        {
+            "min": c["min"],
+            "max": c["max"],
+            "class": c["class"],
+            "color": c["color"]
+        }
+        for c in colorPorValor
+    ]
 
     def normalizar(etiqueta, tipo="prob"):
         if not etiqueta:
@@ -17609,7 +17618,7 @@ def mapa_calor():
                 return "Moderado o Importante"
             if "mayor" in e or e == "4":
                 return "Mayor"
-            if "catastrófico" in e or "crítico" in e or e == "5":
+            if "catastrófico" in e or "catastrofico" in e or "crítico" in e or "critico" in e or e == "5":
                 return "Catastrófico o Crítico"
 
         return niveles[0] if tipo == "prob" else impacto_niveles[0]
@@ -17618,28 +17627,41 @@ def mapa_calor():
     riesgos_json = []
 
     for r in riesgos_db:
-        prob_text = normalizar(getattr(r, "prob_res", "") or getattr(r, "cuadrante_prob", ""), "prob")
-        impacto_text = normalizar(getattr(r, "impacto_res_label", "") or getattr(r, "cuadrante_imp", ""), "imp")
+        prob_text = normalizar(
+            getattr(r, "prob_res", "") or getattr(r, "cuadrante_prob", ""),
+            "prob"
+        )
+
+        impacto_text = normalizar(
+            getattr(r, "impacto_res_label", "") or getattr(r, "cuadrante_imp", ""),
+            "imp"
+        )
+
+        detalle_url = url_for("riesgo_detalle", riesgo_id=r.id)
+
+        item = {
+            "id": r.id,
+            "codigo_riesgo": r.codigo_riesgo or "",
+            "riesgo": r.riesgo or "",
+            "nombre_activo": getattr(r, "nombre_activo", "") or "",
+            "riesgo_residual": getattr(r, "riesgo_residual", "") or "",
+            "propietario": getattr(r, "propietario_riesgo", "") or "",
+            "detalle_url": detalle_url
+        }
 
         if prob_text in niveles and impacto_text in impacto_niveles:
-            matriz[prob_text][impacto_text].append({
-                "id": r.id,
-                "codigo_riesgo": r.codigo_riesgo,
-                "riesgo": r.riesgo,
-                "nombre_activo": getattr(r, "nombre_activo", ""),
-                "riesgo_residual": getattr(r, "riesgo_residual", "") or "",
-                "propietario": getattr(r, "propietario_riesgo", "") or ""
-            })
+            matriz[prob_text][impacto_text].append(item)
 
         riesgos_json.append({
             "id": r.id,
-            "codigo_riesgo": r.codigo_riesgo,
-            "riesgo": r.riesgo,
-            "nombre_activo": getattr(r, "nombre_activo", ""),
+            "codigo_riesgo": r.codigo_riesgo or "",
+            "riesgo": r.riesgo or "",
+            "nombre_activo": getattr(r, "nombre_activo", "") or "",
             "prob_res": prob_text,
             "impacto_res": impacto_text,
             "riesgo_residual": getattr(r, "riesgo_residual", "") or "",
-            "propietario": getattr(r, "propietario_riesgo", "") or ""
+            "propietario": getattr(r, "propietario_riesgo", "") or "",
+            "detalle_url": detalle_url
         })
 
     html = render_template_string("""
@@ -17657,7 +17679,9 @@ def mapa_calor():
       </div>
 
       <div class="heat-header-actions">
-        <a class="heat-back-btn" href="{{ url_for('gestion_riesgos') }}">⬅ Volver a Gestión de Riesgos</a>
+        <a class="heat-back-btn" href="{{ url_for('gestion_riesgos') }}">
+          ⬅ Volver a Gestión de Riesgos
+        </a>
       </div>
 
       <div class="heat-card">
@@ -17672,12 +17696,17 @@ def mapa_calor():
                   {% endfor %}
                 </tr>
               </thead>
+
               <tbody>
                 {% for prob in niveles %}
                 <tr>
                   <th>{{ prob }}</th>
                   {% for imp in impacto_niveles %}
-                    <td class="cell" data-prob="{{ prob }}" data-imp="{{ imp }}" id="cell-{{ prob }}-{{ imp }}"></td>
+                    <td class="cell"
+                        data-prob="{{ prob }}"
+                        data-imp="{{ imp }}"
+                        id="cell-{{ prob }}-{{ imp }}">
+                    </td>
                   {% endfor %}
                 </tr>
                 {% endfor %}
@@ -17690,6 +17719,7 @@ def mapa_calor():
       <div class="heat-legend-card">
         <div class="heat-legend-body">
           <div class="heat-legend-title">Leyenda de niveles</div>
+
           <div class="legend">
             <span class="nivel1">Bajo (1-4)</span>
             <span class="nivel2">Medio (5-8)</span>
@@ -17711,7 +17741,6 @@ def mapa_calor():
     </div>
 
     <style>
-
       body{
         background-image:url('/static/img/ccsgsi.jpg') !important;
         background-size:cover !important;
@@ -17726,9 +17755,6 @@ def mapa_calor():
         margin:10px auto 24px auto;
       }
 
-      /* =========================
-         HERO SGSI
-      ========================== */
       .heat-header-card{
         background:
           linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
@@ -17806,9 +17832,6 @@ def mapa_calor():
         opacity:.9;
       }
 
-      /* =========================
-         BOTÓN VOLVER
-      ========================== */
       .heat-header-actions{
         display:flex;
         justify-content:center;
@@ -17822,11 +17845,15 @@ def mapa_calor():
         font-weight:900;
         background:#fff;
         border:1px solid #cfd8e3;
+        text-decoration:none;
+        color:#1f2937;
       }
 
-      /* =========================
-         CARD
-      ========================== */
+      .heat-back-btn:hover{
+        background:#eef4ff;
+        color:#0b65d8;
+      }
+
       .heat-card{
         background:rgba(255,255,255,.96);
         border-radius:18px;
@@ -17839,9 +17866,6 @@ def mapa_calor():
         padding:14px;
       }
 
-      /* =========================
-         TABLA HEATMAP
-      ========================== */
       .heat-table-wrap{
         background:#fff;
         border-radius:14px;
@@ -17868,6 +17892,7 @@ def mapa_calor():
       .heatmap-table th{
         background:#eaf3ff;
         font-weight:900;
+        color:#1f2937;
       }
 
       .heatmap-table td.cell{
@@ -17881,18 +17906,12 @@ def mapa_calor():
         box-shadow:0 6px 14px rgba(0,0,0,.2);
       }
 
-      /* =========================
-         COLORES NIVELES
-      ========================== */
       .nivel1{background:#2ecc71;color:#fff;}
       .nivel2{background:#f1c40f;color:#111;}
       .nivel3{background:#ff69b4;color:#111;}
       .nivel4{background:#e74c3c;color:#fff;}
       .nivel5{background:#8e44ad;color:#fff;}
 
-      /* =========================
-         LEYENDA
-      ========================== */
       .heat-legend-card{
         background:#fff;
         border-radius:18px;
@@ -17902,6 +17921,13 @@ def mapa_calor():
       .heat-legend-body{
         padding:14px;
         text-align:center;
+      }
+
+      .heat-legend-title{
+        font-size:.82rem;
+        font-weight:950;
+        color:#1f2937;
+        margin-bottom:8px;
       }
 
       .legend{
@@ -17918,9 +17944,6 @@ def mapa_calor():
         font-weight:800;
       }
 
-      /* =========================
-         MODAL MEJORADO
-      ========================== */
       .modal{
         display:none;
         position:fixed;
@@ -17931,17 +17954,22 @@ def mapa_calor():
       }
 
       .modal .box{
+        position:relative;
         background:#fff;
-        max-width:700px;
-        margin:auto;
+        max-width:760px;
+        margin:7vh auto;
         padding:18px;
         border-radius:16px;
         box-shadow:0 20px 50px rgba(0,0,0,.3);
+        max-height:78vh;
+        overflow:auto;
       }
 
       .modal h3{
         font-size:1rem;
         font-weight:900;
+        margin-bottom:12px;
+        color:#1f2937;
       }
 
       .close{
@@ -17954,6 +17982,17 @@ def mapa_calor():
         width:30px;
         height:30px;
         cursor:pointer;
+        font-weight:900;
+      }
+
+      .close:hover{
+        background:#dbe6f4;
+      }
+
+      ul.rlist{
+        list-style:none;
+        padding:0;
+        margin:0;
       }
 
       ul.rlist li{
@@ -17962,14 +18001,32 @@ def mapa_calor():
         border-radius:12px;
         margin-bottom:8px;
         font-size:.8rem;
+        border:1px solid #dbe6f4;
+        cursor:pointer;
+        transition:.18s ease;
       }
 
-      /* =========================
-         RESPONSIVE
-      ========================== */
+      ul.rlist li:hover{
+        background:#eef6ff;
+        transform:translateY(-2px);
+        box-shadow:0 8px 18px rgba(15,23,42,.12);
+      }
+
+      .risk-detail-link{
+        color:#1476ef;
+        font-weight:950;
+        display:inline-block;
+        margin-top:6px;
+      }
+
       @media(max-width:992px){
-        .heat-shell{width:98%;}
-        .heat-title{font-size:1.2rem;}
+        .heat-shell{
+          width:98%;
+        }
+
+        .heat-title{
+          font-size:1.2rem;
+        }
 
         .heatmap-table th,
         .heatmap-table td{
@@ -17977,7 +18034,6 @@ def mapa_calor():
           height:85px;
         }
       }
-
     </style>
 
     <script>
@@ -17985,23 +18041,38 @@ def mapa_calor():
       const matrizServidor = {{ matriz|tojson }};
       const colorRanges = {{ color_ranges|tojson }};
 
+      function escapeHtml(text){
+        return String(text || "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
       function clasePorValor(valor) {
         for (let i = 0; i < colorRanges.length; i++) {
           const r = colorRanges[i];
-          if (valor >= r.min && valor <= r.max) return r.class;
+          if (valor >= r.min && valor <= r.max) {
+            return r.class;
+          }
         }
         return "nivel5";
       }
 
-      for (const prob of Object.keys(matrizServidor)) {
-        for (const imp of Object.keys(matrizServidor[prob])) {
-          const cell = document.getElementById(`cell-${prob}-${imp}`);
-          const lista = matrizServidor[prob][imp] || [];
-          if (!cell) continue;
+      function pintarMapa(){
+        for (const prob of Object.keys(matrizServidor)) {
+          for (const imp of Object.keys(matrizServidor[prob])) {
+            const cell = document.getElementById(`cell-${prob}-${imp}`);
+            const lista = matrizServidor[prob][imp] || [];
 
-          if (lista.length === 0) {
-            cell.innerHTML = "<small style='color:#777'>-</small>";
-          } else {
+            if (!cell) continue;
+
+            if (lista.length === 0) {
+              cell.innerHTML = "<small style='color:#777'>-</small>";
+              continue;
+            }
+
             const map = {
               "Rara vez o Muy baja": 1,
               "Eventualmente o Baja": 2,
@@ -18017,30 +18088,56 @@ def mapa_calor():
 
             const valor = Number(map[prob] || 1) * Number(map[imp] || 1);
             const clase = clasePorValor(valor);
+
             cell.classList.add(clase);
 
-            const texto = `<div>${lista.length} riesgo(s)</div>
-                           <div style="font-size:12px;margin-top:6px">${lista[0].riesgo || lista[0].nombre_activo || ''}</div>`;
-            cell.innerHTML = texto;
+            cell.innerHTML = `
+              <div>${lista.length} riesgo(s)</div>
+              <div style="font-size:12px;margin-top:6px">
+                ${escapeHtml(lista[0].riesgo || lista[0].nombre_activo || '')}
+              </div>
+            `;
 
-            cell.addEventListener('click', () => {
-              const modal = document.getElementById('modal');
-              const title = document.getElementById('modalTitle');
-              const list = document.getElementById('modalList');
-              title.innerText = `Riesgos — ${prob} / ${imp} (${lista.length})`;
-              list.innerHTML = '';
-
-              lista.forEach(it => {
-                const li = document.createElement('li');
-                li.innerHTML = `<b>${it.codigo_riesgo || ''}</b> — ${it.riesgo || it.nombre_activo || 'sin título'}<br>
-                                <small>Activo: ${it.nombre_activo || '—'} | Residual: ${it.riesgo_residual || '—'} | Prop.: ${it.propietario || '—'}</small>`;
-                list.appendChild(li);
-              });
-
-              modal.style.display = 'block';
-            });
+            cell.addEventListener('click', () => abrirModal(prob, imp, lista));
           }
         }
+      }
+
+      function abrirModal(prob, imp, lista){
+        const modal = document.getElementById('modal');
+        const title = document.getElementById('modalTitle');
+        const list = document.getElementById('modalList');
+
+        title.innerText = `Riesgos — ${prob} / ${imp} (${lista.length})`;
+        list.innerHTML = '';
+
+        lista.forEach(it => {
+          const li = document.createElement('li');
+
+          li.onclick = function(){
+            window.location.href = it.detalle_url;
+          };
+
+          li.innerHTML = `
+            <b>${escapeHtml(it.codigo_riesgo || 'Sin código')}</b>
+            —
+            ${escapeHtml(it.riesgo || it.nombre_activo || 'Sin título')}
+            <br>
+            <small>
+              Activo: ${escapeHtml(it.nombre_activo || '—')}
+              |
+              Residual: ${escapeHtml(it.riesgo_residual || '—')}
+              |
+              Prop.: ${escapeHtml(it.propietario || '—')}
+            </small>
+            <br>
+            <span class="risk-detail-link">🔎 Ver detalle del riesgo →</span>
+          `;
+
+          list.appendChild(li);
+        });
+
+        modal.style.display = 'block';
       }
 
       function cerrarModal(){
@@ -18048,8 +18145,12 @@ def mapa_calor():
       }
 
       window.onclick = (e) => {
-        if (e.target.id === 'modal') cerrarModal();
+        if (e.target.id === 'modal') {
+          cerrarModal();
+        }
       };
+
+      document.addEventListener("DOMContentLoaded", pintarMapa);
     </script>
     """,
     niveles=niveles,
