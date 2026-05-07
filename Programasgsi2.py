@@ -7332,6 +7332,7 @@ def _dashboard_build_payload():
     iso_data = _dashboard_latest_iso_data()
     nist_data = _dashboard_latest_nist_data()
     datos_pct = _dashboard_latest_datos_pct()
+    scorecard_terceros_pct = _dashboard_latest_scorecard_terceros_pct()
 
     return {
         "iso_radar_b64": iso_data["radar_b64"],
@@ -7355,7 +7356,11 @@ def _dashboard_build_payload():
         "requisitos_legales_estado_b64": _dashboard_requisitos_legales_estado_chart(),
 
         "datos_pct": round(float(datos_pct or 0), 2),
+
+        # NUEVO: Security Scorecard de Terceros
+        "scorecard_terceros_pct": round(float(scorecard_terceros_pct or 0), 2),
     }
+
 
 
 def _dashboard_latest_datos_pct():
@@ -7367,6 +7372,37 @@ def _dashboard_latest_datos_pct():
         pass
     return 0.0
 
+def _dashboard_latest_scorecard_terceros_pct():
+    """
+    Score promedio de Security Scorecard de Terceros.
+    Fuente: instance/scorecard_proponentes.db
+    Tabla: scorecard_proponentes_runs
+    """
+    try:
+        db_path = os.path.join(app.instance_path, "scorecard_proponentes.db")
+
+        if not os.path.exists(db_path):
+            return 0.0
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT AVG(score_total) AS promedio
+            FROM scorecard_proponentes_runs
+            WHERE estado = 'finalizado'
+              AND score_total IS NOT NULL
+        """)
+
+        row = cur.fetchone()
+        conn.close()
+
+        return round(float(row["promedio"] or 0), 2)
+
+    except Exception as e:
+        print("ERROR DASHBOARD SCORECARD TERCEROS:", repr(e))
+        return 0.0
 
 def _dashboard_riesgos_residuales_chart():
     try:
@@ -8869,6 +8905,9 @@ def dashboard_status():
             "datos_gauge_b64": payload.get("datos_gauge_b64", ""),
             "datos_pct": float(payload.get("datos_pct", 0) or 0),
 
+            # NUEVO: Security Scorecard de Terceros
+            "scorecard_terceros_pct": float(payload.get("scorecard_terceros_pct", 0) or 0),
+
             "riesgos_b64": payload.get("riesgos_b64", ""),
             "incidentes_b64": payload.get("incidentes_b64", ""),
             "vulnerabilidades_b64": payload.get("vulnerabilidades_b64", ""),
@@ -8882,7 +8921,7 @@ def dashboard_status():
             "ok": False,
             "error": str(e)
         }), 500
-
+    
 # ====================
 # Menú principal con tablero compacto
 # ====================
@@ -8893,8 +8932,6 @@ def menu():
     usuario_actual = User.query.get(session.get('user_id'))
     dashboard = _dashboard_build_payload()
 
-    # Admin ve todo el menú completo.
-    # Otros roles ven solo lo permitido.
     if usuario_actual and usuario_actual.role == "admin":
         sections = MENU_SECTIONS
     else:
@@ -9029,6 +9066,20 @@ def menu():
                 <div class="sgsi-stat-link">Nivel de cumplimiento</div>
               </div>
             </div>
+
+            <div class="sgsi-stat-card">
+              <div class="sgsi-stat-icon purple">
+                <i class="bi bi-shield-fill-check"></i>
+              </div>
+              <div class="sgsi-stat-text">
+                <div class="sgsi-stat-title">Scorecard Terceros</div>
+                <div class="sgsi-stat-value purple-text" id="dash_scorecard_terceros_stat">
+                  {{ "%.2f"|format(dashboard.scorecard_terceros_pct) }}%
+                </div>
+                <div class="sgsi-stat-link">Score promedio</div>
+              </div>
+            </div>
+
           </section>
 
           <section class="sgsi-dashboard-grid">
@@ -9085,7 +9136,6 @@ def menu():
         padding-top:var(--sgsi-topbar-fixed-h) !important;
       }
 
-      /* BARRA SUPERIOR FIJA */
       .sgsi-topbar{
         position:fixed !important;
         top:0 !important;
@@ -9100,50 +9150,6 @@ def menu():
         width:97%;
         max-width:1820px;
         margin:8px auto 30px auto;
-      }
-
-      .soa-header-card{
-        background:linear-gradient(135deg,#2f6fb6 0%,#3f86d6 55%,#5aa3ea 100%);
-        min-height:92px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        border-radius:20px;
-        box-shadow:0 12px 30px rgba(0,0,0,.30);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }
-
-      .soa-header-overlay{
-        width:100%;
-        height:100%;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        text-align:center;
-        padding:10px 24px;
-        background:rgba(0,0,0,.08);
-      }
-
-      .soa-header-text{
-        max-width:1250px;
-      }
-
-      .soa-title{
-        color:#ffffff !important;
-        font-weight:900;
-        font-size:1.42rem;
-        line-height:1.15;
-        text-shadow:0 4px 14px rgba(0,0,0,.45);
-        margin:0;
-      }
-
-      .soa-subtitle{
-        color:rgba(255,255,255,.97);
-        font-size:.84rem;
-        margin-top:4px;
-        text-shadow:0 2px 8px rgba(0,0,0,.35);
       }
 
       .sgsi-layout{
@@ -9172,19 +9178,9 @@ def menu():
         overflow-x:hidden !important;
       }
 
-      .sgsi-leftnav-card::-webkit-scrollbar{
-        width:6px;
-      }
-
-      .sgsi-leftnav-card::-webkit-scrollbar-thumb{
-        background:rgba(255,255,255,.42);
-        border-radius:999px;
-      }
-
-      .sgsi-leftnav-card::-webkit-scrollbar-track{
-        background:rgba(255,255,255,.10);
-        border-radius:999px;
-      }
+      .sgsi-leftnav-card::-webkit-scrollbar{ width:6px; }
+      .sgsi-leftnav-card::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.42); border-radius:999px; }
+      .sgsi-leftnav-card::-webkit-scrollbar-track{ background:rgba(255,255,255,.10); border-radius:999px; }
 
       .sgsi-leftnav-header{
         display:flex;
@@ -9366,32 +9362,29 @@ def menu():
 
       .sgsi-dashboard-zone{
         min-width:0;
+        overflow:hidden;
       }
-
-      /* ============================================================
-         KPI / STATS CARDS SGSI - CENTRADAS
-         ISO 27001 / NIST CSF 2.0 / DATOS PERSONALES
-      ============================================================ */
 
       .sgsi-stats-grid{
         width:100%;
-        max-width:1040px;
+        max-width:1120px;
         margin:0 auto 20px auto;
         display:grid;
-        grid-template-columns:repeat(3, minmax(260px, 300px));
+        grid-template-columns:repeat(4, minmax(0, 1fr));
         justify-content:center;
         align-items:stretch;
-        gap:16px;
+        gap:12px;
       }
 
       .sgsi-stat-card{
         width:100%;
-        min-height:104px;
-        padding:16px 18px;
+        min-width:0;
+        min-height:98px;
+        padding:14px 12px;
         display:flex;
         align-items:center;
         justify-content:center;
-        gap:14px;
+        gap:10px;
         background:rgba(255,255,255,.96);
         border:1px solid rgba(219,230,244,.95);
         border-radius:18px;
@@ -9407,26 +9400,26 @@ def menu():
       }
 
       .sgsi-stat-icon{
-        width:52px;
-        height:52px;
-        min-width:52px;
-        flex:0 0 52px;
+        width:46px;
+        height:46px;
+        min-width:46px;
+        flex:0 0 46px;
         border-radius:50%;
         display:flex;
         align-items:center;
         justify-content:center;
-        font-size:1.35rem;
+        font-size:1.15rem;
       }
 
       .sgsi-stat-icon.blue{background:#e8f0ff;color:#2f6ff2;}
       .sgsi-stat-icon.orange{background:#fff1df;color:#f97316;}
       .sgsi-stat-icon.green{background:#e6f7ee;color:#16a34a;}
-      .sgsi-stat-icon.red{background:#ffe8e8;color:#ef4444;}
+      .sgsi-stat-icon.purple{background:#ede9fe;color:#7c3aed;}
 
       .blue-text{color:#2f6ff2 !important;}
       .orange-text{color:#f97316 !important;}
       .green-text{color:#16a34a !important;}
-      .red-text{color:#ef4444 !important;}
+      .purple-text{color:#7c3aed !important;}
 
       .sgsi-stat-text{
         min-width:0;
@@ -9441,7 +9434,7 @@ def menu():
 
       .sgsi-stat-title{
         width:100%;
-        font-size:.78rem;
+        font-size:.70rem;
         font-weight:900;
         color:#1f2937;
         white-space:nowrap;
@@ -9452,7 +9445,7 @@ def menu():
       .sgsi-stat-value{
         width:100%;
         margin-top:2px;
-        font-size:1.45rem;
+        font-size:1.20rem;
         line-height:1.05;
         font-weight:950;
         white-space:nowrap;
@@ -9464,7 +9457,7 @@ def menu():
         width:100%;
         margin-top:4px;
         color:#64748b;
-        font-size:.70rem;
+        font-size:.64rem;
         font-weight:800;
         white-space:nowrap;
         overflow:hidden;
@@ -9537,8 +9530,9 @@ def menu():
         }
 
         .sgsi-stats-grid{
-          max-width:680px;
-          grid-template-columns:repeat(2, minmax(260px, 300px));
+          max-width:720px;
+          grid-template-columns:repeat(2, minmax(260px, 1fr));
+          gap:14px;
         }
 
         .sgsi-chart-card{
@@ -9552,8 +9546,8 @@ def menu():
         }
 
         .sgsi-stats-grid{
-          max-width:330px;
-          grid-template-columns:minmax(260px, 300px);
+          max-width:340px;
+          grid-template-columns:minmax(260px, 320px);
         }
 
         .sgsi-chart-card{
