@@ -5459,11 +5459,11 @@ MODULES = [
     "PESI",
     "Informe Revisión por la Dirección",
     "Gestión de Accesos",
+    "Continuidad del Negocio (BCP/DRP)",
     "Revisión de Accesos",
     "Cuestionarios de Proponentes",
     "Revisión en Listas Restrictivas",
-    "Security Scorecard de Proveedores",
-    "Security Scorecard de Proponentes",
+    "Security Scorecard de Terceros",
     "Nivel de madurez ISO 27001:2022",
     "Nivel de Madurez NIST CSF V.2.0",
     "Nivel de Madurez protección de datos personales",
@@ -8075,9 +8075,25 @@ MENU_SECTIONS = [
         "items": [
             {"label": "Cuestionarios de Proponentes", "href": "/cuestionarios_proveedores", "icon": "bi-ui-checks", "btn": "btn-info text-white", "module": "Cuestionarios de Proponentes"},
             {"label": "Revisión en Listas Restrictivas", "href": "/listas_restrictivas", "icon": "bi-shield-exclamation", "btn": "btn-danger", "module": "/Listas Restrictivas"},
-            {"label": "Security Scorecard de Terceros", "href": "/proponentes/scorecard", "icon": "bi-speedometer", "btn": "btn-warning text-dark", "module": "Cuestionarios de Proponentes"},
+            {"label": "Security Scorecard de Terceros", "href": "/proponentes/scorecard", "icon": "bi-shield-check", "btn": "btn-warning text-dark", "module": "Security Scorecard de Terceros"},
             {"label": "Registro de Proveedores", "href": "/proveedores_menu", "icon": "bi-building", "btn": "btn-primary", "module": "Registro de Proveedores"},
         ],
+    },
+    {
+        "title": "Continuidad del Negocio",
+        "icon": "bi-shield-check",
+        "items": [
+            {"label": "Continuidad del Negocio (BCP/DRP)", "href": "/bcp/dashboard", "icon": "bi-shield-check", "btn": "btn-primary", "module": "Continuidad del Negocio (BCP/DRP)"},
+            {"label": "BIA", "href": "/bcp/bia", "icon": "bi-clipboard-data", "btn": "btn-info text-white", "module": "Continuidad del Negocio (BCP/DRP)"},
+            {"label": "Procesos Críticos", "href": "/bcp/procesos", "icon": "bi-diagram-3", "btn": "btn-warning", "module": "Continuidad del Negocio (BCP/DRP)"},
+            {"label": "Planes de Continuidad", "href": "/bcp/planes", "icon": "bi-journal-text", "btn": "btn-success", "module": "Continuidad del Negocio (BCP/DRP)"},
+            {"label": "DRP", "href": "/bcp/drp", "icon": "bi-hdd-network", "btn": "btn-dark", "module": "Continuidad del Negocio (BCP/DRP)"},
+            {"label": "Gestión de Crisis", "href": "/bcp/crisis", "icon": "bi-exclamation-triangle", "btn": "btn-danger", "module": "Continuidad del Negocio (BCP/DRP)"},
+            {"label": "Simulacros y Pruebas", "href": "/bcp/pruebas", "icon": "bi-play-circle", "btn": "btn-secondary", "module": "Continuidad del Negocio (BCP/DRP)"},
+            {"label": "Dependencias Críticas", "href": "/bcp/dependencias", "icon": "bi-link-45deg", "btn": "btn-primary", "module": "Continuidad del Negocio (BCP/DRP)"},
+            {"label": "Madurez BCP", "href": "/bcp/madurez", "icon": "bi-graph-up-arrow", "btn": "btn-info", "module": "Continuidad del Negocio (BCP/DRP)"},
+            {"label": "Informe Ejecutivo AI", "href": "/bcp/ia/generar", "icon": "bi-robot", "btn": "btn-info text-white", "module": "Continuidad del Negocio (BCP/DRP)"},
+        ]
     },
     {
         "title": "Medición y Mejora",
@@ -8122,6 +8138,7 @@ MENU_SECTIONS = [
                         "btn": "btn-info text-white",
                         "module": "Métricas"
                     },
+                    {"label": "Métricas BCP", "href": "/bcp/metricas", "icon": "bi-bar-chart", "btn": "btn-success", "module": "Continuidad del Negocio (BCP/DRP)"},
                     {
                         "label": "Métricas Planes de Mejora",
                         "href": "/metricas/mejora",
@@ -136696,7 +136713,7 @@ def proveedores_scorecard_parametros():
 
 
 # ==========================================================================================================================================
-#            SCORECARD PROPONENTES INDEPENDIENTE
+#            SCORECARD TERCEROS INDEPENDIENTE
 #            DNS HEALTH / IP REPUTATION / HACKER CHATTER / ESCANEO KALI PROPIO
 # ==========================================================================================================================================
 # IMPORTANTE:
@@ -136845,8 +136862,11 @@ def migrar_scorecard_proponentes_informe_ai():
 migrar_scorecard_proponentes_informe_ai()
 
 # ============================================================
-# PERMISOS
+# PERMISOS - SCORECARD PROPONENTES / TERCEROS
 # ============================================================
+
+SCORECARD_PROPONENTES_PERMISO = "Security Scorecard de Terceros"
+
 
 def scorecard_proponentes_user_permiso():
     user = User.query.get(session.get("user_id"))
@@ -136854,17 +136874,16 @@ def scorecard_proponentes_user_permiso():
     if not user:
         return None, False, False
 
-    read_only = user.role == "auditor"
+    if user.role == "admin":
+        return user, True, False
 
-    if (
-        user.role != "admin"
-        and user.role != "auditor"
-        and not verificar_permiso(user, "Cuestionarios de Proponentes")
-        and not verificar_permiso(user, "Registro de Proveedores")
-    ):
-        return user, False, read_only
+    if user.role == "auditor":
+        return user, True, True
 
-    return user, True, read_only
+    if verificar_permiso(user, SCORECARD_PROPONENTES_PERMISO):
+        return user, True, False
+
+    return user, False, False
 
 
 # ============================================================
@@ -138346,7 +138365,7 @@ def scorecard_proponentes_guardar_api_key(proveedor, api_key, activo, usuario):
 
 
 # ============================================================
-# DASHBOARD PROPONENTES
+# DASHBOARD PROPONENTES / TERCEROS
 # ============================================================
 
 @app.route("/proponentes/scorecard")
@@ -138355,8 +138374,16 @@ def proponentes_scorecard_dashboard():
     user, allowed, read_only = scorecard_proponentes_user_permiso()
 
     if not allowed:
-        flash("No tiene permiso para acceder al Security Scorecard de Proponentes.", "danger")
+        flash("No tiene permiso para acceder al Security Scorecard de Terceros.", "danger")
         return redirect(url_for("menu"))
+
+    puede_configurar = (
+        user.role == "admin"
+        or (
+            user.role != "auditor"
+            and verificar_permiso(user, SCORECARD_PROPONENTES_PERMISO)
+        )
+    )
 
     conn = get_scorecard_proponentes_db_connection()
     cur = conn.cursor()
@@ -138617,7 +138644,7 @@ def proponentes_scorecard_dashboard():
       </div>
 
       <div class="score-action-row">
-        {% if user.role == 'admin' %}
+        {% if puede_configurar %}
           <a href="{{ url_for('admin_scorecard_proponentes_apis') }}" class="btn btn-dark">
             🔐 Configurar APIs
           </a>
@@ -138740,7 +138767,7 @@ def proponentes_scorecard_dashboard():
                       <form method="POST"
                             action="{{ url_for('proponentes_scorecard_eliminar', scorecard_id=r.id) }}"
                             style="display:inline;"
-                            onsubmit="return confirm('¿Seguro que desea eliminar este Security Scorecard de Proponentes? Esta acción no se puede deshacer.');">
+                            onsubmit="return confirm('¿Seguro que desea eliminar este Security Scorecard de Terceros? Esta acción no se puede deshacer.');">
                         <button type="submit" class="btn btn-sm btn-outline-danger">
                           🗑️ Eliminar
                         </button>
@@ -138752,7 +138779,7 @@ def proponentes_scorecard_dashboard():
               {% else %}
               <tr>
                 <td colspan="13" class="text-center text-muted py-4">
-                  No existen scorecards de proponentes registrados.
+                  No existen scorecards de terceros registrados.
                 </td>
               </tr>
               {% endfor %}
@@ -138775,6 +138802,7 @@ def proponentes_scorecard_dashboard():
             en_ejecucion=en_ejecucion,
             read_only=read_only,
             user=user,
+            puede_configurar=puede_configurar,
             scorecard_proponentes_badge_color=scorecard_proponentes_badge_color
         ))
     )
@@ -140949,7 +140977,7 @@ def proponentes_scorecard_eliminar(scorecard_id):
     conn.commit()
     conn.close()
 
-    flash("Security Scorecard de Proponentes eliminado correctamente.", "success")
+    flash("Security Scorecard de Terceros eliminado correctamente.", "success")
     return redirect(url_for("proponentes_scorecard_dashboard"))
 
 
@@ -141667,7 +141695,7 @@ def proponentes_scorecard_detalle(scorecard_id):
     user, allowed, read_only = scorecard_proponentes_user_permiso()
 
     if not allowed:
-        flash("No tiene permiso para acceder al Security Scorecard de Proponentes.", "danger")
+        flash("No tiene permiso para acceder al Security Scorecard de Terceros.", "danger")
         return redirect(url_for("menu"))
 
     conn = get_scorecard_proponentes_db_connection()
@@ -142805,17 +142833,29 @@ def proponentes_scorecard_kali_detalle(scorecard_id):
     )
 
 # ============================================================
-# ADMIN - CONFIGURACIÓN APIs SCORECARD PROPONENTES
+# ADMIN - CONFIGURACIÓN APIs SCORECARD PROPONENTES / TERCEROS
 # ============================================================
 
 @app.route("/admin/scorecard-proponentes/apis", methods=["GET", "POST"])
 @login_required
 def admin_scorecard_proponentes_apis():
-    user = User.query.get(session.get("user_id"))
+    user, allowed, read_only = scorecard_proponentes_user_permiso()
 
-    if not user or user.role != "admin":
-        flash("Solo el administrador puede configurar las APIs del Scorecard de Proponentes.", "danger")
+    if not allowed:
+        flash("No tiene permiso para acceder al Security Scorecard de Terceros.", "danger")
         return redirect(url_for("menu"))
+
+    puede_configurar = (
+        user.role == "admin"
+        or (
+            user.role != "auditor"
+            and verificar_permiso(user, SCORECARD_PROPONENTES_PERMISO)
+        )
+    )
+
+    if not puede_configurar:
+        flash("No tiene permiso para configurar las APIs del Scorecard de Terceros.", "danger")
+        return redirect(url_for("proponentes_scorecard_dashboard"))
 
     if request.method == "POST":
         proveedor = (request.form.get("proveedor") or "").strip().lower()
@@ -142836,12 +142876,12 @@ def admin_scorecard_proponentes_apis():
         try:
             registrar_log(
                 getattr(user, "username", "admin"),
-                f"Actualizó API {proveedor} para Security Scorecard de Proponentes"
+                f"Actualizó API {proveedor} para Security Scorecard de Terceros"
             )
         except Exception:
             pass
 
-        flash("Configuración de API actualizada correctamente para Proponentes.", "success")
+        flash("Configuración de API actualizada correctamente para Terceros.", "success")
         return redirect(url_for("admin_scorecard_proponentes_apis"))
 
     estado_apis = scorecard_proponentes_api_status()
@@ -142924,7 +142964,7 @@ def admin_scorecard_proponentes_apis():
       }
 
       .api-prop-header-overlay h2::before{
-        content:"SGSI · Configuración de APIs Proponentes";
+        content:"SGSI · Configuración de APIs Terceros";
         display:block;
         width:max-content;
         max-width:100%;
@@ -143057,7 +143097,6 @@ def admin_scorecard_proponentes_apis():
       </div>
 
       <div class="d-flex justify-content-between align-items-center mb-3">
-
         <a href="{{ url_for('proponentes_scorecard_dashboard') }}" class="btn btn-light rounded-pill px-4">
           ⬅ Volver
         </a>
@@ -147682,6 +147721,1840 @@ def revdir_pdf(informe_id):
         download_name=filename,
         mimetype="application/pdf"
     )
+
+# ============================================================================================================================================
+#                                      MÓDULO CONTINUIDAD DEL NEGOCIO (BCP/DRP) - GRAC
+#                                      DB INDEPENDIENTE: instance/bcp_drp.db
+# ============================================================================================================================================
+
+BCP_MODULE_NAME = "Continuidad del Negocio (BCP/DRP)"
+BCP_DB_PATH = os.path.join(app.instance_path, "bcp_drp.db")
+
+
+def get_bcp_db_connection():
+    os.makedirs(app.instance_path, exist_ok=True)
+    conn = sqlite3.connect(BCP_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_bcp_db():
+    os.makedirs(app.instance_path, exist_ok=True)
+    conn = get_bcp_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bcp_bia (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proceso TEXT NOT NULL,
+            responsable TEXT,
+            area TEXT,
+            criticidad TEXT,
+            impacto_financiero TEXT,
+            impacto_operacional TEXT,
+            impacto_reputacional TEXT,
+            impacto_legal TEXT,
+            dependencias TEXT,
+            tiempo_maximo_tolerable TEXT,
+            rto_horas REAL DEFAULT 0,
+            rpo_horas REAL DEFAULT 0,
+            manual_alterno TEXT,
+            sitio_alterno TEXT,
+            proveedor_critico TEXT,
+            estado TEXT DEFAULT 'Activo',
+            informe_ai TEXT,
+            plan_mejora_ai TEXT,
+            creado_por TEXT,
+            fecha_registro TEXT NOT NULL
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bcp_procesos_criticos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proceso TEXT NOT NULL,
+            duenio TEXT,
+            area TEXT,
+            dependencias_tecnologicas TEXT,
+            dependencias_humanas TEXT,
+            proveedores_asociados TEXT,
+            criticidad TEXT,
+            sla_horas REAL DEFAULT 0,
+            rto_horas REAL DEFAULT 0,
+            rpo_horas REAL DEFAULT 0,
+            descripcion TEXT,
+            tiene_bcp TEXT DEFAULT 'No',
+            creado_por TEXT,
+            fecha_registro TEXT NOT NULL
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bcp_drp (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            servidor TEXT NOT NULL,
+            sistema TEXT,
+            tipo_recuperacion TEXT,
+            backup TEXT,
+            ubicacion_backup TEXT,
+            frecuencia_backup TEXT,
+            backups_fallidos INTEGER DEFAULT 0,
+            tiempo_recuperacion REAL DEFAULT 0,
+            responsable TEXT,
+            procedimiento TEXT,
+            ultima_prueba TEXT,
+            estado TEXT DEFAULT 'Pendiente',
+            observaciones TEXT,
+            creado_por TEXT,
+            fecha_registro TEXT NOT NULL
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bcp_planes_continuidad (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            escenario TEXT NOT NULL,
+            descripcion TEXT,
+            procedimiento_respuesta TEXT,
+            responsable TEXT,
+            tiempo_activacion TEXT,
+            prioridad TEXT,
+            recursos_necesarios TEXT,
+            comunicaciones TEXT,
+            estado TEXT DEFAULT 'Borrador',
+            informe_ai TEXT,
+            creado_por TEXT,
+            fecha_registro TEXT NOT NULL
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bcp_crisis (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre_comite TEXT NOT NULL,
+            roles TEXT,
+            contactos_emergencia TEXT,
+            escalamiento TEXT,
+            arbol_llamadas TEXT,
+            procedimientos TEXT,
+            comunicaciones_oficiales TEXT,
+            estado TEXT DEFAULT 'Activo',
+            creado_por TEXT,
+            fecha_registro TEXT NOT NULL
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bcp_pruebas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo_prueba TEXT NOT NULL,
+            fecha_prueba TEXT,
+            resultado TEXT,
+            hallazgos TEXT,
+            evidencias TEXT,
+            responsable TEXT,
+            tiempo_recuperacion_real REAL DEFAULT 0,
+            cumplimiento_rto TEXT DEFAULT 'No',
+            cumplimiento_rpo TEXT DEFAULT 'No',
+            lecciones_aprendidas TEXT,
+            creado_por TEXT,
+            fecha_registro TEXT NOT NULL
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bcp_dependencias_criticas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            tipo TEXT,
+            proveedor TEXT,
+            criticidad TEXT,
+            impacto TEXT,
+            plan_contingencia TEXT,
+            responsable TEXT,
+            estado TEXT DEFAULT 'Activo',
+            creado_por TEXT,
+            fecha_registro TEXT NOT NULL
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bcp_madurez (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dominio TEXT NOT NULL,
+            descripcion TEXT,
+            nivel INTEGER DEFAULT 0,
+            observaciones TEXT,
+            fecha_evaluacion TEXT,
+            evaluador TEXT,
+            fecha_registro TEXT NOT NULL
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bcp_metricas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            periodo TEXT NOT NULL,
+            pruebas_exitosas_pct REAL DEFAULT 0,
+            tiempo_promedio_recuperacion REAL DEFAULT 0,
+            cumplimiento_rto_pct REAL DEFAULT 0,
+            cumplimiento_rpo_pct REAL DEFAULT 0,
+            procesos_con_bcp_pct REAL DEFAULT 0,
+            sistemas_sin_drp INTEGER DEFAULT 0,
+            backups_fallidos INTEGER DEFAULT 0,
+            disponibilidad_servicios_pct REAL DEFAULT 0,
+            observaciones TEXT,
+            fecha_registro TEXT NOT NULL
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bcp_informes_ai (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo TEXT,
+            contenido TEXT,
+            contenido_editado TEXT,
+            proveedor_ai TEXT,
+            modelo_ai TEXT,
+            generado_por TEXT,
+            fecha_generacion TEXT NOT NULL
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+# Inicializar DB independiente BCP al cargar la app
+init_bcp_db()
+
+
+# ============================================================
+# HELPERS BCP
+# ============================================================
+
+def bcp_now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def bcp_user():
+    return User.query.get(session.get("user_id"))
+
+
+def bcp_can_view(user):
+    return user and (
+        user.role in ("admin", "auditor")
+        or verificar_permiso(user, BCP_MODULE_NAME)
+    )
+
+
+def bcp_can_write(user):
+    return user and user.role != "auditor" and (
+        user.role == "admin"
+        or verificar_permiso(user, BCP_MODULE_NAME)
+    )
+
+
+def bcp_guard_view():
+    user = bcp_user()
+    if not bcp_can_view(user):
+        flash("No tiene permiso para acceder al módulo BCP/DRP.", "danger")
+        return None, redirect(url_for("menu"))
+    return user, None
+
+
+def bcp_guard_write():
+    user = bcp_user()
+    if not bcp_can_write(user):
+        flash("No tiene permiso para modificar información del módulo BCP/DRP.", "danger")
+        return None, redirect(url_for("bcp_dashboard"))
+    return user, None
+
+
+def bcp_float(value):
+    try:
+        return float(value or 0)
+    except Exception:
+        return 0
+
+
+def bcp_int(value):
+    try:
+        return int(value or 0)
+    except Exception:
+        return 0
+
+
+def bcp_pct(num, den):
+    if not den:
+        return 0
+    return round((num / den) * 100, 2)
+
+
+def bcp_norm_yes(value):
+    return (value or "").strip().lower() in ("si", "sí", "s", "yes", "true", "1")
+
+
+def bcp_badge(valor):
+    v = (valor or "").lower()
+    if "crítico" in v or "critico" in v or "alta" in v or "fallido" in v:
+        return "danger"
+    if "medio" in v or "pendiente" in v or "borrador" in v or "parcial" in v or "revisión" in v:
+        return "warning text-dark"
+    if "bajo" in v or "activo" in v or "exitoso" in v or "aprobado" in v or "probado" in v:
+        return "success"
+    return "secondary"
+
+
+def bcp_query_all(table, order="id DESC"):
+    conn = get_bcp_db_connection()
+    cur = conn.cursor()
+    cur.execute(f"SELECT * FROM {table} ORDER BY {order}")
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def bcp_query_one(table, item_id):
+    conn = get_bcp_db_connection()
+    cur = conn.cursor()
+    cur.execute(f"SELECT * FROM {table} WHERE id = ?", (item_id,))
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def bcp_insert(table, data):
+    keys = list(data.keys())
+    placeholders = ",".join(["?"] * len(keys))
+    sql = f"INSERT INTO {table} ({','.join(keys)}) VALUES ({placeholders})"
+    conn = get_bcp_db_connection()
+    cur = conn.cursor()
+    cur.execute(sql, tuple(data[k] for k in keys))
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return new_id
+
+
+def bcp_update(table, item_id, data):
+    keys = list(data.keys())
+    sql = f"UPDATE {table} SET {', '.join([k + ' = ?' for k in keys])} WHERE id = ?"
+    conn = get_bcp_db_connection()
+    cur = conn.cursor()
+    cur.execute(sql, tuple(data[k] for k in keys) + (item_id,))
+    conn.commit()
+    conn.close()
+
+
+def bcp_delete(table, item_id):
+    conn = get_bcp_db_connection()
+    cur = conn.cursor()
+    cur.execute(f"DELETE FROM {table} WHERE id = ?", (item_id,))
+    conn.commit()
+    conn.close()
+
+
+def bcp_count(table):
+    conn = get_bcp_db_connection()
+    cur = conn.cursor()
+    cur.execute(f"SELECT COUNT(*) AS total FROM {table}")
+    total = cur.fetchone()["total"]
+    conn.close()
+    return total or 0
+
+
+def bcp_metricas_actuales():
+    bias = bcp_query_all("bcp_bia")
+    procesos = bcp_query_all("bcp_procesos_criticos")
+    drps = bcp_query_all("bcp_drp")
+    pruebas = bcp_query_all("bcp_pruebas")
+    deps = bcp_query_all("bcp_dependencias_criticas")
+    madurez = bcp_query_all("bcp_madurez")
+
+    rto_vals = []
+    rpo_vals = []
+
+    for x in bias:
+        rto_vals.append(bcp_float(x.get("rto_horas")))
+        rpo_vals.append(bcp_float(x.get("rpo_horas")))
+    for x in procesos:
+        rto_vals.append(bcp_float(x.get("rto_horas")))
+        rpo_vals.append(bcp_float(x.get("rpo_horas")))
+
+    pruebas_exitosas = len([x for x in pruebas if (x.get("resultado") or "").lower() == "exitoso"])
+    rto_ok = len([x for x in pruebas if bcp_norm_yes(x.get("cumplimiento_rto"))])
+    rpo_ok = len([x for x in pruebas if bcp_norm_yes(x.get("cumplimiento_rpo"))])
+    procesos_con_bcp = len([x for x in procesos if bcp_norm_yes(x.get("tiene_bcp"))])
+
+    nivel_madurez = round(sum([bcp_int(m.get("nivel")) for m in madurez]) / len(madurez), 2) if madurez else 0
+
+    return {
+        "nivel_madurez": nivel_madurez,
+        "procesos_criticos": len(procesos),
+        "servicios_criticos": len([d for d in deps if (d.get("tipo") or "").lower() in ("servicio", "cloud", "internet")]),
+        "sistemas_criticos": len(drps),
+        "rto_promedio": round(sum(rto_vals) / len(rto_vals), 2) if rto_vals else 0,
+        "rpo_promedio": round(sum(rpo_vals) / len(rpo_vals), 2) if rpo_vals else 0,
+        "pruebas_realizadas": len(pruebas),
+        "estado_drp": bcp_pct(len([d for d in drps if (d.get("estado") or "").lower() in ("probado", "activo", "aprobado")]), len(drps)),
+        "riesgo_operativo": len([b for b in bias if (b.get("criticidad") or "").lower() in ("alta", "crítica", "critica")]),
+        "dependencias_criticas": len(deps),
+        "proveedores_criticos": len([d for d in deps if d.get("proveedor")]),
+        "estado_backups": bcp_pct(len([d for d in drps if (d.get("backup") or "").lower() not in ("", "no", "ninguno")]), len(drps)),
+        "disponibilidad_servicios": 100,
+        "pruebas_exitosas_pct": bcp_pct(pruebas_exitosas, len(pruebas)),
+        "cumplimiento_rto_pct": bcp_pct(rto_ok, len(pruebas)),
+        "cumplimiento_rpo_pct": bcp_pct(rpo_ok, len(pruebas)),
+        "procesos_con_bcp_pct": bcp_pct(procesos_con_bcp, len(procesos)),
+        "sistemas_sin_drp": max(0, len(procesos) - len(drps)),
+        "backups_fallidos": sum([bcp_int(d.get("backups_fallidos")) for d in drps]),
+        "tiempo_promedio_recuperacion": round(sum([bcp_float(p.get("tiempo_recuperacion_real")) for p in pruebas]) / len(pruebas), 2) if pruebas else 0,
+    }
+
+
+# ============================================================
+# UI SHELL - MISMO ESTILO BASE DE GRAC
+# BOTONES POR FUERA DEL HEADER (COMO LOS DEMÁS MÓDULOS)
+# ============================================================
+
+def bcp_render(title, body_html):
+    user = User.query.get(session.get("user_id"))
+
+    shell_html = """
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .bcp-wrap{width:96%;max-width:1600px;margin:26px auto 24px auto;}
+
+      .bcp-hero{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .bcp-hero::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }
+
+      .bcp-hero-left{
+        position:relative;
+        z-index:1;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        gap:14px;
+      }
+
+      .bcp-hero-left::before{
+        content:"🛟";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#fff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+      }
+
+      .bcp-hero-text::before{
+        content:"SGSI · Continuidad del Negocio";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#fff;
+      }
+
+      .bcp-title{
+        color:#fff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .bcp-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+        line-height:1.25;
+        font-weight:800;
+      }
+
+      .bcp-header-actions{
+        display:flex;
+        justify-content:center;
+        align-items:center;
+        gap:10px;
+        margin-bottom:16px;
+        flex-wrap:wrap;
+      }
+
+      .bcp-toolbar{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:12px;
+        flex-wrap:wrap;
+        margin-bottom:14px;
+      }
+
+      .bcp-actions{
+        display:flex;
+        justify-content:flex-end;
+        align-items:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin-left:auto;
+      }
+
+      .bcp-header-actions .btn,
+      .bcp-actions .btn,
+      .bcp-btn,
+      .btn{
+        border-radius:999px !important;
+        min-height:40px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .bcp-btn-main{
+        background:#fff;
+        color:#000;
+        border:2px solid #fff;
+      }
+
+      .bcp-btn-main:hover{
+        background:#f3f4f6;
+        color:#000;
+        border-color:#f3f4f6;
+      }
+
+      .bcp-btn-info{
+        background:#0dcaf0;
+        color:#fff;
+        border:2px solid #0dcaf0;
+      }
+
+      .bcp-btn-danger{
+        background:#dc3545;
+        color:#fff;
+        border:2px solid #dc3545;
+      }
+
+      .bcp-card,
+      .card{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        margin-bottom:16px;
+        overflow:hidden;
+      }
+
+      .bcp-card-body,
+      .card-body{padding:18px;}
+
+      .bcp-section-title,
+      .card h5,
+      .card h6{
+        font-weight:950;
+        font-size:.95rem;
+        color:#1459a6;
+        margin-bottom:4px;
+      }
+
+      .bcp-section-muted{
+        color:#607086;
+        font-size:.82rem;
+        font-weight:700;
+        margin-top:3px;
+      }
+
+      .bcp-kpi{
+        background:#fff;
+        border-radius:16px;
+        padding:14px 15px;
+        box-shadow:0 8px 18px rgba(15,23,42,.10);
+        height:100%;
+        border:1px solid #dbe6f4;
+        border-left:6px solid #1459a6;
+      }
+
+      .bcp-kpi-label{
+        font-size:.72rem;
+        font-weight:900;
+        color:#1459a6;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:8px;
+        line-height:1.15;
+      }
+
+      .bcp-kpi-value{
+        color:#1459a6;
+        font-size:1.42rem;
+        font-weight:950;
+        line-height:1;
+      }
+
+      .bcp-table-wrap,
+      .table-responsive{
+        width:100%;
+        max-height:72vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        background:#fff;
+        border-radius:14px;
+        border:1px solid #dbe6f4;
+        box-shadow:0 12px 24px rgba(15,23,42,.10);
+      }
+
+      .bcp-table,
+      .table{
+        width:100%;
+        min-width:980px;
+        border-collapse:separate;
+        border-spacing:0;
+        margin:0;
+      }
+
+      .bcp-table thead th,
+      .table thead th{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#fff !important;
+        font-size:.78rem;
+        font-weight:900 !important;
+        border:none !important;
+        white-space:nowrap;
+        vertical-align:middle !important;
+        text-align:center;
+        padding:9px 8px;
+      }
+
+      .bcp-table tbody td,
+      .table tbody td,
+      .table td{
+        vertical-align:middle !important;
+        font-size:.82rem;
+        padding:9px 8px;
+        border-bottom:1px solid #e5edf7;
+        color:#1f2937;
+      }
+
+      .bcp-table tbody tr:nth-child(even),
+      .table tbody tr:nth-child(even){background:#f8fbff;}
+
+      .bcp-table tbody tr:hover,
+      .table tbody tr:hover{background:#eef6ff;}
+
+      .form-label{
+        font-size:.72rem;
+        font-weight:900;
+        color:#1459a6;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
+      }
+
+      .form-control,
+      .form-select{
+        border-radius:10px !important;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        box-shadow:none !important;
+      }
+
+      textarea.form-control{min-height:96px;}
+
+      .form-control:focus,
+      .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#fff;
+      }
+
+      .badge{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }
+
+      @media(max-width:992px){
+        .bcp-wrap{width:98%;margin:8px auto 22px auto;}
+        .bcp-hero{min-height:88px;}
+        .bcp-title{font-size:1.20rem;}
+        .bcp-subtitle{font-size:.76rem;}
+      }
+
+      @media(max-width:768px){
+        .bcp-hero{text-align:center;}
+        .bcp-hero-left{flex-direction:column;text-align:center;gap:10px;width:100%;}
+        .bcp-header-actions{flex-direction:column;}
+        .bcp-header-actions .btn{width:100%;}
+        .bcp-toolbar{flex-direction:column;align-items:stretch;}
+        .bcp-actions{justify-content:center;width:100%;}
+        .bcp-actions .btn{width:100%;}
+      }
+    </style>
+
+    <div class="bcp-wrap">
+
+      <div class="bcp-hero">
+        <div class="bcp-hero-left">
+          <div class="bcp-hero-text">
+            <h1 class="bcp-title">Continuidad del Negocio (BCP/DRP)</h1>
+            <div class="bcp-subtitle">{{ title }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bcp-header-actions">
+        <a href="{{ url_for('bcp_dashboard') }}" class="btn bcp-btn-main">🏠 Dashboard</a>
+        <a href="{{ url_for('bcp_ia_generar') }}" class="btn bcp-btn-info">🤖 IA</a>
+        <a href="{{ url_for('bcp_pdf') }}" class="btn bcp-btn-danger" data-no-progress="true">📄 PDF</a>
+      </div>
+
+      {{ body_html|safe }}
+
+    </div>
+    """
+
+    inner = render_template_string(
+        shell_html,
+        title=title,
+        body_html=Markup(body_html),
+        user=user
+    )
+
+    return render_template_string(
+        BASE,
+        content=Markup(inner)
+    )
+
+
+# ============================================================
+# CONFIGURACIÓN CRUD BCP
+# ============================================================
+
+BCP_CONFIG = {
+    "bia": {
+        "title": "Análisis de Impacto al Negocio - BIA",
+        "table": "bcp_bia",
+        "endpoint": "bcp_bia",
+        "new_endpoint": "bcp_bia_new",
+        "edit_endpoint": "bcp_bia_edit",
+        "delete_endpoint": "bcp_bia_delete",
+        "fields": [
+            ("proceso", "Proceso", "text", True),
+            ("responsable", "Responsable", "text", False),
+            ("area", "Área", "text", False),
+            ("criticidad", "Criticidad", "select", False, ["Baja", "Media", "Alta", "Crítica"]),
+            ("impacto_financiero", "Impacto financiero", "select", False, ["Bajo", "Medio", "Alto", "Crítico"]),
+            ("impacto_operacional", "Impacto operacional", "select", False, ["Bajo", "Medio", "Alto", "Crítico"]),
+            ("impacto_reputacional", "Impacto reputacional", "select", False, ["Bajo", "Medio", "Alto", "Crítico"]),
+            ("impacto_legal", "Impacto legal/regulatorio", "select", False, ["Bajo", "Medio", "Alto", "Crítico"]),
+            ("dependencias", "Dependencias", "textarea", False),
+            ("tiempo_maximo_tolerable", "Tiempo máximo tolerable", "text", False),
+            ("rto_horas", "RTO horas", "number", False),
+            ("rpo_horas", "RPO horas", "number", False),
+            ("manual_alterno", "Manual alterno", "select", False, ["Sí", "No"]),
+            ("sitio_alterno", "Sitio alterno", "text", False),
+            ("proveedor_critico", "Proveedor crítico", "text", False),
+            ("estado", "Estado", "select", False, ["Activo", "En revisión", "Inactivo"]),
+        ],
+        "columns": ["proceso", "responsable", "area", "criticidad", "rto_horas", "rpo_horas", "estado"]
+    },
+    "procesos": {
+        "title": "Registro de Procesos Críticos",
+        "table": "bcp_procesos_criticos",
+        "endpoint": "bcp_procesos",
+        "new_endpoint": "bcp_procesos_new",
+        "edit_endpoint": "bcp_procesos_edit",
+        "delete_endpoint": "bcp_procesos_delete",
+        "fields": [
+            ("proceso", "Proceso", "text", True),
+            ("duenio", "Dueño", "text", False),
+            ("area", "Área", "text", False),
+            ("dependencias_tecnologicas", "Dependencias tecnológicas", "textarea", False),
+            ("dependencias_humanas", "Dependencias humanas", "textarea", False),
+            ("proveedores_asociados", "Proveedores asociados", "textarea", False),
+            ("criticidad", "Nivel criticidad", "select", False, ["Baja", "Media", "Alta", "Crítica"]),
+            ("sla_horas", "SLA horas", "number", False),
+            ("rto_horas", "RTO horas", "number", False),
+            ("rpo_horas", "RPO horas", "number", False),
+            ("tiene_bcp", "Tiene BCP", "select", False, ["Sí", "No"]),
+            ("descripcion", "Descripción", "textarea", False),
+        ],
+        "columns": ["proceso", "duenio", "area", "criticidad", "rto_horas", "rpo_horas", "tiene_bcp"]
+    },
+    "drp": {
+        "title": "Plan de Recuperación Tecnológica - DRP",
+        "table": "bcp_drp",
+        "endpoint": "bcp_drp",
+        "new_endpoint": "bcp_drp_new",
+        "edit_endpoint": "bcp_drp_edit",
+        "delete_endpoint": "bcp_drp_delete",
+        "fields": [
+            ("servidor", "Servidor / Activo", "text", True),
+            ("sistema", "Sistema", "text", False),
+            ("tipo_recuperacion", "Tipo recuperación", "text", False),
+            ("backup", "Backup", "text", False),
+            ("ubicacion_backup", "Ubicación backup", "text", False),
+            ("frecuencia_backup", "Frecuencia backup", "text", False),
+            ("backups_fallidos", "Backups fallidos", "int", False),
+            ("tiempo_recuperacion", "Tiempo recuperación horas", "number", False),
+            ("responsable", "Responsable", "text", False),
+            ("procedimiento", "Procedimiento", "textarea", False),
+            ("ultima_prueba", "Última prueba", "date", False),
+            ("estado", "Estado", "select", False, ["Pendiente", "Activo", "Probado", "Fallido"]),
+            ("observaciones", "Observaciones", "textarea", False),
+        ],
+        "columns": ["servidor", "sistema", "tipo_recuperacion", "backup", "backups_fallidos", "estado"]
+    },
+    "planes": {
+        "title": "Planes de Continuidad",
+        "table": "bcp_planes_continuidad",
+        "endpoint": "bcp_planes",
+        "new_endpoint": "bcp_planes_new",
+        "edit_endpoint": "bcp_planes_edit",
+        "delete_endpoint": "bcp_planes_delete",
+        "fields": [
+            ("escenario", "Escenario", "text", True),
+            ("descripcion", "Descripción", "textarea", False),
+            ("procedimiento_respuesta", "Procedimiento respuesta", "textarea", False),
+            ("responsable", "Responsable", "text", False),
+            ("tiempo_activacion", "Tiempo activación", "text", False),
+            ("prioridad", "Prioridad", "select", False, ["Baja", "Media", "Alta", "Crítica"]),
+            ("recursos_necesarios", "Recursos necesarios", "textarea", False),
+            ("comunicaciones", "Comunicaciones", "textarea", False),
+            ("estado", "Estado", "select", False, ["Borrador", "Aprobado", "En prueba", "Activo"]),
+        ],
+        "columns": ["escenario", "responsable", "prioridad", "estado"]
+    },
+    "crisis": {
+        "title": "Gestión de Crisis",
+        "table": "bcp_crisis",
+        "endpoint": "bcp_crisis",
+        "new_endpoint": "bcp_crisis_new",
+        "edit_endpoint": "bcp_crisis_edit",
+        "delete_endpoint": "bcp_crisis_delete",
+        "fields": [
+            ("nombre_comite", "Comité de crisis", "text", True),
+            ("roles", "Roles", "textarea", False),
+            ("contactos_emergencia", "Contactos emergencia", "textarea", False),
+            ("escalamiento", "Escalamiento", "textarea", False),
+            ("arbol_llamadas", "Árbol de llamadas", "textarea", False),
+            ("procedimientos", "Procedimientos", "textarea", False),
+            ("comunicaciones_oficiales", "Comunicaciones oficiales", "textarea", False),
+            ("estado", "Estado", "select", False, ["Activo", "En revisión", "Inactivo"]),
+        ],
+        "columns": ["nombre_comite", "estado"]
+    },
+    "pruebas": {
+        "title": "Simulacros y Pruebas",
+        "table": "bcp_pruebas",
+        "endpoint": "bcp_pruebas",
+        "new_endpoint": "bcp_pruebas_new",
+        "edit_endpoint": "bcp_pruebas_edit",
+        "delete_endpoint": "bcp_pruebas_delete",
+        "fields": [
+            ("tipo_prueba", "Tipo prueba", "select", True, ["Tabletop", "Simulación ransomware", "DRP failover", "Recuperación backup", "Prueba comunicaciones", "Recuperación cloud"]),
+            ("fecha_prueba", "Fecha prueba", "date", False),
+            ("resultado", "Resultado", "select", False, ["Exitoso", "Parcial", "Fallido"]),
+            ("hallazgos", "Hallazgos", "textarea", False),
+            ("evidencias", "Evidencias", "textarea", False),
+            ("responsable", "Responsable", "text", False),
+            ("tiempo_recuperacion_real", "Tiempo recuperación real horas", "number", False),
+            ("cumplimiento_rto", "Cumplimiento RTO", "select", False, ["Sí", "No"]),
+            ("cumplimiento_rpo", "Cumplimiento RPO", "select", False, ["Sí", "No"]),
+            ("lecciones_aprendidas", "Lecciones aprendidas", "textarea", False),
+        ],
+        "columns": ["tipo_prueba", "fecha_prueba", "resultado", "responsable", "cumplimiento_rto", "cumplimiento_rpo"]
+    },
+    "dependencias": {
+        "title": "Dependencias Críticas",
+        "table": "bcp_dependencias_criticas",
+        "endpoint": "bcp_dependencias",
+        "new_endpoint": "bcp_dependencias_new",
+        "edit_endpoint": "bcp_dependencias_edit",
+        "delete_endpoint": "bcp_dependencias_delete",
+        "fields": [
+            ("nombre", "Nombre", "text", True),
+            ("tipo", "Tipo", "select", False, ["Internet", "Cloud", "SAP", "Microsoft 365", "AWS", "Oracle", "VPN", "Firewall", "WAF", "DNS", "Proveedor", "Otro"]),
+            ("proveedor", "Proveedor", "text", False),
+            ("criticidad", "Criticidad", "select", False, ["Baja", "Media", "Alta", "Crítica"]),
+            ("impacto", "Impacto", "textarea", False),
+            ("plan_contingencia", "Plan contingencia", "textarea", False),
+            ("responsable", "Responsable", "text", False),
+            ("estado", "Estado", "select", False, ["Activo", "En revisión", "Inactivo"]),
+        ],
+        "columns": ["nombre", "tipo", "proveedor", "criticidad", "estado"]
+    },
+    "madurez": {
+        "title": "Evaluación de Madurez BCP",
+        "table": "bcp_madurez",
+        "endpoint": "bcp_madurez",
+        "new_endpoint": "bcp_madurez_new",
+        "edit_endpoint": "bcp_madurez_edit",
+        "delete_endpoint": "bcp_madurez_delete",
+        "fields": [
+            ("dominio", "Dominio", "select", True, ["Gobierno BCP", "BIA", "DRP", "Gestión de Crisis", "Pruebas", "Mejora Continua"]),
+            ("descripcion", "Descripción", "textarea", False),
+            ("nivel", "Nivel 0 a 5", "int", False),
+            ("observaciones", "Observaciones", "textarea", False),
+            ("fecha_evaluacion", "Fecha evaluación", "date", False),
+            ("evaluador", "Evaluador", "text", False),
+        ],
+        "columns": ["dominio", "nivel", "fecha_evaluacion", "evaluador"]
+    },
+}
+
+
+def bcp_field_value(field, typ, raw):
+    if typ == "number":
+        return bcp_float(raw)
+    if typ == "int":
+        return bcp_int(raw)
+    return (raw or "").strip()
+
+
+# ============================================================
+# DASHBOARD
+# ============================================================
+
+@app.route("/bcp")
+@app.route("/bcp/dashboard")
+@login_required
+def bcp_dashboard():
+    user, resp = bcp_guard_view()
+    if resp:
+        return resp
+
+    k = bcp_metricas_actuales()
+
+    body = render_template_string("""
+    <div class="row g-3 mb-3">
+      {% for label, value, suffix in [
+        ('Nivel de madurez BCP', k.nivel_madurez, '/5'),
+        ('Procesos críticos', k.procesos_criticos, ''),
+        ('Servicios críticos', k.servicios_criticos, ''),
+        ('Sistemas críticos', k.sistemas_criticos, ''),
+        ('RTO promedio', k.rto_promedio, ' h'),
+        ('RPO promedio', k.rpo_promedio, ' h'),
+        ('Pruebas realizadas', k.pruebas_realizadas, ''),
+        ('Estado DRP', k.estado_drp, '%'),
+        ('Riesgo operativo alto/crítico', k.riesgo_operativo, ''),
+        ('Dependencias críticas', k.dependencias_criticas, ''),
+        ('Proveedores críticos', k.proveedores_criticos, ''),
+        ('Estado backups', k.estado_backups, '%')
+      ] %}
+      <div class="col-12 col-md-6 col-lg-3">
+        <div class="bcp-kpi">
+          <div class="bcp-kpi-label">{{ label }}</div>
+          <div class="bcp-kpi-value">{{ value }}{{ suffix }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-lg-6">
+        <div class="bcp-card"><div class="bcp-card-body">
+          <h2 class="bcp-section-title">Cumplimiento RTO</h2>
+          <div class="bcp-meter mt-3"><span style="width:{{ k.cumplimiento_rto_pct }}%"></span></div>
+          <div class="mt-2 fw-bold">{{ k.cumplimiento_rto_pct }}%</div>
+        </div></div>
+      </div>
+      <div class="col-lg-6">
+        <div class="bcp-card"><div class="bcp-card-body">
+          <h2 class="bcp-section-title">Cumplimiento RPO</h2>
+          <div class="bcp-meter mt-3"><span style="width:{{ k.cumplimiento_rpo_pct }}%"></span></div>
+          <div class="mt-2 fw-bold">{{ k.cumplimiento_rpo_pct }}%</div>
+        </div></div>
+      </div>
+    </div>
+
+    <div class="bcp-card"><div class="bcp-card-body">
+      <div class="bcp-toolbar">
+        <div>
+          <h2 class="bcp-section-title">Accesos rápidos</h2>
+          <div class="bcp-section-muted">Módulos principales de continuidad, recuperación y resiliencia.</div>
+        </div>
+      </div>
+      <div class="bcp-actions">
+        <a class="btn btn-primary" href="{{ url_for('bcp_bia') }}">BIA</a>
+        <a class="btn btn-warning" href="{{ url_for('bcp_procesos') }}">Procesos Críticos</a>
+        <a class="btn btn-dark" href="{{ url_for('bcp_drp') }}">DRP</a>
+        <a class="btn btn-success" href="{{ url_for('bcp_planes') }}">Planes BCP</a>
+        <a class="btn btn-danger" href="{{ url_for('bcp_crisis') }}">Crisis</a>
+        <a class="btn btn-secondary" href="{{ url_for('bcp_pruebas') }}">Pruebas</a>
+        <a class="btn btn-info text-white" href="{{ url_for('bcp_dependencias') }}">Dependencias</a>
+        <a class="btn btn-outline-primary" href="{{ url_for('bcp_madurez') }}">Madurez</a>
+      </div>
+    </div></div>
+    """, k=k)
+
+    return bcp_render("Dashboard Ejecutivo BCP", body)
+
+
+# ============================================================
+# CRUD GENÉRICO
+# ============================================================
+
+def bcp_list_page(key):
+    user, resp = bcp_guard_view()
+    if resp:
+        return resp
+
+    cfg = BCP_CONFIG[key]
+    items = bcp_query_all(cfg["table"])
+    read_only = not bcp_can_write(user)
+
+    body = render_template_string("""
+    <div class="bcp-card">
+      <div class="bcp-card-body">
+        <div class="bcp-toolbar">
+          <div>
+            <h2 class="bcp-section-title">{{ cfg.title }}</h2>
+            <div class="bcp-section-muted">Gestión, seguimiento y trazabilidad del componente BCP/DRP.</div>
+          </div>
+          {% if not read_only %}
+            <a class="btn btn-primary bcp-btn" href="{{ url_for(cfg.new_endpoint) }}">➕ Nuevo registro</a>
+          {% endif %}
+        </div>
+
+        <div class="bcp-table-wrap">
+          <table class="table table-hover bcp-table">
+            <thead>
+              <tr>
+                <th style="width:80px;">ID</th>
+                {% for c in cfg.columns %}
+                  <th>{{ c|replace('_',' ')|title }}</th>
+                {% endfor %}
+                <th style="width:220px;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for it in items %}
+              <tr>
+                <td class="fw-bold text-primary">#{{ it.id }}</td>
+                {% for c in cfg.columns %}
+                  {% set val = it.get(c) %}
+                  <td>
+                    {% if c in ['estado','criticidad','resultado','prioridad'] %}
+                      <span class="badge bg-{{ bcp_badge(val) }}">{{ val or '—' }}</span>
+                    {% elif c in ['tiene_bcp','cumplimiento_rto','cumplimiento_rpo'] %}
+                      {% if val in ['Sí','Si','SI','sí','si'] %}
+                        <span class="badge bg-success">Sí</span>
+                      {% elif val %}
+                        <span class="badge bg-danger">No</span>
+                      {% else %}
+                        <span class="text-muted">—</span>
+                      {% endif %}
+                    {% else %}
+                      {{ val or '—' }}
+                    {% endif %}
+                  </td>
+                {% endfor %}
+                <td>
+                  <div class="bcp-actions">
+                    <a class="btn btn-sm btn-outline-primary" href="{{ url_for(cfg.edit_endpoint, id=it.id) }}">Ver/Editar</a>
+                    {% if not read_only %}
+                      <a class="btn btn-sm btn-outline-danger" onclick="return confirm('¿Eliminar este registro?')" href="{{ url_for(cfg.delete_endpoint, id=it.id) }}">Eliminar</a>
+                    {% endif %}
+                  </div>
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="20"><div class="bcp-empty">No existen registros para este componente.<br>{% if not read_only %}{% endif %}</div></td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    """, cfg=cfg, items=items, read_only=read_only, bcp_badge=bcp_badge)
+
+    return bcp_render(cfg["title"], body)
+
+
+def bcp_form_page(key, id=None):
+    user, resp = bcp_guard_view()
+    if resp:
+        return resp
+
+    cfg = BCP_CONFIG[key]
+    item = bcp_query_one(cfg["table"], id) if id else {}
+    read_only = not bcp_can_write(user)
+
+    if request.method == "POST":
+        user, resp = bcp_guard_write()
+        if resp:
+            return resp
+
+        data = {}
+        for f in cfg["fields"]:
+            name, label, typ = f[0], f[1], f[2]
+            data[name] = bcp_field_value(name, typ, request.form.get(name))
+
+        if id:
+            bcp_update(cfg["table"], id, data)
+            saved_id = id
+        else:
+            data["creado_por"] = user.username
+            data["fecha_registro"] = bcp_now()
+            saved_id = bcp_insert(cfg["table"], data)
+
+        try:
+            registrar_log(user.username, f"Guardó registro BCP en {cfg['title']}: ID {saved_id}")
+        except Exception:
+            pass
+
+        flash("Registro guardado correctamente.", "success")
+        return redirect(url_for(cfg["endpoint"]))
+
+    body = render_template_string("""
+    <div class="bcp-card">
+      <div class="bcp-card-body">
+        <div class="bcp-toolbar">
+          <div>
+            <h2 class="bcp-section-title">{{ cfg.title }}</h2>
+            <div class="bcp-section-muted">Complete la información requerida para este componente.</div>
+          </div>
+        </div>
+
+        <form method="POST" data-progress-text="Guardando registro BCP/DRP...">
+          <div class="row g-3">
+            {% for f in cfg.fields %}
+              {% set name = f[0] %}
+              {% set label = f[1] %}
+              {% set typ = f[2] %}
+              {% set required = f[3] %}
+              {% set options = f[4] if f|length > 4 else [] %}
+              {% set value = item.get(name) %}
+              <div class="col-md-6">
+                <label class="form-label">{{ label }}</label>
+                {% if typ == 'textarea' %}
+                  <textarea class="form-control" name="{{ name }}" {% if read_only %}readonly{% endif %}>{{ value or '' }}</textarea>
+                {% elif typ == 'select' %}
+                  <select class="form-select" name="{{ name }}" {% if read_only %}disabled{% endif %} {% if required %}required{% endif %}>
+                    <option value="">Seleccione...</option>
+                    {% for op in options %}
+                      <option value="{{ op }}" {% if value == op %}selected{% endif %}>{{ op }}</option>
+                    {% endfor %}
+                  </select>
+                {% elif typ == 'date' %}
+                  <input class="form-control" type="date" name="{{ name }}" value="{{ value or '' }}" {% if read_only %}readonly{% endif %}>
+                {% else %}
+                  <input class="form-control" type="{{ 'number' if typ in ['number','int'] else 'text' }}" step="0.01" name="{{ name }}" value="{{ value or '' }}" {% if required %}required{% endif %} {% if read_only %}readonly{% endif %}>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+
+          <div class="bcp-actions justify-content-center mt-4">
+            <a class="btn btn-light" href="{{ url_for(cfg.endpoint) }}">Volver</a>
+            {% if not read_only %}<button class="btn btn-primary" type="submit">Guardar</button>{% endif %}
+          </div>
+        </form>
+      </div>
+    </div>
+    """, cfg=cfg, item=item, read_only=read_only)
+
+    return bcp_render(cfg["title"], body)
+
+
+def bcp_delete_item(key, id):
+    user, resp = bcp_guard_write()
+    if resp:
+        return resp
+
+    cfg = BCP_CONFIG[key]
+    bcp_delete(cfg["table"], id)
+
+    try:
+        registrar_log(user.username, f"Eliminó registro BCP en {cfg['title']}: ID {id}")
+    except Exception:
+        pass
+
+    flash("Registro eliminado correctamente.", "success")
+    return redirect(url_for(cfg["endpoint"]))
+
+
+# ============================================================
+# RUTAS CRUD
+# ============================================================
+
+@app.route("/bcp/bia")
+@login_required
+def bcp_bia(): return bcp_list_page("bia")
+
+@app.route("/bcp/bia/new", methods=["GET", "POST"])
+@login_required
+def bcp_bia_new(): return bcp_form_page("bia")
+
+@app.route("/bcp/bia/edit/<int:id>", methods=["GET", "POST"])
+@login_required
+def bcp_bia_edit(id): return bcp_form_page("bia", id)
+
+@app.route("/bcp/bia/delete/<int:id>")
+@login_required
+def bcp_bia_delete(id): return bcp_delete_item("bia", id)
+
+@app.route("/bcp/procesos")
+@login_required
+def bcp_procesos(): return bcp_list_page("procesos")
+
+@app.route("/bcp/procesos/new", methods=["GET", "POST"])
+@login_required
+def bcp_procesos_new(): return bcp_form_page("procesos")
+
+@app.route("/bcp/procesos/edit/<int:id>", methods=["GET", "POST"])
+@login_required
+def bcp_procesos_edit(id): return bcp_form_page("procesos", id)
+
+@app.route("/bcp/procesos/delete/<int:id>")
+@login_required
+def bcp_procesos_delete(id): return bcp_delete_item("procesos", id)
+
+@app.route("/bcp/drp")
+@login_required
+def bcp_drp(): return bcp_list_page("drp")
+
+@app.route("/bcp/drp/new", methods=["GET", "POST"])
+@login_required
+def bcp_drp_new(): return bcp_form_page("drp")
+
+@app.route("/bcp/drp/edit/<int:id>", methods=["GET", "POST"])
+@login_required
+def bcp_drp_edit(id): return bcp_form_page("drp", id)
+
+@app.route("/bcp/drp/delete/<int:id>")
+@login_required
+def bcp_drp_delete(id): return bcp_delete_item("drp", id)
+
+@app.route("/bcp/planes")
+@login_required
+def bcp_planes(): return bcp_list_page("planes")
+
+@app.route("/bcp/planes/new", methods=["GET", "POST"])
+@login_required
+def bcp_planes_new(): return bcp_form_page("planes")
+
+@app.route("/bcp/planes/edit/<int:id>", methods=["GET", "POST"])
+@login_required
+def bcp_planes_edit(id): return bcp_form_page("planes", id)
+
+@app.route("/bcp/planes/delete/<int:id>")
+@login_required
+def bcp_planes_delete(id): return bcp_delete_item("planes", id)
+
+@app.route("/bcp/crisis")
+@login_required
+def bcp_crisis(): return bcp_list_page("crisis")
+
+@app.route("/bcp/crisis/new", methods=["GET", "POST"])
+@login_required
+def bcp_crisis_new(): return bcp_form_page("crisis")
+
+@app.route("/bcp/crisis/edit/<int:id>", methods=["GET", "POST"])
+@login_required
+def bcp_crisis_edit(id): return bcp_form_page("crisis", id)
+
+@app.route("/bcp/crisis/delete/<int:id>")
+@login_required
+def bcp_crisis_delete(id): return bcp_delete_item("crisis", id)
+
+@app.route("/bcp/pruebas")
+@login_required
+def bcp_pruebas(): return bcp_list_page("pruebas")
+
+@app.route("/bcp/pruebas/new", methods=["GET", "POST"])
+@login_required
+def bcp_pruebas_new(): return bcp_form_page("pruebas")
+
+@app.route("/bcp/pruebas/edit/<int:id>", methods=["GET", "POST"])
+@login_required
+def bcp_pruebas_edit(id): return bcp_form_page("pruebas", id)
+
+@app.route("/bcp/pruebas/delete/<int:id>")
+@login_required
+def bcp_pruebas_delete(id): return bcp_delete_item("pruebas", id)
+
+@app.route("/bcp/dependencias")
+@login_required
+def bcp_dependencias(): return bcp_list_page("dependencias")
+
+@app.route("/bcp/dependencias/new", methods=["GET", "POST"])
+@login_required
+def bcp_dependencias_new(): return bcp_form_page("dependencias")
+
+@app.route("/bcp/dependencias/edit/<int:id>", methods=["GET", "POST"])
+@login_required
+def bcp_dependencias_edit(id): return bcp_form_page("dependencias", id)
+
+@app.route("/bcp/dependencias/delete/<int:id>")
+@login_required
+def bcp_dependencias_delete(id): return bcp_delete_item("dependencias", id)
+
+@app.route("/bcp/madurez")
+@login_required
+def bcp_madurez(): return bcp_list_page("madurez")
+
+@app.route("/bcp/madurez/new", methods=["GET", "POST"])
+@login_required
+def bcp_madurez_new(): return bcp_form_page("madurez")
+
+@app.route("/bcp/madurez/edit/<int:id>", methods=["GET", "POST"])
+@login_required
+def bcp_madurez_edit(id): return bcp_form_page("madurez", id)
+
+@app.route("/bcp/madurez/delete/<int:id>")
+@login_required
+def bcp_madurez_delete(id): return bcp_delete_item("madurez", id)
+
+
+# ============================================================
+# MÉTRICAS BCP - AUTOMÁTICAS POR MES / SIN BOTONES SUPERIORES
+# ============================================================
+
+def bcp_mes_actual():
+    return datetime.now().strftime("%Y-%m")
+
+
+def bcp_meses_disponibles():
+    meses = set()
+
+    conn = get_bcp_db_connection()
+    cur = conn.cursor()
+
+    for table, col in [
+        ("bcp_pruebas", "fecha_prueba"),
+        ("bcp_bia", "fecha_registro"),
+        ("bcp_procesos_criticos", "fecha_registro"),
+        ("bcp_drp", "fecha_registro"),
+        ("bcp_dependencias_criticas", "fecha_registro"),
+        ("bcp_madurez", "fecha_evaluacion"),
+    ]:
+        try:
+            cur.execute(f"""
+                SELECT DISTINCT substr({col}, 1, 7) AS periodo
+                FROM {table}
+                WHERE {col} IS NOT NULL
+                  AND trim({col}) != ''
+                  AND length({col}) >= 7
+                ORDER BY periodo DESC
+            """)
+            for r in cur.fetchall():
+                if r["periodo"]:
+                    meses.add(r["periodo"])
+        except Exception:
+            pass
+
+    conn.close()
+
+    meses.add(bcp_mes_actual())
+    return sorted(list(meses), reverse=True)
+
+
+def bcp_filtrar_por_mes(rows, campo, periodo):
+    if not periodo:
+        return rows
+
+    return [
+        r for r in rows
+        if str(r.get(campo) or "").startswith(periodo)
+    ]
+
+
+def bcp_metricas_por_mes(periodo=None):
+    periodo = periodo or bcp_mes_actual()
+
+    bias_all = bcp_query_all("bcp_bia")
+    procesos_all = bcp_query_all("bcp_procesos_criticos")
+    drps_all = bcp_query_all("bcp_drp")
+    pruebas_all = bcp_query_all("bcp_pruebas")
+    deps_all = bcp_query_all("bcp_dependencias_criticas")
+    madurez_all = bcp_query_all("bcp_madurez")
+
+    pruebas_mes = bcp_filtrar_por_mes(pruebas_all, "fecha_prueba", periodo)
+    madurez_mes = bcp_filtrar_por_mes(madurez_all, "fecha_evaluacion", periodo)
+
+    procesos_base = procesos_all
+    drps_base = drps_all
+    deps_base = deps_all
+    bias_base = bias_all
+    madurez_base = madurez_mes if madurez_mes else madurez_all
+
+    rto_vals = []
+    rpo_vals = []
+
+    for x in bias_base:
+        if bcp_float(x.get("rto_horas")) > 0:
+            rto_vals.append(bcp_float(x.get("rto_horas")))
+        if bcp_float(x.get("rpo_horas")) > 0:
+            rpo_vals.append(bcp_float(x.get("rpo_horas")))
+
+    for x in procesos_base:
+        if bcp_float(x.get("rto_horas")) > 0:
+            rto_vals.append(bcp_float(x.get("rto_horas")))
+        if bcp_float(x.get("rpo_horas")) > 0:
+            rpo_vals.append(bcp_float(x.get("rpo_horas")))
+
+    pruebas_exitosas = len([
+        x for x in pruebas_mes
+        if (x.get("resultado") or "").strip().lower() == "exitoso"
+    ])
+
+    rto_ok = len([
+        x for x in pruebas_mes
+        if bcp_norm_yes(x.get("cumplimiento_rto"))
+    ])
+
+    rpo_ok = len([
+        x for x in pruebas_mes
+        if bcp_norm_yes(x.get("cumplimiento_rpo"))
+    ])
+
+    procesos_con_bcp = len([
+        x for x in procesos_base
+        if bcp_norm_yes(x.get("tiene_bcp"))
+    ])
+
+    nivel_madurez = round(
+        sum([bcp_int(m.get("nivel")) for m in madurez_base]) / len(madurez_base),
+        2
+    ) if madurez_base else 0
+
+    tiempo_promedio_recuperacion = round(
+        sum([bcp_float(p.get("tiempo_recuperacion_real")) for p in pruebas_mes]) / len(pruebas_mes),
+        2
+    ) if pruebas_mes else 0
+
+    return {
+        "periodo": periodo,
+        "nivel_madurez": nivel_madurez,
+        "procesos_criticos": len(procesos_base),
+        "servicios_criticos": len([
+            d for d in deps_base
+            if (d.get("tipo") or "").lower() in ("servicio", "cloud", "internet")
+        ]),
+        "sistemas_criticos": len(drps_base),
+        "rto_promedio": round(sum(rto_vals) / len(rto_vals), 2) if rto_vals else 0,
+        "rpo_promedio": round(sum(rpo_vals) / len(rpo_vals), 2) if rpo_vals else 0,
+        "pruebas_realizadas": len(pruebas_mes),
+        "estado_drp": bcp_pct(
+            len([
+                d for d in drps_base
+                if (d.get("estado") or "").lower() in ("probado", "activo", "aprobado")
+            ]),
+            len(drps_base)
+        ),
+        "riesgo_operativo": len([
+            b for b in bias_base
+            if (b.get("criticidad") or "").lower() in ("alta", "crítica", "critica")
+        ]),
+        "dependencias_criticas": len(deps_base),
+        "proveedores_criticos": len([d for d in deps_base if d.get("proveedor")]),
+        "estado_backups": bcp_pct(
+            len([
+                d for d in drps_base
+                if (d.get("backup") or "").lower() not in ("", "no", "ninguno")
+            ]),
+            len(drps_base)
+        ),
+        "disponibilidad_servicios": 100,
+        "pruebas_exitosas_pct": bcp_pct(pruebas_exitosas, len(pruebas_mes)),
+        "cumplimiento_rto_pct": bcp_pct(rto_ok, len(pruebas_mes)),
+        "cumplimiento_rpo_pct": bcp_pct(rpo_ok, len(pruebas_mes)),
+        "procesos_con_bcp_pct": bcp_pct(procesos_con_bcp, len(procesos_base)),
+        "sistemas_sin_drp": max(0, len(procesos_base) - len(drps_base)),
+        "backups_fallidos": sum([bcp_int(d.get("backups_fallidos")) for d in drps_base]),
+        "tiempo_promedio_recuperacion": tiempo_promedio_recuperacion,
+    }
+
+
+def bcp_metricas_historico_mensual():
+    meses = bcp_meses_disponibles()
+    historico = []
+
+    for mes in meses:
+        historico.append(bcp_metricas_por_mes(mes))
+
+    return historico
+
+
+@app.route("/bcp/metricas")
+@login_required
+def bcp_metricas():
+    user, resp = bcp_guard_view()
+    if resp:
+        return resp
+
+    periodo = (request.args.get("periodo") or bcp_mes_actual()).strip()
+    meses = bcp_meses_disponibles()
+
+    if periodo not in meses:
+        meses.append(periodo)
+        meses = sorted(list(set(meses)), reverse=True)
+
+    auto = bcp_metricas_por_mes(periodo)
+    historico = bcp_metricas_historico_mensual()
+
+    body = render_template_string("""
+    <style>
+      .bcp-header-actions {
+        display: none !important;
+      }
+    </style>
+
+    <div class="bcp-card">
+      <div class="bcp-card-body">
+        <div class="bcp-toolbar">
+          <div>
+            <h2 class="bcp-section-title">Métricas BCP automáticas por mes</h2>
+            <div class="bcp-section-muted">
+              Indicadores calculados automáticamente desde BIA, procesos críticos, DRP, pruebas, dependencias y madurez.
+            </div>
+          </div>
+
+          <form method="GET" class="d-flex align-items-center gap-2 flex-wrap">
+            <label class="form-label mb-0">Periodo</label>
+            <select class="form-select" name="periodo" onchange="this.form.submit()" style="min-width:150px;">
+              {% for m in meses %}
+                <option value="{{ m }}" {% if m == periodo %}selected{% endif %}>{{ m }}</option>
+              {% endfor %}
+            </select>
+          </form>
+        </div>
+
+        <div class="row g-3">
+          {% for label, val, suf in [
+            ('% pruebas exitosas', auto.pruebas_exitosas_pct, '%'),
+            ('Tiempo promedio recuperación', auto.tiempo_promedio_recuperacion, ' h'),
+            ('Cumplimiento RTO', auto.cumplimiento_rto_pct, '%'),
+            ('Cumplimiento RPO', auto.cumplimiento_rpo_pct, '%'),
+            ('Procesos con BCP', auto.procesos_con_bcp_pct, '%'),
+            ('Sistemas sin DRP', auto.sistemas_sin_drp, ''),
+            ('Backups fallidos', auto.backups_fallidos, ''),
+            ('Disponibilidad servicios', auto.disponibilidad_servicios, '%')
+          ] %}
+          <div class="col-12 col-md-6 col-lg-3">
+            <div class="bcp-kpi">
+              <div class="bcp-kpi-label">{{ label }}</div>
+              <div class="bcp-kpi-value">{{ val }}{{ suf }}</div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="bcp-card">
+      <div class="bcp-card-body">
+        <div class="bcp-toolbar">
+          <div>
+            <h2 class="bcp-section-title">Detalle del periodo {{ periodo }}</h2>
+            <div class="bcp-section-muted">Resumen automático del mes seleccionado.</div>
+          </div>
+        </div>
+
+        <div class="bcp-table-wrap">
+          <table class="table table-hover bcp-table">
+            <thead>
+              <tr>
+                <th>Indicador</th>
+                <th>Resultado</th>
+                <th>Interpretación</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Pruebas realizadas</td><td>{{ auto.pruebas_realizadas }}</td><td>Simulacros o pruebas BCP/DRP registradas en el mes.</td></tr>
+              <tr><td>Pruebas exitosas</td><td>{{ auto.pruebas_exitosas_pct }}%</td><td>Porcentaje de pruebas con resultado exitoso.</td></tr>
+              <tr><td>Cumplimiento RTO</td><td>{{ auto.cumplimiento_rto_pct }}%</td><td>Porcentaje de pruebas del mes que cumplieron el RTO.</td></tr>
+              <tr><td>Cumplimiento RPO</td><td>{{ auto.cumplimiento_rpo_pct }}%</td><td>Porcentaje de pruebas del mes que cumplieron el RPO.</td></tr>
+              <tr><td>Procesos con BCP</td><td>{{ auto.procesos_con_bcp_pct }}%</td><td>Cobertura total de procesos críticos con plan BCP.</td></tr>
+              <tr><td>Estado DRP</td><td>{{ auto.estado_drp }}%</td><td>Porcentaje de DRP activos, aprobados o probados.</td></tr>
+              <tr><td>Estado backups</td><td>{{ auto.estado_backups }}%</td><td>Porcentaje de activos/sistemas DRP con backup definido.</td></tr>
+              <tr><td>Nivel de madurez BCP</td><td>{{ auto.nivel_madurez }}/5</td><td>Promedio de madurez BCP registrado para el periodo o histórico disponible.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="bcp-card">
+      <div class="bcp-card-body">
+        <div class="bcp-toolbar">
+          <div>
+            <h2 class="bcp-section-title">Histórico mensual automático</h2>
+            <div class="bcp-section-muted">
+              No requiere captura manual. Se calcula con los registros existentes por cada mes.
+            </div>
+          </div>
+        </div>
+
+        <div class="bcp-table-wrap">
+          <table class="table table-hover bcp-table">
+            <thead>
+              <tr>
+                <th>Periodo</th>
+                <th>Pruebas</th>
+                <th>Pruebas exitosas</th>
+                <th>Tiempo prom. recuperación</th>
+                <th>RTO</th>
+                <th>RPO</th>
+                <th>Procesos BCP</th>
+                <th>Sistemas sin DRP</th>
+                <th>Backups fallidos</th>
+                <th>Disponibilidad</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for m in historico %}
+                <tr>
+                  <td class="fw-bold text-primary">{{ m.periodo }}</td>
+                  <td>{{ m.pruebas_realizadas }}</td>
+                  <td>{{ m.pruebas_exitosas_pct }}%</td>
+                  <td>{{ m.tiempo_promedio_recuperacion }} h</td>
+                  <td>{{ m.cumplimiento_rto_pct }}%</td>
+                  <td>{{ m.cumplimiento_rpo_pct }}%</td>
+                  <td>{{ m.procesos_con_bcp_pct }}%</td>
+                  <td>{{ m.sistemas_sin_drp }}</td>
+                  <td>{{ m.backups_fallidos }}</td>
+                  <td>{{ m.disponibilidad_servicios }}%</td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="10">
+                    <div class="bcp-empty">No hay información mensual disponible.</div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </div>
+    """, auto=auto, historico=historico, periodo=periodo, meses=meses)
+
+    return bcp_render("Métricas BCP", body)
+
+
+# ============================================================
+# IA GENERATIVA BCP
+# ============================================================
+
+@app.route("/bcp/ia/generar")
+@login_required
+def bcp_ia_generar():
+    user, resp = bcp_guard_write()
+    if resp:
+        return resp
+
+    k = bcp_metricas_actuales()
+
+    prompt = f"""
+Actúa como experto senior en Continuidad del Negocio, ISO 22301, ISO 27001 y resiliencia operacional.
+
+Genera un informe ejecutivo profesional para el módulo Continuidad del Negocio (BCP/DRP) de GRAC.
+
+Indicadores:
+- Nivel madurez BCP: {k['nivel_madurez']}/5
+- Procesos críticos: {k['procesos_criticos']}
+- Sistemas críticos con DRP: {k['sistemas_criticos']}
+- RTO promedio: {k['rto_promedio']} horas
+- RPO promedio: {k['rpo_promedio']} horas
+- Pruebas realizadas: {k['pruebas_realizadas']}
+- Cumplimiento RTO: {k['cumplimiento_rto_pct']}%
+- Cumplimiento RPO: {k['cumplimiento_rpo_pct']}%
+- Procesos con BCP: {k['procesos_con_bcp_pct']}%
+- Backups fallidos: {k['backups_fallidos']}
+- Dependencias críticas: {k['dependencias_criticas']}
+
+Incluye:
+1. Resumen ejecutivo
+2. Principales hallazgos
+3. Riesgos de continuidad
+4. Recomendaciones
+5. Plan de mejora
+6. Prioridades de corto plazo
+7. Conclusión ejecutiva
+
+No uses markdown con asteriscos.
+"""
+
+    try:
+        texto = ai_text_general(
+            prompt,
+            system_prompt="Eres consultor senior en continuidad de negocio, ISO 22301, ISO 27001 y ciberresiliencia.",
+            temperature=0.2,
+            max_tokens=900
+        )
+        flash("Informe IA generado correctamente.", "success")
+    except Exception as e:
+        texto = f"Error generando informe IA: {repr(e)}"
+        flash(texto, "danger")
+
+    data = {
+        "tipo": "Informe Ejecutivo BCP/DRP",
+        "contenido": texto,
+        "contenido_editado": "",
+        "proveedor_ai": (get_ai_provider() if 'get_ai_provider' in globals() else ""),
+        "modelo_ai": "",
+        "generado_por": user.username,
+        "fecha_generacion": bcp_now(),
+    }
+    bcp_insert("bcp_informes_ai", data)
+
+    body = render_template_string("""
+    <div class="bcp-card"><div class="bcp-card-body">
+      <h2 class="bcp-section-title mb-3">Informe Ejecutivo IA — BCP/DRP</h2>
+      <textarea class="form-control" rows="22">{{ texto }}</textarea>
+      <div class="bcp-actions justify-content-center mt-3">
+        <a href="{{ url_for('bcp_dashboard') }}" class="btn btn-light">Volver</a>
+        <a href="{{ url_for('bcp_ia_generar') }}" class="btn btn-primary">Generar nuevamente</a>
+      </div>
+    </div></div>
+    """, texto=texto)
+
+    return bcp_render("Informe Ejecutivo IA", body)
+
+
+# ============================================================
+# PDF EJECUTIVO BCP
+# ============================================================
+
+@app.route("/bcp/pdf")
+@login_required
+def bcp_pdf():
+    user, resp = bcp_guard_view()
+    if resp:
+        return resp
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    styles = getSampleStyleSheet()
+    story = []
+
+    h1 = ParagraphStyle("BCPH1", parent=styles["Heading1"], fontSize=16, textColor=colors.HexColor("#1d4f8f"), spaceAfter=12)
+    h2 = ParagraphStyle("BCPH2", parent=styles["Heading2"], fontSize=12, textColor=colors.HexColor("#2f6fb6"), spaceAfter=8)
+    normal = styles["BodyText"]
+
+    k = bcp_metricas_actuales()
+
+    story.append(Paragraph("Informe Ejecutivo Continuidad del Negocio (BCP/DRP)", h1))
+    story.append(Paragraph(f"Fecha de generación: {datetime.now().strftime('%Y-%m-%d %H:%M')}", normal))
+    story.append(Spacer(1, 12))
+
+    data = [
+        ["Indicador", "Valor"],
+        ["Nivel de madurez BCP", f"{k['nivel_madurez']}/5"],
+        ["Procesos críticos", str(k["procesos_criticos"])],
+        ["Sistemas críticos", str(k["sistemas_criticos"])],
+        ["RTO promedio", f"{k['rto_promedio']} horas"],
+        ["RPO promedio", f"{k['rpo_promedio']} horas"],
+        ["Pruebas realizadas", str(k["pruebas_realizadas"])],
+        ["Cumplimiento RTO", f"{k['cumplimiento_rto_pct']}%"],
+        ["Cumplimiento RPO", f"{k['cumplimiento_rpo_pct']}%"],
+        ["Procesos con BCP", f"{k['procesos_con_bcp_pct']}%"],
+        ["Sistemas sin DRP", str(k["sistemas_sin_drp"])],
+        ["Backups fallidos", str(k["backups_fallidos"])],
+    ]
+
+    table = Table(data, colWidths=[8 * cm, 8 * cm])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1d4f8f")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+    ]))
+    story.append(table)
+    story.append(Spacer(1, 14))
+
+    story.append(Paragraph("Resumen de cobertura documental", h2))
+    sections = [
+        ("BIA", bcp_count("bcp_bia")),
+        ("Procesos críticos", bcp_count("bcp_procesos_criticos")),
+        ("DRP", bcp_count("bcp_drp")),
+        ("Planes de continuidad", bcp_count("bcp_planes_continuidad")),
+        ("Gestión de crisis", bcp_count("bcp_crisis")),
+        ("Pruebas y simulacros", bcp_count("bcp_pruebas")),
+        ("Dependencias críticas", bcp_count("bcp_dependencias_criticas")),
+    ]
+    table2 = Table([["Componente", "Registros"]] + [[a, str(b)] for a, b in sections], colWidths=[10 * cm, 6 * cm])
+    table2.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#2f6fb6")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+    ]))
+    story.append(table2)
+
+    doc.build(story)
+    buffer.seek(0)
+
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=f"Informe_BCP_DRP_{datetime.now().strftime('%Y%m%d')}.pdf",
+        mimetype="application/pdf"
+    )
+
+# ============================================================================================================================================
+#                                      FIN MÓDULO CONTINUIDAD DEL NEGOCIO (BCP/DRP)
+# ============================================================================================================================================
 
 
 # =========================
