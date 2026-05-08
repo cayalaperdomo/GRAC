@@ -823,7 +823,17 @@ init_log_db()
 #                                                               FIN LOGS DE AUDITORÍA - DB INDEPENDIENTE
 # ============================================================================================================================================
 
+# =========================
+# CONFIG Nivel de Madurez - SOC 2
+# =========================
+os.makedirs(app.instance_path, exist_ok=True)
 
+SOC2_DB_PATH = os.path.join(app.instance_path, "soc2_madurez.db")
+
+if not app.config.get("SQLALCHEMY_BINDS"):
+    app.config["SQLALCHEMY_BINDS"] = {}
+
+app.config["SQLALCHEMY_BINDS"]["soc2_madurez"] = "sqlite:///" + SOC2_DB_PATH
 
 madurez_bp = Blueprint("madurez", __name__, url_prefix="/madurez")
 
@@ -5468,6 +5478,7 @@ MODULES = [
     "Nivel de Madurez NIST CSF V.2.0",
     "Nivel de Madurez protección de datos personales",
     "Nivel de Madurez PCI-DSS",
+    "Nivel de madurez SOC 2",
     "Métricas",
     "Reportes",
     "Logs de Auditoría",
@@ -8139,6 +8150,7 @@ MENU_SECTIONS = [
             {"label": "Nivel de Madurez NIST CSF V.2.0", "href": "/madurez_nist", "icon": "bi-compass", "btn": "btn-primary", "module": "Nivel de Madurez NIST CSF V.2.0"},
             {"label": "Nivel de Madurez Protección de Datos Personales", "href": "/madurez_datos", "icon": "bi-shield-lock", "btn": "btn-primary", "module": "Nivel de Madurez protección de datos personales"},
             {"label": "Nivel de Madurez PCI-DSS", "href": "/madurez_pci", "icon": "bi-credit-card-2-front", "btn": "btn-primary", "module": "Nivel de Madurez PCI-DSS"},
+            {"label": "Nivel de Madurez SOC 2", "href": "/madurez_soc2/", "icon": "bi-shield-check", "btn": "btn-primary", "module": "Nivel de madurez SOC 2"},
             {
                 "label": "Métricas",
                 "href": "#",
@@ -126559,6 +126571,3419 @@ def detalle_resultado_pci(analysis_id: int):
 # ==========================================================================================================================================
 
 # ==========================================================================================================================================
+#                                                   Módulo de Madurez SOC 2 — Diseño NIST
+# ==========================================================================================================================================
+# INSTRUCCIONES DE INTEGRACIÓN:
+# 1) Pega este bloque en Programasgsi2.py después del módulo PCI-DSS o en la zona de módulos de madurez.
+# 2) Deja el Excel en: static/templates/Matriz SOC 2.xlsx
+#    También acepta: Matriz SOC 2(2).xlsx, SOC 2.xlsx, SOC2.xlsx
+# 3) Agrega "Nivel de madurez SOC 2" a MODULES.
+# 4) Registra el blueprint una sola vez:
+#       app.register_blueprint(soc2_madurez_bp)
+# 5) Este módulo usa BASE DE DATOS INDEPENDIENTE:
+#       instance/soc2_madurez.db
+# ==========================================================================================================================================
+
+soc2_madurez_bp = Blueprint("madurez_soc2", __name__, url_prefix="/madurez_soc2")
+
+# ============================================================
+# BASE DE DATOS INDEPENDIENTE — SOC 2
+# ============================================================
+SOC2_DB_PATH = os.path.join(app.instance_path, "soc2_madurez.db")
+os.makedirs(app.instance_path, exist_ok=True)
+
+app.config.setdefault("SQLALCHEMY_BINDS", {})
+app.config["SQLALCHEMY_BINDS"]["soc2_madurez"] = "sqlite:///" + SOC2_DB_PATH
+
+SOC2_PERMISSION_NAME = "Nivel de madurez SOC 2"
+SOC2_INSTRUMENTO_TEMPLATE_XLSX = os.path.join(BASE_DIR, "static", "templates", "Matriz SOC 2.xlsx")
+
+SOC2_STATUS_SCORE = {
+    "SI": 100,
+    "PARCIAL": 50,
+    "NO": 0,
+    "NA": None,  # N/A no suma ni resta; se excluye del cálculo
+}
+
+SOC2_BLOCK_ORDER = [
+    "SEGURIDAD",
+    "DISPONIBILIDAD",
+    "CONFIDENCIALIDAD",
+    "INTEGRIDAD",
+    "PRIVACIDAD",
+]
+
+SOC2_BLOCK_TITLES = {
+    "SEGURIDAD": "Seguridad",
+    "DISPONIBILIDAD": "Disponibilidad",
+    "CONFIDENCIALIDAD": "Confidencialidad",
+    "INTEGRIDAD": "Integridad del procesamiento",
+    "PRIVACIDAD": "Privacidad",
+}
+
+SOC2_MADUREZ_LEVELS = [
+    {
+        "nivel": "Nivel 1: Inicial",
+        "descripcion": "No existe implementación formal o es mínima; las prácticas son ad hoc.",
+        "score": 1,
+        "rango_pct": "0% – 20%",
+        "logica": "Prácticas no formalizadas"
+    },
+    {
+        "nivel": "Nivel 2: Repetible",
+        "descripcion": "Existen prácticas parciales y repetibles, pero con documentación o control limitado.",
+        "score": 2,
+        "rango_pct": "21% – 40%",
+        "logica": "Prácticas parciales"
+    },
+    {
+        "nivel": "Nivel 3: Definido",
+        "descripcion": "El proceso está definido, documentado y comunicado para su ejecución consistente.",
+        "score": 3,
+        "rango_pct": "41% – 60%",
+        "logica": "Proceso documentado"
+    },
+    {
+        "nivel": "Nivel 4: Gestionado",
+        "descripcion": "El proceso se mide, gestiona, controla y tiene seguimiento periódico.",
+        "score": 4,
+        "rango_pct": "61% – 80%",
+        "logica": "Proceso medido y gestionado"
+    },
+    {
+        "nivel": "Nivel 5: Optimizado",
+        "descripcion": "El proceso es eficaz, sostenido y mejorado continuamente con evidencia trazable.",
+        "score": 5,
+        "rango_pct": "81% – 100%",
+        "logica": "Mejora continua"
+    },
+]
+
+
+# ============================================================
+# MODELOS DB — SOC 2
+# ============================================================
+class Soc2MadurezParametro(db.Model):
+    __bind_key__ = "soc2_madurez"
+    __tablename__ = "soc2_madurez_parametros"
+
+    id = db.Column(db.Integer, primary_key=True)
+    nivel = db.Column(db.String(80), nullable=False)
+    rango_desde = db.Column(db.Float, nullable=False)
+    rango_hasta = db.Column(db.Float, nullable=False)
+    color = db.Column(db.String(20), nullable=True)
+    descripcion = db.Column(db.Text, nullable=True)
+    orden = db.Column(db.Integer, default=0)
+
+
+class Soc2MadurezPregunta(db.Model):
+    __bind_key__ = "soc2_madurez"
+    __tablename__ = "soc2_madurez_preguntas"
+
+    id = db.Column(db.Integer, primary_key=True)
+    bloque_codigo = db.Column(db.String(50), index=True, nullable=True)
+    bloque_nombre = db.Column(db.String(255), nullable=True)
+    seccion_codigo = db.Column(db.String(50), index=True, nullable=True)
+    seccion_nombre = db.Column(db.Text, nullable=True)
+    pregunta_codigo = db.Column(db.String(50), index=True, nullable=True)
+    pregunta = db.Column(db.Text, nullable=False)
+    tipo = db.Column(db.String(5), nullable=False, default="q")  # h / q
+    orden = db.Column(db.Integer, default=0)
+    activo = db.Column(db.Boolean, default=True)
+
+
+class Soc2MadurezRun(db.Model):
+    __bind_key__ = "soc2_madurez"
+    __tablename__ = "soc2_madurez_runs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    consecutivo = db.Column(db.String(255), nullable=False, index=True)
+    company_name = db.Column(db.String(255), nullable=True)
+    user_id = db.Column(db.Integer, nullable=True)  # DB independiente: no FK cruzada
+    estado = db.Column(db.String(20), nullable=False, default="BORRADOR", index=True)
+    progreso_pct = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    resumen_json = db.Column(db.Text, nullable=False, default="{}")
+    pct_general = db.Column(db.Float, nullable=False, default=0.0)
+    radar_overall_b64 = db.Column(db.Text, nullable=True)
+
+    informe_ejecutivo_ai = db.Column(db.Text, nullable=True)
+    informe_ejecutivo_editado = db.Column(db.Text, nullable=True)
+    plan_trabajo_ai = db.Column(db.Text, nullable=True)
+    plan_trabajo_editado = db.Column(db.Text, nullable=True)
+
+
+class Soc2MadurezRespuesta(db.Model):
+    __bind_key__ = "soc2_madurez"
+    __tablename__ = "soc2_madurez_respuestas"
+
+    id = db.Column(db.Integer, primary_key=True)
+    run_id = db.Column(db.Integer, db.ForeignKey("soc2_madurez_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    pregunta_id = db.Column(db.Integer, db.ForeignKey("soc2_madurez_preguntas.id", ondelete="CASCADE"), nullable=False, index=True)
+    estado = db.Column(db.String(20), nullable=False)  # SI / PARCIAL / NO / NA
+    comentario = db.Column(db.Text, nullable=True)
+
+
+class Soc2MadurezCriterioAnalisis(db.Model):
+    __bind_key__ = "soc2_madurez"
+    __tablename__ = "soc2_madurez_criterio_analisis"
+
+    id = db.Column(db.Integer, primary_key=True)
+    run_id = db.Column(db.Integer, db.ForeignKey("soc2_madurez_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    bloque_codigo = db.Column(db.String(50), nullable=False, index=True)
+    bloque_nombre = db.Column(db.String(255), nullable=True)
+    estado_actual = db.Column(db.Text, nullable=True)
+    estado_requerido = db.Column(db.Text, nullable=True)
+    plan_accion_ai = db.Column(db.Text, nullable=True)
+    plan_accion_editado = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint("run_id", "bloque_codigo", name="uq_soc2_run_bloque"),
+    )
+
+
+# ============================================================
+# INICIALIZACIÓN DB INDEPENDIENTE
+# ============================================================
+def init_soc2_madurez_db():
+    try:
+        os.makedirs(app.instance_path, exist_ok=True)
+        app.config.setdefault("SQLALCHEMY_BINDS", {})
+        app.config["SQLALCHEMY_BINDS"]["soc2_madurez"] = "sqlite:///" + SOC2_DB_PATH
+        with app.app_context():
+            db.create_all(bind_key="soc2_madurez")
+            seed_soc2_parametros()
+        print(f"✅ Base de datos SOC 2 inicializada correctamente: {SOC2_DB_PATH}")
+    except Exception as e:
+        print(f"❌ Error inicializando base de datos SOC 2: {repr(e)}")
+        raise
+
+
+# ============================================================
+# HELPERS GENERALES
+# ============================================================
+def soc2_block_title(code: str) -> str:
+    return SOC2_BLOCK_TITLES.get((code or "").strip().upper(), code or "")
+
+
+def soc2_safe_str(x):
+    if x is None:
+        return ""
+    try:
+        if pd.isna(x):
+            return ""
+    except Exception:
+        pass
+    return str(x).strip()
+
+
+def _soc2_norm(s: str) -> str:
+    s = soc2_safe_str(s)
+    s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+    s = s.upper()
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def soc2_normalizar_texto_excel(texto: str) -> str:
+    t = soc2_safe_str(texto)
+    if not t:
+        return ""
+    t = t.replace("\ufeff", " ").replace("\xa0", " ")
+    t = t.replace("\r\n", "\n").replace("\r", "\n")
+    t = re.sub(r"[ \t]+", " ", t).strip()
+    return t
+
+
+def soc2_detectar_bloque(texto: str):
+    n = _soc2_norm(texto)
+    mapa = {
+        "SEGURIDAD": "SEGURIDAD",
+        "DISPONIBILIDAD": "DISPONIBILIDAD",
+        "CONFIDENCIALIDAD": "CONFIDENCIALIDAD",
+        "INTEGRIDAD": "INTEGRIDAD",
+        "INTEGRIDAD DEL PROCESAMIENTO": "INTEGRIDAD",
+        "PRIVACIDAD": "PRIVACIDAD",
+    }
+    code = mapa.get(n)
+    if code:
+        return code, SOC2_BLOCK_TITLES[code]
+    return None, None
+
+
+def seed_soc2_parametros():
+    if Soc2MadurezParametro.query.first():
+        return
+    params = [
+        {"nivel": "Nivel 1: Inicial", "rango_desde": 0, "rango_hasta": 20.99, "color": "#dc3545", "descripcion": "No existe implementación formal o es mínima.", "orden": 1},
+        {"nivel": "Nivel 2: Repetible", "rango_desde": 21, "rango_hasta": 40.99, "color": "#fd7e14", "descripcion": "Existen prácticas parciales y repetibles.", "orden": 2},
+        {"nivel": "Nivel 3: Definido", "rango_desde": 41, "rango_hasta": 60.99, "color": "#ffc107", "descripcion": "El proceso está definido y documentado.", "orden": 3},
+        {"nivel": "Nivel 4: Gestionado", "rango_desde": 61, "rango_hasta": 80.99, "color": "#0d6efd", "descripcion": "El proceso se mide, gestiona y controla.", "orden": 4},
+        {"nivel": "Nivel 5: Optimizado", "rango_desde": 81, "rango_hasta": 100, "color": "#198754", "descripcion": "Proceso eficaz, sostenido y mejorado continuamente.", "orden": 5},
+    ]
+    for p in params:
+        db.session.add(Soc2MadurezParametro(**p))
+    db.session.commit()
+
+
+def soc2_resolver_nivel(pct: float):
+    try:
+        pct = float(pct or 0)
+    except Exception:
+        pct = 0.0
+    pct = max(0.0, min(100.0, pct))
+    rows = Soc2MadurezParametro.query.order_by(Soc2MadurezParametro.orden.asc()).all()
+    for r in rows:
+        if float(r.rango_desde) <= pct <= float(r.rango_hasta):
+            return {"nivel": r.nivel, "score": r.orden, "color": r.color or "#6c757d", "descripcion": r.descripcion or ""}
+    return {"nivel": "Nivel no definido", "score": 0, "color": "#6c757d", "descripcion": ""}
+
+
+def soc2_resumen_instrumento():
+    total_q = Soc2MadurezPregunta.query.filter_by(tipo="q").count()
+    total_h = Soc2MadurezPregunta.query.filter_by(tipo="h").count()
+    por_bloque = (
+        db.session.query(Soc2MadurezPregunta.bloque_codigo, func.count(Soc2MadurezPregunta.id))
+        .filter(Soc2MadurezPregunta.tipo == "q")
+        .group_by(Soc2MadurezPregunta.bloque_codigo)
+        .all()
+    )
+    return {"total_preguntas": total_q, "total_headers": total_h, "por_bloque": {k: v for k, v in por_bloque}}
+
+
+def cargar_respuestas_soc2(run_id):
+    out = {}
+    if not run_id:
+        return out
+    rows = Soc2MadurezRespuesta.query.filter_by(run_id=run_id).all()
+    for r in rows:
+        out[r.pregunta_id] = {"estado": (r.estado or "").strip().upper(), "comentario": (r.comentario or "").strip()}
+    return out
+
+
+def calcular_progreso_soc2(preguntas, form_data=None, respuestas_db=None):
+    total = len(preguntas)
+    respondidas = 0
+    for q in preguntas:
+        estado = ""
+        if form_data is not None:
+            estado = (form_data.get(f"st_{q.id}") or "").strip().upper()
+        elif respuestas_db is not None:
+            estado = (respuestas_db.get(q.id, {}).get("estado") or "").strip().upper()
+        if estado in ("SI", "PARCIAL", "NO", "NA"):
+            respondidas += 1
+    pct = int(round((respondidas / total) * 100)) if total > 0 else 0
+    return respondidas, total, pct
+
+
+def obtener_borrador_soc2(user_id):
+    if not user_id:
+        return None
+    return (
+        Soc2MadurezRun.query
+        .filter(Soc2MadurezRun.user_id == user_id, Soc2MadurezRun.estado == "BORRADOR")
+        .order_by(Soc2MadurezRun.updated_at.desc(), Soc2MadurezRun.id.desc())
+        .first()
+    )
+
+
+def _contar_respuestas_run_soc2(run_id: int) -> int:
+    if not run_id:
+        return 0
+    return Soc2MadurezRespuesta.query.filter_by(run_id=run_id).count()
+
+
+def _eliminar_runs_vacios_soc2(user_id: int | None = None):
+    q = Soc2MadurezRun.query
+    if user_id:
+        q = q.filter(Soc2MadurezRun.user_id == user_id)
+    eliminados = 0
+    for run in q.all():
+        if Soc2MadurezRespuesta.query.filter_by(run_id=run.id).count() == 0:
+            Soc2MadurezCriterioAnalisis.query.filter_by(run_id=run.id).delete(synchronize_session=False)
+            db.session.delete(run)
+            eliminados += 1
+    if eliminados:
+        db.session.commit()
+    return eliminados
+
+
+def soc2_pct_from_estados(estados: list[str]) -> float:
+    vals = []
+    for e in estados:
+        v = SOC2_STATUS_SCORE.get((e or "").strip().upper())
+        if v is not None:
+            vals.append(v)
+    return round(sum(vals) / len(vals), 2) if vals else 0.0
+
+
+def _parse_rango_pct_soc2(rango: str):
+    if not rango:
+        return None, None
+    s = rango.replace("%", "").strip().replace("–", "-")
+    parts = [p.strip() for p in s.split("-")]
+    if len(parts) != 2:
+        return None, None
+    try:
+        return float(parts[0]), float(parts[1])
+    except Exception:
+        return None, None
+
+
+def soc2_nivel_visual_por_pct(pct: float):
+    return soc2_resolver_nivel(pct)
+
+
+def _soc2_group_questions():
+    preguntas = (
+        Soc2MadurezPregunta.query
+        .filter_by(activo=True, tipo="q")
+        .order_by(Soc2MadurezPregunta.bloque_codigo.asc(), Soc2MadurezPregunta.orden.asc(), Soc2MadurezPregunta.id.asc())
+        .all()
+    )
+    grouped = {}
+    for q in preguntas:
+        bloque = (q.bloque_codigo or "SIN_BLOQUE").strip().upper()
+        if bloque not in grouped:
+            grouped[bloque] = {
+                "titulo": q.bloque_nombre or soc2_block_title(bloque) or bloque,
+                "items": []
+            }
+        grouped[bloque]["items"].append(q)
+    ordered = {}
+    for code in SOC2_BLOCK_ORDER:
+        if code in grouped:
+            ordered[code] = grouped[code]
+    for code, val in grouped.items():
+        if code not in ordered:
+            ordered[code] = val
+    return ordered
+
+
+def _soc2_build_resumen(run_id: int) -> dict:
+    q = (
+        db.session.query(Soc2MadurezRespuesta, Soc2MadurezPregunta)
+        .join(Soc2MadurezPregunta, Soc2MadurezPregunta.id == Soc2MadurezRespuesta.pregunta_id)
+        .filter(Soc2MadurezRespuesta.run_id == run_id)
+        .filter(Soc2MadurezPregunta.tipo == "q")
+        .order_by(Soc2MadurezPregunta.bloque_codigo.asc(), Soc2MadurezPregunta.orden.asc())
+    )
+    por_bloque = {}
+    for r, p in q.all():
+        b = (p.bloque_codigo or "SIN_BLOQUE").strip().upper()
+        por_bloque.setdefault(b, {
+            "bloque": b,
+            "nombre": p.bloque_nombre or soc2_block_title(b) or b,
+            "total": 0,
+            "validas": 0,
+            "SI": 0,
+            "PARCIAL": 0,
+            "NO": 0,
+            "NA": 0,
+            "items": [],
+        })
+        estado = (r.estado or "").strip().upper()
+        por_bloque[b]["total"] += 1
+        if estado in ("SI", "PARCIAL", "NO", "NA"):
+            por_bloque[b][estado] += 1
+        score = SOC2_STATUS_SCORE.get(estado)
+        if score is not None:
+            por_bloque[b]["validas"] += 1
+        por_bloque[b]["items"].append({
+            "pregunta_id": p.id,
+            "pregunta_codigo": p.pregunta_codigo,
+            "pregunta": p.pregunta,
+            "estado": estado,
+            "comentario": r.comentario or "",
+        })
+
+    resumen = {}
+    for b, d in por_bloque.items():
+        estados = [it["estado"] for it in d["items"]]
+        pct = soc2_pct_from_estados(estados)
+        nivel = soc2_resolver_nivel(pct)
+        d["pct"] = pct
+        d["madurez"] = nivel["nivel"]
+        d["score"] = nivel.get("score", 0)
+        d["color"] = nivel["color"]
+        d["descripcion"] = nivel.get("descripcion", "")
+        d["brecha_pct"] = round(100.0 - pct, 2)
+        resumen[b] = d
+    return resumen
+
+
+def soc2_pct_por_criterio(resumen: dict, order: list[str] = None):
+    order = order or SOC2_BLOCK_ORDER
+    labels, values = [], []
+    for b in order:
+        if b in (resumen or {}):
+            labels.append(soc2_block_title(b) or b)
+            values.append(float((resumen or {}).get(b, {}).get("pct", 0) or 0))
+    for b, d in (resumen or {}).items():
+        if b not in order:
+            labels.append(d.get("nombre") or b)
+            values.append(float(d.get("pct", 0) or 0))
+    return labels, values
+
+
+def soc2_radar_b64(labels: list[str], values: list[float], title: str = "Radar SOC 2"):
+    if not labels:
+        return ""
+    vals = [max(0.0, min(100.0, float(v))) for v in values]
+    N = len(labels)
+    angles = [n / float(N) * 2 * math.pi for n in range(N)]
+    angles += angles[:1]
+    plot_vals = vals + vals[:1]
+
+    fig = plt.figure(figsize=(3.55, 3.55), dpi=170)
+    ax = plt.subplot(111, polar=True)
+    ax.set_theta_offset(math.pi / 2)
+    ax.set_theta_direction(-1)
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(labels, fontsize=7.3)
+    ax.tick_params(axis="x", pad=10)
+    ax.set_ylim(0, 100)
+    ax.set_yticks([20, 40, 60, 80, 100])
+    ax.set_yticklabels(["20", "40", "60", "80", "100"], fontsize=7)
+    ax.tick_params(axis="y", pad=4)
+    ax.plot(angles, plot_vals, linewidth=2.0)
+    ax.fill(angles, plot_vals, alpha=0.16)
+    ax.set_title(title, fontsize=9.5, pad=14)
+    fig.subplots_adjust(top=0.83, bottom=0.10, left=0.10, right=0.90)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", transparent=True, bbox_inches="tight", pad_inches=0.22)
+    plt.close(fig)
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
+def generar_soc2_velocimetro_png_bytes(titulo, valor, nivel="", color="#6c757d"):
+    try:
+        valor = max(0, min(100, float(valor or 0)))
+        fig = plt.figure(figsize=(7.2, 4.2), dpi=220)
+        ax = plt.axes([0.04, 0.08, 0.92, 0.84])
+        ax.set_aspect("equal")
+        ax.axis("off")
+        ax.set_xlim(-1.18, 1.18)
+        ax.set_ylim(-0.28, 1.18)
+        fig.patch.set_facecolor("white")
+        ax.set_facecolor("white")
+        rangos = [(180, 144, "#d9534f"), (144, 108, "#f0ad4e"), (108, 72, "#f7d154"), (72, 36, "#5bc0de"), (36, 0, "#5cb85c")]
+        for theta1, theta2, c in rangos:
+            ax.add_patch(Wedge((0, 0), 1.00, theta2, theta1, width=0.18, facecolor=c, edgecolor="white", linewidth=2))
+        for pct in range(0, 101, 10):
+            ang = math.radians(180 - (pct / 100.0) * 180.0)
+            ax.plot([math.cos(ang) * 0.78, math.cos(ang) * 0.88], [math.sin(ang) * 0.78, math.sin(ang) * 0.88], linewidth=1.2, color="#6b7280")
+        for pct in [0, 25, 50, 75, 100]:
+            ang = math.radians(180 - (pct / 100.0) * 180.0)
+            ax.text(math.cos(ang) * 0.63, math.sin(ang) * 0.63, f"{pct}", ha="center", va="center", fontsize=10, fontweight="bold", color="#374151")
+        ang = math.radians(180 - (valor / 100.0) * 180.0)
+        ax.add_patch(FancyArrowPatch((0, 0), (math.cos(ang) * 0.72, math.sin(ang) * 0.72), arrowstyle="-|>", mutation_scale=18, linewidth=2.4, color="#111827", zorder=5))
+        ax.add_patch(Circle((0, 0), radius=0.065, facecolor="#111827", edgecolor="white", linewidth=1.0, zorder=6))
+        titulo_corto = (titulo or "").strip()
+        if len(titulo_corto) > 42:
+            titulo_corto = titulo_corto[:39] + "..."
+        ax.text(0, 1.06, titulo_corto, ha="center", va="center", fontsize=13, fontweight="bold", color="#0f3d68")
+        ax.text(0, 0.30, f"{valor:.1f}%", ha="center", va="center", fontsize=24, fontweight="bold", color=color)
+        if nivel:
+            ax.text(0, 0.12, str(nivel)[:30], ha="center", va="center", fontsize=11, fontweight="bold", color="#374151")
+        buf = io.BytesIO()
+        canvas = FigureCanvas(fig)
+        canvas.print_png(buf)
+        plt.close(fig)
+        buf.seek(0)
+        return buf.getvalue()
+    except Exception:
+        plt.close("all")
+        return None
+
+
+def generar_soc2_velocimetro_base64(label: str, pct: float, nivel: str, color: str):
+    b = generar_soc2_velocimetro_png_bytes(label, pct, nivel, color)
+    if not b:
+        return None
+    return base64.b64encode(b).decode("utf-8")
+
+
+def soc2_normalizar_texto_rico_guardado(texto: str) -> str:
+    txt = (texto or "").strip()
+    if not txt:
+        return ""
+    txt = txt.replace("\r\n", "\n").replace("\r", "\n")
+    txt = html.unescape(txt).replace("```json", "").replace("```", "").strip()
+    try:
+        obj = json.loads(txt)
+        if isinstance(obj, dict):
+            val = obj.get("informe_ejecutivo") or obj.get("plan_trabajo") or obj.get("texto") or ""
+            if isinstance(val, list):
+                val = json.dumps(val, ensure_ascii=False)
+            if isinstance(val, str) and val.strip():
+                txt = val.strip()
+    except Exception:
+        pass
+    txt = re.sub(r"<\s*br\s*/?\s*>", "\n", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"<[^>]+>", "", txt)
+    patrones = [
+        r"^\s*\*{0,3}\s*INFORME\s+EJECUTIVO\s*(DE\s+MADUREZ\s+SOC\s*2)?\s*\*{0,3}\s*[:\-–—]?\s*",
+        r"^\s*#{1,6}\s*INFORME\s+EJECUTIVO\s*(DE\s+MADUREZ\s+SOC\s*2)?\s*[:\-–—]?\s*",
+        r"^\s*RESUMEN\s+EJECUTIVO\s*[:\-–—]?\s*",
+        r"^\s*PLAN\s+DE\s+TRABAJO\s*[:\-–—]?\s*",
+    ]
+    for p in patrones:
+        txt = re.sub(p, "", txt, flags=re.IGNORECASE).strip()
+    txt = txt.replace("**", "").replace("__", "")
+    txt = re.sub(r"\n{3,}", "\n\n", txt)
+    return txt.strip()
+
+
+def _extraer_json_objeto_soc2(raw: str) -> dict:
+    raw = (raw or "").strip().replace("```json", "").replace("```", "").strip()
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+    try:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(raw[start:end + 1])
+    except Exception:
+        pass
+    return {}
+
+
+def _build_plan_accion_soc2_texto(plan_list) -> str:
+    if not isinstance(plan_list, list):
+        return ""
+    lines = []
+    for i, it in enumerate(plan_list, start=1):
+        accion = (it.get("accion") or it.get("actividad") or "").strip()
+        prioridad = (it.get("prioridad") or "").strip()
+        responsable = (it.get("responsable_sugerido") or "").strip()
+        plazo = (it.get("plazo") or "").strip()
+        evidencia = (it.get("evidencia_esperada") or it.get("entregable") or "").strip()
+        lines.append(
+            f"{i}. Acción: {accion or 'Sin definir'}\n"
+            f"   Prioridad: {prioridad or 'Sin definir'}\n"
+            f"   Responsable sugerido: {responsable or 'Sin definir'}\n"
+            f"   Plazo: {plazo or 'Sin definir'}\n"
+            f"   Evidencia esperada: {evidencia or 'Sin definir'}"
+        )
+    return "\n\n".join(lines).strip()
+
+
+def _normalizar_plan_accion_soc2_texto(texto_raw: str) -> str:
+    txt = (texto_raw or "").strip().replace("```json", "").replace("```", "").strip()
+    if not txt:
+        return ""
+    obj = _extraer_json_objeto_soc2(txt)
+    if isinstance(obj, dict):
+        for key in ("plan_accion", "plan_trabajo", "plan", "acciones"):
+            if isinstance(obj.get(key), list):
+                return _build_plan_accion_soc2_texto(obj.get(key))
+    return soc2_normalizar_texto_rico_guardado(txt)
+
+
+# ============================================================
+# IA — SOC 2
+# ============================================================
+def _soc2_ai_text(prompt: str, max_tokens: int = 900) -> str:
+    """
+    IA exclusiva para SOC 2.
+    Corrige timeout de Ollama:
+    - Reduce num_predict
+    - Aumenta timeout
+    - No usa stream
+    - Mantiene OpenRouter si está configurado como proveedor
+    """
+
+    provider = (get_ai_provider() or "openrouter").strip().lower()
+
+    # =========================
+    # OLLAMA
+    # =========================
+    if provider == "ollama":
+        base_url = (get_ollama_base_url() or "http://localhost:11434").strip().rstrip("/")
+        model = (get_ollama_model() or "llama3.1").strip()
+
+        if not base_url:
+            raise RuntimeError("No hay OLLAMA_BASE_URL configurada.")
+        if not model:
+            raise RuntimeError("No hay OLLAMA_MODEL configurado.")
+
+        try:
+            resp = requests.post(
+                f"{base_url}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.15,
+                        "num_predict": int(max_tokens or 700),
+                        "top_p": 0.9
+                    }
+                },
+                timeout=600
+            )
+
+            resp.raise_for_status()
+            data = resp.json() or {}
+            texto = (data.get("response") or "").strip()
+
+            if not texto:
+                raise RuntimeError("Ollama respondió sin contenido.")
+
+            return texto
+
+        except requests.exceptions.ReadTimeout:
+            raise RuntimeError(
+                "Ollama tardó demasiado en responder. "
+                "Se recomienda reducir el número de preguntas enviadas o usar OpenRouter para este análisis."
+            )
+
+        except requests.exceptions.ConnectionError:
+            raise RuntimeError(
+                "No fue posible conectar con Ollama. "
+                "Verifica que Ollama esté activo en http://localhost:11434."
+            )
+
+    # =========================
+    # OPENROUTER
+    # =========================
+    if "_ai_text" in globals():
+        return _ai_text(prompt, max_tokens=max_tokens)
+
+    raise RuntimeError("No se encontró helper global _ai_text para OpenRouter/Ollama.")
+
+
+def _soc2_ai_prompt_criterio(
+    run: "Soc2MadurezRun",
+    bloque_codigo: str,
+    bloque_nombre: str,
+    pct: float,
+    items: list[dict]
+):
+    """
+    Prompt SOC 2 mejorado:
+    - Evita respuestas demasiado cortas.
+    - Mantiene límite para no generar timeout en Ollama.
+    - Obliga estado actual y requerido con análisis real.
+    """
+
+    bullets = []
+
+    for it in items[:30]:
+        pregunta = (it.get("pregunta") or "")[:260].replace("\n", " ")
+        comentario = (it.get("comentario") or "")[:260].replace("\n", " ")
+        estado = (it.get("estado") or "").strip().upper()
+
+        linea = f"- [{estado}] {pregunta}"
+        if comentario:
+            linea += f" | Evidencia/Comentario: {comentario}"
+
+        bullets.append(linea)
+
+    joined = "\n".join(bullets) if bullets else "- Sin evidencias registradas."
+
+    return f"""
+Eres un consultor senior experto en SOC 2, Trust Services Criteria, auditoría de controles, seguridad de la información y gobierno de riesgos.
+
+Debes generar un análisis ejecutivo, claro y accionable para el criterio evaluado.
+
+CONTEXTO DE LA EVALUACIÓN
+Consecutivo: {run.consecutivo}
+Criterio SOC 2: {bloque_codigo} - {bloque_nombre}
+Cumplimiento actual: {pct:.2f}%
+
+EVIDENCIAS Y RESPUESTAS DEL CRITERIO
+{joined}
+
+INSTRUCCIONES OBLIGATORIAS
+Responde únicamente JSON válido.
+No uses markdown.
+No agregues texto antes ni después del JSON.
+
+Debes devolver exactamente estas llaves:
+{{
+  "estado_actual": "texto",
+  "estado_requerido": "texto",
+  "plan_accion": [
+    {{
+      "accion": "texto",
+      "prioridad": "Alta|Media|Baja",
+      "responsable_sugerido": "texto",
+      "plazo": "texto",
+      "evidencia_esperada": "texto"
+    }}
+  ]
+}}
+
+REGLAS PARA estado_actual:
+- No respondas solo con el porcentaje.
+- Redacta entre 2 y 4 párrafos.
+- Explica qué tan maduro está el criterio actualmente.
+- Menciona fortalezas visibles según respuestas SI.
+- Menciona brechas según respuestas NO y PARCIAL.
+- Usa los comentarios/evidencias cuando existan.
+- Si hay pocas evidencias, dilo claramente.
+- No inventes herramientas ni controles que no estén soportados por las respuestas.
+
+REGLAS PARA estado_requerido:
+- No respondas solo con "100% de cumplimiento".
+- Redacta entre 2 y 4 párrafos.
+- Describe el estado objetivo esperado para SOC 2.
+- Explica qué controles, evidencias, formalización, monitoreo y mejora deberían existir.
+- Relaciona el estado requerido con auditoría, trazabilidad, evidencia y operación sostenida.
+- No inventes marcas ni herramientas específicas.
+
+REGLAS PARA plan_accion:
+- Genera entre 5 y 8 acciones.
+- Prioriza primero respuestas NO y PARCIAL.
+- Cada acción debe ser concreta, auditable y verificable.
+- La evidencia esperada debe ser un entregable real: política, procedimiento, matriz, registro, acta, reporte, evidencia de monitoreo, prueba de control, etc.
+- Usa prioridades Alta, Media o Baja.
+
+TONO
+Profesional, ejecutivo y consultivo.
+Enfocado en madurez SOC 2 y preparación para auditoría.
+""".strip()
+
+
+# ============================================================
+# IMPORTAR INSTRUMENTO
+# ============================================================
+@soc2_madurez_bp.route("/admin/importar_instrumento", methods=["POST"])
+@login_required
+def importar_instrumento_soc2():
+    user = User.query.get(session.get("user_id"))
+    if user.role == "auditor":
+        flash("El rol Auditor no puede importar instrumentos.", "danger")
+        return redirect(url_for("madurez_soc2.parametros"))
+    if user.role != "admin" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
+        flash("No tiene permiso para importar el instrumento SOC 2.", "danger")
+        return redirect(url_for("menu"))
+
+    force = (request.args.get("force") == "1") or (request.form.get("force") == "1")
+    try:
+        if force:
+            Soc2MadurezCriterioAnalisis.query.delete()
+            Soc2MadurezRespuesta.query.delete()
+            Soc2MadurezRun.query.delete()
+            Soc2MadurezPregunta.query.delete()
+            db.session.commit()
+            flash("🧹 Instrumento SOC 2 anterior borrado. Reimportando…", "info")
+
+        if Soc2MadurezPregunta.query.first() and not force:
+            flash("El instrumento SOC 2 ya está cargado en la base de datos.", "warning")
+            return redirect(url_for("madurez_soc2.parametros"))
+
+        alternativas = [
+            SOC2_INSTRUMENTO_TEMPLATE_XLSX,
+            os.path.join(BASE_DIR, "static", "templates", "Matriz SOC 2(2).xlsx"),
+            os.path.join(BASE_DIR, "static", "templates", "SOC 2.xlsx"),
+            os.path.join(BASE_DIR, "static", "templates", "SOC2.xlsx"),
+        ]
+        xlsx_path = next((p for p in alternativas if os.path.exists(p)), None)
+        if not xlsx_path:
+            flash("No se encontró el Excel SOC 2 en static/templates. Usa: Matriz SOC 2.xlsx", "danger")
+            return redirect(url_for("madurez_soc2.parametros"))
+
+        df = pd.read_excel(xlsx_path, sheet_name=0, header=0)
+        col_pregunta = None
+        for c in df.columns:
+            if _soc2_norm(c) in ("PREGUNTAS", "PREGUNTA"):
+                col_pregunta = c
+                break
+        if not col_pregunta:
+            flash("El Excel SOC 2 no contiene la columna 'Preguntas'.", "danger")
+            return redirect(url_for("madurez_soc2.parametros"))
+
+        orden = 1
+        bloque_codigo = None
+        bloque_nombre = None
+        creadas_q = 0
+        creadas_h = 0
+        ignoradas = 0
+
+        for _, row in df.iterrows():
+            txt = soc2_normalizar_texto_excel(row.get(col_pregunta))
+            if not txt or _soc2_norm(txt) in ("PREGUNTAS", "PREGUNTA"):
+                continue
+            bc, bn = soc2_detectar_bloque(txt)
+            if bc:
+                bloque_codigo = bc
+                bloque_nombre = bn
+                db.session.add(Soc2MadurezPregunta(
+                    bloque_codigo=bloque_codigo,
+                    bloque_nombre=bloque_nombre,
+                    seccion_codigo=bloque_codigo,
+                    seccion_nombre=bloque_nombre,
+                    pregunta=bn,
+                    tipo="h",
+                    orden=orden,
+                    activo=True
+                ))
+                orden += 1
+                creadas_h += 1
+                continue
+            if not bloque_codigo:
+                ignoradas += 1
+                continue
+            pregunta_codigo = f"{bloque_codigo[:3]}-{creadas_q + 1:03d}"
+            db.session.add(Soc2MadurezPregunta(
+                bloque_codigo=bloque_codigo,
+                bloque_nombre=bloque_nombre,
+                seccion_codigo=bloque_codigo,
+                seccion_nombre=bloque_nombre,
+                pregunta_codigo=pregunta_codigo,
+                pregunta=txt,
+                tipo="q",
+                orden=orden,
+                activo=True
+            ))
+            orden += 1
+            creadas_q += 1
+
+        db.session.commit()
+        seed_soc2_parametros()
+        flash(f"✅ Instrumento SOC 2 importado correctamente. Cabeceras: {creadas_h} | Preguntas: {creadas_q} | Ignoradas: {ignoradas}", "success")
+        return redirect(url_for("madurez_soc2.parametros"))
+    except Exception as e:
+        db.session.rollback()
+        traceback.print_exc()
+        flash(f"❌ Error importando instrumento SOC 2: {e}", "danger")
+        return redirect(url_for("madurez_soc2.parametros"))
+
+
+# ============================================================
+# CONSOLIDAR ANÁLISIS
+# ============================================================
+def run_analysis_from_soc2_run(soc2_run_id: int):
+    run = Soc2MadurezRun.query.get_or_404(soc2_run_id)
+    resumen = _soc2_build_resumen(run.id)
+    valores = [float(v.get("pct", 0) or 0) for v in resumen.values()]
+    pct_general = round(sum(valores) / len(valores), 2) if valores else 0.0
+    labels, values = soc2_pct_por_criterio(resumen, SOC2_BLOCK_ORDER)
+    run.resumen_json = json.dumps(resumen, ensure_ascii=False)
+    run.pct_general = pct_general
+    run.radar_overall_b64 = soc2_radar_b64(labels, values, title="Radar por Criterio - SOC 2")
+    run.company_name = run.consecutivo
+    run.updated_at = datetime.utcnow()
+    db.session.commit()
+    return run.id
+
+
+# ============================================================
+# PANTALLA PRINCIPAL — MISMO DISEÑO NIST
+# ============================================================
+@soc2_madurez_bp.route("/", methods=["GET"], endpoint="inicio_soc2")
+@login_required
+def inicio_soc2():
+    user = User.query.get(session.get("user_id"))
+    if user.role != "admin" and user.role != "auditor" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
+        flash("No tiene permiso para acceder al módulo de nivel de madurez SOC 2.", "danger")
+        return redirect(url_for("menu"))
+
+    read_only = user.role == "auditor"
+    ingreso_btn = """
+      <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled title="El rol Auditor no puede ingresar información">
+        <i class="bi bi-pencil-square me-2"></i>Ingresar la información
+      </button>
+    """ if read_only else f"""
+      <a href="{url_for('madurez_soc2.ingreso')}" class="btn nistmad-btn-primary rounded-pill px-4 fw-bold">
+        <i class="bi bi-pencil-square me-2"></i>Ingresar la información
+      </a>
+    """
+
+    parametros_btn = """
+      <button class="btn btn-outline-secondary rounded-pill px-3" disabled title="El rol Auditor no tiene acceso a Parámetros">
+        <i class="bi bi-gear me-2"></i>Parámetros
+      </button>
+    """ if read_only else f"""
+      <a href="{url_for('madurez_soc2.parametros')}" class="btn btn-outline-secondary rounded-pill px-3">
+        <i class="bi bi-gear me-2"></i>Parámetros
+      </a>
+    """
+
+    total = Soc2MadurezPregunta.query.filter_by(tipo="q").count()
+    badge = '<span class="badge bg-success ms-2">Instrumento cargado</span>' if total else '<span class="badge bg-danger ms-2">Instrumento NO cargado</span>'
+    hint = "Puedes ingresar la información, analizar la evaluación o consultar el historial." if total else "Primero entra a Parámetros e importa el instrumento SOC 2."
+
+    content = f"""
+<div class="nistmad-shell">
+
+  <div class="nistmad-header-card">
+    <div class="nistmad-header-overlay">
+      <div class="nistmad-header-text">
+        <h3 class="nistmad-title m-0">Nivel de Madurez — SOC 2</h3>
+        <div class="nistmad-subtitle">
+          Evaluación por criterios SOC 2: Seguridad, Disponibilidad, Confidencialidad,
+          Integridad del procesamiento y Privacidad.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nistmad-header-actions">
+    {ingreso_btn}
+    <a href="{url_for('madurez_soc2.historial')}" class="btn nistmad-btn-soft rounded-pill px-4 historial-pill">
+      <span class="d-inline-flex align-items-center gap-2">
+        <span class="hist-dot"></span>
+        <i class="bi bi-clock-history"></i>
+        <span class="fw-semibold">Historial de Revisiones</span>
+      </span>
+    </a>
+  </div>
+
+  <div class="row g-3 mt-2">
+    <div class="col-12 col-lg-8">
+      <div class="nistmad-card p-4 h-100">
+        <div class="nistmad-section-title">Estado del instrumento</div>
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+          <div>
+            <div class="fw-bold">Estado del instrumento {badge}</div>
+            <div class="text-muted small mt-1">Preguntas cargadas: <b>{total}</b></div>
+            <div class="mt-2 small">{hint}</div>
+          </div>
+          <div class="text-end">
+            <div class="text-muted small">Acceso rápido</div>
+            <div class="d-flex gap-2 flex-wrap justify-content-end mt-2">
+              {parametros_btn}
+            </div>
+          </div>
+        </div>
+        <div class="alert alert-info mt-3 mb-0 small">
+          <b>Sugerencia:</b> Usa <b>Parámetros</b> para ver la definición de niveles 1–5
+          y gestionar la importación del instrumento SOC 2.
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-lg-4">
+      <div class="nistmad-card p-4 h-100">
+        <div class="nistmad-section-title">¿Qué puedes hacer aquí?</div>
+        <ul class="small mb-0 text-black ps-3">
+          <li><b>Ingresar la información:</b> diligenciar respuestas (Sí/Parcial/No/N/A) con evidencia.</li>
+          <li><b>Historial:</b> revisar evaluaciones previas y su porcentaje general.</li>
+          <li><b>Parámetros:</b> ver niveles de madurez y cargar el instrumento.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+{soc2_nist_css('nistmad', '🛡️')}
+"""
+    return render_template_string(BASE, title="Madurez SOC 2", content=content)
+
+
+# ============================================================
+# PARÁMETROS — DISEÑO NIST
+# ============================================================
+@soc2_madurez_bp.route("/parametros", methods=["GET", "POST"])
+@login_required
+def parametros():
+    user = User.query.get(session.get("user_id"))
+    if user.role == "auditor":
+        flash("El rol Auditor no puede administrar parámetros SOC 2.", "warning")
+        return redirect(url_for("madurez_soc2.inicio_soc2"))
+    if user.role != "admin" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
+        flash("No tiene permiso para administrar parámetros SOC 2.", "danger")
+        return redirect(url_for("menu"))
+
+    seed_soc2_parametros()
+    if request.method == "POST":
+        try:
+            for r in Soc2MadurezParametro.query.all():
+                r.nivel = (request.form.get(f"nivel_{r.id}") or r.nivel).strip()
+                r.rango_desde = float(request.form.get(f"desde_{r.id}") or r.rango_desde)
+                r.rango_hasta = float(request.form.get(f"hasta_{r.id}") or r.rango_hasta)
+                r.color = (request.form.get(f"color_{r.id}") or r.color).strip()
+                r.descripcion = (request.form.get(f"descripcion_{r.id}") or "").strip()
+            db.session.commit()
+            flash("✅ Parámetros SOC 2 guardados correctamente.", "success")
+        except Exception as e:
+            db.session.rollback()
+            flash(f"Error guardando parámetros SOC 2: {e}", "danger")
+        return redirect(url_for("madurez_soc2.parametros"))
+
+    rows = []
+    for r in Soc2MadurezParametro.query.order_by(Soc2MadurezParametro.orden.asc()).all():
+        rows.append(f"""
+        <tr>
+          <td><input class="form-control" name="nivel_{r.id}" value="{escape(r.nivel or '')}"></td>
+          <td class="text-center"><input class="form-control text-center" name="desde_{r.id}" value="{r.rango_desde}"></td>
+          <td class="text-center"><input class="form-control text-center" name="hasta_{r.id}" value="{r.rango_hasta}"></td>
+          <td class="text-center"><input type="color" class="form-control form-control-color mx-auto" name="color_{r.id}" value="{escape(r.color or '#6c757d')}"></td>
+          <td><textarea class="form-control" name="descripcion_{r.id}" rows="2">{escape(r.descripcion or '')}</textarea></td>
+        </tr>
+        """)
+
+    resumen = soc2_resumen_instrumento()
+    content = f"""
+<div class="nistpar-shell">
+  <div class="nistpar-header-card">
+    <div class="nistpar-header-overlay">
+      <div class="nistpar-header-text">
+        <h3 class="nistpar-title m-0">Parámetros de Madurez — SOC 2</h3>
+        <div class="nistpar-subtitle">Configuración de niveles, rangos de madurez e importación del instrumento.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nistpar-header-actions">
+    <a href="{url_for('madurez_soc2.inicio_soc2')}" class="btn nistpar-btn-main rounded-pill px-4 fw-bold"><i class="bi bi-arrow-left me-2"></i>Volver</a>
+    <form method="POST" action="{url_for('madurez_soc2.importar_instrumento_soc2')}" class="m-0">
+      <button class="btn btn-success rounded-pill px-4 fw-bold"><i class="bi bi-upload me-2"></i>Importar instrumento</button>
+    </form>
+    <form method="POST" action="{url_for('madurez_soc2.importar_instrumento_soc2')}?force=1" class="m-0" onsubmit="return confirm('¿Borrar e importar de nuevo el instrumento SOC 2?')">
+      <button class="btn btn-danger rounded-pill px-4 fw-bold"><i class="bi bi-arrow-repeat me-2"></i>Reimportar</button>
+    </form>
+  </div>
+
+  <div class="nistpar-card p-4 mb-3">
+    <div class="nistpar-section-title">Resumen instrumento</div>
+    <div class="small text-black">
+      Preguntas: <b>{resumen['total_preguntas']}</b> · Cabeceras: <b>{resumen['total_headers']}</b> · Por criterio: <b>{escape(str(resumen['por_bloque']))}</b>
+    </div>
+  </div>
+
+  <form method="POST" class="nistpar-card p-4">
+    <div class="nistpar-section-title">Niveles de madurez</div>
+    <div class="table-responsive">
+      <table class="table table-hover align-middle nistpar-table">
+        <thead class="nistpar-table-head">
+          <tr>
+            <th style="width: 28%;">Nivel de Madurez</th>
+            <th class="text-center" style="width:110px;">Desde %</th>
+            <th class="text-center" style="width:110px;">Hasta %</th>
+            <th class="text-center" style="width:90px;">Color</th>
+            <th>Descripción del Nivel</th>
+          </tr>
+        </thead>
+        <tbody>{''.join(rows)}</tbody>
+      </table>
+    </div>
+    <div class="text-end mt-3">
+      <button class="btn btn-primary rounded-pill px-4 fw-bold"><i class="bi bi-save me-2"></i>Guardar parámetros</button>
+    </div>
+  </form>
+</div>
+{soc2_nist_css('nistpar', '⚙️')}
+"""
+    return render_template_string(BASE, title="Parámetros SOC 2", content=content)
+
+
+# ============================================================
+# INGRESO DE INFORMACIÓN SOC 2 — MISMO DISEÑO NIST REAL
+# ============================================================
+@soc2_madurez_bp.route("/ingreso", methods=["GET"])
+@login_required
+def ingreso():
+    user = User.query.get(session.get("user_id"))
+
+    if user.role != "admin" and user.role != "auditor" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
+        flash("No tiene permiso para acceder al módulo de nivel de madurez SOC 2.", "danger")
+        return redirect(url_for("menu"))
+
+    if user.role == "auditor":
+        flash("El rol Auditor no puede ingresar la información en este módulo.", "warning")
+        return redirect(url_for("madurez_soc2.inicio_soc2"))
+
+    if Soc2MadurezPregunta.query.filter_by(tipo="q").count() == 0:
+        flash("⚠️ Primero debes importar el instrumento SOC 2.", "warning")
+        return redirect(url_for("madurez_soc2.parametros"))
+
+    preguntas = (
+        Soc2MadurezPregunta.query
+        .filter_by(activo=True, tipo="q")
+        .order_by(
+            Soc2MadurezPregunta.bloque_codigo.asc(),
+            Soc2MadurezPregunta.seccion_codigo.asc(),
+            Soc2MadurezPregunta.orden.asc(),
+            Soc2MadurezPregunta.id.asc()
+        )
+        .all()
+    )
+
+    draft = obtener_borrador_soc2(user.id if user else None)
+    respuestas_guardadas = cargar_respuestas_soc2(draft.id) if draft else {}
+
+    consecutivo_val = (draft.consecutivo if draft else "") or ""
+    _, _, progreso_inicial = calcular_progreso_soc2(
+        preguntas,
+        respuestas_db=respuestas_guardadas
+    )
+
+    grouped = _soc2_group_questions()
+
+    acc_html = []
+    acc_id = 0
+
+    def esc(x):
+        return escape(str(x or ""))
+
+    for bloque_codigo, payload in grouped.items():
+        acc_id += 1
+        func_key = f"soc2func{acc_id}"
+        titulo_bloque = payload.get("titulo") or soc2_block_title(bloque_codigo) or bloque_codigo
+        rows = []
+
+        for q in payload.get("items", []):
+            saved = respuestas_guardadas.get(q.id, {})
+            saved_estado = (saved.get("estado") or "").strip().upper()
+            saved_com = esc(saved.get("comentario") or "")
+            qtext = q.pregunta or ""
+            cat_code = q.pregunta_codigo or q.seccion_codigo or bloque_codigo
+
+            chk_na = "checked" if saved_estado == "NA" else ""
+            chk_si = "checked" if saved_estado == "SI" else ""
+            chk_pa = "checked" if saved_estado == "PARCIAL" else ""
+            chk_no = "checked" if saved_estado == "NO" else ""
+
+            rows.append(f"""
+            <div class="col-12 col-xl-6">
+              <div class="nistform-qcard h-100">
+                <div class="nistform-qhead">
+                  <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <span class="badge rounded-pill text-bg-light border fw-semibold">
+                      {esc(cat_code)}
+                    </span>
+                    <span class="badge rounded-pill text-bg-primary">
+                      Orden {q.orden or 0}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="nistform-qtext">
+                  {esc(qtext)}
+                </div>
+
+                <div class="nistform-radio-row">
+                  <label class="nistform-radio-card">
+                    <input class="form-check-input" type="radio" name="st_{q.id}" value="NA" {chk_na}>
+                    <span>N/A</span>
+                  </label>
+
+                  <label class="nistform-radio-card">
+                    <input class="form-check-input" type="radio" name="st_{q.id}" value="SI" {chk_si}>
+                    <span>Sí</span>
+                  </label>
+
+                  <label class="nistform-radio-card">
+                    <input class="form-check-input" type="radio" name="st_{q.id}" value="PARCIAL" {chk_pa}>
+                    <span>Parcial</span>
+                  </label>
+
+                  <label class="nistform-radio-card">
+                    <input class="form-check-input" type="radio" name="st_{q.id}" value="NO" {chk_no}>
+                    <span>No</span>
+                  </label>
+                </div>
+
+                <div class="mt-3">
+                  <label class="form-label small fw-bold text-black mb-1">Comentarios / evidencia</label>
+                  <textarea class="form-control form-control-sm"
+                            name="cm_{q.id}"
+                            rows="3"
+                            placeholder="Comentarios / evidencia">{saved_com}</textarea>
+                </div>
+              </div>
+            </div>
+            """)
+
+        acc_html.append(f"""
+        <div class="accordion-item nistform-acc-item">
+          <h2 class="accordion-header" id="h{func_key}">
+            <button class="accordion-button {'collapsed' if acc_id != 1 else ''}"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#c{func_key}"
+                    aria-expanded="{'true' if acc_id == 1 else 'false'}"
+                    aria-controls="c{func_key}">
+              <div class="nistform-acc-inner">
+                <div>
+                  <div class="nistform-func-title">
+                    {esc(titulo_bloque)}
+                  </div>
+                  <div class="nistform-func-subtitle">
+                    Criterio SOC 2 · {esc(bloque_codigo)}
+                  </div>
+                </div>
+                <span class="badge rounded-pill text-bg-primary">
+                  {len(payload.get('items', []))} preguntas
+                </span>
+              </div>
+            </button>
+          </h2>
+
+          <div id="c{func_key}"
+               class="accordion-collapse collapse {'show' if acc_id == 1 else ''}">
+            <div class="accordion-body nistform-acc-body">
+              <div class="nistform-cat-block">
+                <div class="nistform-cat-title">
+                  <span>{esc(bloque_codigo)}</span>
+                  <small>{esc(titulo_bloque)}</small>
+                </div>
+                <div class="row g-3">
+                  {''.join(rows)}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        """)
+
+    alerta_borrador = ""
+    if draft:
+        alerta_borrador = f"""
+        <div class="alert alert-info rounded-4 border-0 shadow-sm">
+          <i class="bi bi-info-circle-fill me-2"></i>
+          Tienes un borrador SOC 2 cargado automáticamente.
+          <strong>Progreso actual:</strong> {progreso_inicial}%.
+        </div>
+        """
+
+    disabled_analizar = "" if progreso_inicial == 100 else "disabled"
+
+    content = f"""
+    <div class="nistform-shell">
+      <div class="nistform-header-card">
+        <div class="nistform-header-overlay">
+          <div class="nistform-header-text">
+            <h3 class="nistform-title m-0">Nivel de Madurez — SOC 2</h3>
+            <div class="nistform-subtitle">
+              Ingreso de información del instrumento SOC 2
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="nistform-header-actions">
+        <a href="{url_for('madurez_soc2.inicio_soc2')}" class="btn btn-light rounded-pill px-4 fw-bold">
+          <i class="bi bi-arrow-left me-2"></i>Volver
+        </a>
+        <a href="{url_for('madurez_soc2.historial')}" class="btn btn-outline-primary rounded-pill px-4 fw-bold">
+          <i class="bi bi-clock-history me-2"></i>Historial
+        </a>
+      </div>
+
+      <div class="nistform-card p-4">
+        {alerta_borrador}
+        <form method="POST" action="{url_for('madurez_soc2.ingreso_guardar')}">
+          <input type="hidden" name="draft_id" value="{draft.id if draft else ''}">
+
+          <div class="nistform-section-title">Información de la revisión</div>
+          <div class="mb-4">
+            <label class="text-black form-label fw-semibold">Consecutivo de la Revisión</label>
+            <input type="text" class="form-control form-control-lg rounded-pill" name="consecutivo" value="{esc(consecutivo_val)}" required>
+          </div>
+
+          <div class="nistform-section-title">📊 Progreso del instrumento</div>
+          <div class="mb-4">
+            <div class="progress nistform-progress">
+              <div id="nistProgressBar"
+                   class="progress-bar progress-bar-striped progress-bar-animated"
+                   role="progressbar"
+                   style="width:{progreso_inicial}%"
+                   aria-valuemin="0"
+                   aria-valuemax="100"
+                   aria-valuenow="{progreso_inicial}">{progreso_inicial}%</div>
+            </div>
+            <div class="text-center small text-muted mt-2">
+              <span id="nistProgressText">{progreso_inicial}%</span> del instrumento completado
+            </div>
+          </div>
+
+          <div class="nistform-section-title">Instrumento de evaluación</div>
+          <div class="accordion nistform-accordion" id="accSoc2">
+            {''.join(acc_html)}
+          </div>
+
+          <div class="d-flex justify-content-center gap-3 flex-wrap mt-4">
+            <button id="btnGuardarSoc2"
+                    class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold"
+                    type="submit"
+                    name="accion"
+                    value="guardar">
+              <i class="bi bi-save2 me-2"></i>Guardar
+            </button>
+
+            <button id="btnAnalizarSoc2"
+                    class="btn btn-primary btn-lg rounded-pill px-5 shadow fw-semibold"
+                    type="submit"
+                    name="accion"
+                    value="analizar"
+                    {disabled_analizar}>
+              <i class="bi bi-bar-chart-line-fill me-2"></i>Analizar
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {{
+        const total = {len(preguntas)};
+        const radios = document.querySelectorAll('input[type="radio"][name^="st_"]');
+        const progressBar = document.getElementById("nistProgressBar");
+        const progressText = document.getElementById("nistProgressText");
+        const btnAnalizar = document.getElementById("btnAnalizarSoc2");
+
+        function updateProgress() {{
+          const names = new Set();
+          document.querySelectorAll('input[type="radio"][name^="st_"]:checked').forEach(function (r) {{
+            names.add(r.name);
+          }});
+
+          const pct = total > 0 ? Math.round((names.size / total) * 100) : 0;
+
+          if (progressBar) {{
+            progressBar.style.width = pct + "%";
+            progressBar.setAttribute("aria-valuenow", pct);
+            progressBar.textContent = pct + "%";
+          }}
+
+          if (progressText) {{
+            progressText.textContent = pct + "%";
+          }}
+
+          if (btnAnalizar) {{
+            btnAnalizar.disabled = pct < 100;
+          }}
+        }}
+
+        radios.forEach(function (r) {{
+          r.addEventListener("change", updateProgress);
+        }});
+
+        updateProgress();
+      }});
+    </script>
+    {soc2_nistform_css()}
+    """
+    return render_template_string(BASE, title="Ingreso SOC 2", content=content)
+
+
+@soc2_madurez_bp.route("/ingreso/guardar", methods=["POST"])
+@login_required
+def ingreso_guardar():
+    user = User.query.get(session.get("user_id"))
+    if user.role == "auditor":
+        flash("El rol Auditor no puede guardar ni analizar información SOC 2.", "danger")
+        return redirect(url_for("madurez_soc2.inicio_soc2"))
+    if user.role != "admin" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
+        flash("No tiene permiso para guardar información SOC 2.", "danger")
+        return redirect(url_for("menu"))
+
+    consecutivo = (request.form.get("consecutivo") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    accion = (request.form.get("accion") or "guardar").strip().lower()
+    draft_id = (request.form.get("draft_id") or "").strip()
+    if not consecutivo:
+        flash("Debes ingresar el consecutivo de la Revisión.", "warning")
+        return redirect(url_for("madurez_soc2.ingreso"))
+
+    preguntas = (
+        Soc2MadurezPregunta.query
+        .filter_by(activo=True, tipo="q")
+        .order_by(Soc2MadurezPregunta.bloque_codigo.asc(), Soc2MadurezPregunta.orden.asc(), Soc2MadurezPregunta.id.asc())
+        .all()
+    )
+    if not preguntas:
+        flash("⚠️ No hay preguntas activas cargadas en el instrumento SOC 2.", "warning")
+        return redirect(url_for("madurez_soc2.inicio_soc2"))
+
+    respondidas, total, progreso_pct = calcular_progreso_soc2(preguntas, form_data=request.form)
+    try:
+        run = None
+        if draft_id and draft_id.isdigit():
+            run = Soc2MadurezRun.query.filter_by(id=int(draft_id)).first()
+            if run and user and run.user_id != user.id and user.role != "admin":
+                flash("No tienes permiso para modificar este borrador.", "danger")
+                return redirect(url_for("madurez_soc2.ingreso"))
+        if not run:
+            run = obtener_borrador_soc2(user.id if user else None)
+
+        if respondidas == 0:
+            if run and _contar_respuestas_run_soc2(run.id) == 0:
+                Soc2MadurezRespuesta.query.filter_by(run_id=run.id).delete(synchronize_session=False)
+                Soc2MadurezCriterioAnalisis.query.filter_by(run_id=run.id).delete(synchronize_session=False)
+                db.session.delete(run)
+                db.session.commit()
+            flash("⚠️ Debes responder al menos una pregunta antes de guardar o analizar.", "warning")
+            return redirect(url_for("madurez_soc2.ingreso"))
+
+        if not run:
+            run = Soc2MadurezRun(consecutivo=consecutivo, company_name=consecutivo, user_id=user.id if user else None, estado="BORRADOR", progreso_pct=0)
+            db.session.add(run)
+            db.session.flush()
+
+        run.consecutivo = consecutivo
+        run.company_name = consecutivo
+        run.progreso_pct = progreso_pct
+        run.updated_at = datetime.utcnow()
+        Soc2MadurezRespuesta.query.filter_by(run_id=run.id).delete(synchronize_session=False)
+
+        respuestas_insertadas = 0
+        for q in preguntas:
+            st = (request.form.get(f"st_{q.id}") or "").strip().upper()
+            cm = (request.form.get(f"cm_{q.id}") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+            if st in ("SI", "PARCIAL", "NO", "NA"):
+                db.session.add(Soc2MadurezRespuesta(run_id=run.id, pregunta_id=q.id, estado=st, comentario=cm))
+                respuestas_insertadas += 1
+
+        if accion == "analizar":
+            if progreso_pct < 100:
+                db.session.commit()
+                flash("⚠️ Para analizar debes completar el 100% del instrumento.", "warning")
+                return redirect(url_for("madurez_soc2.ingreso"))
+            run.estado = "FINALIZADO"
+            run.progreso_pct = 100
+            db.session.commit()
+            run_id = run_analysis_from_soc2_run(run.id)
+            flash(f"✅ Revisión SOC 2 analizada correctamente. Se consolidaron {respuestas_insertadas} respuestas.", "success")
+            return redirect(url_for("madurez_soc2.detalle", run_id=run_id))
+
+        db.session.commit()
+        flash("✅ Información SOC 2 guardada correctamente.", "success")
+        return redirect(url_for("madurez_soc2.ingreso"))
+    except Exception as e:
+        db.session.rollback()
+        traceback.print_exc()
+        flash(f"❌ Error guardando la revisión SOC 2: {e}", "danger")
+        return redirect(url_for("madurez_soc2.ingreso"))
+
+
+# ============================================================
+# HISTORIAL — DISEÑO NIST
+# ============================================================
+@soc2_madurez_bp.route("/historial", methods=["GET"])
+@login_required
+def historial():
+    user = User.query.get(session.get("user_id"))
+    if user.role != "admin" and user.role != "auditor" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
+        flash("No tiene permiso para ver historial SOC 2.", "danger")
+        return redirect(url_for("menu"))
+
+    q = Soc2MadurezRun.query.filter(Soc2MadurezRun.estado == "FINALIZADO")
+    if user.role != "admin" and user.role != "auditor":
+        q = q.filter(Soc2MadurezRun.user_id == user.id)
+    runs = q.order_by(Soc2MadurezRun.created_at.desc(), Soc2MadurezRun.id.desc()).all()
+
+    rows = []
+    for r in runs:
+        nivel = soc2_resolver_nivel(r.pct_general)
+        acciones = f"""
+        <a href="{url_for('madurez_soc2.detalle', run_id=r.id)}" class="btn btn-sm btn-primary rounded-pill px-3"><i class="bi bi-eye me-1"></i>Ver</a>
+        <a href="{url_for('madurez_soc2.exportar_pdf', run_id=r.id)}" class="btn btn-sm btn-danger rounded-pill px-3"><i class="bi bi-file-earmark-pdf me-1"></i>PDF</a>
+        """
+        if user.role != "auditor":
+            acciones += f"""
+            <form method="POST" action="{url_for('madurez_soc2.eliminar_run', run_id=r.id)}" class="d-inline" onsubmit="return confirm('¿Eliminar esta revisión SOC 2?')">
+              <button class="btn btn-sm btn-outline-danger rounded-pill px-3"><i class="bi bi-trash me-1"></i>Eliminar</button>
+            </form>
+            """
+        rows.append(f"""
+        <tr>
+          <td class="fw-bold">{escape(r.consecutivo or '')}</td>
+          <td>{r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else ''}</td>
+          <td class="text-center"><span class="badge rounded-pill" style="background:{nivel['color']};">{r.pct_general:.2f}%</span></td>
+          <td>{escape(nivel['nivel'])}</td>
+          <td class="text-end">{acciones}</td>
+        </tr>
+        """)
+
+    content = f"""
+<div class="nisthist-shell">
+  <div class="nisthist-header-card"><div class="nisthist-header-overlay"><div class="nisthist-header-text">
+    <h3 class="nisthist-title m-0">Historial de Revisiones — SOC 2</h3>
+    <div class="nisthist-subtitle">Consulta de evaluaciones finalizadas y resultados ejecutivos.</div>
+  </div></div></div>
+
+  <div class="nisthist-header-actions">
+    <a href="{url_for('madurez_soc2.inicio_soc2')}" class="btn nisthist-btn-main rounded-pill px-4 fw-bold"><i class="bi bi-arrow-left me-2"></i>Volver</a>
+    <a href="{url_for('madurez_soc2.ingreso')}" class="btn btn-primary rounded-pill px-4 fw-bold"><i class="bi bi-plus-circle me-2"></i>Nueva revisión</a>
+  </div>
+
+  <div class="nisthist-card p-4">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead><tr><th>Consecutivo</th><th>Fecha</th><th class="text-center">Cumplimiento</th><th>Nivel</th><th class="text-end">Acciones</th></tr></thead>
+        <tbody>{''.join(rows) if rows else '<tr><td colspan="5" class="text-center text-muted py-4">No hay revisiones SOC 2 finalizadas.</td></tr>'}</tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{soc2_nist_css('nisthist', '🕘')}
+"""
+    return render_template_string(BASE, title="Historial SOC 2", content=content)
+
+
+# ============================================================
+# SOC 2 — DETALLE POR CRITERIO
+# ============================================================
+
+@soc2_madurez_bp.route("/detalle/<int:run_id>/criterio/<bloque_codigo>", methods=["GET"])
+@login_required
+def detalle_criterio(run_id: int, bloque_codigo: str):
+    user = User.query.get(session.get("user_id"))
+
+    if user.role != "admin" and user.role != "auditor" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
+        flash("No tiene permiso para ver el detalle del criterio SOC 2.", "danger")
+        return redirect(url_for("menu"))
+
+    run = Soc2MadurezRun.query.get_or_404(run_id)
+    bloque_codigo = (bloque_codigo or "").strip().upper()
+
+    try:
+        resumen = json.loads(run.resumen_json or "{}")
+    except Exception:
+        resumen = {}
+
+    d = resumen.get(bloque_codigo)
+    if not d:
+        flash("No se encontró información para este criterio SOC 2.", "warning")
+        return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
+
+    items = d.get("items", []) or []
+    nombre = d.get("nombre") or soc2_block_title(bloque_codigo) or bloque_codigo
+    pct = float(d.get("pct", 0) or 0)
+    nivel = soc2_nivel_visual_por_pct(pct)
+
+    rows = []
+    for it in items:
+        estado = (it.get("estado") or "").upper()
+        color = {
+            "SI": "success",
+            "PARCIAL": "warning text-dark",
+            "NO": "danger",
+            "NA": "secondary"
+        }.get(estado, "secondary")
+
+        rows.append(f"""
+        <tr>
+          <td style="width:120px;">
+            <span class="badge bg-light text-primary border">
+              {escape(it.get("pregunta_codigo") or "")}
+            </span>
+          </td>
+          <td>
+            <div class="fw-bold text-dark">{escape(it.get("pregunta") or "")}</div>
+            <div class="small text-muted mt-1">{escape(it.get("comentario") or "")}</div>
+          </td>
+          <td class="text-center" style="width:110px;">
+            <span class="badge bg-{color}">{escape(estado)}</span>
+          </td>
+        </tr>
+        """)
+
+    content = f"""
+    <div class="nistdet-shell">
+
+      <div class="nistdet-header-card">
+        <div class="nistdet-header-overlay">
+          <div class="nistdet-header-text">
+            <h3 class="nistdet-title m-0">Preguntas SOC 2 — {escape(nombre)}</h3>
+            <div class="nistdet-subtitle">
+              Consecutivo: <b>{escape(run.consecutivo or '')}</b>
+              · Cumplimiento: <b>{pct:.2f}%</b>
+              · Nivel: <b>{escape(nivel.get("nivel",""))}</b>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="nistdet-header-actions">
+        <a href="{url_for('madurez_soc2.detalle', run_id=run.id)}"
+           class="btn nistdet-btn-main rounded-pill px-4 fw-bold">
+          <i class="bi bi-arrow-left me-2"></i>Volver al detalle
+        </a>
+      </div>
+
+      <div class="nistdet-card p-4">
+        <div class="nistdet-section-title mb-3">{escape(nombre)}</div>
+
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>Código</th>
+                <th>Pregunta / Evidencia</th>
+                <th class="text-center">Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {''.join(rows)}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    {soc2_nist_css('nistdet', '📊')}
+    """
+
+    return render_template_string(BASE, title="Detalle criterio SOC 2", content=content)
+
+
+# ============================================================
+# SOC 2 — ANÁLISIS POR CRITERIO
+# ============================================================
+
+@soc2_madurez_bp.route("/detalle/<int:run_id>/criterio/<bloque_codigo>/analisis", methods=["GET", "POST"])
+@login_required
+def analisis_criterio(run_id: int, bloque_codigo: str):
+    user = User.query.get(session.get("user_id"))
+
+    if user.role != "admin" and user.role != "auditor" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
+        flash("No tiene permiso para ver el análisis SOC 2.", "danger")
+        return redirect(url_for("menu"))
+
+    run = Soc2MadurezRun.query.get_or_404(run_id)
+    bloque_codigo = (bloque_codigo or "").strip().upper()
+
+    try:
+        resumen = json.loads(run.resumen_json or "{}")
+    except Exception:
+        resumen = {}
+
+    d = resumen.get(bloque_codigo)
+    if not d:
+        flash("No se encontró información para este criterio SOC 2.", "warning")
+        return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
+
+    nombre = d.get("nombre") or soc2_block_title(bloque_codigo) or bloque_codigo
+    pct = float(d.get("pct", 0) or 0)
+    items = d.get("items", []) or []
+
+    analisis = Soc2MadurezCriterioAnalisis.query.filter_by(
+        run_id=run.id,
+        bloque_codigo=bloque_codigo
+    ).first()
+
+    if request.method == "POST":
+        if user.role == "auditor":
+            flash("El rol Auditor no puede generar análisis con IA.", "danger")
+            return redirect(url_for("madurez_soc2.analisis_criterio", run_id=run.id, bloque_codigo=bloque_codigo))
+
+        prompt = _soc2_ai_prompt_criterio(run, bloque_codigo, nombre, pct, items)
+
+        try:
+            raw = _soc2_ai_text(prompt, max_tokens=1600)
+            obj = _extraer_json_objeto_soc2(raw)
+
+            estado_actual = (obj.get("estado_actual") or "").strip() if isinstance(obj, dict) else ""
+            estado_requerido = (obj.get("estado_requerido") or "").strip() if isinstance(obj, dict) else ""
+            plan_raw = json.dumps(obj.get("plan_accion", []), ensure_ascii=False) if isinstance(obj, dict) else raw
+            plan_txt = _build_plan_accion_soc2_texto(obj.get("plan_accion", [])) if isinstance(obj, dict) else raw
+
+            if not analisis:
+                analisis = Soc2MadurezCriterioAnalisis(
+                    run_id=run.id,
+                    bloque_codigo=bloque_codigo,
+                    bloque_nombre=nombre
+                )
+                db.session.add(analisis)
+
+            analisis.estado_actual = estado_actual
+            analisis.estado_requerido = estado_requerido
+            analisis.plan_accion_ai = plan_txt or plan_raw
+            analisis.plan_accion_editado = plan_txt or plan_raw
+            db.session.commit()
+
+            flash("✅ Análisis SOC 2 generado con IA.", "success")
+
+        except Exception as e:
+            db.session.rollback()
+            traceback.print_exc()
+            flash(f"❌ Error generando análisis SOC 2: {e}", "danger")
+
+        return redirect(url_for("madurez_soc2.analisis_criterio", run_id=run.id, bloque_codigo=bloque_codigo))
+
+    estado_actual = analisis.estado_actual if analisis else ""
+    estado_requerido = analisis.estado_requerido if analisis else ""
+    plan_accion = _normalizar_plan_accion_soc2_texto(
+        (analisis.plan_accion_editado or analisis.plan_accion_ai) if analisis else ""
+    )
+
+    boton_generar = ""
+    if user.role != "auditor":
+        boton_generar = f"""
+        <form method="POST" class="m-0">
+          <button type="submit" class="btn nistdet-btn-success rounded-pill px-4 fw-bold">
+            <i class="bi bi-magic me-2"></i>Generar análisis IA
+          </button>
+        </form>
+        """
+
+    content = f"""
+    <div class="nistdet-shell">
+
+      <div class="nistdet-header-card">
+        <div class="nistdet-header-overlay">
+          <div class="nistdet-header-text">
+            <h3 class="nistdet-title m-0">Análisis SOC 2 — {escape(nombre)}</h3>
+            <div class="nistdet-subtitle">
+              Consecutivo: <b>{escape(run.consecutivo or '')}</b>
+              · Cumplimiento: <b>{pct:.2f}%</b>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="nistdet-header-actions">
+        <a href="{url_for('madurez_soc2.detalle', run_id=run.id)}"
+           class="btn nistdet-btn-main rounded-pill px-4 fw-bold">
+          <i class="bi bi-arrow-left me-2"></i>Volver al detalle
+        </a>
+        {boton_generar}
+      </div>
+
+      <div class="row g-3">
+        <div class="col-12 col-xl-6">
+          <div class="nistdet-card p-4 h-100">
+            <div class="nistdet-section-title">Estado actual</div>
+            <div class="nistdet-exec-box mt-3">
+              {escape(estado_actual) if estado_actual else "No se ha generado análisis."}
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12 col-xl-6">
+          <div class="nistdet-card p-4 h-100">
+            <div class="nistdet-section-title">Estado requerido</div>
+            <div class="nistdet-exec-box mt-3">
+              {escape(estado_requerido) if estado_requerido else "No se ha generado análisis."}
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12">
+          <div class="nistdet-card p-4">
+            <div class="nistdet-section-title">Plan de acción</div>
+            <div class="nistdet-exec-box mt-3">
+              <pre class="mb-0" style="white-space:pre-wrap;font-family:inherit;">{escape(plan_accion) if plan_accion else "No se ha generado plan de acción."}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    {soc2_nist_css('nistdet', '📊')}
+    """
+
+    return render_template_string(BASE, title="Análisis criterio SOC 2", content=content)
+
+# ================
+# Detalle SOC 2 — MISMO DISEÑO NIST
+# ================
+
+@soc2_madurez_bp.route("/detalle/<int:run_id>", methods=["GET"])
+@login_required
+def detalle(run_id: int):
+    user = User.query.get(session.get("user_id"))
+
+    if user.role != "admin" and user.role != "auditor" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
+        flash("No tiene permiso para ver el detalle SOC 2.", "danger")
+        return redirect(url_for("menu"))
+
+    run = Soc2MadurezRun.query.get_or_404(run_id)
+
+    if user.role not in ("admin", "auditor") and run.user_id != user.id:
+        flash("No tiene permiso para ver esta revisión SOC 2.", "danger")
+        return redirect(url_for("madurez_soc2.historial"))
+
+    try:
+        resumen = json.loads(run.resumen_json or "{}")
+    except Exception:
+        resumen = {}
+
+    if not resumen:
+        run_analysis_from_soc2_run(run.id)
+        run = Soc2MadurezRun.query.get_or_404(run.id)
+        try:
+            resumen = json.loads(run.resumen_json or "{}")
+        except Exception:
+            resumen = {}
+
+    def _nl2br_soc2(s: str) -> str:
+        txt = soc2_normalizar_texto_rico_guardado(s or "")
+        return txt.replace("\n", "<br>")
+
+    # =========================
+    # Radar por criterio
+    # =========================
+    radar_labels, radar_values = soc2_pct_por_criterio(resumen, SOC2_BLOCK_ORDER)
+    radar_b64 = run.radar_overall_b64 or soc2_radar_b64(
+        radar_labels,
+        radar_values,
+        title="Radar por Criterio"
+    )
+
+    informe_ai = soc2_normalizar_texto_rico_guardado(run.informe_ejecutivo_ai or "")
+    informe_editado = soc2_normalizar_texto_rico_guardado(run.informe_ejecutivo_editado or "")
+    informe_mostrar = informe_editado if informe_editado else informe_ai
+
+    nivel_general = soc2_nivel_visual_por_pct(run.pct_general)
+    nivel_general_texto = (nivel_general.get("nivel") or "").strip()
+    nivel_general_nombre = nivel_general_texto.split(":", 1)[1].strip() if ":" in nivel_general_texto else nivel_general_texto
+
+    botones_ia = ""
+    if user.role != "auditor":
+        botones_ia = f"""
+          <form method="POST"
+                  action="{url_for('madurez_soc2.informe_ejecutivo_generar', run_id=run.id)}"
+                  class="m-0">
+              <button type="submit" class="btn nistdet-btn-success rounded-pill px-4 fw-bold">
+                <i class="bi bi-magic me-2"></i>Generar con IA
+              </button>
+            </form>
+
+            <a href="{url_for('madurez_soc2.informe_ejecutivo_editar', run_id=run.id)}"
+               class="btn btn-primary rounded-pill px-4 fw-bold">
+              <i class="bi bi-pencil-square me-2"></i>Editar
+            </a>
+        """
+    else:
+        botones_ia = """
+          <button class="btn nistdet-btn-success rounded-pill px-4 fw-bold" disabled>
+            <i class="bi bi-magic me-2"></i>Generar con IA
+          </button>
+          <button class="btn btn-primary rounded-pill px-4 fw-bold" disabled>
+            <i class="bi bi-pencil-square me-2"></i>Editar
+          </button>
+        """
+
+    # =========================
+    # Tarjeta superior
+    # =========================
+    top_html = f"""
+    <div class="row g-3 mb-4">
+
+      <div class="col-12 col-xl-5">
+        <div class="nistdet-card p-4 h-100">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+            <div>
+              <div class="nistdet-card-title">📊 Radar por Criterio General</div>
+              <div class="text-muted small">
+                Resultado consolidado por criterios SOC 2.
+              </div>
+            </div>
+
+            <div class="text-end">
+              <div class="badge rounded-pill px-3 py-2"
+                   style="background:{nivel_general.get('color','#6c757d')}; color:#fff; font-size:.82rem;">
+                Nivel {nivel_general.get('score', 0)}
+              </div>
+              <div class="small text-muted mt-1">{escape(nivel_general_nombre)}</div>
+            </div>
+          </div>
+
+          <div class="text-center mt-3">
+            {f'<img class="img-fluid nistdet-radar-img-small" src="data:image/png;base64,{radar_b64}">' if radar_b64 else '<div class="alert alert-warning mb-0">No fue posible generar el radar.</div>'}
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-xl-7">
+        <div class="nistdet-card p-4 h-100">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+              <div class="nistdet-card-title">🧾 Informe ejecutivo</div>
+              <div class="text-muted small">
+                Síntesis ejecutiva generada con IA a partir de los resultados por criterio SOC 2.
+              </div>
+            </div>
+
+            <div class="d-flex gap-2 flex-wrap">
+              {botones_ia}
+            </div>
+          </div>
+
+          <div class="nistdet-exec-box mt-3">
+            {f'<div class="nistdet-exec-text">{_nl2br_soc2(escape(informe_mostrar))}</div>' if informe_mostrar else '''
+              <div class="text-center py-4">
+                <div class="mb-2" style="font-size:2rem;">🤖</div>
+                <div class="fw-bold text-black">Aún no hay informe ejecutivo</div>
+                <div class="text-muted small mt-1">
+                  Presiona <b>Generar con IA</b> para construir el informe con base en el resultado de los criterios SOC 2.
+                </div>
+              </div>
+            '''}
+          </div>
+        </div>
+      </div>
+
+    </div>
+    """
+
+    # =========================
+    # Gauge igual NIST
+    # =========================
+    def gauge_svg_categoria(pct, color="#2f6fb6"):
+        try:
+            pct = max(0, min(100, float(pct or 0)))
+        except Exception:
+            pct = 0.0
+
+        radius = 44
+        circumference = math.pi * radius
+        progress = circumference * (pct / 100.0)
+
+        return f"""
+        <svg width="150" height="96" viewBox="0 0 120 78" aria-hidden="true">
+          <path d="M16 62 A44 44 0 0 1 104 62"
+                fill="none" stroke="#e9ecef" stroke-width="10" stroke-linecap="round"/>
+          <path d="M16 62 A44 44 0 0 1 104 62"
+                fill="none" stroke="{color}" stroke-width="10" stroke-linecap="round"
+                stroke-dasharray="{progress:.2f} {circumference:.2f}"/>
+          <text x="60" y="46" text-anchor="middle"
+                style="font-size:15px;font-weight:800;fill:#111;">{pct:.0f}%</text>
+          <text x="17" y="74" text-anchor="middle"
+                style="font-size:10px;fill:#6c757d;">0</text>
+          <text x="103" y="74" text-anchor="middle"
+                style="font-size:10px;fill:#6c757d;">100</text>
+        </svg>
+        """
+
+    # =========================
+    # Criterios SOC 2 como capítulos NIST
+    # =========================
+    criterio_cards = []
+
+    for code in SOC2_BLOCK_ORDER:
+        if code not in resumen:
+            continue
+
+        d = resumen.get(code, {}) or {}
+
+        pct = float(d.get("pct", 0) or 0)
+        total = int(d.get("total", 0) or 0)
+        nombre_criterio = (d.get("nombre") or soc2_block_title(code) or code).strip()
+
+        nivel_data = soc2_nivel_visual_por_pct(pct)
+        nivel_score = nivel_data.get("score", "")
+        nivel_texto = (nivel_data.get("nivel") or "").strip()
+        nivel_nombre = nivel_texto.split(":", 1)[1].strip() if ":" in nivel_texto else nivel_texto
+
+        gauge_html = gauge_svg_categoria(pct, nivel_data.get("color", "#2f6fb6"))
+
+        criterio_cards.append(f"""
+        <div class="col-12 col-md-6 col-xl-4">
+          <div class="nistdet-subcard h-100">
+
+            <div class="nistdet-subcard-top">
+              <div class="text-center">
+                {gauge_html}
+              </div>
+            </div>
+
+            <div class="nistdet-subcard-body">
+              <div class="nistdet-row">
+                <div class="nistdet-label">Criterio</div>
+                <div class="nistdet-value fw-bold">{escape(code)}</div>
+              </div>
+
+              <div class="nistdet-row">
+                <div class="nistdet-label">Nombre</div>
+                <div class="nistdet-value nistdet-value-wrap">{escape(nombre_criterio)}</div>
+              </div>
+
+              <div class="nistdet-row">
+                <div class="nistdet-label">% Cumplimiento</div>
+                <div class="nistdet-value fw-bold">{pct:.2f}%</div>
+              </div>
+
+              <div class="nistdet-row">
+                <div class="nistdet-label">Nivel de Madurez</div>
+                <div class="nistdet-value">
+                  <div class="d-flex align-items-center gap-2 flex-wrap mb-1">
+                    <span class="nivel-dot"
+                          style="background-color:{nivel_data.get('color','#6c757d')} !important;"></span>
+                    <span class="fw-bold">Nivel {nivel_score}</span>
+                  </div>
+                  <div class="text-muted small nistdet-value-wrap">
+                    {escape(nivel_nombre)}
+                  </div>
+                </div>
+              </div>
+
+              <div class="nistdet-row">
+                <div class="nistdet-label">Ítems</div>
+                <div class="nistdet-value fw-bold">{total}</div>
+              </div>
+
+              <div class="nistdet-row nistdet-row-actions">
+                <div class="nistdet-label">Acciones</div>
+                <div class="nistdet-value">
+                  <div class="d-flex flex-wrap gap-2">
+                    <a class="btn btn-sm btn-outline-primary rounded-pill"
+                       href="{url_for('madurez_soc2.detalle_criterio', run_id=run.id, bloque_codigo=code)}">
+                      <i class="bi bi-list-check me-1"></i>Ver preguntas
+                    </a>
+
+                    <a class="btn btn-sm btn-outline-dark rounded-pill"
+                       href="{url_for('madurez_soc2.analisis_criterio', run_id=run.id, bloque_codigo=code)}">
+                      <i class="bi bi-cpu me-1"></i>Análisis
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+        """)
+
+    capitulo_cards = f"""
+    <div class="nistdet-card p-4 mb-4">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">
+        <div>
+          <div class="nistdet-section-title">SOC 2 — Trust Services Criteria</div>
+          <div class="text-muted small">
+            Resultado detallado por criterios SOC 2.
+          </div>
+        </div>
+
+        <div class="nistdet-capitulo-resumen">
+          <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
+            <span class="badge rounded-pill px-3 py-2"
+                  style="background:{nivel_general.get('color','#6c757d')}; color:#fff;">
+              Nivel {nivel_general.get('score', 0)}
+            </span>
+            <span class="fw-bold text-dark">{run.pct_general:.2f}%</span>
+          </div>
+          <div class="small text-muted text-end mt-1">
+            {escape(nivel_general_nombre)}
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        {''.join(criterio_cards)}
+      </div>
+    </div>
+    """
+
+    content = f"""
+    <div class="nistdet-shell">
+
+      <div class="nistdet-header-card">
+        <div class="nistdet-header-overlay">
+          <div class="nistdet-header-text">
+            <h3 class="nistdet-title m-0">Resultado de Madurez — SOC 2</h3>
+            <div class="nistdet-subtitle">
+              Consecutivo: <b>{escape(run.consecutivo or '')}</b>
+              · Cumplimiento general: <b>{run.pct_general:.2f}%</b>
+              · Nivel general: <b>{escape(nivel_general_nombre)}</b>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="nistdet-header-actions">
+        <a href="{url_for('madurez_soc2.historial')}"
+           class="btn nistdet-btn-main rounded-pill px-4 fw-bold">
+          <i class="bi bi-arrow-left me-2"></i>Volver al historial
+        </a>
+
+        <a href="{url_for('madurez_soc2.inicio_soc2')}"
+           class="btn nistdet-btn-soft rounded-pill px-4 fw-bold">
+          <i class="bi bi-house-door-fill me-2"></i>Volver al módulo
+        </a>
+
+        <a href="{url_for('madurez_soc2.exportar_pdf', run_id=run.id)}"
+           class="btn btn-danger rounded-pill px-4 fw-bold">
+          <i class="bi bi-file-earmark-pdf me-2"></i>Exportar PDF
+        </a>
+      </div>
+
+      {top_html}
+
+      {capitulo_cards}
+
+    </div>
+
+    <style>
+      body{{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }}
+
+      .nistdet-shell{{
+        width:96%;
+        max-width:1580px;
+        margin:26px auto 24px auto;
+      }}
+
+      .nistdet-header-card{{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }}
+
+      .nistdet-header-card::before{{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }}
+
+      .nistdet-header-overlay{{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }}
+
+      .nistdet-header-overlay::before{{
+        content:"📊";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }}
+
+      .nistdet-header-text{{
+        max-width:1100px;
+        width:100%;
+        display:block !important;
+        transform:none !important;
+      }}
+
+      .nistdet-header-text::before{{
+        content:"SGSI · Resultado SOC 2";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }}
+
+      .nistdet-title{{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        margin:0 !important;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+      }}
+
+      .nistdet-subtitle{{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+        line-height:1.25;
+      }}
+
+      .nistdet-header-actions{{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }}
+
+      .nistdet-header-actions .btn,
+      .btn{{
+        border-radius:10px !important;
+        min-height:38px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }}
+
+      .nistdet-btn-main,
+      .btn-outline-light{{
+        background:#ffffff;
+        color:#0f172a !important;
+        border:1px solid #cfd8e3 !important;
+      }}
+
+      .nistdet-btn-main:hover,
+      .btn-outline-light:hover{{
+        background:#edf5ff;
+        color:#0b65d8 !important;
+        border-color:#9ec5fe !important;
+      }}
+
+      .nistdet-btn-soft{{
+        background:rgba(255,255,255,.88);
+        color:#111 !important;
+        border:1px solid rgba(108,117,125,.35);
+      }}
+
+      .nistdet-btn-soft:hover{{
+        background:#edf5ff;
+        color:#0b65d8 !important;
+      }}
+
+      .nistdet-btn-success{{
+        background:#198754;
+        color:#ffffff !important;
+        border:1px solid #198754;
+      }}
+
+      .nistdet-btn-success:hover{{
+        background:#157347;
+        color:#ffffff !important;
+      }}
+
+      .nistdet-card,
+      .card{{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
+      }}
+
+      .nistdet-card-title,
+      .nistdet-section-title,
+      .card h5,
+      .card h6{{
+        font-weight:950;
+        color:#1459a6;
+      }}
+
+      .nistdet-section-title{{
+        font-size:.95rem;
+        padding-bottom:8px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+        margin-bottom:16px;
+      }}
+
+      .nistdet-radar-img-small{{
+        max-width:290px;
+        width:100%;
+        height:auto;
+        display:inline-block;
+      }}
+
+      .nistdet-exec-box{{
+        min-height:310px;
+        background:linear-gradient(180deg,rgba(248,250,252,.94),rgba(255,255,255,.98));
+        border:1px solid rgba(63,134,214,.16);
+        border-radius:16px;
+        padding:18px;
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.60);
+      }}
+
+      .nistdet-exec-text{{
+        font-size:.96rem;
+        line-height:1.65;
+        color:#1f2937;
+        white-space:normal;
+      }}
+
+      .nistdet-subcard{{
+        background:#ffffff;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        padding:14px;
+        box-shadow:0 8px 18px rgba(15,23,42,.08);
+      }}
+
+      .nistdet-subcard-top{{
+        border-bottom:1px solid rgba(59,130,246,.16);
+        padding-bottom:8px;
+        margin-bottom:10px;
+      }}
+
+      .nistdet-subcard-body{{
+        display:flex;
+        flex-direction:column;
+        gap:8px;
+      }}
+
+      .nistdet-row{{
+        display:grid;
+        grid-template-columns:125px 1fr;
+        gap:10px;
+        align-items:start;
+      }}
+
+      .nistdet-label{{
+        font-size:.72rem;
+        font-weight:900;
+        color:#1459a6;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+      }}
+
+      .nistdet-value{{
+        font-size:.88rem;
+        color:#0f172a;
+        line-height:1.45;
+      }}
+
+      .nistdet-value-wrap{{
+        word-break:break-word;
+        white-space:normal;
+      }}
+
+      .nivel-dot{{
+        width:12px;
+        height:12px;
+        border-radius:50%;
+        display:inline-block;
+        box-shadow:0 0 0 3px rgba(0,0,0,.06);
+      }}
+
+      .form-label{{
+        font-size:.72rem;
+        font-weight:900;
+        color:#1459a6;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
+      }}
+
+      .form-control,
+      .form-select{{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        box-shadow:none !important;
+      }}
+
+      .form-control:focus,
+      .form-select:focus{{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#ffffff;
+      }}
+
+      .badge{{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }}
+
+      @media (max-width:991.98px){{
+        .nistdet-shell{{
+          width:98%;
+          margin:8px auto 22px auto;
+        }}
+
+        .nistdet-header-card{{
+          min-height:88px;
+        }}
+
+        .nistdet-title{{
+          font-size:1.20rem;
+        }}
+
+        .nistdet-subtitle{{
+          font-size:.76rem;
+        }}
+
+        .nistdet-radar-img-small{{
+          max-width:255px;
+        }}
+
+        .nistdet-exec-box{{
+          min-height:240px;
+        }}
+
+        .nistdet-row{{
+          grid-template-columns:1fr;
+          gap:3px;
+        }}
+      }}
+
+      @media (max-width:768px){{
+        .nistdet-header-overlay{{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }}
+
+        .nistdet-header-overlay::before{{
+          margin:0;
+        }}
+
+        .nistdet-header-text::before{{
+          margin-left:auto;
+          margin-right:auto;
+        }}
+
+        .nistdet-title,
+        .nistdet-subtitle{{
+          text-align:center;
+        }}
+
+        .nistdet-header-actions .btn{{
+          width:100%;
+        }}
+      }}
+    </style>
+    """
+    return render_template_string(BASE, title="Detalle SOC 2", content=content)
+
+
+# Alias por compatibilidad si tu menú anterior apuntaba a resultado
+@soc2_madurez_bp.route("/resultado/<int:run_id>", methods=["GET"])
+@login_required
+def resultado(run_id: int):
+    return detalle(run_id)
+
+
+# ============================================================
+# IA — INFORME / PLAN / CRITERIO
+# ============================================================
+@soc2_madurez_bp.route("/detalle/<int:run_id>/informe-ejecutivo/generar", methods=["POST"])
+@login_required
+def informe_ejecutivo_generar(run_id: int):
+    user = User.query.get(session.get("user_id"))
+    if user.role == "auditor":
+        flash("El perfil Auditor no puede generar el informe ejecutivo con IA.", "danger")
+        return redirect(url_for("madurez_soc2.detalle", run_id=run_id))
+    run = Soc2MadurezRun.query.get_or_404(run_id)
+    resumen = json.loads(run.resumen_json or "{}")
+    if not resumen:
+        flash("⚠️ No hay resultados consolidados para generar el informe ejecutivo.", "warning")
+        return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
+    try:
+        raw = _soc2_ai_text(_soc2_prompt_informe_ejecutivo(run, resumen), max_tokens=1200)
+        obj = _extraer_json_objeto_soc2(raw)
+        informe_ai = (obj.get("informe_ejecutivo") or raw or "").strip() if isinstance(obj, dict) else raw
+        informe_ai = soc2_normalizar_texto_rico_guardado(informe_ai)
+        if not informe_ai:
+            raise RuntimeError("La IA no devolvió un informe válido.")
+        run.informe_ejecutivo_ai = informe_ai
+        run.informe_ejecutivo_editado = informe_ai
+        db.session.commit()
+        flash("✅ Informe ejecutivo SOC 2 generado con IA.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"❌ Error llamando IA para el informe ejecutivo: {e}", "danger")
+    return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
+
+
+@soc2_madurez_bp.route("/detalle/<int:run_id>/informe-ejecutivo/editar", methods=["GET", "POST"])
+@login_required
+def informe_ejecutivo_editar(run_id: int):
+    user = User.query.get(session.get("user_id"))
+    if user.role == "auditor":
+        flash("El perfil Auditor no puede editar el informe ejecutivo.", "danger")
+        return redirect(url_for("madurez_soc2.detalle", run_id=run_id))
+    run = Soc2MadurezRun.query.get_or_404(run_id)
+    if request.method == "POST":
+        run.informe_ejecutivo_editado = (request.form.get("informe") or "").strip()
+        db.session.commit()
+        flash("✅ Informe ejecutivo SOC 2 actualizado.", "success")
+        return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
+    texto = run.informe_ejecutivo_editado or run.informe_ejecutivo_ai or ""
+    content = f"""
+<div class="nistdet-shell">
+  <div class="nistdet-header-card"><div class="nistdet-header-overlay"><div class="nistdet-header-text"><h3 class="nistdet-title m-0">Editar Informe Ejecutivo — SOC 2</h3></div></div></div>
+  <form method="POST" class="nistdet-card p-4">
+    <textarea name="informe" rows="18" class="form-control">{escape(texto)}</textarea>
+    <div class="text-end mt-3">
+      <a href="{url_for('madurez_soc2.detalle', run_id=run.id)}" class="btn btn-secondary rounded-pill px-4">Cancelar</a>
+      <button class="btn btn-primary rounded-pill px-4 fw-bold">Guardar</button>
+    </div>
+  </form>
+</div>
+{soc2_nist_css('nistdet', '✍️')}
+"""
+    return render_template_string(BASE, title="Editar Informe Ejecutivo SOC 2", content=content)
+
+
+@soc2_madurez_bp.route("/detalle/<int:run_id>/plan-trabajo/generar", methods=["POST"])
+@login_required
+def plan_trabajo_generar(run_id: int):
+    user = User.query.get(session.get("user_id"))
+    if user.role == "auditor":
+        flash("El perfil Auditor no puede generar el plan de trabajo con IA.", "danger")
+        return redirect(url_for("madurez_soc2.detalle", run_id=run_id))
+    run = Soc2MadurezRun.query.get_or_404(run_id)
+    resumen = json.loads(run.resumen_json or "{}")
+    try:
+        raw = _soc2_ai_text(_soc2_prompt_plan_trabajo(run, resumen), max_tokens=1600)
+        obj = _extraer_json_objeto_soc2(raw)
+        plan = obj.get("plan_trabajo") if isinstance(obj, dict) else None
+        plan_txt = _build_plan_accion_soc2_texto(plan) if isinstance(plan, list) else raw
+        plan_txt = soc2_normalizar_texto_rico_guardado(plan_txt)
+        if not plan_txt:
+            raise RuntimeError("La IA no devolvió un plan válido.")
+        run.plan_trabajo_ai = plan_txt
+        run.plan_trabajo_editado = plan_txt
+        db.session.commit()
+        flash("✅ Plan de trabajo SOC 2 generado con IA.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"❌ Error generando plan de trabajo: {e}", "danger")
+    return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
+
+
+@soc2_madurez_bp.route("/detalle/<int:run_id>/plan-trabajo/editar", methods=["GET", "POST"])
+@login_required
+def plan_trabajo_editar(run_id: int):
+    user = User.query.get(session.get("user_id"))
+    if user.role == "auditor":
+        flash("El perfil Auditor no puede editar el plan de trabajo.", "danger")
+        return redirect(url_for("madurez_soc2.detalle", run_id=run_id))
+    run = Soc2MadurezRun.query.get_or_404(run_id)
+    if request.method == "POST":
+        run.plan_trabajo_editado = (request.form.get("plan") or "").strip()
+        db.session.commit()
+        flash("✅ Plan de trabajo SOC 2 actualizado.", "success")
+        return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
+    texto = run.plan_trabajo_editado or run.plan_trabajo_ai or ""
+    content = f"""
+<div class="nistdet-shell">
+  <div class="nistdet-header-card"><div class="nistdet-header-overlay"><div class="nistdet-header-text"><h3 class="nistdet-title m-0">Editar Plan de Trabajo — SOC 2</h3></div></div></div>
+  <form method="POST" class="nistdet-card p-4">
+    <textarea name="plan" rows="18" class="form-control">{escape(texto)}</textarea>
+    <div class="text-end mt-3">
+      <a href="{url_for('madurez_soc2.detalle', run_id=run.id)}" class="btn btn-secondary rounded-pill px-4">Cancelar</a>
+      <button class="btn btn-success rounded-pill px-4 fw-bold">Guardar</button>
+    </div>
+  </form>
+</div>
+{soc2_nist_css('nistdet', '✍️')}
+"""
+    return render_template_string(BASE, title="Editar Plan SOC 2", content=content)
+
+
+# ============================================================
+# PDF EJECUTIVO
+# ============================================================
+def _soc2_build_pdf_run(run: "Soc2MadurezRun") -> io.BytesIO:
+    try:
+        resumen = json.loads(run.resumen_json or "{}")
+    except Exception:
+        resumen = {}
+    labels, values = soc2_pct_por_criterio(resumen, SOC2_BLOCK_ORDER)
+    radar_b64 = run.radar_overall_b64 or soc2_radar_b64(labels, values, title="Radar por Criterio - SOC 2")
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=1.2 * cm, rightMargin=1.2 * cm, topMargin=1.0 * cm, bottomMargin=1.0 * cm, title="SOC 2 - Informe Ejecutivo")
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="SGSI_Title_SOC2", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=18, textColor=colors.white, alignment=TA_CENTER, spaceAfter=8))
+    styles.add(ParagraphStyle(name="SGSI_Section_SOC2", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=12, textColor=colors.HexColor("#1d4f8f"), spaceBefore=10, spaceAfter=8))
+    styles.add(ParagraphStyle(name="SGSI_Normal_SOC2", parent=styles["Normal"], fontName="Helvetica", fontSize=8.5, leading=11, textColor=colors.HexColor("#1f2937"), spaceAfter=5))
+    styles.add(ParagraphStyle(name="SGSI_Small_SOC2", parent=styles["Normal"], fontName="Helvetica", fontSize=7.5, leading=9, textColor=colors.HexColor("#374151"), spaceAfter=4))
+
+    def pdf_escape(v):
+        return html.escape(str(v or ""))
+
+    story = []
+    title_tbl = Table([[Paragraph("SOC 2 - Informe de Madurez", styles["SGSI_Title_SOC2"])]], colWidths=[26.8 * cm])
+    title_tbl.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#3f86d6")), ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#1d4f8f")), ("TOPPADDING", (0, 0), (-1, -1), 8), ("BOTTOMPADDING", (0, 0), (-1, -1), 8)]))
+    story.append(title_tbl)
+    story.append(Spacer(1, 8))
+
+    nivel_general = soc2_resolver_nivel(run.pct_general)
+    resumen_tbl = Table([
+        ["Consecutivo", pdf_escape(run.consecutivo)],
+        ["Fecha", run.created_at.strftime("%Y-%m-%d %H:%M") if run.created_at else ""],
+        ["Cumplimiento general", f"{run.pct_general:.2f}% - {pdf_escape(nivel_general.get('nivel',''))}"],
+    ], colWidths=[5.2 * cm, 21.6 * cm])
+    resumen_tbl.setStyle(TableStyle([("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f1fb")), ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")), ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"), ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")), ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+    story.append(resumen_tbl)
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph("Informe Ejecutivo", styles["SGSI_Section_SOC2"]))
+    informe = soc2_normalizar_texto_rico_guardado(run.informe_ejecutivo_editado or run.informe_ejecutivo_ai or "")
+    if informe:
+        for parrafo in re.split(r"\n\s*\n", informe):
+            if parrafo.strip():
+                story.append(Paragraph(pdf_escape(parrafo.strip()), styles["SGSI_Normal_SOC2"]))
+    else:
+        story.append(Paragraph("No hay informe ejecutivo registrado.", styles["SGSI_Normal_SOC2"]))
+
+    story.append(Paragraph("Radar por Criterio SOC 2", styles["SGSI_Section_SOC2"]))
+    if radar_b64:
+        try:
+            img = RLImage(io.BytesIO(base64.b64decode(radar_b64)), width=11.5 * cm, height=11.0 * cm)
+            story.append(img)
+        except Exception:
+            pass
+
+    story.append(Paragraph("Detalle por Criterio", styles["SGSI_Section_SOC2"]))
+    data = [["Criterio", "% Cumplimiento", "Nivel", "SI", "Parcial", "NO", "N/A", "Items"]]
+    for code in SOC2_BLOCK_ORDER:
+        d = resumen.get(code)
+        if not d:
+            continue
+        data.append([
+            Paragraph(pdf_escape(d.get("nombre") or code), styles["SGSI_Small_SOC2"]),
+            Paragraph(f"{float(d.get('pct',0) or 0):.2f}%", styles["SGSI_Small_SOC2"]),
+            Paragraph(pdf_escape(d.get("madurez") or ""), styles["SGSI_Small_SOC2"]),
+            str(d.get("SI", 0)), str(d.get("PARCIAL", 0)), str(d.get("NO", 0)), str(d.get("NA", 0)), str(d.get("total", 0)),
+        ])
+    tbl = Table(data, colWidths=[7.2 * cm, 3.0 * cm, 5.0 * cm, 1.5 * cm, 2.0 * cm, 1.5 * cm, 1.5 * cm, 2.0 * cm], repeatRows=1)
+    tbl.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3f86d6")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
+    story.append(tbl)
+
+    plan = _normalizar_plan_accion_soc2_texto(run.plan_trabajo_editado or run.plan_trabajo_ai or "")
+    if plan:
+        story.append(PageBreak())
+        story.append(Paragraph("Plan de Trabajo", styles["SGSI_Section_SOC2"]))
+        for parrafo in re.split(r"\n\s*\n", plan):
+            if parrafo.strip():
+                story.append(Paragraph(pdf_escape(parrafo.strip()), styles["SGSI_Normal_SOC2"]))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf
+
+
+@soc2_madurez_bp.route("/detalle/<int:run_id>/pdf", methods=["GET"])
+@login_required
+def exportar_pdf(run_id: int):
+    user = User.query.get(session.get("user_id"))
+    if user.role != "admin" and user.role != "auditor" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
+        flash("No tiene permiso para exportar SOC 2.", "danger")
+        return redirect(url_for("menu"))
+    run = Soc2MadurezRun.query.get_or_404(run_id)
+    pdf = _soc2_build_pdf_run(run)
+    filename = f"SOC2_Madurez_{re.sub(r'[^A-Za-z0-9_-]+', '_', run.consecutivo or str(run.id))}.pdf"
+    return send_file(pdf, mimetype="application/pdf", as_attachment=True, download_name=filename)
+
+
+@soc2_madurez_bp.route("/detalle/<int:run_id>/eliminar", methods=["POST"])
+@login_required
+def eliminar_run(run_id: int):
+    user = User.query.get(session.get("user_id"))
+    if user.role == "auditor":
+        flash("El perfil Auditor no puede eliminar revisiones SOC 2.", "danger")
+        return redirect(url_for("madurez_soc2.historial"))
+    if user.role != "admin" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
+        flash("No tiene permiso para eliminar revisiones SOC 2.", "danger")
+        return redirect(url_for("menu"))
+    run = Soc2MadurezRun.query.get_or_404(run_id)
+    try:
+        Soc2MadurezCriterioAnalisis.query.filter_by(run_id=run.id).delete(synchronize_session=False)
+        Soc2MadurezRespuesta.query.filter_by(run_id=run.id).delete(synchronize_session=False)
+        db.session.delete(run)
+        db.session.commit()
+        flash("✅ Revisión SOC 2 eliminada correctamente.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"❌ Error eliminando revisión SOC 2: {e}", "danger")
+    return redirect(url_for("madurez_soc2.historial"))
+
+
+# ============================================================
+# CSS — COPIA DE PATRÓN NIST
+# ============================================================
+def soc2_nist_css(prefix, icon, subtitle_label="SOC 2"):
+    return f"""
+<style>
+  body{{
+    background-image:url('/static/img/ccsgsi.jpg');
+    background-size:cover;
+    background-position:center;
+    background-attachment:fixed;
+    background-repeat:no-repeat;
+  }}
+
+  .{prefix}-shell{{
+    width:96%;
+    max-width:1600px;
+    margin:26px auto 24px auto;
+  }}
+
+  .{prefix}-header-card{{
+    background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+    border-radius:18px;
+    padding:16px 24px;
+    min-height:94px;
+    display:flex;
+    align-items:center;
+    justify-content:flex-start;
+    box-shadow:0 12px 24px rgba(15,23,42,.25);
+    position:relative;
+    overflow:hidden;
+    margin-bottom:14px;
+  }}
+
+  .{prefix}-header-card::before{{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:
+      radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+      repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+    pointer-events:none;
+  }}
+
+  .{prefix}-header-overlay{{
+    width:100%;
+    display:flex;
+    align-items:center;
+    justify-content:flex-start;
+    text-align:left;
+    background:transparent !important;
+    padding:0 !important;
+    position:relative;
+    z-index:1;
+  }}
+
+  .{prefix}-header-overlay::before{{
+    content:"{icon}";
+    width:54px;
+    height:54px;
+    min-width:54px;
+    border-radius:14px;
+    background:#ffffff;
+    color:#1459a6;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:1.45rem;
+    box-shadow:0 8px 18px rgba(0,0,0,.25);
+    margin-right:14px;
+  }}
+
+  .{prefix}-header-text{{
+    max-width:1100px;
+    width:100%;
+    display:block !important;
+    transform:none !important;
+  }}
+
+  .{prefix}-header-text::before{{
+    content:"SGSI · {subtitle_label}";
+    display:inline-block;
+    background:rgba(255,255,255,.18);
+    border-radius:999px;
+    padding:3px 10px;
+    font-size:.65rem;
+    font-weight:800;
+    margin-bottom:4px;
+    color:#ffffff;
+  }}
+
+  .{prefix}-title{{
+    color:#ffffff !important;
+    font-weight:950;
+    font-size:1.32rem;
+    line-height:1.1;
+    text-shadow:0 3px 10px rgba(0,0,0,.35);
+    margin:0 !important;
+  }}
+
+  .{prefix}-subtitle{{
+    color:rgba(255,255,255,.95);
+    font-size:.78rem;
+    margin-top:4px;
+    line-height:1.25;
+    font-weight:800;
+  }}
+
+  .{prefix}-header-actions{{
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:10px;
+    margin:10px 0 14px;
+  }}
+
+  .{prefix}-header-actions .btn,
+  .{prefix}-btn-main,
+  .{prefix}-btn-primary,
+  .{prefix}-btn-soft,
+  .btn{{
+    border-radius:10px !important;
+    min-height:38px;
+    padding:8px 22px !important;
+    font-size:.82rem;
+    font-weight:900;
+    box-shadow:0 8px 16px rgba(15,23,42,.15);
+  }}
+
+  .{prefix}-btn-main,
+  .{prefix}-btn-primary{{
+    background:#1459a6 !important;
+    border:1px solid #1459a6 !important;
+    color:#ffffff !important;
+  }}
+
+  .{prefix}-btn-main:hover,
+  .{prefix}-btn-primary:hover{{
+    background:#0f4f94 !important;
+    color:#ffffff !important;
+  }}
+
+  .{prefix}-btn-soft{{
+    background:#ffffff !important;
+    border:1px solid #cfd8e3 !important;
+    color:#0f172a !important;
+  }}
+
+  .{prefix}-btn-soft:hover{{
+    background:#edf5ff !important;
+    color:#0b65d8 !important;
+  }}
+
+  .{prefix}-card,
+  .card{{
+    background:rgba(255,255,255,.96) !important;
+    border-radius:18px !important;
+    backdrop-filter:blur(8px);
+    box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+    border:1px solid rgba(219,230,244,.9) !important;
+    overflow:hidden;
+  }}
+
+  .{prefix}-section-title,
+  .card h5,
+  .card h6{{
+    font-weight:950;
+    font-size:.95rem;
+    color:#1459a6;
+    margin:8px 0 14px 0;
+    padding-bottom:8px;
+    border-bottom:2px solid rgba(59,130,246,.18);
+  }}
+
+  .form-control,
+  .form-select{{
+    border-radius:10px;
+    border:1px solid #d9e3f0;
+    min-height:40px;
+    font-size:.86rem;
+    background:#f8fafc;
+    box-shadow:none !important;
+  }}
+
+  .form-control:focus,
+  .form-select:focus{{
+    border-color:#3f86d6;
+    box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+    background:#ffffff;
+  }}
+
+  .badge{{
+    border-radius:999px;
+    font-size:.70rem;
+    padding:.35rem .65rem;
+    font-weight:900;
+  }}
+
+  @media(max-width:991.98px){{
+    .{prefix}-shell{{
+      width:98%;
+      margin:8px auto 22px auto;
+    }}
+
+    .{prefix}-header-card{{
+      min-height:88px;
+    }}
+
+    .{prefix}-title{{
+      font-size:1.20rem;
+    }}
+
+    .{prefix}-subtitle{{
+      font-size:.76rem;
+    }}
+  }}
+
+  @media(max-width:768px){{
+    .{prefix}-header-overlay{{
+      flex-direction:column;
+      text-align:center;
+      gap:10px;
+    }}
+
+    .{prefix}-header-overlay::before{{
+      margin:0;
+    }}
+
+    .{prefix}-header-text::before{{
+      margin-left:auto;
+      margin-right:auto;
+    }}
+
+    .{prefix}-title,
+    .{prefix}-subtitle{{
+      text-align:center;
+    }}
+
+    .{prefix}-header-actions .btn{{
+      width:100%;
+    }}
+  }}
+</style>
+"""
+
+
+def soc2_nistform_css():
+    return """
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .nistform-shell{
+        width:96%;
+        max-width:1600px;
+        margin:26px auto 24px auto;
+      }
+
+      .nistform-header-card{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .nistform-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }
+
+      .nistform-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }
+
+      .nistform-header-overlay::before{
+        content:"🛡️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .nistform-header-text{
+        max-width:1100px;
+        width:100%;
+        display:block !important;
+        transform:none !important;
+      }
+
+      .nistform-header-text::before{
+        content:"SGSI · Evaluación NIST CSF 2.0";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }
+
+      .nistform-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .nistform-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+        line-height:1.25;
+        font-weight:800;
+      }
+
+      .nistform-header-actions{
+        display:flex;
+        justify-content:center;
+        align-items:center;
+        flex-wrap:wrap;
+        gap:10px;
+        margin:10px 0 14px;
+      }
+
+      .nistform-header-actions .btn,
+      .btn{
+        border-radius:10px !important;
+        min-height:38px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .nistform-card,
+      .card{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
+      }
+
+      .nistform-section-title,
+      .card h5,
+      .card h6{
+        font-weight:950;
+        font-size:.95rem;
+        color:#1459a6;
+        margin:8px 0 14px 0;
+        padding-bottom:8px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+      }
+
+      .nistform-progress{
+        height:24px;
+        border-radius:999px;
+        background:#dbe6f4;
+        overflow:hidden;
+        box-shadow:inset 0 2px 6px rgba(0,0,0,.12);
+      }
+
+      .nistform-progress .progress-bar{
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1);
+        font-weight:900;
+      }
+
+      .nistform-accordion{
+        display:flex;
+        flex-direction:column;
+        gap:12px;
+      }
+
+      .nistform-acc-item{
+        border:1px solid #dbe6f4;
+        border-radius:18px!important;
+        overflow:hidden;
+        box-shadow:0 8px 18px rgba(15,23,42,.08);
+      }
+
+      .nistform-acc-item .accordion-button{
+        background:linear-gradient(135deg,#eef6ff,#ffffff);
+        color:#1f2937;
+        font-weight:900;
+        box-shadow:none;
+        padding:16px 18px;
+      }
+
+      .nistform-acc-item .accordion-button:not(.collapsed){
+        background:linear-gradient(135deg,#dceeff,#ffffff);
+        color:#1459a6;
+      }
+
+      .nistform-acc-inner{
+        width:100%;
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:14px;
+      }
+
+      .nistform-func-title{
+        font-size:1.02rem;
+        font-weight:950;
+        color:#1459a6;
+      }
+
+      .nistform-func-subtitle{
+        font-size:.78rem;
+        color:#607086;
+        font-weight:700;
+        margin-top:2px;
+      }
+
+      .nistform-acc-body{
+        background:#f8fbff;
+        padding:16px;
+      }
+
+      .nistform-cat-block{
+        background:rgba(255,255,255,.88);
+        border:1px solid rgba(15,23,42,.08);
+        border-radius:18px;
+        padding:14px;
+        margin-bottom:14px;
+      }
+
+      .nistform-cat-title{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+        margin-bottom:14px;
+        color:#1459a6;
+        font-weight:950;
+      }
+
+      .nistform-cat-title small{
+        color:#607086;
+        font-weight:700;
+      }
+
+      .nistform-qcard{
+        background:#ffffff;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        padding:16px;
+        box-shadow:0 8px 18px rgba(15,23,42,.06);
+      }
+
+      .nistform-qhead{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+        margin-bottom:10px;
+      }
+
+      .nistform-qtext{
+        color:#111827;
+        font-weight:800;
+        line-height:1.35;
+        min-height:76px;
+      }
+
+      .nistform-radio-row{
+        display:grid;
+        grid-template-columns:repeat(4,1fr);
+        gap:8px;
+        margin-top:14px;
+      }
+
+      .nistform-radio-card{
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        gap:7px;
+        border:1px solid #d7e0ec;
+        background:#ffffff;
+        color:#1f2937;
+        border-radius:999px;
+        padding:8px 10px;
+        font-weight:900;
+        font-size:.78rem;
+        cursor:pointer;
+        transition:all .18s ease;
+        min-height:40px;
+        user-select:none;
+      }
+
+      .nistform-radio-card input{
+        accent-color:#1459a6;
+      }
+
+      .nistform-radio-card:hover{
+        transform:translateY(-1px);
+        box-shadow:0 8px 16px rgba(15,23,42,.10);
+      }
+
+      .nistform-radio-card:has(input[value="NA"]:checked){
+        background:#e2e3e5;
+        border-color:#6c757d;
+        color:#41464b;
+      }
+
+      .nistform-radio-card:has(input[value="SI"]:checked){
+        background:#d1e7dd;
+        border-color:#198754;
+        color:#0f5132;
+      }
+
+      .nistform-radio-card:has(input[value="PARCIAL"]:checked){
+        background:#fff3cd;
+        border-color:#ffc107;
+        color:#664d03;
+      }
+
+      .nistform-radio-card:has(input[value="NO"]:checked){
+        background:#f8d7da;
+        border-color:#dc3545;
+        color:#842029;
+      }
+
+      .form-label{
+        font-size:.72rem;
+        font-weight:900;
+        color:#1459a6;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
+      }
+
+      .form-control,
+      .form-select{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        box-shadow:none !important;
+      }
+
+      .form-control:focus,
+      .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#ffffff;
+      }
+
+      .badge{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }
+
+      @media(max-width:991.98px){
+        .nistform-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .nistform-header-card{
+          min-height:88px;
+        }
+
+        .nistform-title{
+          font-size:1.20rem;
+        }
+
+        .nistform-subtitle{
+          font-size:.76rem;
+        }
+
+        .nistform-card{
+          padding:14px!important;
+        }
+      }
+
+      @media(max-width:768px){
+        .nistform-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .nistform-header-overlay::before{
+          margin:0;
+        }
+
+        .nistform-header-text::before{
+          margin-left:auto;
+          margin-right:auto;
+        }
+
+        .nistform-title,
+        .nistform-subtitle{
+          text-align:center;
+        }
+
+        .nistform-header-actions .btn{
+          width:100%;
+        }
+
+        .nistform-acc-inner,
+        .nistform-cat-title{
+          flex-direction:column;
+          align-items:flex-start;
+        }
+
+        .nistform-radio-row{
+          grid-template-columns:1fr;
+        }
+      }
+    </style>
+    """
+
+# ==========================================================================================================================================
+#                                                   Fin Módulo de Madurez SOC 2 — Diseño NIST
+# ==========================================================================================================================================
+
+# ==========================================================================================================================================
 #                                                   Módulo de Listas Restrictivas
 # ==========================================================================================================================================
 
@@ -149667,11 +153092,13 @@ def allowed_file(filename: str) -> bool:
 
 with app.app_context():
     db.create_all()
+    init_soc2_madurez_db()
 
 app.register_blueprint(madurez_bp)
 app.register_blueprint(nist_madurez_bp)
 app.register_blueprint(madurez_datos_bp)
 app.register_blueprint(pci_madurez_bp)
+app.register_blueprint(soc2_madurez_bp)
 
 def get_free_port(start=5000):
     port = start
