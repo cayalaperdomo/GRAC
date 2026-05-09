@@ -126658,6 +126658,21 @@ def detalle_resultado_pci(analysis_id: int):
 
 soc2_madurez_bp = Blueprint("madurez_soc2", __name__, url_prefix="/madurez_soc2")
 
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.units import cm
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    Image as RLImage,
+    PageBreak
+)
+
 # ============================================================
 # BASE DE DATOS INDEPENDIENTE — SOC 2
 # ============================================================
@@ -127260,6 +127275,70 @@ def _normalizar_plan_accion_soc2_texto(texto_raw: str) -> str:
                 return _build_plan_accion_soc2_texto(obj.get(key))
     return soc2_normalizar_texto_rico_guardado(txt)
 
+# ============================================================
+# SOC 2 — PROMPT PLAN DE TRABAJO IA
+# ============================================================
+
+def _soc2_prompt_plan_trabajo(run: "Soc2MadurezRun", resumen: dict) -> str:
+    """
+    Prompt para generar plan de trabajo SOC 2.
+    Lo usa plan_trabajo_generar().
+    """
+
+    lineas = []
+
+    for code in SOC2_BLOCK_ORDER:
+        d = (resumen or {}).get(code)
+        if not d:
+            continue
+
+        lineas.append(
+            f"- {d.get('nombre') or soc2_block_title(code) or code}: "
+            f"{float(d.get('pct', 0) or 0):.2f}% | "
+            f"Nivel: {d.get('madurez') or ''} | "
+            f"Brecha: {float(d.get('brecha_pct', 0) or 0):.2f}% | "
+            f"NO: {d.get('NO', 0)} | "
+            f"Parcial: {d.get('PARCIAL', 0)}"
+        )
+
+    criterios_txt = "\n".join(lineas) if lineas else "Sin resultados consolidados."
+
+    return f"""
+Eres un consultor senior experto en SOC 2 y preparación para auditoría.
+
+Genera un plan de trabajo priorizado para cerrar brechas SOC 2.
+
+DATOS
+Consecutivo: {run.consecutivo}
+Cumplimiento general: {float(run.pct_general or 0):.2f}%
+
+RESULTADOS POR CRITERIO
+{criterios_txt}
+
+RESPONDE ÚNICAMENTE JSON VÁLIDO.
+No uses markdown.
+No agregues texto antes ni después del JSON.
+
+Formato exacto:
+{{
+  "plan_trabajo": [
+    {{
+      "accion": "texto",
+      "prioridad": "Alta|Media|Baja",
+      "responsable_sugerido": "texto",
+      "plazo": "texto",
+      "evidencia_esperada": "texto"
+    }}
+  ]
+}}
+
+REGLAS:
+- Genera entre 8 y 12 acciones.
+- Prioriza criterios con menor cumplimiento.
+- Las acciones deben ser auditables y verificables.
+- La evidencia esperada debe ser concreta.
+- No inventes herramientas específicas.
+""".strip()
 
 # ============================================================
 # IA — SOC 2
@@ -127550,19 +127629,88 @@ def run_analysis_from_soc2_run(soc2_run_id: int):
     db.session.commit()
     return run.id
 
+# ============================================================
+# PERMISOS SOC 2 — ADMIN / USUARIO CON PERMISO / AUDITOR
+# ============================================================
+
+def soc2_user_can_access(user):
+    """
+    Puede VER el módulo:
+    - admin
+    - auditor
+    - usuario con permiso Nivel de madurez SOC 2
+    """
+    return bool(
+        user and (
+            user.role in ("admin", "auditor")
+            or verificar_permiso(user, SOC2_PERMISSION_NAME)
+        )
+    )
+
+
+def soc2_user_can_execute(user):
+    """
+    Puede EJECUTAR / MODIFICAR:
+    - admin
+    - usuario con permiso Nivel de madurez SOC 2
+
+    Auditor NO puede:
+    - editar
+    - eliminar
+    - generar IA
+    - exportar PDF
+    - importar instrumento
+    - guardar / analizar
+    """
+    return bool(
+        user
+        and user.role != "auditor"
+        and (
+            user.role == "admin"
+            or verificar_permiso(user, SOC2_PERMISSION_NAME)
+        )
+    )
+
+
+def soc2_check_access_or_redirect(user, msg="No tiene permiso para acceder al módulo SOC 2."):
+    if not soc2_user_can_access(user):
+        flash(msg, "danger")
+        return redirect(url_for("menu"))
+    return None
+
+
+def soc2_check_execute_or_redirect(user, msg="No tiene permiso para ejecutar esta acción en SOC 2."):
+    if not soc2_user_can_execute(user):
+        flash(msg, "danger")
+        return redirect(url_for("madurez_soc2.inicio_soc2"))
+    return None
+
+
+# Alias para compatibilidad con bloques anteriores
+def soc2_deny_access(msg="No tiene permiso para acceder al módulo SOC 2."):
+    flash(msg, "danger")
+    return redirect(url_for("menu"))
+
+
+def soc2_deny_execute(msg="No tiene permiso para ejecutar esta acción en SOC 2."):
+    flash(msg, "danger")
+    return redirect(url_for("madurez_soc2.inicio_soc2"))
+
 
 # ============================================================
 # PANTALLA PRINCIPAL — MISMO DISEÑO NIST
 # ============================================================
+
 @soc2_madurez_bp.route("/", methods=["GET"], endpoint="inicio_soc2")
 @login_required
 def inicio_soc2():
     user = User.query.get(session.get("user_id"))
-    if user.role != "admin" and user.role != "auditor" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
-        flash("No tiene permiso para acceder al módulo de nivel de madurez SOC 2.", "danger")
-        return redirect(url_for("menu"))
+
+    if not soc2_user_can_access(user):
+        return soc2_deny_access("No tiene permiso para acceder al módulo de nivel de madurez SOC 2.")
 
     read_only = user.role == "auditor"
+
     ingreso_btn = """
       <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled title="El rol Auditor no puede ingresar información">
         <i class="bi bi-pencil-square me-2"></i>Ingresar la información
@@ -127574,7 +127722,7 @@ def inicio_soc2():
     """
 
     parametros_btn = """
-      <button class="btn btn-outline-secondary rounded-pill px-3" disabled title="El rol Auditor no tiene acceso a Parámetros">
+      <button class="btn btn-outline-secondary rounded-pill px-3" disabled title="El rol Auditor no puede modificar parámetros">
         <i class="bi bi-gear me-2"></i>Parámetros
       </button>
     """ if read_only else f"""
@@ -127641,9 +127789,9 @@ def inicio_soc2():
       <div class="nistmad-card p-4 h-100">
         <div class="nistmad-section-title">¿Qué puedes hacer aquí?</div>
         <ul class="small mb-0 text-black ps-3">
-          <li><b>Ingresar la información:</b> diligenciar respuestas (Sí/Parcial/No/N/A) con evidencia.</li>
-          <li><b>Historial:</b> revisar evaluaciones previas y su porcentaje general.</li>
-          <li><b>Parámetros:</b> ver niveles de madurez y cargar el instrumento.</li>
+          <li><b>Ingresar la información:</b> diligenciar respuestas con evidencia.</li>
+          <li><b>Historial:</b> revisar evaluaciones previas y resultados.</li>
+          <li><b>Parámetros:</b> gestionar niveles e instrumento, excepto auditor.</li>
         </ul>
       </div>
     </div>
@@ -127653,22 +127801,20 @@ def inicio_soc2():
 """
     return render_template_string(BASE, title="Madurez SOC 2", content=content)
 
+# ============================================================
+# PARÁMETROS — USUARIO CON PERMISO PUEDE MODIFICAR / AUDITOR NO
+# ============================================================
 
-# ============================================================
-# PARÁMETROS — DISEÑO NIST
-# ============================================================
 @soc2_madurez_bp.route("/parametros", methods=["GET", "POST"])
 @login_required
 def parametros():
     user = User.query.get(session.get("user_id"))
-    if user.role == "auditor":
-        flash("El rol Auditor no puede administrar parámetros SOC 2.", "warning")
-        return redirect(url_for("madurez_soc2.inicio_soc2"))
-    if user.role != "admin" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
-        flash("No tiene permiso para administrar parámetros SOC 2.", "danger")
-        return redirect(url_for("menu"))
+
+    if not soc2_user_can_execute(user):
+        return soc2_deny_execute("No tiene permiso para administrar parámetros SOC 2.")
 
     seed_soc2_parametros()
+
     if request.method == "POST":
         try:
             for r in Soc2MadurezParametro.query.all():
@@ -127697,6 +127843,7 @@ def parametros():
         """)
 
     resumen = soc2_resumen_instrumento()
+
     content = f"""
 <div class="nistpar-shell">
   <div class="nistpar-header-card">
@@ -127709,12 +127856,18 @@ def parametros():
   </div>
 
   <div class="nistpar-header-actions">
-    <a href="{url_for('madurez_soc2.inicio_soc2')}" class="btn nistpar-btn-main rounded-pill px-4 fw-bold"><i class="bi bi-arrow-left me-2"></i>Volver</a>
+    <a href="{url_for('madurez_soc2.inicio_soc2')}" class="btn nistpar-btn-main rounded-pill px-4 fw-bold">
+      <i class="bi bi-arrow-left me-2"></i>Volver
+    </a>
     <form method="POST" action="{url_for('madurez_soc2.importar_instrumento_soc2')}" class="m-0">
-      <button class="btn btn-success rounded-pill px-4 fw-bold"><i class="bi bi-upload me-2"></i>Importar instrumento</button>
+      <button class="btn btn-success rounded-pill px-4 fw-bold">
+        <i class="bi bi-upload me-2"></i>Importar instrumento
+      </button>
     </form>
     <form method="POST" action="{url_for('madurez_soc2.importar_instrumento_soc2')}?force=1" class="m-0" onsubmit="return confirm('¿Borrar e importar de nuevo el instrumento SOC 2?')">
-      <button class="btn btn-danger rounded-pill px-4 fw-bold"><i class="bi bi-arrow-repeat me-2"></i>Reimportar</button>
+      <button class="btn btn-danger rounded-pill px-4 fw-bold">
+        <i class="bi bi-arrow-repeat me-2"></i>Reimportar
+      </button>
     </form>
   </div>
 
@@ -127731,7 +127884,7 @@ def parametros():
       <table class="table table-hover align-middle nistpar-table">
         <thead class="nistpar-table-head">
           <tr>
-            <th style="width: 28%;">Nivel de Madurez</th>
+            <th style="width:28%;">Nivel de Madurez</th>
             <th class="text-center" style="width:110px;">Desde %</th>
             <th class="text-center" style="width:110px;">Hasta %</th>
             <th class="text-center" style="width:90px;">Color</th>
@@ -127742,7 +127895,9 @@ def parametros():
       </table>
     </div>
     <div class="text-end mt-3">
-      <button class="btn btn-primary rounded-pill px-4 fw-bold"><i class="bi bi-save me-2"></i>Guardar parámetros</button>
+      <button class="btn btn-primary rounded-pill px-4 fw-bold">
+        <i class="bi bi-save me-2"></i>Guardar parámetros
+      </button>
     </div>
   </form>
 </div>
@@ -127752,20 +127907,16 @@ def parametros():
 
 
 # ============================================================
-# INGRESO DE INFORMACIÓN SOC 2 — MISMO DISEÑO NIST REAL
+# INGRESO DE INFORMACIÓN SOC 2 — USUARIO CON PERMISO / AUDITOR NO
 # ============================================================
+
 @soc2_madurez_bp.route("/ingreso", methods=["GET"])
 @login_required
 def ingreso():
     user = User.query.get(session.get("user_id"))
 
-    if user.role != "admin" and user.role != "auditor" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
-        flash("No tiene permiso para acceder al módulo de nivel de madurez SOC 2.", "danger")
-        return redirect(url_for("menu"))
-
-    if user.role == "auditor":
-        flash("El rol Auditor no puede ingresar la información en este módulo.", "warning")
-        return redirect(url_for("madurez_soc2.inicio_soc2"))
+    if not soc2_user_can_execute(user):
+        return soc2_deny_execute("No tiene permiso para ingresar información SOC 2.")
 
     if Soc2MadurezPregunta.query.filter_by(tipo="q").count() == 0:
         flash("⚠️ Primero debes importar el instrumento SOC 2.", "warning")
@@ -127787,13 +127938,9 @@ def ingreso():
     respuestas_guardadas = cargar_respuestas_soc2(draft.id) if draft else {}
 
     consecutivo_val = (draft.consecutivo if draft else "") or ""
-    _, _, progreso_inicial = calcular_progreso_soc2(
-        preguntas,
-        respuestas_db=respuestas_guardadas
-    )
+    _, _, progreso_inicial = calcular_progreso_soc2(preguntas, respuestas_db=respuestas_guardadas)
 
     grouped = _soc2_group_questions()
-
     acc_html = []
     acc_id = 0
 
@@ -127823,35 +127970,26 @@ def ingreso():
               <div class="nistform-qcard h-100">
                 <div class="nistform-qhead">
                   <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <span class="badge rounded-pill text-bg-light border fw-semibold">
-                      {esc(cat_code)}
-                    </span>
-                    <span class="badge rounded-pill text-bg-primary">
-                      Orden {q.orden or 0}
-                    </span>
+                    <span class="badge rounded-pill text-bg-light border fw-semibold">{esc(cat_code)}</span>
+                    <span class="badge rounded-pill text-bg-primary">Orden {q.orden or 0}</span>
                   </div>
                 </div>
 
-                <div class="nistform-qtext">
-                  {esc(qtext)}
-                </div>
+                <div class="nistform-qtext">{esc(qtext)}</div>
 
                 <div class="nistform-radio-row">
                   <label class="nistform-radio-card">
                     <input class="form-check-input" type="radio" name="st_{q.id}" value="NA" {chk_na}>
                     <span>N/A</span>
                   </label>
-
                   <label class="nistform-radio-card">
                     <input class="form-check-input" type="radio" name="st_{q.id}" value="SI" {chk_si}>
                     <span>Sí</span>
                   </label>
-
                   <label class="nistform-radio-card">
                     <input class="form-check-input" type="radio" name="st_{q.id}" value="PARCIAL" {chk_pa}>
                     <span>Parcial</span>
                   </label>
-
                   <label class="nistform-radio-card">
                     <input class="form-check-input" type="radio" name="st_{q.id}" value="NO" {chk_no}>
                     <span>No</span>
@@ -127880,31 +128018,22 @@ def ingreso():
                     aria-controls="c{func_key}">
               <div class="nistform-acc-inner">
                 <div>
-                  <div class="nistform-func-title">
-                    {esc(titulo_bloque)}
-                  </div>
-                  <div class="nistform-func-subtitle">
-                    Criterio SOC 2 · {esc(bloque_codigo)}
-                  </div>
+                  <div class="nistform-func-title">{esc(titulo_bloque)}</div>
+                  <div class="nistform-func-subtitle">Criterio SOC 2 · {esc(bloque_codigo)}</div>
                 </div>
-                <span class="badge rounded-pill text-bg-primary">
-                  {len(payload.get('items', []))} preguntas
-                </span>
+                <span class="badge rounded-pill text-bg-primary">{len(payload.get('items', []))} preguntas</span>
               </div>
             </button>
           </h2>
 
-          <div id="c{func_key}"
-               class="accordion-collapse collapse {'show' if acc_id == 1 else ''}">
+          <div id="c{func_key}" class="accordion-collapse collapse {'show' if acc_id == 1 else ''}">
             <div class="accordion-body nistform-acc-body">
               <div class="nistform-cat-block">
                 <div class="nistform-cat-title">
                   <span>{esc(bloque_codigo)}</span>
                   <small>{esc(titulo_bloque)}</small>
                 </div>
-                <div class="row g-3">
-                  {''.join(rows)}
-                </div>
+                <div class="row g-3">{''.join(rows)}</div>
               </div>
             </div>
           </div>
@@ -127929,9 +128058,7 @@ def ingreso():
         <div class="nistform-header-overlay">
           <div class="nistform-header-text">
             <h3 class="nistform-title m-0">Nivel de Madurez — SOC 2</h3>
-            <div class="nistform-subtitle">
-              Ingreso de información del instrumento SOC 2
-            </div>
+            <div class="nistform-subtitle">Ingreso de información del instrumento SOC 2</div>
           </div>
         </div>
       </div>
@@ -127973,13 +128100,10 @@ def ingreso():
           </div>
 
           <div class="nistform-section-title">Instrumento de evaluación</div>
-          <div class="accordion nistform-accordion" id="accSoc2">
-            {''.join(acc_html)}
-          </div>
+          <div class="accordion nistform-accordion" id="accSoc2">{''.join(acc_html)}</div>
 
           <div class="d-flex justify-content-center gap-3 flex-wrap mt-4">
-            <button id="btnGuardarSoc2"
-                    class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold"
+            <button class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold"
                     type="submit"
                     name="accion"
                     value="guardar">
@@ -128002,7 +128126,6 @@ def ingreso():
     <script>
       document.addEventListener("DOMContentLoaded", function () {{
         const total = {len(preguntas)};
-        const radios = document.querySelectorAll('input[type="radio"][name^="st_"]');
         const progressBar = document.getElementById("nistProgressBar");
         const progressText = document.getElementById("nistProgressText");
         const btnAnalizar = document.getElementById("btnAnalizarSoc2");
@@ -128030,7 +128153,7 @@ def ingreso():
           }}
         }}
 
-        radios.forEach(function (r) {{
+        document.querySelectorAll('input[type="radio"][name^="st_"]').forEach(function (r) {{
           r.addEventListener("change", updateProgress);
         }});
 
@@ -128042,20 +128165,22 @@ def ingreso():
     return render_template_string(BASE, title="Ingreso SOC 2", content=content)
 
 
+# ============================================================
+# GUARDAR / ANALIZAR — USUARIO CON PERMISO / AUDITOR NO
+# ============================================================
+
 @soc2_madurez_bp.route("/ingreso/guardar", methods=["POST"])
 @login_required
 def ingreso_guardar():
     user = User.query.get(session.get("user_id"))
-    if user.role == "auditor":
-        flash("El rol Auditor no puede guardar ni analizar información SOC 2.", "danger")
-        return redirect(url_for("madurez_soc2.inicio_soc2"))
-    if user.role != "admin" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
-        flash("No tiene permiso para guardar información SOC 2.", "danger")
-        return redirect(url_for("menu"))
+
+    if not soc2_user_can_execute(user):
+        return soc2_deny_execute("No tiene permiso para guardar ni analizar información SOC 2.")
 
     consecutivo = (request.form.get("consecutivo") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     accion = (request.form.get("accion") or "guardar").strip().lower()
     draft_id = (request.form.get("draft_id") or "").strip()
+
     if not consecutivo:
         flash("Debes ingresar el consecutivo de la Revisión.", "warning")
         return redirect(url_for("madurez_soc2.ingreso"))
@@ -128066,18 +128191,19 @@ def ingreso_guardar():
         .order_by(Soc2MadurezPregunta.bloque_codigo.asc(), Soc2MadurezPregunta.orden.asc(), Soc2MadurezPregunta.id.asc())
         .all()
     )
+
     if not preguntas:
         flash("⚠️ No hay preguntas activas cargadas en el instrumento SOC 2.", "warning")
         return redirect(url_for("madurez_soc2.inicio_soc2"))
 
     respondidas, total, progreso_pct = calcular_progreso_soc2(preguntas, form_data=request.form)
+
     try:
         run = None
+
         if draft_id and draft_id.isdigit():
             run = Soc2MadurezRun.query.filter_by(id=int(draft_id)).first()
-            if run and user and run.user_id != user.id and user.role != "admin":
-                flash("No tienes permiso para modificar este borrador.", "danger")
-                return redirect(url_for("madurez_soc2.ingreso"))
+
         if not run:
             run = obtener_borrador_soc2(user.id if user else None)
 
@@ -128091,22 +128217,39 @@ def ingreso_guardar():
             return redirect(url_for("madurez_soc2.ingreso"))
 
         if not run:
-            run = Soc2MadurezRun(consecutivo=consecutivo, company_name=consecutivo, user_id=user.id if user else None, estado="BORRADOR", progreso_pct=0)
+            run = Soc2MadurezRun(
+                consecutivo=consecutivo,
+                company_name=consecutivo,
+                user_id=user.id if user else None,
+                estado="BORRADOR",
+                progreso_pct=0,
+                resumen_json="{}",
+                pct_general=0.0,
+                radar_overall_b64=None
+            )
             db.session.add(run)
             db.session.flush()
 
         run.consecutivo = consecutivo
         run.company_name = consecutivo
+        run.user_id = user.id if user else run.user_id
         run.progreso_pct = progreso_pct
         run.updated_at = datetime.utcnow()
+
         Soc2MadurezRespuesta.query.filter_by(run_id=run.id).delete(synchronize_session=False)
 
         respuestas_insertadas = 0
         for q in preguntas:
             st = (request.form.get(f"st_{q.id}") or "").strip().upper()
             cm = (request.form.get(f"cm_{q.id}") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
             if st in ("SI", "PARCIAL", "NO", "NA"):
-                db.session.add(Soc2MadurezRespuesta(run_id=run.id, pregunta_id=q.id, estado=st, comentario=cm))
+                db.session.add(Soc2MadurezRespuesta(
+                    run_id=run.id,
+                    pregunta_id=q.id,
+                    estado=st,
+                    comentario=cm
+                ))
                 respuestas_insertadas += 1
 
         if accion == "analizar":
@@ -128114,16 +128257,20 @@ def ingreso_guardar():
                 db.session.commit()
                 flash("⚠️ Para analizar debes completar el 100% del instrumento.", "warning")
                 return redirect(url_for("madurez_soc2.ingreso"))
+
             run.estado = "FINALIZADO"
             run.progreso_pct = 100
             db.session.commit()
+
             run_id = run_analysis_from_soc2_run(run.id)
+
             flash(f"✅ Revisión SOC 2 analizada correctamente. Se consolidaron {respuestas_insertadas} respuestas.", "success")
             return redirect(url_for("madurez_soc2.detalle", run_id=run_id))
 
         db.session.commit()
         flash("✅ Información SOC 2 guardada correctamente.", "success")
         return redirect(url_for("madurez_soc2.ingreso"))
+
     except Exception as e:
         db.session.rollback()
         traceback.print_exc()
@@ -128132,67 +128279,135 @@ def ingreso_guardar():
 
 
 # ============================================================
-# HISTORIAL — DISEÑO NIST
+# HISTORIAL SOC 2 — VISIBLE PARA USUARIOS CON PERMISO
 # ============================================================
+
 @soc2_madurez_bp.route("/historial", methods=["GET"])
 @login_required
 def historial():
     user = User.query.get(session.get("user_id"))
-    if user.role != "admin" and user.role != "auditor" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
-        flash("No tiene permiso para ver historial SOC 2.", "danger")
-        return redirect(url_for("menu"))
 
-    q = Soc2MadurezRun.query.filter(Soc2MadurezRun.estado == "FINALIZADO")
-    if user.role != "admin" and user.role != "auditor":
-        q = q.filter(Soc2MadurezRun.user_id == user.id)
-    runs = q.order_by(Soc2MadurezRun.created_at.desc(), Soc2MadurezRun.id.desc()).all()
+    denied = soc2_check_access_or_redirect(user, "No tiene permiso para ver historial SOC 2.")
+    if denied:
+        return denied
+
+    runs = (
+        Soc2MadurezRun.query
+        .filter(Soc2MadurezRun.estado == "FINALIZADO")
+        .order_by(Soc2MadurezRun.created_at.desc(), Soc2MadurezRun.id.desc())
+        .all()
+    )
+
+    nueva_revision_btn = ""
+    if soc2_user_can_execute(user):
+        nueva_revision_btn = f"""
+        <a href="{url_for('madurez_soc2.ingreso')}"
+           class="btn btn-primary rounded-pill px-4 fw-bold">
+          <i class="bi bi-plus-circle me-2"></i>Nueva revisión
+        </a>
+        """
 
     rows = []
+
     for r in runs:
         nivel = soc2_resolver_nivel(r.pct_general)
+
         acciones = f"""
-        <a href="{url_for('madurez_soc2.detalle', run_id=r.id)}" class="btn btn-sm btn-primary rounded-pill px-3"><i class="bi bi-eye me-1"></i>Ver</a>
-        <a href="{url_for('madurez_soc2.exportar_pdf', run_id=r.id)}" class="btn btn-sm btn-danger rounded-pill px-3"><i class="bi bi-file-earmark-pdf me-1"></i>PDF</a>
+        <a href="{url_for('madurez_soc2.detalle', run_id=r.id)}"
+           class="btn btn-sm btn-primary rounded-pill px-3">
+          <i class="bi bi-eye me-1"></i>Ver
+        </a>
+
+        <a href="{url_for('madurez_soc2.exportar_pdf', run_id=r.id)}"
+           class="btn btn-sm btn-danger rounded-pill px-3">
+          <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+        </a>
         """
-        if user.role != "auditor":
+
+        if soc2_user_can_execute(user):
             acciones += f"""
-            <form method="POST" action="{url_for('madurez_soc2.eliminar_run', run_id=r.id)}" class="d-inline" onsubmit="return confirm('¿Eliminar esta revisión SOC 2?')">
-              <button class="btn btn-sm btn-outline-danger rounded-pill px-3"><i class="bi bi-trash me-1"></i>Eliminar</button>
+            <form method="POST"
+                  action="{url_for('madurez_soc2.eliminar_run', run_id=r.id)}"
+                  class="d-inline"
+                  onsubmit="return confirm('¿Eliminar esta revisión SOC 2?')">
+              <button class="btn btn-sm btn-outline-danger rounded-pill px-3">
+                <i class="bi bi-trash me-1"></i>Eliminar
+              </button>
             </form>
             """
+
         rows.append(f"""
         <tr>
-          <td class="fw-bold">{escape(r.consecutivo or '')}</td>
+          <td class="fw-bold">{escape(r.consecutivo or r.company_name or '')}</td>
           <td>{r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else ''}</td>
-          <td class="text-center"><span class="badge rounded-pill" style="background:{nivel['color']};">{r.pct_general:.2f}%</span></td>
-          <td>{escape(nivel['nivel'])}</td>
+          <td class="text-center">
+            <span class="badge rounded-pill"
+                  style="background:{nivel.get('color', '#6c757d')}; color:#fff;">
+              {float(r.pct_general or 0):.2f}%
+            </span>
+          </td>
+          <td>{escape(nivel.get('nivel', ''))}</td>
+          <td>{escape(r.estado or '')}</td>
           <td class="text-end">{acciones}</td>
         </tr>
         """)
 
+    empty_row = """
+    <tr>
+      <td colspan="6" class="text-center text-muted py-4">
+        No hay revisiones SOC 2 finalizadas.
+      </td>
+    </tr>
+    """
+
     content = f"""
 <div class="nisthist-shell">
-  <div class="nisthist-header-card"><div class="nisthist-header-overlay"><div class="nisthist-header-text">
-    <h3 class="nisthist-title m-0">Historial de Revisiones — SOC 2</h3>
-    <div class="nisthist-subtitle">Consulta de evaluaciones finalizadas y resultados ejecutivos.</div>
-  </div></div></div>
+
+  <div class="nisthist-header-card">
+    <div class="nisthist-header-overlay">
+      <div class="nisthist-header-text">
+        <h3 class="nisthist-title m-0">Historial de Revisiones — SOC 2</h3>
+        <div class="nisthist-subtitle">
+          Consulta de evaluaciones finalizadas y resultados ejecutivos.
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="nisthist-header-actions">
-    <a href="{url_for('madurez_soc2.inicio_soc2')}" class="btn nisthist-btn-main rounded-pill px-4 fw-bold"><i class="bi bi-arrow-left me-2"></i>Volver</a>
-    <a href="{url_for('madurez_soc2.ingreso')}" class="btn btn-primary rounded-pill px-4 fw-bold"><i class="bi bi-plus-circle me-2"></i>Nueva revisión</a>
+    <a href="{url_for('madurez_soc2.inicio_soc2')}"
+       class="btn nisthist-btn-main rounded-pill px-4 fw-bold">
+      <i class="bi bi-arrow-left me-2"></i>Volver
+    </a>
+
+    {nueva_revision_btn}
   </div>
 
   <div class="nisthist-card p-4">
     <div class="table-responsive">
       <table class="table table-hover align-middle">
-        <thead><tr><th>Consecutivo</th><th>Fecha</th><th class="text-center">Cumplimiento</th><th>Nivel</th><th class="text-end">Acciones</th></tr></thead>
-        <tbody>{''.join(rows) if rows else '<tr><td colspan="5" class="text-center text-muted py-4">No hay revisiones SOC 2 finalizadas.</td></tr>'}</tbody>
+        <thead>
+          <tr>
+            <th>Consecutivo</th>
+            <th>Fecha</th>
+            <th class="text-center">Cumplimiento</th>
+            <th>Nivel</th>
+            <th>Estado</th>
+            <th class="text-end">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {''.join(rows) if rows else empty_row}
+        </tbody>
       </table>
     </div>
   </div>
+
 </div>
+
 {soc2_nist_css('nisthist', '🕘')}
 """
+
     return render_template_string(BASE, title="Historial SOC 2", content=content)
 
 
@@ -128205,9 +128420,8 @@ def historial():
 def detalle_criterio(run_id: int, bloque_codigo: str):
     user = User.query.get(session.get("user_id"))
 
-    if user.role != "admin" and user.role != "auditor" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
-        flash("No tiene permiso para ver el detalle del criterio SOC 2.", "danger")
-        return redirect(url_for("menu"))
+    if not soc2_user_can_access(user):
+        return soc2_deny_access("No tiene permiso para ver el detalle del criterio SOC 2.")
 
     run = Soc2MadurezRun.query.get_or_404(run_id)
     bloque_codigo = (bloque_codigo or "").strip().upper()
@@ -128312,9 +128526,8 @@ def detalle_criterio(run_id: int, bloque_codigo: str):
 def analisis_criterio(run_id: int, bloque_codigo: str):
     user = User.query.get(session.get("user_id"))
 
-    if user.role != "admin" and user.role != "auditor" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
-        flash("No tiene permiso para ver el análisis SOC 2.", "danger")
-        return redirect(url_for("menu"))
+    if not soc2_user_can_access(user):
+        return soc2_deny_access("No tiene permiso para ver el análisis SOC 2.")
 
     run = Soc2MadurezRun.query.get_or_404(run_id)
     bloque_codigo = (bloque_codigo or "").strip().upper()
@@ -128339,14 +128552,13 @@ def analisis_criterio(run_id: int, bloque_codigo: str):
     ).first()
 
     if request.method == "POST":
-        if user.role == "auditor":
-            flash("El rol Auditor no puede generar análisis con IA.", "danger")
-            return redirect(url_for("madurez_soc2.analisis_criterio", run_id=run.id, bloque_codigo=bloque_codigo))
+        if not soc2_user_can_execute(user):
+            return soc2_deny_execute("El rol Auditor no puede generar análisis con IA.")
 
         prompt = _soc2_ai_prompt_criterio(run, bloque_codigo, nombre, pct, items)
 
         try:
-            raw = _soc2_ai_text(prompt, max_tokens=1600)
+            raw = _soc2_ai_text(prompt, max_tokens=1200)
             obj = _extraer_json_objeto_soc2(raw)
 
             estado_actual = (obj.get("estado_actual") or "").strip() if isinstance(obj, dict) else ""
@@ -128384,13 +128596,19 @@ def analisis_criterio(run_id: int, bloque_codigo: str):
     )
 
     boton_generar = ""
-    if user.role != "auditor":
-        boton_generar = f"""
+    if soc2_user_can_execute(user):
+        boton_generar = """
         <form method="POST" class="m-0">
           <button type="submit" class="btn nistdet-btn-success rounded-pill px-4 fw-bold">
             <i class="bi bi-magic me-2"></i>Generar análisis IA
           </button>
         </form>
+        """
+    else:
+        boton_generar = """
+        <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
+          <i class="bi bi-lock me-2"></i>Solo lectura
+        </button>
         """
 
     content = f"""
@@ -128452,24 +128670,19 @@ def analisis_criterio(run_id: int, bloque_codigo: str):
 
     return render_template_string(BASE, title="Análisis criterio SOC 2", content=content)
 
-# ================
-# Detalle SOC 2 — MISMO DISEÑO NIST
-# ================
+# ============================================================
+# DETALLE SOC 2 — MISMO DISEÑO NIST
+# ============================================================
 
 @soc2_madurez_bp.route("/detalle/<int:run_id>", methods=["GET"])
 @login_required
 def detalle(run_id: int):
     user = User.query.get(session.get("user_id"))
 
-    if user.role != "admin" and user.role != "auditor" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
-        flash("No tiene permiso para ver el detalle SOC 2.", "danger")
-        return redirect(url_for("menu"))
+    if not soc2_user_can_access(user):
+        return soc2_deny_access("No tiene permiso para ver el detalle SOC 2.")
 
     run = Soc2MadurezRun.query.get_or_404(run_id)
-
-    if user.role not in ("admin", "auditor") and run.user_id != user.id:
-        flash("No tiene permiso para ver esta revisión SOC 2.", "danger")
-        return redirect(url_for("madurez_soc2.historial"))
 
     try:
         resumen = json.loads(run.resumen_json or "{}")
@@ -128488,9 +128701,6 @@ def detalle(run_id: int):
         txt = soc2_normalizar_texto_rico_guardado(s or "")
         return txt.replace("\n", "<br>")
 
-    # =========================
-    # Radar por criterio
-    # =========================
     radar_labels, radar_values = soc2_pct_por_criterio(resumen, SOC2_BLOCK_ORDER)
     radar_b64 = run.radar_overall_b64 or soc2_radar_b64(
         radar_labels,
@@ -128507,7 +128717,7 @@ def detalle(run_id: int):
     nivel_general_nombre = nivel_general_texto.split(":", 1)[1].strip() if ":" in nivel_general_texto else nivel_general_texto
 
     botones_ia = ""
-    if user.role != "auditor":
+    if soc2_user_can_execute(user):
         botones_ia = f"""
           <form method="POST"
                   action="{url_for('madurez_soc2.informe_ejecutivo_generar', run_id=run.id)}"
@@ -128524,17 +128734,20 @@ def detalle(run_id: int):
         """
     else:
         botones_ia = """
-          <button class="btn nistdet-btn-success rounded-pill px-4 fw-bold" disabled>
-            <i class="bi bi-magic me-2"></i>Generar con IA
-          </button>
-          <button class="btn btn-primary rounded-pill px-4 fw-bold" disabled>
-            <i class="bi bi-pencil-square me-2"></i>Editar
+          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
+            <i class="bi bi-lock me-2"></i>Solo lectura
           </button>
         """
 
-    # =========================
-    # Tarjeta superior
-    # =========================
+    pdf_btn = ""
+    if soc2_user_can_execute(user):
+        pdf_btn = f"""
+        <a href="{url_for('madurez_soc2.exportar_pdf', run_id=run.id)}"
+           class="btn btn-danger rounded-pill px-4 fw-bold">
+          <i class="bi bi-file-earmark-pdf me-2"></i>Exportar PDF
+        </a>
+        """
+
     top_html = f"""
     <div class="row g-3 mb-4">
 
@@ -128584,7 +128797,7 @@ def detalle(run_id: int):
                 <div class="mb-2" style="font-size:2rem;">🤖</div>
                 <div class="fw-bold text-black">Aún no hay informe ejecutivo</div>
                 <div class="text-muted small mt-1">
-                  Presiona <b>Generar con IA</b> para construir el informe con base en el resultado de los criterios SOC 2.
+                  No se ha generado informe ejecutivo para esta revisión.
                 </div>
               </div>
             '''}
@@ -128595,9 +128808,6 @@ def detalle(run_id: int):
     </div>
     """
 
-    # =========================
-    # Gauge igual NIST
-    # =========================
     def gauge_svg_categoria(pct, color="#2f6fb6"):
         try:
             pct = max(0, min(100, float(pct or 0)))
@@ -128624,9 +128834,6 @@ def detalle(run_id: int):
         </svg>
         """
 
-    # =========================
-    # Criterios SOC 2 como capítulos NIST
-    # =========================
     criterio_cards = []
 
     for code in SOC2_BLOCK_ORDER:
@@ -128770,10 +128977,7 @@ def detalle(run_id: int):
           <i class="bi bi-house-door-fill me-2"></i>Volver al módulo
         </a>
 
-        <a href="{url_for('madurez_soc2.exportar_pdf', run_id=run.id)}"
-           class="btn btn-danger rounded-pill px-4 fw-bold">
-          <i class="bi bi-file-earmark-pdf me-2"></i>Exportar PDF
-        </a>
+        {pdf_btn}
       </div>
 
       {top_html}
@@ -128782,365 +128986,7 @@ def detalle(run_id: int):
 
     </div>
 
-    <style>
-      body{{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .nistdet-shell{{
-        width:96%;
-        max-width:1580px;
-        margin:26px auto 24px auto;
-      }}
-
-      .nistdet-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }}
-
-      .nistdet-header-card::before{{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }}
-
-      .nistdet-header-overlay{{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }}
-
-      .nistdet-header-overlay::before{{
-        content:"📊";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#1459a6;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }}
-
-      .nistdet-header-text{{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }}
-
-      .nistdet-header-text::before{{
-        content:"SGSI · Resultado SOC 2";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }}
-
-      .nistdet-title{{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        margin:0 !important;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-      }}
-
-      .nistdet-subtitle{{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }}
-
-      .nistdet-header-actions{{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }}
-
-      .nistdet-header-actions .btn,
-      .btn{{
-        border-radius:10px !important;
-        min-height:38px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }}
-
-      .nistdet-btn-main,
-      .btn-outline-light{{
-        background:#ffffff;
-        color:#0f172a !important;
-        border:1px solid #cfd8e3 !important;
-      }}
-
-      .nistdet-btn-main:hover,
-      .btn-outline-light:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-        border-color:#9ec5fe !important;
-      }}
-
-      .nistdet-btn-soft{{
-        background:rgba(255,255,255,.88);
-        color:#111 !important;
-        border:1px solid rgba(108,117,125,.35);
-      }}
-
-      .nistdet-btn-soft:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-      }}
-
-      .nistdet-btn-success{{
-        background:#198754;
-        color:#ffffff !important;
-        border:1px solid #198754;
-      }}
-
-      .nistdet-btn-success:hover{{
-        background:#157347;
-        color:#ffffff !important;
-      }}
-
-      .nistdet-card,
-      .card{{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
-        overflow:hidden;
-      }}
-
-      .nistdet-card-title,
-      .nistdet-section-title,
-      .card h5,
-      .card h6{{
-        font-weight:950;
-        color:#1459a6;
-      }}
-
-      .nistdet-section-title{{
-        font-size:.95rem;
-        padding-bottom:8px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-        margin-bottom:16px;
-      }}
-
-      .nistdet-radar-img-small{{
-        max-width:290px;
-        width:100%;
-        height:auto;
-        display:inline-block;
-      }}
-
-      .nistdet-exec-box{{
-        min-height:310px;
-        background:linear-gradient(180deg,rgba(248,250,252,.94),rgba(255,255,255,.98));
-        border:1px solid rgba(63,134,214,.16);
-        border-radius:16px;
-        padding:18px;
-        box-shadow:inset 0 1px 0 rgba(255,255,255,.60);
-      }}
-
-      .nistdet-exec-text{{
-        font-size:.96rem;
-        line-height:1.65;
-        color:#1f2937;
-        white-space:normal;
-      }}
-
-      .nistdet-subcard{{
-        background:#ffffff;
-        border:1px solid #dbe6f4;
-        border-radius:16px;
-        padding:14px;
-        box-shadow:0 8px 18px rgba(15,23,42,.08);
-      }}
-
-      .nistdet-subcard-top{{
-        border-bottom:1px solid rgba(59,130,246,.16);
-        padding-bottom:8px;
-        margin-bottom:10px;
-      }}
-
-      .nistdet-subcard-body{{
-        display:flex;
-        flex-direction:column;
-        gap:8px;
-      }}
-
-      .nistdet-row{{
-        display:grid;
-        grid-template-columns:125px 1fr;
-        gap:10px;
-        align-items:start;
-      }}
-
-      .nistdet-label{{
-        font-size:.72rem;
-        font-weight:900;
-        color:#1459a6;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        padding:6px 10px;
-        border-radius:10px;
-        display:inline-block;
-      }}
-
-      .nistdet-value{{
-        font-size:.88rem;
-        color:#0f172a;
-        line-height:1.45;
-      }}
-
-      .nistdet-value-wrap{{
-        word-break:break-word;
-        white-space:normal;
-      }}
-
-      .nivel-dot{{
-        width:12px;
-        height:12px;
-        border-radius:50%;
-        display:inline-block;
-        box-shadow:0 0 0 3px rgba(0,0,0,.06);
-      }}
-
-      .form-label{{
-        font-size:.72rem;
-        font-weight:900;
-        color:#1459a6;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        padding:6px 10px;
-        border-radius:10px;
-        display:inline-block;
-        margin-bottom:6px;
-      }}
-
-      .form-control,
-      .form-select{{
-        border-radius:10px;
-        border:1px solid #d9e3f0;
-        min-height:40px;
-        font-size:.86rem;
-        background:#f8fafc;
-        box-shadow:none !important;
-      }}
-
-      .form-control:focus,
-      .form-select:focus{{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
-      }}
-
-      .badge{{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }}
-
-      @media (max-width:991.98px){{
-        .nistdet-shell{{
-          width:98%;
-          margin:8px auto 22px auto;
-        }}
-
-        .nistdet-header-card{{
-          min-height:88px;
-        }}
-
-        .nistdet-title{{
-          font-size:1.20rem;
-        }}
-
-        .nistdet-subtitle{{
-          font-size:.76rem;
-        }}
-
-        .nistdet-radar-img-small{{
-          max-width:255px;
-        }}
-
-        .nistdet-exec-box{{
-          min-height:240px;
-        }}
-
-        .nistdet-row{{
-          grid-template-columns:1fr;
-          gap:3px;
-        }}
-      }}
-
-      @media (max-width:768px){{
-        .nistdet-header-overlay{{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }}
-
-        .nistdet-header-overlay::before{{
-          margin:0;
-        }}
-
-        .nistdet-header-text::before{{
-          margin-left:auto;
-          margin-right:auto;
-        }}
-
-        .nistdet-title,
-        .nistdet-subtitle{{
-          text-align:center;
-        }}
-
-        .nistdet-header-actions .btn{{
-          width:100%;
-        }}
-      }}
-    </style>
+    {soc2_nist_css('nistdet', '📊')}
     """
     return render_template_string(BASE, title="Detalle SOC 2", content=content)
 
@@ -129151,36 +128997,107 @@ def detalle(run_id: int):
 def resultado(run_id: int):
     return detalle(run_id)
 
+# ============================================================
+# SOC 2 — PROMPT INFORME EJECUTIVO IA
+# ============================================================
+
+def _soc2_prompt_informe_ejecutivo(run: "Soc2MadurezRun", resumen: dict) -> str:
+    """
+    Prompt para generar informe ejecutivo SOC 2.
+    Lo usa informe_ejecutivo_generar().
+    """
+
+    lineas = []
+
+    for code in SOC2_BLOCK_ORDER:
+        d = (resumen or {}).get(code)
+        if not d:
+            continue
+
+        lineas.append(
+            f"- {d.get('nombre') or soc2_block_title(code) or code}: "
+            f"{float(d.get('pct', 0) or 0):.2f}% | "
+            f"Nivel: {d.get('madurez') or ''} | "
+            f"SI: {d.get('SI', 0)} | "
+            f"Parcial: {d.get('PARCIAL', 0)} | "
+            f"NO: {d.get('NO', 0)} | "
+            f"N/A: {d.get('NA', 0)} | "
+            f"Total: {d.get('total', 0)}"
+        )
+
+    criterios_txt = "\n".join(lineas) if lineas else "Sin resultados consolidados."
+
+    return f"""
+Eres un consultor senior experto en SOC 2, auditoría de controles, gobierno de seguridad de la información y Trust Services Criteria.
+
+Genera un informe ejecutivo profesional para alta dirección.
+
+DATOS DE LA EVALUACIÓN
+Consecutivo: {run.consecutivo}
+Cumplimiento general: {float(run.pct_general or 0):.2f}%
+
+RESULTADOS POR CRITERIO
+{criterios_txt}
+
+RESPONDE ÚNICAMENTE JSON VÁLIDO.
+No uses markdown.
+No agregues texto antes ni después del JSON.
+
+Formato exacto:
+{{
+  "informe_ejecutivo": "texto"
+}}
+
+REGLAS:
+- El informe debe tener entre 5 y 8 párrafos.
+- No repitas el título "Informe Ejecutivo".
+- Explica el estado general de madurez SOC 2.
+- Menciona fortalezas principales.
+- Menciona brechas o criterios con menor cumplimiento.
+- Explica riesgos ejecutivos asociados.
+- Incluye recomendaciones estratégicas.
+- No inventes datos que no estén en los resultados.
+- Redacción clara, ejecutiva y consultiva.
+""".strip()
 
 # ============================================================
-# IA — INFORME / PLAN / CRITERIO
+# IA — INFORME / PLAN
 # ============================================================
+
 @soc2_madurez_bp.route("/detalle/<int:run_id>/informe-ejecutivo/generar", methods=["POST"])
 @login_required
 def informe_ejecutivo_generar(run_id: int):
     user = User.query.get(session.get("user_id"))
-    if user.role == "auditor":
-        flash("El perfil Auditor no puede generar el informe ejecutivo con IA.", "danger")
-        return redirect(url_for("madurez_soc2.detalle", run_id=run_id))
+
+    if not soc2_user_can_execute(user):
+        return soc2_deny_execute("El perfil Auditor no puede generar el informe ejecutivo con IA.")
+
     run = Soc2MadurezRun.query.get_or_404(run_id)
     resumen = json.loads(run.resumen_json or "{}")
+
     if not resumen:
         flash("⚠️ No hay resultados consolidados para generar el informe ejecutivo.", "warning")
         return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
+
     try:
         raw = _soc2_ai_text(_soc2_prompt_informe_ejecutivo(run, resumen), max_tokens=1200)
         obj = _extraer_json_objeto_soc2(raw)
         informe_ai = (obj.get("informe_ejecutivo") or raw or "").strip() if isinstance(obj, dict) else raw
         informe_ai = soc2_normalizar_texto_rico_guardado(informe_ai)
+
         if not informe_ai:
             raise RuntimeError("La IA no devolvió un informe válido.")
+
         run.informe_ejecutivo_ai = informe_ai
         run.informe_ejecutivo_editado = informe_ai
         db.session.commit()
+
         flash("✅ Informe ejecutivo SOC 2 generado con IA.", "success")
+
     except Exception as e:
         db.session.rollback()
         flash(f"❌ Error llamando IA para el informe ejecutivo: {e}", "danger")
+
     return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
 
 
@@ -129188,19 +129105,30 @@ def informe_ejecutivo_generar(run_id: int):
 @login_required
 def informe_ejecutivo_editar(run_id: int):
     user = User.query.get(session.get("user_id"))
-    if user.role == "auditor":
-        flash("El perfil Auditor no puede editar el informe ejecutivo.", "danger")
-        return redirect(url_for("madurez_soc2.detalle", run_id=run_id))
+
+    if not soc2_user_can_execute(user):
+        return soc2_deny_execute("El perfil Auditor no puede editar el informe ejecutivo.")
+
     run = Soc2MadurezRun.query.get_or_404(run_id)
+
     if request.method == "POST":
         run.informe_ejecutivo_editado = (request.form.get("informe") or "").strip()
         db.session.commit()
         flash("✅ Informe ejecutivo SOC 2 actualizado.", "success")
         return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
+
     texto = run.informe_ejecutivo_editado or run.informe_ejecutivo_ai or ""
+
     content = f"""
 <div class="nistdet-shell">
-  <div class="nistdet-header-card"><div class="nistdet-header-overlay"><div class="nistdet-header-text"><h3 class="nistdet-title m-0">Editar Informe Ejecutivo — SOC 2</h3></div></div></div>
+  <div class="nistdet-header-card">
+    <div class="nistdet-header-overlay">
+      <div class="nistdet-header-text">
+        <h3 class="nistdet-title m-0">Editar Informe Ejecutivo — SOC 2</h3>
+      </div>
+    </div>
+  </div>
+
   <form method="POST" class="nistdet-card p-4">
     <textarea name="informe" rows="18" class="form-control">{escape(texto)}</textarea>
     <div class="text-end mt-3">
@@ -129218,26 +129146,33 @@ def informe_ejecutivo_editar(run_id: int):
 @login_required
 def plan_trabajo_generar(run_id: int):
     user = User.query.get(session.get("user_id"))
-    if user.role == "auditor":
-        flash("El perfil Auditor no puede generar el plan de trabajo con IA.", "danger")
-        return redirect(url_for("madurez_soc2.detalle", run_id=run_id))
+
+    if not soc2_user_can_execute(user):
+        return soc2_deny_execute("El perfil Auditor no puede generar el plan de trabajo con IA.")
+
     run = Soc2MadurezRun.query.get_or_404(run_id)
     resumen = json.loads(run.resumen_json or "{}")
+
     try:
         raw = _soc2_ai_text(_soc2_prompt_plan_trabajo(run, resumen), max_tokens=1600)
         obj = _extraer_json_objeto_soc2(raw)
         plan = obj.get("plan_trabajo") if isinstance(obj, dict) else None
         plan_txt = _build_plan_accion_soc2_texto(plan) if isinstance(plan, list) else raw
         plan_txt = soc2_normalizar_texto_rico_guardado(plan_txt)
+
         if not plan_txt:
             raise RuntimeError("La IA no devolvió un plan válido.")
+
         run.plan_trabajo_ai = plan_txt
         run.plan_trabajo_editado = plan_txt
         db.session.commit()
+
         flash("✅ Plan de trabajo SOC 2 generado con IA.", "success")
+
     except Exception as e:
         db.session.rollback()
         flash(f"❌ Error generando plan de trabajo: {e}", "danger")
+
     return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
 
 
@@ -129245,19 +129180,30 @@ def plan_trabajo_generar(run_id: int):
 @login_required
 def plan_trabajo_editar(run_id: int):
     user = User.query.get(session.get("user_id"))
-    if user.role == "auditor":
-        flash("El perfil Auditor no puede editar el plan de trabajo.", "danger")
-        return redirect(url_for("madurez_soc2.detalle", run_id=run_id))
+
+    if not soc2_user_can_execute(user):
+        return soc2_deny_execute("El perfil Auditor no puede editar el plan de trabajo.")
+
     run = Soc2MadurezRun.query.get_or_404(run_id)
+
     if request.method == "POST":
         run.plan_trabajo_editado = (request.form.get("plan") or "").strip()
         db.session.commit()
         flash("✅ Plan de trabajo SOC 2 actualizado.", "success")
         return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
+
     texto = run.plan_trabajo_editado or run.plan_trabajo_ai or ""
+
     content = f"""
 <div class="nistdet-shell">
-  <div class="nistdet-header-card"><div class="nistdet-header-overlay"><div class="nistdet-header-text"><h3 class="nistdet-title m-0">Editar Plan de Trabajo — SOC 2</h3></div></div></div>
+  <div class="nistdet-header-card">
+    <div class="nistdet-header-overlay">
+      <div class="nistdet-header-text">
+        <h3 class="nistdet-title m-0">Editar Plan de Trabajo — SOC 2</h3>
+      </div>
+    </div>
+  </div>
+
   <form method="POST" class="nistdet-card p-4">
     <textarea name="plan" rows="18" class="form-control">{escape(texto)}</textarea>
     <div class="text-end mt-3">
@@ -129270,124 +129216,262 @@ def plan_trabajo_editar(run_id: int):
 """
     return render_template_string(BASE, title="Editar Plan SOC 2", content=content)
 
+# ============================================================
+# PDF EJECUTIVO SOC 2
+# ============================================================
 
-# ============================================================
-# PDF EJECUTIVO
-# ============================================================
 def _soc2_build_pdf_run(run: "Soc2MadurezRun") -> io.BytesIO:
     try:
         resumen = json.loads(run.resumen_json or "{}")
     except Exception:
         resumen = {}
+
     labels, values = soc2_pct_por_criterio(resumen, SOC2_BLOCK_ORDER)
-    radar_b64 = run.radar_overall_b64 or soc2_radar_b64(labels, values, title="Radar por Criterio - SOC 2")
+    radar_b64 = run.radar_overall_b64 or soc2_radar_b64(
+        labels,
+        values,
+        title="Radar por Criterio - SOC 2"
+    )
 
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=1.2 * cm, rightMargin=1.2 * cm, topMargin=1.0 * cm, bottomMargin=1.0 * cm, title="SOC 2 - Informe Ejecutivo")
+
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=landscape(A4),
+        leftMargin=1.2 * cm,
+        rightMargin=1.2 * cm,
+        topMargin=1.0 * cm,
+        bottomMargin=1.0 * cm,
+        title="SOC 2 - Informe Ejecutivo"
+    )
+
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="SGSI_Title_SOC2", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=18, textColor=colors.white, alignment=TA_CENTER, spaceAfter=8))
-    styles.add(ParagraphStyle(name="SGSI_Section_SOC2", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=12, textColor=colors.HexColor("#1d4f8f"), spaceBefore=10, spaceAfter=8))
-    styles.add(ParagraphStyle(name="SGSI_Normal_SOC2", parent=styles["Normal"], fontName="Helvetica", fontSize=8.5, leading=11, textColor=colors.HexColor("#1f2937"), spaceAfter=5))
-    styles.add(ParagraphStyle(name="SGSI_Small_SOC2", parent=styles["Normal"], fontName="Helvetica", fontSize=7.5, leading=9, textColor=colors.HexColor("#374151"), spaceAfter=4))
+
+    styles.add(ParagraphStyle(
+        name="SOC2_Title",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        textColor=colors.white,
+        alignment=TA_CENTER,
+        spaceAfter=8
+    ))
+
+    styles.add(ParagraphStyle(
+        name="SOC2_Section",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        textColor=colors.HexColor("#1d4f8f"),
+        spaceBefore=10,
+        spaceAfter=8
+    ))
+
+    styles.add(ParagraphStyle(
+        name="SOC2_Normal",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8.5,
+        leading=11,
+        textColor=colors.HexColor("#1f2937"),
+        spaceAfter=5
+    ))
+
+    styles.add(ParagraphStyle(
+        name="SOC2_Small",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=7.5,
+        leading=9,
+        textColor=colors.HexColor("#374151"),
+        spaceAfter=4
+    ))
 
     def pdf_escape(v):
         return html.escape(str(v or ""))
 
     story = []
-    title_tbl = Table([[Paragraph("SOC 2 - Informe de Madurez", styles["SGSI_Title_SOC2"])]], colWidths=[26.8 * cm])
-    title_tbl.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#3f86d6")), ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#1d4f8f")), ("TOPPADDING", (0, 0), (-1, -1), 8), ("BOTTOMPADDING", (0, 0), (-1, -1), 8)]))
+
+    title_tbl = Table(
+        [[Paragraph("SOC 2 - Informe de Madurez", styles["SOC2_Title"])]],
+        colWidths=[26.8 * cm]
+    )
+    title_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#3f86d6")),
+        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#1d4f8f")),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]))
     story.append(title_tbl)
     story.append(Spacer(1, 8))
 
     nivel_general = soc2_resolver_nivel(run.pct_general)
+
     resumen_tbl = Table([
         ["Consecutivo", pdf_escape(run.consecutivo)],
         ["Fecha", run.created_at.strftime("%Y-%m-%d %H:%M") if run.created_at else ""],
-        ["Cumplimiento general", f"{run.pct_general:.2f}% - {pdf_escape(nivel_general.get('nivel',''))}"],
+        ["Cumplimiento general", f"{float(run.pct_general or 0):.2f}% - {pdf_escape(nivel_general.get('nivel',''))}"],
     ], colWidths=[5.2 * cm, 21.6 * cm])
-    resumen_tbl.setStyle(TableStyle([("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f1fb")), ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")), ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"), ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")), ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+
+    resumen_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f1fb")),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
     story.append(resumen_tbl)
     story.append(Spacer(1, 10))
 
-    story.append(Paragraph("Informe Ejecutivo", styles["SGSI_Section_SOC2"]))
-    informe = soc2_normalizar_texto_rico_guardado(run.informe_ejecutivo_editado or run.informe_ejecutivo_ai or "")
+    story.append(Paragraph("Informe Ejecutivo", styles["SOC2_Section"]))
+
+    informe = soc2_normalizar_texto_rico_guardado(
+        run.informe_ejecutivo_editado or run.informe_ejecutivo_ai or ""
+    )
+
     if informe:
         for parrafo in re.split(r"\n\s*\n", informe):
             if parrafo.strip():
-                story.append(Paragraph(pdf_escape(parrafo.strip()), styles["SGSI_Normal_SOC2"]))
+                story.append(Paragraph(pdf_escape(parrafo.strip()), styles["SOC2_Normal"]))
     else:
-        story.append(Paragraph("No hay informe ejecutivo registrado.", styles["SGSI_Normal_SOC2"]))
+        story.append(Paragraph("No hay informe ejecutivo registrado.", styles["SOC2_Normal"]))
 
-    story.append(Paragraph("Radar por Criterio SOC 2", styles["SGSI_Section_SOC2"]))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("Radar por Criterio SOC 2", styles["SOC2_Section"]))
+
     if radar_b64:
         try:
-            img = RLImage(io.BytesIO(base64.b64decode(radar_b64)), width=11.5 * cm, height=11.0 * cm)
+            img = RLImage(
+                io.BytesIO(base64.b64decode(radar_b64)),
+                width=11.5 * cm,
+                height=11.0 * cm
+            )
             story.append(img)
         except Exception:
-            pass
+            story.append(Paragraph("No fue posible insertar el radar.", styles["SOC2_Normal"]))
 
-    story.append(Paragraph("Detalle por Criterio", styles["SGSI_Section_SOC2"]))
-    data = [["Criterio", "% Cumplimiento", "Nivel", "SI", "Parcial", "NO", "N/A", "Items"]]
+    story.append(Paragraph("Detalle por Criterio", styles["SOC2_Section"]))
+
+    data = [[
+        "Criterio",
+        "% Cumplimiento",
+        "Nivel",
+        "SI",
+        "Parcial",
+        "NO",
+        "N/A",
+        "Ítems"
+    ]]
+
     for code in SOC2_BLOCK_ORDER:
         d = resumen.get(code)
         if not d:
             continue
+
         data.append([
-            Paragraph(pdf_escape(d.get("nombre") or code), styles["SGSI_Small_SOC2"]),
-            Paragraph(f"{float(d.get('pct',0) or 0):.2f}%", styles["SGSI_Small_SOC2"]),
-            Paragraph(pdf_escape(d.get("madurez") or ""), styles["SGSI_Small_SOC2"]),
-            str(d.get("SI", 0)), str(d.get("PARCIAL", 0)), str(d.get("NO", 0)), str(d.get("NA", 0)), str(d.get("total", 0)),
+            Paragraph(pdf_escape(d.get("nombre") or code), styles["SOC2_Small"]),
+            Paragraph(f"{float(d.get('pct', 0) or 0):.2f}%", styles["SOC2_Small"]),
+            Paragraph(pdf_escape(d.get("madurez") or ""), styles["SOC2_Small"]),
+            str(d.get("SI", 0)),
+            str(d.get("PARCIAL", 0)),
+            str(d.get("NO", 0)),
+            str(d.get("NA", 0)),
+            str(d.get("total", 0)),
         ])
-    tbl = Table(data, colWidths=[7.2 * cm, 3.0 * cm, 5.0 * cm, 1.5 * cm, 2.0 * cm, 1.5 * cm, 1.5 * cm, 2.0 * cm], repeatRows=1)
-    tbl.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3f86d6")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
+
+    tbl = Table(
+        data,
+        colWidths=[
+            7.2 * cm,
+            3.0 * cm,
+            5.0 * cm,
+            1.5 * cm,
+            2.0 * cm,
+            1.5 * cm,
+            1.5 * cm,
+            2.0 * cm
+        ],
+        repeatRows=1
+    )
+
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3f86d6")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+
     story.append(tbl)
 
-    plan = _normalizar_plan_accion_soc2_texto(run.plan_trabajo_editado or run.plan_trabajo_ai or "")
+    plan = _normalizar_plan_accion_soc2_texto(
+        run.plan_trabajo_editado or run.plan_trabajo_ai or ""
+    )
+
     if plan:
         story.append(PageBreak())
-        story.append(Paragraph("Plan de Trabajo", styles["SGSI_Section_SOC2"]))
+        story.append(Paragraph("Plan de Trabajo", styles["SOC2_Section"]))
+
         for parrafo in re.split(r"\n\s*\n", plan):
             if parrafo.strip():
-                story.append(Paragraph(pdf_escape(parrafo.strip()), styles["SGSI_Normal_SOC2"]))
+                story.append(Paragraph(pdf_escape(parrafo.strip()), styles["SOC2_Normal"]))
 
     doc.build(story)
     buf.seek(0)
     return buf
 
+# ============================================================
+# EXPORTAR PDF — AUDITOR NO PUEDE GENERAR PDF
+# ============================================================
 
 @soc2_madurez_bp.route("/detalle/<int:run_id>/pdf", methods=["GET"])
 @login_required
 def exportar_pdf(run_id: int):
     user = User.query.get(session.get("user_id"))
-    if user.role != "admin" and user.role != "auditor" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
-        flash("No tiene permiso para exportar SOC 2.", "danger")
-        return redirect(url_for("menu"))
+
+    if not soc2_user_can_execute(user):
+        return soc2_deny_execute("El perfil Auditor no puede generar ni exportar PDF SOC 2.")
+
     run = Soc2MadurezRun.query.get_or_404(run_id)
     pdf = _soc2_build_pdf_run(run)
     filename = f"SOC2_Madurez_{re.sub(r'[^A-Za-z0-9_-]+', '_', run.consecutivo or str(run.id))}.pdf"
-    return send_file(pdf, mimetype="application/pdf", as_attachment=True, download_name=filename)
 
+    return send_file(
+        pdf,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=filename
+    )
+
+
+# ============================================================
+# ELIMINAR — AUDITOR NO PUEDE
+# ============================================================
 
 @soc2_madurez_bp.route("/detalle/<int:run_id>/eliminar", methods=["POST"])
 @login_required
 def eliminar_run(run_id: int):
     user = User.query.get(session.get("user_id"))
-    if user.role == "auditor":
-        flash("El perfil Auditor no puede eliminar revisiones SOC 2.", "danger")
-        return redirect(url_for("madurez_soc2.historial"))
-    if user.role != "admin" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
-        flash("No tiene permiso para eliminar revisiones SOC 2.", "danger")
-        return redirect(url_for("menu"))
+
+    if not soc2_user_can_execute(user):
+        return soc2_deny_execute("El perfil Auditor no puede eliminar revisiones SOC 2.")
+
     run = Soc2MadurezRun.query.get_or_404(run_id)
+
     try:
         Soc2MadurezCriterioAnalisis.query.filter_by(run_id=run.id).delete(synchronize_session=False)
         Soc2MadurezRespuesta.query.filter_by(run_id=run.id).delete(synchronize_session=False)
         db.session.delete(run)
         db.session.commit()
         flash("✅ Revisión SOC 2 eliminada correctamente.", "success")
+
     except Exception as e:
         db.session.rollback()
         flash(f"❌ Error eliminando revisión SOC 2: {e}", "danger")
+
     return redirect(url_for("madurez_soc2.historial"))
 
 
