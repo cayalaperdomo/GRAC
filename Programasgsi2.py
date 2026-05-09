@@ -5032,7 +5032,7 @@ def perfil():
       <div class="perfil-header-card">
         <div class="perfil-header-overlay">
           <div class="perfil-header-text">
-            <h3 class="perfil-title m-0">👤 Perfil de usuario</h3>
+            <h3 class="perfil-title m-0">Perfil de usuario</h3>
             <div class="perfil-subtitle">
               Administra tu foto de perfil y actualiza tu contraseña de acceso
             </div>
@@ -5125,124 +5125,162 @@ def perfil():
       .perfil-shell{
         width:96%;
         max-width:1200px;
-        margin:10px auto 30px auto;
+        margin:26px auto 24px auto;
       }
 
-      /* =========================
-         HEADER SGSI
-         ========================= */
       .perfil-header-card{
-        background:#3f86d6;
-        height:88px;
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
         display:flex;
         align-items:center;
-        justify-content:center;
-        border-radius:18px;
-        box-shadow:0 12px 30px rgba(0,0,0,.30);
-        margin-bottom:14px;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
         overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .perfil-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
       }
 
       .perfil-header-overlay{
         width:100%;
-        height:100%;
         display:flex;
-        align-items:flex-start;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }
+
+      .perfil-header-overlay::before{
+        content:"👤";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
         justify-content:center;
-        text-align:center;
-        background:rgba(0,0,0,.08);
-        padding:8px 24px 6px 24px;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
       }
 
       .perfil-header-text{
-        max-width:1000px;
+        max-width:1100px;
         width:100%;
-        display:flex;
-        flex-direction:column;
-        align-items:center;
-        justify-content:flex-start;
-        transform:translateY(8px);
+        display:block !important;
+        transform:none !important;
+      }
+
+      .perfil-header-text::before{
+        content:"SGSI · Perfil de Usuario";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
       }
 
       .perfil-title{
         color:#ffffff !important;
-        font-weight:900;
-        font-size:1.38rem;
+        font-weight:950;
+        font-size:1.32rem;
         line-height:1.1;
-        text-shadow:0 4px 14px rgba(0,0,0,.45);
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
         margin:0 !important;
       }
 
       .perfil-subtitle{
-        color:rgba(255,255,255,.96);
-        font-size:.82rem;
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
         margin-top:4px;
-        line-height:1.15;
+        line-height:1.25;
+        font-weight:800;
       }
 
-      /* =========================
-         BOTONES
-         ========================= */
       .perfil-header-actions{
         display:flex;
         justify-content:center;
         gap:10px;
-        margin-bottom:16px;
         flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .perfil-header-actions .btn,
+      .perfil-btn-main,
+      .btn{
+        border-radius:10px !important;
+        min-height:38px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
       }
 
       .perfil-btn-main{
         background:#ffffff;
-        color:#000;
-        border:2px solid #ffffff;
-        border-radius:999px;
-        box-shadow:0 4px 10px rgba(0,0,0,.10);
-        padding:6px 18px;
+        color:#0f172a !important;
+        border:1px solid #cfd8e3 !important;
       }
 
       .perfil-btn-main:hover{
-        background:#f3f4f6;
-        color:#000;
+        background:#edf5ff;
+        color:#0b65d8 !important;
+        border-color:#9ec5fe !important;
       }
 
-      /* =========================
-         TARJETA PRINCIPAL
-         ========================= */
-      .perfil-card{
-        background:rgba(255,255,255,.93)!important;
-        border-radius:18px;
-        backdrop-filter:blur(6px);
-        box-shadow:0 10px 24px rgba(0,0,0,.18);
-        border:none;
+      .perfil-card,
+      .card{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
       }
 
       .perfil-card .card-body{
         padding:22px;
       }
 
-      /* =========================
-         SECCIONES
-         ========================= */
-      .perfil-section-title{
-        font-weight:900;
-        font-size:1.02rem;
-        color:#1d4ed8;
+      .perfil-section-title,
+      .card h5,
+      .card h6{
+        font-weight:950;
+        font-size:.95rem;
+        color:#1459a6;
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
         margin-bottom:16px;
       }
 
-      /* =========================
-         BLOQUE USUARIO
-         ========================= */
       .perfil-user-box{
         display:flex;
         align-items:center;
         gap:18px;
-        background:rgba(248,250,252,.92);
-        border:1px solid rgba(15,23,42,.06);
+        background:#f8fbff;
+        border:1px solid #dbe6f4;
         border-radius:16px;
         padding:16px;
+        box-shadow:0 8px 18px rgba(15,23,42,.08);
       }
 
       .perfil-avatar{
@@ -5250,7 +5288,7 @@ def perfil():
         height:78px;
         border-radius:50%;
         object-fit:cover;
-        border:3px solid #3f86d6;
+        border:3px solid #1459a6;
         box-shadow:0 6px 16px rgba(0,0,0,.12);
         flex:0 0 auto;
       }
@@ -5261,57 +5299,65 @@ def perfil():
 
       .perfil-user-name{
         font-size:1.05rem;
-        font-weight:900;
+        font-weight:950;
         color:#1f2937;
         line-height:1.2;
         margin-bottom:4px;
       }
 
       .perfil-user-meta{
-        color:#6b7280;
+        color:#607086;
         font-size:.90rem;
         line-height:1.35;
+        font-weight:700;
       }
 
-      /* =========================
-         FORMULARIOS
-         ========================= */
+      .form-label{
+        font-size:.72rem;
+        font-weight:900;
+        color:#1459a6;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
+      }
+
       .form-control,
       .form-select{
         border-radius:10px;
-        border:1px solid #cfd8e3;
-        min-height:42px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        box-shadow:none !important;
       }
 
       .form-control:focus,
       .form-select:focus{
         border-color:#3f86d6;
-        box-shadow:0 0 0 0.2rem rgba(63,134,214,.18);
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#ffffff;
       }
 
-      .btn{
-        border-radius:999px !important;
+      .badge{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
       }
 
-      /* =========================
-         RESPONSIVE
-         ========================= */
       @media (max-width:992px){
         .perfil-shell{
           width:98%;
-          margin:8px auto 24px auto;
+          margin:8px auto 22px auto;
         }
 
         .perfil-header-card{
-          height:84px;
-        }
-
-        .perfil-header-overlay{
-          padding:8px 16px 6px 16px;
-        }
-
-        .perfil-header-text{
-          transform:translateY(-1px);
+          min-height:88px;
         }
 
         .perfil-title{
@@ -5330,6 +5376,32 @@ def perfil():
           flex-direction:column;
           align-items:flex-start;
           text-align:left;
+        }
+      }
+
+      @media (max-width:768px){
+        .perfil-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .perfil-header-overlay::before{
+          margin:0;
+        }
+
+        .perfil-header-text::before{
+          margin-left:auto;
+          margin-right:auto;
+        }
+
+        .perfil-title,
+        .perfil-subtitle{
+          text-align:center;
+        }
+
+        .perfil-header-actions .btn{
+          width:100%;
         }
       }
     </style>
