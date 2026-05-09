@@ -13521,7 +13521,7 @@ def gestion_riesgos():
 
     def color_por_valor(valor):
         if valor is None or str(valor).strip() == "":
-            return ""
+            return "nivel-none"
 
         s = str(valor).strip().lower()
 
@@ -13537,11 +13537,15 @@ def gestion_riesgos():
             return "nivel1"
 
         try:
-            n = int(str(valor).split()[0])
+            import re
+            m = re.search(r"\d+(\.\d+)?", s)
+            n = float(m.group(0)) if m else 0
         except Exception:
             n = 0
 
-        if 1 <= n <= 4:
+        if n <= 0:
+            return "nivel-none"
+        elif n <= 4:
             return "nivel1"
         elif n <= 8:
             return "nivel2"
@@ -13549,9 +13553,8 @@ def gestion_riesgos():
             return "nivel3"
         elif n <= 19:
             return "nivel4"
-        elif n >= 20:
+        else:
             return "nivel5"
-        return ""
 
     riesgos_html = """
     <div class="risk-shell">
@@ -14419,6 +14422,59 @@ def gestion_riesgos():
         scrollbar-width: thin;
         scrollbar-color: #3f86d6 #dbe4f0;
       }
+
+      /* =========================
+           COLORES RIESGOS
+           IGUALES AL MAPA DE CALOR
+        ========================== */
+
+        .risk-table tbody td.nivel1,
+        .risk-table tbody tr:nth-child(even) td.nivel1,
+        .risk-table tbody tr:hover td.nivel1 {
+          background: #2ecc71 !important;
+          color: #ffffff !important;
+          font-weight: 900 !important;
+        }
+
+        .risk-table tbody td.nivel2,
+        .risk-table tbody tr:nth-child(even) td.nivel2,
+        .risk-table tbody tr:hover td.nivel2 {
+          background: #f1c40f !important;
+          color: #111111 !important;
+          font-weight: 900 !important;
+        }
+
+        .risk-table tbody td.nivel3,
+        .risk-table tbody tr:nth-child(even) td.nivel3,
+        .risk-table tbody tr:hover td.nivel3 {
+          background: #ff69b4 !important;
+          color: #111111 !important;
+          font-weight: 900 !important;
+        }
+
+        .risk-table tbody td.nivel4,
+        .risk-table tbody tr:nth-child(even) td.nivel4,
+        .risk-table tbody tr:hover td.nivel4 {
+          background: #e74c3c !important;
+          color: #ffffff !important;
+          font-weight: 900 !important;
+        }
+
+        .risk-table tbody td.nivel5,
+        .risk-table tbody tr:nth-child(even) td.nivel5,
+        .risk-table tbody tr:hover td.nivel5 {
+          background: #8e44ad !important;
+          color: #ffffff !important;
+          font-weight: 900 !important;
+        }
+
+        .risk-table tbody td.nivel-none,
+        .risk-table tbody tr:nth-child(even) td.nivel-none,
+        .risk-table tbody tr:hover td.nivel-none {
+          background: rgba(255,255,255,.98) !important;
+          color: #64748b !important;
+          font-weight: 800 !important;
+        }
 
       @media (max-width: 1200px) {
         .risk-hero-badge {
