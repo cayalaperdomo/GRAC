@@ -9156,7 +9156,7 @@ def menu():
                 <i class="bi bi-shield-fill-check"></i>
               </div>
               <div class="sgsi-stat-text">
-                <div class="sgsi-stat-title">Scorecard Terceros</div>
+                <div class="sgsi-stat-title">Security Scorecard</div>
                 <div class="sgsi-stat-value purple-text" id="dash_scorecard_terceros_stat">
                   {{ "%.2f"|format(dashboard.scorecard_terceros_pct) }}%
                 </div>
@@ -128324,17 +128324,18 @@ def historial():
         </a>
         """
 
-        if soc2_user_can_execute(user):
-            acciones += f"""
-            <form method="POST"
-                  action="{url_for('madurez_soc2.eliminar_run', run_id=r.id)}"
-                  class="d-inline"
-                  onsubmit="return confirm('¿Eliminar esta revisión SOC 2?')">
-              <button class="btn btn-sm btn-outline-danger rounded-pill px-3">
-                <i class="bi bi-trash me-1"></i>Eliminar
-              </button>
-            </form>
-            """
+
+        acciones = f"""
+        <a href="{url_for('madurez_soc2.detalle', run_id=r.id)}"
+           class="btn btn-sm btn-primary rounded-pill px-3">
+          <i class="bi bi-eye me-1"></i>Ver
+        </a>
+
+        <a href="{url_for('madurez_soc2.exportar_pdf', run_id=r.id)}"
+           class="btn btn-sm btn-danger rounded-pill px-3">
+          <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+        </a>
+        """
 
         rows.append(f"""
         <tr>
@@ -128740,7 +128741,7 @@ def detalle(run_id: int):
         """
 
     pdf_btn = ""
-    if soc2_user_can_execute(user):
+    if soc2_user_can_access(user):
         pdf_btn = f"""
         <a href="{url_for('madurez_soc2.exportar_pdf', run_id=run.id)}"
            class="btn btn-danger rounded-pill px-4 fw-bold">
@@ -129424,7 +129425,7 @@ def _soc2_build_pdf_run(run: "Soc2MadurezRun") -> io.BytesIO:
     return buf
 
 # ============================================================
-# EXPORTAR PDF — AUDITOR NO PUEDE GENERAR PDF
+# EXPORTAR PDF — ADMIN / USUARIO CON PERMISO / AUDITOR
 # ============================================================
 
 @soc2_madurez_bp.route("/detalle/<int:run_id>/pdf", methods=["GET"])
@@ -129432,11 +129433,18 @@ def _soc2_build_pdf_run(run: "Soc2MadurezRun") -> io.BytesIO:
 def exportar_pdf(run_id: int):
     user = User.query.get(session.get("user_id"))
 
-    if not soc2_user_can_execute(user):
-        return soc2_deny_execute("El perfil Auditor no puede generar ni exportar PDF SOC 2.")
+    # ✅ Auditor también puede exportar/imprimir PDF
+    denied = soc2_check_access_or_redirect(
+        user,
+        "No tiene permiso para exportar PDF SOC 2."
+    )
+    if denied:
+        return denied
 
     run = Soc2MadurezRun.query.get_or_404(run_id)
+
     pdf = _soc2_build_pdf_run(run)
+
     filename = f"SOC2_Madurez_{re.sub(r'[^A-Za-z0-9_-]+', '_', run.consecutivo or str(run.id))}.pdf"
 
     return send_file(
