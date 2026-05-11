@@ -8211,7 +8211,7 @@ MENU_SECTIONS = [
             {"label": "Simulacros y Pruebas", "href": "/bcp/pruebas", "icon": "bi-play-circle", "btn": "btn-secondary", "module": "Continuidad del Negocio (BCP/DRP)"},
             {"label": "Dependencias Críticas", "href": "/bcp/dependencias", "icon": "bi-link-45deg", "btn": "btn-primary", "module": "Continuidad del Negocio (BCP/DRP)"},
             {"label": "Madurez BCP", "href": "/bcp/madurez", "icon": "bi-graph-up-arrow", "btn": "btn-info", "module": "Continuidad del Negocio (BCP/DRP)"},
-            {"label": "Informe Ejecutivo AI", "href": "/bcp/ia/generar", "icon": "bi-robot", "btn": "btn-info text-white", "module": "Continuidad del Negocio (BCP/DRP)"},
+            {"label": "Informe Ejecutivo AI", "href": "/bcp/ia/matriz", "icon": "bi-robot", "btn": "btn-info text-white", "module": "Continuidad del Negocio (BCP/DRP)"},
         ]
     },
     {
@@ -154247,6 +154247,181 @@ def bcp_metricas():
 
 
 # ============================================================
+# TABLA / MIGRACIÓN MATRIZ INFORMES IA BCP
+# ============================================================
+
+def bcp_init_informes_ai():
+    conn = get_bcp_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bcp_informes_ai (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo TEXT,
+            contenido TEXT,
+            contenido_editado TEXT,
+            proveedor_ai TEXT,
+            modelo_ai TEXT,
+            generado_por TEXT,
+            fecha_generacion TEXT
+        )
+    """)
+
+    columnas_requeridas = {
+        "nivel_madurez": "REAL DEFAULT 0",
+        "procesos_criticos": "INTEGER DEFAULT 0",
+        "sistemas_criticos": "INTEGER DEFAULT 0",
+        "rto_promedio": "REAL DEFAULT 0",
+        "rpo_promedio": "REAL DEFAULT 0",
+        "pruebas_realizadas": "INTEGER DEFAULT 0",
+        "cumplimiento_rto_pct": "REAL DEFAULT 0",
+        "cumplimiento_rpo_pct": "REAL DEFAULT 0",
+        "procesos_con_bcp_pct": "REAL DEFAULT 0",
+        "backups_fallidos": "INTEGER DEFAULT 0",
+        "dependencias_criticas": "INTEGER DEFAULT 0"
+    }
+
+    columnas_actuales = [
+        row["name"]
+        for row in cur.execute("PRAGMA table_info(bcp_informes_ai)").fetchall()
+    ]
+
+    for columna, tipo in columnas_requeridas.items():
+        if columna not in columnas_actuales:
+            cur.execute(f"ALTER TABLE bcp_informes_ai ADD COLUMN {columna} {tipo}")
+
+    conn.commit()
+    conn.close()
+
+
+with app.app_context():
+    bcp_init_informes_ai()
+
+
+# ============================================================
+# MATRIZ HISTÓRICA INFORMES IA BCP
+# ============================================================
+
+@app.route("/bcp/ia/matriz")
+@login_required
+def bcp_matriz_informes():
+    user, resp = bcp_guard_view()
+    if resp:
+        return resp
+
+    bcp_init_informes_ai()
+
+    conn = get_bcp_db_connection()
+    informes = conn.execute("""
+        SELECT *
+        FROM bcp_informes_ai
+        ORDER BY id DESC
+    """).fetchall()
+    conn.close()
+
+    body = render_template_string("""
+    <div class="bcp-card">
+      <div class="bcp-card-body">
+
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+          <h2 class="bcp-section-title mb-0">Matriz Histórica Informes IA BCP/DRP</h2>
+
+          {% if user.role != 'auditor' %}
+          <a href="{{ url_for('bcp_ia_generar') }}" class="btn btn-primary rounded-pill px-4">
+            Generar nuevo informe IA
+          </a>
+          {% endif %}
+        </div>
+
+        <div class="alert alert-info border-0 shadow-sm">
+          Primero visualiza la matriz histórica. Desde esta pantalla puedes generar, consultar o eliminar informes IA BCP.
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-hover table-bordered align-middle bg-white">
+            <thead class="table-primary text-center">
+              <tr>
+                <th>ID</th>
+                <th>Fecha</th>
+                <th>Usuario</th>
+                <th>Madurez</th>
+                <th>Procesos críticos</th>
+                <th>Sistemas críticos</th>
+                <th>RTO</th>
+                <th>RPO</th>
+                <th>Pruebas</th>
+                <th>Cump. RTO</th>
+                <th>Cump. RPO</th>
+                <th>Backups fallidos</th>
+                <th>Proveedor IA</th>
+                <th style="min-width:200px;">Acciones</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {% for i in informes %}
+              <tr>
+                <td class="text-center">{{ i['id'] }}</td>
+                <td>{{ i['fecha_generacion'] }}</td>
+                <td>{{ i['generado_por'] }}</td>
+                <td class="text-center">{{ i['nivel_madurez'] }}/5</td>
+                <td class="text-center">{{ i['procesos_criticos'] }}</td>
+                <td class="text-center">{{ i['sistemas_criticos'] }}</td>
+                <td class="text-center">{{ i['rto_promedio'] }} h</td>
+                <td class="text-center">{{ i['rpo_promedio'] }} h</td>
+                <td class="text-center">{{ i['pruebas_realizadas'] }}</td>
+                <td class="text-center">{{ i['cumplimiento_rto_pct'] }}%</td>
+                <td class="text-center">{{ i['cumplimiento_rpo_pct'] }}%</td>
+                <td class="text-center">{{ i['backups_fallidos'] }}</td>
+                <td class="text-center">{{ i['proveedor_ai'] }}</td>
+
+                <td>
+                  <div class="d-flex justify-content-center flex-wrap gap-2">
+
+                    <a href="{{ url_for('bcp_ver_informe_ia', informe_id=i['id']) }}"
+                       class="btn btn-sm btn-outline-primary rounded-pill">
+                      <i class="bi bi-eye"></i> Ver
+                    </a>
+
+                    {% if user.role != 'auditor' %}
+                    <form method="POST"
+                          action="{{ url_for('bcp_eliminar_informe_ia', informe_id=i['id']) }}"
+                          style="display:inline;"
+                          onsubmit="return confirm('¿Desea eliminar este informe IA BCP?')">
+                      <button type="submit" class="btn btn-sm btn-danger rounded-pill">
+                        <i class="bi bi-trash"></i> Eliminar
+                      </button>
+                    </form>
+                    {% endif %}
+
+                  </div>
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="14" class="text-center text-muted py-4">
+                  No existen informes IA generados.
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="bcp-actions justify-content-center mt-4">
+          <a href="{{ url_for('bcp_dashboard') }}" class="btn btn-light rounded-pill px-4">
+            Volver
+          </a>
+        </div>
+
+      </div>
+    </div>
+    """, informes=informes, user=user)
+
+    return bcp_render("Matriz Informes IA BCP", body)
+
+
+# ============================================================
 # IA GENERATIVA BCP
 # ============================================================
 
@@ -154257,12 +154432,16 @@ def bcp_ia_generar():
     if resp:
         return resp
 
+    bcp_init_informes_ai()
+
     k = bcp_metricas_actuales()
 
     prompt = f"""
 Actúa como experto senior en Continuidad del Negocio, ISO 22301, ISO 27001 y resiliencia operacional.
 
-Genera un informe ejecutivo profesional para el módulo Continuidad del Negocio (BCP/DRP) de GRAC.
+Genera un informe ejecutivo profesional, claro y concreto para el módulo Continuidad del Negocio (BCP/DRP) de GRAC.
+
+Máximo 700 palabras.
 
 Indicadores:
 - Nivel madurez BCP: {k['nivel_madurez']}/5
@@ -154287,6 +154466,8 @@ Incluye:
 7. Conclusión ejecutiva
 
 No uses markdown con asteriscos.
+No repitas títulos.
+No generes texto excesivamente largo.
 """
 
     try:
@@ -154294,37 +154475,211 @@ No uses markdown con asteriscos.
             prompt,
             system_prompt="Eres consultor senior en continuidad de negocio, ISO 22301, ISO 27001 y ciberresiliencia.",
             temperature=0.2,
-            max_tokens=900
+            max_tokens=650
         )
-        flash("Informe IA generado correctamente.", "success")
-    except Exception as e:
-        texto = f"Error generando informe IA: {repr(e)}"
-        flash(texto, "danger")
 
-    data = {
-        "tipo": "Informe Ejecutivo BCP/DRP",
-        "contenido": texto,
-        "contenido_editado": "",
-        "proveedor_ai": (get_ai_provider() if 'get_ai_provider' in globals() else ""),
-        "modelo_ai": "",
-        "generado_por": user.username,
-        "fecha_generacion": bcp_now(),
-    }
-    bcp_insert("bcp_informes_ai", data)
+        flash("Informe IA generado correctamente y almacenado en la matriz histórica BCP.", "success")
+
+    except Exception as e:
+        texto = f"""
+Informe Ejecutivo BCP/DRP
+
+No fue posible generar el informe mediante IA en este momento.
+
+Causa técnica:
+{repr(e)}
+
+Resumen técnico de la revisión:
+
+Nivel de madurez BCP: {k.get('nivel_madurez', 0)}/5
+Procesos críticos: {k.get('procesos_criticos', 0)}
+Sistemas críticos con DRP: {k.get('sistemas_criticos', 0)}
+RTO promedio: {k.get('rto_promedio', 0)} horas
+RPO promedio: {k.get('rpo_promedio', 0)} horas
+Pruebas realizadas: {k.get('pruebas_realizadas', 0)}
+Cumplimiento RTO: {k.get('cumplimiento_rto_pct', 0)}%
+Cumplimiento RPO: {k.get('cumplimiento_rpo_pct', 0)}%
+Procesos con BCP: {k.get('procesos_con_bcp_pct', 0)}%
+Backups fallidos: {k.get('backups_fallidos', 0)}
+Dependencias críticas: {k.get('dependencias_criticas', 0)}
+
+Recomendación:
+Validar que el proveedor IA esté activo y respondiendo correctamente.
+"""
+
+        flash("El proveedor IA no respondió correctamente. Se guardó un resumen técnico en la matriz.", "warning")
+
+    conn = get_bcp_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO bcp_informes_ai (
+            tipo,
+            contenido,
+            contenido_editado,
+            proveedor_ai,
+            modelo_ai,
+            generado_por,
+            fecha_generacion,
+            nivel_madurez,
+            procesos_criticos,
+            sistemas_criticos,
+            rto_promedio,
+            rpo_promedio,
+            pruebas_realizadas,
+            cumplimiento_rto_pct,
+            cumplimiento_rpo_pct,
+            procesos_con_bcp_pct,
+            backups_fallidos,
+            dependencias_criticas
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        "Informe Ejecutivo BCP/DRP",
+        texto,
+        "",
+        (get_ai_provider() if 'get_ai_provider' in globals() else ""),
+        "",
+        user.username,
+        bcp_now(),
+        k.get("nivel_madurez", 0),
+        k.get("procesos_criticos", 0),
+        k.get("sistemas_criticos", 0),
+        k.get("rto_promedio", 0),
+        k.get("rpo_promedio", 0),
+        k.get("pruebas_realizadas", 0),
+        k.get("cumplimiento_rto_pct", 0),
+        k.get("cumplimiento_rpo_pct", 0),
+        k.get("procesos_con_bcp_pct", 0),
+        k.get("backups_fallidos", 0),
+        k.get("dependencias_criticas", 0)
+    ))
+
+    informe_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for("bcp_ver_informe_ia", informe_id=informe_id))
+
+
+# ============================================================
+# VER DETALLE INFORME IA
+# ============================================================
+
+@app.route("/bcp/ia/ver/<int:informe_id>")
+@login_required
+def bcp_ver_informe_ia(informe_id):
+    user, resp = bcp_guard_view()
+    if resp:
+        return resp
+
+    bcp_init_informes_ai()
+
+    conn = get_bcp_db_connection()
+    informe = conn.execute("""
+        SELECT *
+        FROM bcp_informes_ai
+        WHERE id = ?
+    """, (informe_id,)).fetchone()
+    conn.close()
+
+    if not informe:
+        flash("Informe no encontrado.", "warning")
+        return redirect(url_for("bcp_matriz_informes"))
+
+    contenido = informe["contenido_editado"] or informe["contenido"]
 
     body = render_template_string("""
-    <div class="bcp-card"><div class="bcp-card-body">
-      <h2 class="bcp-section-title mb-3">Informe Ejecutivo IA — BCP/DRP</h2>
-      <textarea class="form-control" rows="22">{{ texto }}</textarea>
-      <div class="bcp-actions justify-content-center mt-3">
-        <a href="{{ url_for('bcp_dashboard') }}" class="btn btn-light">Volver</a>
-        <a href="{{ url_for('bcp_ia_generar') }}" class="btn btn-primary">Generar nuevamente</a>
+    <div class="bcp-card">
+      <div class="bcp-card-body">
+
+        <h2 class="bcp-section-title mb-4">Detalle Informe Ejecutivo IA BCP/DRP</h2>
+
+        <div class="row g-3 mb-4">
+          <div class="col-md-3">
+            <div class="alert alert-primary mb-0">
+              <strong>Fecha</strong><br>{{ informe['fecha_generacion'] }}
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="alert alert-info mb-0">
+              <strong>Usuario</strong><br>{{ informe['generado_por'] }}
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="alert alert-success mb-0">
+              <strong>Madurez BCP</strong><br>{{ informe['nivel_madurez'] }}/5
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="alert alert-warning mb-0">
+              <strong>Proveedor IA</strong><br>{{ informe['proveedor_ai'] }}
+            </div>
+          </div>
+        </div>
+
+        <textarea class="form-control" rows="28" readonly>{{ contenido }}</textarea>
+
+        <div class="bcp-actions justify-content-center mt-4">
+          <a href="{{ url_for('bcp_matriz_informes') }}" class="btn btn-light rounded-pill px-4">
+            Volver a matriz
+          </a>
+
+          {% if user.role != 'auditor' %}
+          <a href="{{ url_for('bcp_ia_generar') }}" class="btn btn-primary rounded-pill px-4">
+            Generar nuevo informe
+          </a>
+          {% endif %}
+        </div>
+
       </div>
-    </div></div>
-    """, texto=texto)
+    </div>
+    """, informe=informe, contenido=contenido, user=user)
 
-    return bcp_render("Informe Ejecutivo IA", body)
+    return bcp_render("Detalle Informe IA", body)
 
+
+# ============================================================
+# ELIMINAR INFORME IA BCP
+# ============================================================
+
+@app.route("/bcp/ia/eliminar/<int:informe_id>", methods=["POST"])
+@login_required
+def bcp_eliminar_informe_ia(informe_id):
+    user, resp = bcp_guard_write()
+    if resp:
+        return resp
+
+    if user.role == "auditor":
+        flash("El rol auditor no puede eliminar informes IA.", "warning")
+        return redirect(url_for("bcp_matriz_informes"))
+
+    conn = get_bcp_db_connection()
+
+    informe = conn.execute("""
+        SELECT id
+        FROM bcp_informes_ai
+        WHERE id = ?
+    """, (informe_id,)).fetchone()
+
+    if not informe:
+        conn.close()
+        flash("El informe no existe.", "warning")
+        return redirect(url_for("bcp_matriz_informes"))
+
+    conn.execute("""
+        DELETE FROM bcp_informes_ai
+        WHERE id = ?
+    """, (informe_id,))
+
+    conn.commit()
+    conn.close()
+
+    flash("Informe IA BCP eliminado correctamente.", "success")
+    return redirect(url_for("bcp_matriz_informes"))
 
 # ============================================================
 # PDF EJECUTIVO BCP
