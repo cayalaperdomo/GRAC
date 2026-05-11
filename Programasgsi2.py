@@ -95236,18 +95236,42 @@ def chatgpt_api():
     try:
         print("[CHATGPT_API] Mensaje recibido:", user_msg)
 
+        prompt = f"""
+Actúa como asistente experto del SGSI GRAC.
+
+Responde de forma clara, práctica y profesional.
+Si la pregunta es sobre seguridad de la información, ISO 27001, NIST, PCI-DSS, BCP/DRP,
+riesgos, auditoría, proveedores, incidentes, vulnerabilidades o gobierno de seguridad,
+entrega una respuesta orientada a implementación.
+
+Pregunta del usuario:
+{user_msg}
+
+Instrucciones:
+- Responde en español.
+- Sé concreto.
+- No generes respuestas excesivamente largas.
+- Máximo 600 palabras.
+"""
+
         respuesta = chat_ai(
-            prompt=user_msg,
+            prompt=prompt,
             model="openai/gpt-4o-mini"
         )
 
         print("[CHATGPT_API] Respuesta generada correctamente")
 
-        return jsonify({"reply": respuesta or "No se recibió respuesta de la IA."})
+        if not respuesta or not str(respuesta).strip():
+            respuesta = "No se recibió respuesta de la IA."
+
+        return jsonify({"reply": respuesta})
 
     except Exception as e:
-        print("[CHATGPT_API ERROR]:", e)
-        return jsonify({"error": str(e)}), 500
+        print("[CHATGPT_API ERROR]:", repr(e))
+
+        return jsonify({
+            "error": "No fue posible consultar la IA en este momento. Detalle técnico: " + repr(e)
+        }), 500
 
 
 @app.route("/chatgpt_view", methods=["GET"])
@@ -95354,7 +95378,7 @@ def chatgpt_view():
         userInput.focus();
 
         sendBtn.disabled = true;
-        sendBtn.innerText = 'Enviando...';
+        sendBtn.innerText = 'Consultando IA...';
 
         const thinkingId = 'thinking-' + Date.now();
 
@@ -95367,9 +95391,11 @@ def chatgpt_view():
         chatBox.scrollTop = chatBox.scrollHeight;
 
         const controller = new AbortController();
+
+        // 300 segundos para evitar corte prematuro del chat
         const timeoutId = setTimeout(function() {
           controller.abort();
-        }, 90000);
+        }, 300000);
 
         try {
           const resp = await fetch("{{ url_for('chatgpt_api') }}", {
@@ -95418,7 +95444,7 @@ def chatgpt_view():
           if (t) t.remove();
 
           if (err.name === 'AbortError') {
-            appendMessage("⚠ La consulta tardó demasiado. Revisa la conexión con OpenRouter/Ollama o la función chat_ai().", 'bot');
+            appendMessage("⚠ La consulta tardó demasiado. Valida que OpenRouter/Ollama esté activo y que el modelo responda correctamente.", 'bot');
           } else {
             appendMessage("⚠ Error de conexión consultando la IA: " + err.message, 'bot');
           }
