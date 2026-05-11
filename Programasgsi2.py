@@ -67609,7 +67609,7 @@ def threat_model_asset_view():
     </div>
     """
     return vuln_scan_shell(
-        "🧭 Matriz MITRE ATT&CK",
+        "Matriz MITRE ATT&CK",
         render_template_string(body, activo=activo, matrix=matrix)
     )
 
@@ -95227,23 +95227,26 @@ def mejora_delete(id):
 @app.route('/chatgpt_api', methods=['POST'])
 @login_required
 def chatgpt_api():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     user_msg = (data.get("message") or "").strip()
 
     if not user_msg:
         return jsonify({"error": "Mensaje vacío"}), 400
 
     try:
-        # ✅ USO ÚNICO DE OPENROUTER
+        print("[CHATGPT_API] Mensaje recibido:", user_msg)
+
         respuesta = chat_ai(
             prompt=user_msg,
             model="openai/gpt-4o-mini"
         )
 
-        return jsonify({"reply": respuesta})
+        print("[CHATGPT_API] Respuesta generada correctamente")
+
+        return jsonify({"reply": respuesta or "No se recibió respuesta de la IA."})
 
     except Exception as e:
-        print("Error IA:", e)
+        print("[CHATGPT_API ERROR]:", e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -95253,58 +95256,75 @@ def chatgpt_view():
     html = """
     <div class="chatsgsi-shell">
 
-      <!-- CABECERA -->
       <div class="chatsgsi-header-card">
         <div class="chatsgsi-header-overlay">
           <div class="chatsgsi-header-text">
             <h3 class="chatsgsi-title m-0">Asistente SGSI (ChatGPT)</h3>
             <div class="chatsgsi-subtitle">
-              Consulta dudas, orientación y apoyo sobre tu SGSI directamente
-              desde el asistente integrado de la plataforma.
+              Consulta dudas, orientación y apoyo sobre tu SGSI directamente desde el asistente integrado.
             </div>
           </div>
         </div>
       </div>
 
-      <!-- BOTÓN VOLVER -->
-      <div class="chatsgsi-header-actions">
-
-      </div>
-
-      <!-- TARJETA PRINCIPAL -->
       <div class="chatsgsi-card p-0">
         <div class="chatsgsi-card-header">
           Chat con el asistente
         </div>
 
         <div class="chatsgsi-card-body">
-          
-          <!-- Caja de mensajes -->
-          <div id="chat-box"
-               class="chatsgsi-box">
-          </div>
 
-          <!-- Input -->
-          <form class="d-flex gap-2 mt-3" onsubmit="enviarMensaje(event)">
+          <div id="chat-box" class="chatsgsi-box"></div>
+
+          <div class="d-flex gap-2 mt-3">
             <input type="text"
                    id="user-input"
                    class="form-control"
                    placeholder="Escribe tu pregunta sobre el SGSI..."
                    autocomplete="off">
-            <button class="btn btn-success rounded-pill px-4" type="submit">
+
+            <button id="chat-send-btn"
+                    class="chat-send-clean"
+                    type="button"
+                    onclick="consultarAIChatGPT()">
               Enviar
             </button>
-          </form>
+          </div>
+
         </div>
       </div>
-
     </div>
 
     <script>
-      const chatBox = document.getElementById('chat-box');
-      const userInput = document.getElementById('user-input');
+      window.SGSI_DISABLE_GLOBAL_LOADER = true;
+      window.SGSI_PROGRESS_GLOBAL_DISABLED = true;
+
+      function ocultarLoaderChatGPT() {
+        const ids = [
+          'SGSI_PROGRESS_GLOBAL',
+          'sgsi-progress-global',
+          'global-loader',
+          'loader',
+          'loadingOverlay',
+          'progressOverlay',
+          'progressGlobal',
+          'SGSI_PROGRESS_OVERLAY'
+        ];
+
+        ids.forEach(function(id) {
+          const el = document.getElementById(id);
+          if (el) {
+            el.style.display = 'none';
+            el.style.visibility = 'hidden';
+            el.style.opacity = '0';
+            el.style.pointerEvents = 'none';
+          }
+        });
+      }
 
       function appendMessage(text, who) {
+        const chatBox = document.getElementById('chat-box');
+
         const wrapper = document.createElement('div');
         wrapper.className = 'mb-2 d-flex ' + (who === 'user' ? 'justify-content-end' : 'justify-content-start');
 
@@ -95318,37 +95338,72 @@ def chatgpt_view():
         chatBox.scrollTop = chatBox.scrollHeight;
       }
 
-      async function enviarMensaje(ev) {
-        ev.preventDefault();
+      async function consultarAIChatGPT() {
+        ocultarLoaderChatGPT();
+
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('chat-send-btn');
+        const chatBox = document.getElementById('chat-box');
+
         const text = (userInput.value || '').trim();
-        if (!text) return;
+        if (!text) return false;
 
         appendMessage(text, 'user');
+
         userInput.value = '';
         userInput.focus();
 
+        sendBtn.disabled = true;
+        sendBtn.innerText = 'Enviando...';
+
         const thinkingId = 'thinking-' + Date.now();
+
         const thinkingDiv = document.createElement('div');
         thinkingDiv.id = thinkingId;
         thinkingDiv.className = 'mb-2 d-flex justify-content-start';
         thinkingDiv.innerHTML = '<div class="px-3 py-2 rounded-3 chatsgsi-bubble chatsgsi-thinking text-muted small">Pensando...</div>';
+
         chatBox.appendChild(thinkingDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(function() {
+          controller.abort();
+        }, 90000);
 
         try {
           const resp = await fetch("{{ url_for('chatgpt_api') }}", {
             method: "POST",
+            credentials: "same-origin",
+            signal: controller.signal,
             headers: {
-              "Content-Type": "application/json"
+              "Content-Type": "application/json",
+              "X-No-Loader": "1"
             },
-            body: JSON.stringify({ message: text })
+            body: JSON.stringify({
+              message: text
+            })
           });
+
+          clearTimeout(timeoutId);
+
+          const raw = await resp.text();
+
+          let data = {};
+          try {
+            data = JSON.parse(raw);
+          } catch (e) {
+            data = {
+              error: "Respuesta no válida del servidor: " + raw.substring(0, 300)
+            };
+          }
 
           const t = document.getElementById(thinkingId);
           if (t) t.remove();
 
-          const data = await resp.json();
-          if (data.reply) {
+          if (!resp.ok) {
+            appendMessage("⚠ Error HTTP " + resp.status + ": " + (data.error || raw), 'bot');
+          } else if (data.reply) {
             appendMessage(data.reply, 'bot');
           } else if (data.error) {
             appendMessage("⚠ " + data.error, 'bot');
@@ -95357,12 +95412,43 @@ def chatgpt_view():
           }
 
         } catch (err) {
+          clearTimeout(timeoutId);
+
           const t = document.getElementById(thinkingId);
           if (t) t.remove();
+
+          if (err.name === 'AbortError') {
+            appendMessage("⚠ La consulta tardó demasiado. Revisa la conexión con OpenRouter/Ollama o la función chat_ai().", 'bot');
+          } else {
+            appendMessage("⚠ Error de conexión consultando la IA: " + err.message, 'bot');
+          }
+
           console.error(err);
-          appendMessage("Ocurrió un error de conexión.", 'bot');
+
+        } finally {
+          sendBtn.disabled = false;
+          sendBtn.innerText = 'Enviar';
+          userInput.focus();
+          ocultarLoaderChatGPT();
         }
+
+        return false;
       }
+
+      document.addEventListener('DOMContentLoaded', function() {
+        ocultarLoaderChatGPT();
+
+        const userInput = document.getElementById('user-input');
+
+        userInput.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            consultarAIChatGPT();
+          }
+        });
+
+        userInput.focus();
+      });
     </script>
 
     <style>
@@ -95372,6 +95458,20 @@ def chatgpt_view():
         background-position:center;
         background-attachment:fixed;
         background-repeat:no-repeat;
+      }
+
+      #SGSI_PROGRESS_GLOBAL,
+      #sgsi-progress-global,
+      #global-loader,
+      #loader,
+      #loadingOverlay,
+      #progressOverlay,
+      #progressGlobal,
+      #SGSI_PROGRESS_OVERLAY{
+        display:none !important;
+        visibility:hidden !important;
+        opacity:0 !important;
+        pointer-events:none !important;
       }
 
       .chatsgsi-shell{
@@ -95412,7 +95512,6 @@ def chatgpt_view():
         text-align:left;
         position:relative;
         z-index:1;
-        min-width:0;
       }
 
       .chatsgsi-header-overlay::before{
@@ -95429,11 +95528,6 @@ def chatgpt_view():
         font-size:1.4rem;
         box-shadow:0 8px 18px rgba(0,0,0,.25);
         margin-right:14px;
-      }
-
-      .chatsgsi-header-text{
-        max-width:1000px;
-        min-width:0;
       }
 
       .chatsgsi-header-text::before{
@@ -95455,7 +95549,6 @@ def chatgpt_view():
         line-height:1.1;
         margin:0 !important;
         text-shadow:0 4px 14px rgba(0,0,0,.45);
-        overflow-wrap:break-word;
       }
 
       .chatsgsi-subtitle{
@@ -95463,33 +95556,6 @@ def chatgpt_view():
         font-size:.78rem;
         line-height:1.25;
         margin-top:3px;
-        overflow-wrap:break-word;
-      }
-
-      .chatsgsi-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .btn{
-        border-radius:10px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-        max-width:100%;
-      }
-
-      .chatsgsi-btn-main{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .chatsgsi-btn-main:hover{
-        background:#edf5ff;
-        color:#0b65d8;
       }
 
       .chatsgsi-card{
@@ -95499,8 +95565,6 @@ def chatgpt_view():
         box-shadow:0 12px 24px rgba(15,23,42,.18);
         border:1px solid rgba(219,230,244,.9);
         overflow:hidden;
-        width:100%;
-        max-width:100%;
       }
 
       .chatsgsi-card-header{
@@ -95508,7 +95572,6 @@ def chatgpt_view():
         color:#ffffff;
         font-weight:950;
         padding:14px 18px;
-        border-bottom:1px solid rgba(255,255,255,.15);
       }
 
       .chatsgsi-card-body{
@@ -95523,7 +95586,6 @@ def chatgpt_view():
         padding:12px;
         overflow:auto;
         background:#f8fbff;
-        box-shadow:inset 0 1px 0 rgba(255,255,255,.35);
       }
 
       .chatsgsi-bubble{
@@ -95557,7 +95619,6 @@ def chatgpt_view():
         min-height:40px;
         font-size:.86rem;
         background:#f8fafc;
-        max-width:100%;
       }
 
       .form-control:focus{
@@ -95566,25 +95627,26 @@ def chatgpt_view():
         background:#ffffff;
       }
 
-      h3{
+      .chat-send-clean{
+        border:none;
+        border-radius:999px;
+        min-width:110px;
+        padding:0 22px;
+        background:#198754;
         color:#ffffff;
-        margin:0;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }
+
+      .chat-send-clean:disabled{
+        opacity:.75;
+        cursor:not-allowed;
       }
 
       @media (max-width:992px){
         .chatsgsi-shell{
           width:98%;
           margin:8px auto 22px auto;
-        }
-
-        .chatsgsi-title{
-          font-size:1.20rem;
-          line-height:1.08;
-        }
-
-        .chatsgsi-subtitle{
-          font-size:.76rem;
-          line-height:1.12;
         }
 
         .chatsgsi-box{
@@ -95608,16 +95670,13 @@ def chatgpt_view():
           text-align:center;
         }
 
-        .chatsgsi-header-actions .btn{
-          width:100%;
-        }
-
         .chatsgsi-bubble{
           max-width:100%;
         }
       }
     </style>
     """
+
     inner = render_template_string(html)
     return render_template_string(BASE, content=Markup(inner))
 
@@ -102436,7 +102495,7 @@ def ingreso():
     ).all()
 
     if not preguntas:
-        content = f"""
+        content = """
         <div class="alert alert-warning">
           No hay instrumento cargado en la base de datos.
           (Admin) Importa el instrumento para habilitar el formulario.
@@ -102451,6 +102510,7 @@ def ingreso():
     respuestas_guardadas = cargar_respuestas_run(draft.id) if draft else {}
 
     company_name_value = (draft.company_name if draft else "") or ""
+
     _, _, progreso_inicial = calcular_progreso_formulario(
         preguntas,
         respuestas_db=respuestas_guardadas
@@ -102481,6 +102541,7 @@ def ingreso():
 
         def flush_block():
             nonlocal rows, current_header, inner_blocks
+
             if not rows:
                 return
 
@@ -102501,6 +102562,7 @@ def ingreso():
               </div>
             </div>
             """)
+
             rows = []
 
         for p in items:
@@ -102527,6 +102589,7 @@ def ingreso():
             rows.append(f"""
             <div class="col-12 col-xl-6">
               <div class="isoform-qcard h-100">
+
                 <div class="isoform-qhead">
                   <div class="d-flex align-items-center gap-2 flex-wrap">
                     <span class="badge rounded-pill text-bg-light border fw-semibold">
@@ -102565,12 +102628,16 @@ def ingreso():
                 </div>
 
                 <div class="mt-3">
-                  <label class="form-label small fw-bold text-black mb-1">Comentarios / evidencia</label>
+                  <label class="form-label small fw-bold text-black mb-1">
+                    Comentarios / evidencia
+                  </label>
+
                   <textarea class="form-control form-control-sm"
                             name="c_{p.id}"
                             rows="3"
                             placeholder="Comentarios / evidencia">{saved_com}</textarea>
                 </div>
+
               </div>
             </div>
             """)
@@ -102598,6 +102665,7 @@ def ingreso():
                   <i class="bi bi-folder2-open me-2"></i>
                   <span class="isoform-acc-title">{esc(sheet)}</span>
                 </div>
+
                 <span class="badge rounded-pill text-bg-light border">
                   {sum(1 for x in items if x.tipo == 'q')} preguntas
                 </span>
@@ -102646,14 +102714,18 @@ def ingreso():
            class="btn isoform-btn-main rounded-pill px-4 fw-bold">
           <i class="bi bi-arrow-left me-2"></i>Volver a Madurez ISO
         </a>
-
       </div>
 
       <div class="isoform-card p-4">
 
         {alerta_borrador}
 
-        <form method="POST" action="{url_for('madurez.ingreso_guardar')}">
+        <form id="isoIngresoForm"
+              method="POST"
+              action="{url_for('madurez.ingreso_guardar')}"
+              novalidate
+              autocomplete="off">
+
           <input type="hidden" name="draft_id" value="{draft.id if draft else ''}">
 
           <div class="isoform-section-title">
@@ -102661,15 +102733,22 @@ def ingreso():
           </div>
 
           <div class="mb-4">
-            <label class="text-black form-label fw-semibold">
-              Consecutivo de la Revisión
+            <label class="text-black form-label fw-semibold" for="isoConsecutivoRevision">
+              Consecutivo de la Revisión <span class="text-danger">*</span>
             </label>
 
             <input type="text"
                    class="form-control"
                    name="company_name"
+                   id="isoConsecutivoRevision"
                    value="{esc(company_name_value)}"
+                   autocomplete="off"
                    required>
+
+            <div id="isoConsecutivoRevisionError"
+                 class="invalid-feedback d-none fw-bold mt-2">
+              Debes ingresar el consecutivo de la Revisión.
+            </div>
           </div>
 
           <div class="isoform-section-title">
@@ -102703,24 +102782,28 @@ def ingreso():
           </div>
 
           <div class="d-flex justify-content-center gap-3 flex-wrap mt-4">
+
             <button id="btnGuardar"
-                    class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold"
+                    class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold iso-submit-btn"
                     type="submit"
                     name="accion"
-                    value="guardar">
+                    value="guardar"
+                    data-accion="guardar">
               <i class="bi bi-save2 me-2"></i>
               Guardar
             </button>
 
             <button id="btnAnalizar"
-                    class="btn btn-primary btn-lg rounded-pill px-5 shadow fw-semibold"
+                    class="btn btn-primary btn-lg rounded-pill px-5 shadow fw-semibold iso-submit-btn"
                     type="submit"
                     name="accion"
                     value="analizar"
+                    data-accion="analizar"
                     {disabled_analizar}>
               <i class="bi bi-bar-chart-line-fill me-2"></i>
               Analizar
             </button>
+
           </div>
 
         </form>
@@ -102730,54 +102813,234 @@ def ingreso():
     </div>
 
     <script>
-    function actualizarProgresoInstrumento() {{
-        const radios = document.querySelectorAll('input[type="radio"][name^="r_"]');
-        const nombres = [...new Set(Array.from(radios).map(r => r.name))];
-        const total = nombres.length;
+    (function() {{
 
-        let respondidas = 0;
-        nombres.forEach(nombre => {{
-            const marcado = document.querySelector(`input[name="${{nombre}}"]:checked`);
-            if (marcado) {{
-                respondidas++;
+        let ISO_BLOQUEAR_LOADER = false;
+
+        function isoOcultarLoaderGlobal() {{
+            const ids = [
+                "SGSI_PROGRESS_GLOBAL",
+                "globalLoader",
+                "loader",
+                "progressOverlay",
+                "sgsiProgressGlobal",
+                "globalProgress",
+                "overlayProgress",
+                "loadingOverlay"
+            ];
+
+            ids.forEach(function(id) {{
+                const el = document.getElementById(id);
+                if (el) {{
+                    el.style.display = "none";
+                    el.style.visibility = "hidden";
+                    el.style.opacity = "0";
+                    el.style.pointerEvents = "none";
+                    el.classList.add("d-none");
+                    el.classList.remove("show");
+                }}
+            }});
+
+            document.querySelectorAll(
+                ".modal-backdrop, " +
+                ".progress-overlay, " +
+                ".loader-overlay, " +
+                ".sgsi-loader, " +
+                ".sgsi-progress, " +
+                ".loading-overlay, " +
+                ".global-loader, " +
+                ".global-progress, " +
+                ".progress-global"
+            ).forEach(function(el) {{
+                el.style.display = "none";
+                el.style.visibility = "hidden";
+                el.style.opacity = "0";
+                el.style.pointerEvents = "none";
+                el.classList.add("d-none");
+                el.classList.remove("show");
+            }});
+
+            document.body.classList.remove("modal-open");
+            document.body.style.overflow = "";
+            document.body.style.paddingRight = "";
+        }}
+
+        function isoValidarConsecutivoRevision() {{
+            const input = document.getElementById("isoConsecutivoRevision");
+            const error = document.getElementById("isoConsecutivoRevisionError");
+
+            const valor = input ? input.value.trim() : "";
+
+            if (!valor) {{
+                ISO_BLOQUEAR_LOADER = true;
+                isoOcultarLoaderGlobal();
+
+                if (input) {{
+                    input.classList.add("is-invalid");
+                    input.setAttribute("aria-invalid", "true");
+                    input.focus();
+                }}
+
+                if (error) {{
+                    error.classList.remove("d-none");
+                    error.style.display = "block";
+                }}
+
+                return false;
+            }}
+
+            ISO_BLOQUEAR_LOADER = false;
+
+            if (input) {{
+                input.classList.remove("is-invalid");
+                input.setAttribute("aria-invalid", "false");
+            }}
+
+            if (error) {{
+                error.classList.add("d-none");
+                error.style.display = "none";
+            }}
+
+            return true;
+        }}
+
+        function actualizarProgresoInstrumento() {{
+            const radios = document.querySelectorAll('input[type="radio"][name^="r_"]');
+            const nombres = [...new Set(Array.from(radios).map(r => r.name))];
+            const total = nombres.length;
+
+            let respondidas = 0;
+
+            nombres.forEach(function(nombre) {{
+                const marcado = document.querySelector('input[name="' + nombre + '"]:checked');
+                if (marcado) {{
+                    respondidas++;
+                }}
+            }});
+
+            const porcentaje = total > 0 ? Math.round((respondidas / total) * 100) : 0;
+
+            const bar = document.getElementById("instrumentProgressBar");
+            const text = document.getElementById("instrumentProgressText");
+            const btnAnalizar = document.getElementById("btnAnalizar");
+
+            if (bar) {{
+                bar.style.width = porcentaje + "%";
+                bar.innerText = porcentaje + "%";
+                bar.setAttribute("aria-valuenow", porcentaje);
+            }}
+
+            if (text) {{
+                text.innerText = porcentaje + "%";
+            }}
+
+            if (btnAnalizar) {{
+                btnAnalizar.disabled = porcentaje < 100;
+                btnAnalizar.classList.toggle("disabled", porcentaje < 100);
+            }}
+        }}
+
+        /*
+          BLOQUEO DE LOADERS EXTERNOS:
+          Si en BASE existe showLoader(), showGlobalLoader(), mostrarLoader(), etc.,
+          se interceptan para que NO aparezcan cuando el consecutivo está vacío.
+        */
+        const posiblesLoaders = [
+            "showLoader",
+            "mostrarLoader",
+            "showGlobalLoader",
+            "mostrarProgresoGlobal",
+            "showProgress",
+            "openLoader",
+            "activarLoader",
+            "SGSI_showLoader"
+        ];
+
+        posiblesLoaders.forEach(function(nombreFuncion) {{
+            const original = window[nombreFuncion];
+
+            if (typeof original === "function" && !original.__isoInterceptado) {{
+                const wrapper = function() {{
+                    if (ISO_BLOQUEAR_LOADER || !isoValidarConsecutivoRevision()) {{
+                        isoOcultarLoaderGlobal();
+                        return false;
+                    }}
+
+                    return original.apply(this, arguments);
+                }};
+
+                wrapper.__isoInterceptado = true;
+                window[nombreFuncion] = wrapper;
             }}
         }});
 
-        const porcentaje = total > 0 ? Math.round((respondidas / total) * 100) : 0;
+        document.addEventListener("change", function(e) {{
+            if (e.target.matches('input[type="radio"][name^="r_"]')) {{
+                actualizarProgresoInstrumento();
+            }}
+        }});
 
-        const bar = document.getElementById("instrumentProgressBar");
-        const text = document.getElementById("instrumentProgressText");
-        const btnAnalizar = document.getElementById("btnAnalizar");
+        document.addEventListener("click", function(e) {{
+            const btn = e.target.closest(".iso-submit-btn");
 
-        if (bar) {{
-            bar.style.width = porcentaje + "%";
-            bar.innerText = porcentaje + "%";
-            bar.setAttribute("aria-valuenow", porcentaje);
-        }}
+            if (!btn) {{
+                return;
+            }}
 
-        if (text) {{
-            text.innerText = porcentaje + "%";
-        }}
+            if (!isoValidarConsecutivoRevision()) {{
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
 
-        if (btnAnalizar) {{
-            btnAnalizar.disabled = porcentaje < 100;
-            btnAnalizar.classList.toggle("disabled", porcentaje < 100);
-        }}
-    }}
+                ISO_BLOQUEAR_LOADER = true;
+                isoOcultarLoaderGlobal();
 
-    document.addEventListener("change", function(e) {{
-        if (e.target.matches('input[type="radio"][name^="r_"]')) {{
+                return false;
+            }}
+        }}, true);
+
+        window.addEventListener("DOMContentLoaded", function() {{
+            const form = document.getElementById("isoIngresoForm");
+            const input = document.getElementById("isoConsecutivoRevision");
+
+            if (input) {{
+                input.addEventListener("input", function() {{
+                    isoValidarConsecutivoRevision();
+                }});
+
+                input.addEventListener("blur", function() {{
+                    isoValidarConsecutivoRevision();
+                }});
+            }}
+
+            if (form) {{
+                form.addEventListener("submit", function(e) {{
+                    if (!isoValidarConsecutivoRevision()) {{
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+
+                        ISO_BLOQUEAR_LOADER = true;
+                        isoOcultarLoaderGlobal();
+
+                        return false;
+                    }}
+                }}, true);
+            }}
+
             actualizarProgresoInstrumento();
-        }}
-    }});
+            isoOcultarLoaderGlobal();
+        }});
 
-    window.addEventListener("DOMContentLoaded", function() {{
-        actualizarProgresoInstrumento();
-    }});
+        window.addEventListener("pageshow", function() {{
+            isoOcultarLoaderGlobal();
+        }});
+
+    }})();
     </script>
 
     <style>
-      body{{
+      body {{
         background-image:url('/static/img/ccsgsi.jpg');
         background-size:cover;
         background-position:center;
@@ -102785,16 +103048,13 @@ def ingreso():
         background-repeat:no-repeat;
       }}
 
-      .isoform-shell{{
+      .isoform-shell {{
         width:96%;
         max-width:1600px;
         margin:26px auto 24px auto;
       }}
 
-      /* =========================
-         HEADER SGSI REAL
-      ========================= */
-      .isoform-header-card{{
+      .isoform-header-card {{
         background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
         border-radius:18px;
         padding:16px 24px;
@@ -102808,7 +103068,7 @@ def ingreso():
         margin-bottom:14px;
       }}
 
-      .isoform-header-card::before{{
+      .isoform-header-card::before {{
         content:"";
         position:absolute;
         inset:0;
@@ -102817,7 +103077,7 @@ def ingreso():
           repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
       }}
 
-      .isoform-header-overlay{{
+      .isoform-header-overlay {{
         width:100%;
         display:flex;
         align-items:center;
@@ -102826,7 +103086,7 @@ def ingreso():
         z-index:1;
       }}
 
-      .isoform-header-overlay::before{{
+      .isoform-header-overlay::before {{
         content:"📌";
         width:54px;
         height:54px;
@@ -102841,7 +103101,7 @@ def ingreso():
         margin-right:14px;
       }}
 
-      .isoform-header-text::before{{
+      .isoform-header-text::before {{
         content:"SGSI · Evaluación ISO";
         display:inline-block;
         background:rgba(255,255,255,.18);
@@ -102853,22 +103113,19 @@ def ingreso():
         color:#fff;
       }}
 
-      .isoform-title{{
+      .isoform-title {{
         color:#fff;
         font-weight:950;
         font-size:1.32rem;
         text-shadow:0 3px 10px rgba(0,0,0,.35);
       }}
 
-      .isoform-subtitle{{
+      .isoform-subtitle {{
         color:rgba(255,255,255,.95);
         font-size:.78rem;
       }}
 
-      /* =========================
-         BOTONES
-      ========================= */
-      .isoform-header-actions{{
+      .isoform-header-actions {{
         display:flex;
         justify-content:center;
         gap:10px;
@@ -102876,7 +103133,7 @@ def ingreso():
         margin:10px 0 14px;
       }}
 
-      .isoform-btn-main{{
+      .isoform-btn-main {{
         background:#fff;
         color:#0f172a;
         border:1px solid #cfd8e3;
@@ -102886,15 +103143,12 @@ def ingreso():
         box-shadow:0 8px 16px rgba(15,23,42,.15);
       }}
 
-      .isoform-btn-main:hover{{
+      .isoform-btn-main:hover {{
         background:#edf5ff;
         color:#0b65d8;
       }}
 
-      /* =========================
-         CARD SGSI
-      ========================= */
-      .isoform-card{{
+      .isoform-card {{
         background:rgba(255,255,255,.96);
         border-radius:18px;
         backdrop-filter:blur(8px);
@@ -102902,11 +103156,11 @@ def ingreso():
         border:1px solid rgba(219,230,244,.9);
       }}
 
-      .isoform-card.p-4{{
+      .isoform-card.p-4 {{
         padding:18px !important;
       }}
 
-      .isoform-section-title{{
+      .isoform-section-title {{
         font-weight:950;
         font-size:.88rem;
         color:#1459a6;
@@ -102917,24 +103171,18 @@ def ingreso():
         margin-bottom:12px;
       }}
 
-      /* =========================
-         PROGRESO
-      ========================= */
-      .isoform-progress{{
+      .isoform-progress {{
         height:22px;
         border-radius:999px;
         overflow:hidden;
         background:#e5edf7;
       }}
 
-      .progress-bar{{
+      .progress-bar {{
         font-weight:900;
       }}
 
-      /* =========================
-         FORMULARIOS SGSI
-      ========================= */
-      .form-label{{
+      .form-label {{
         font-size:.72rem;
         font-weight:900;
         color:#1459a6;
@@ -102945,7 +103193,7 @@ def ingreso():
       }}
 
       .form-control,
-      .form-select{{
+      .form-select {{
         border-radius:10px;
         border:1px solid #d9e3f0;
         min-height:40px;
@@ -102953,42 +103201,70 @@ def ingreso():
       }}
 
       .form-control:focus,
-      .form-select:focus{{
+      .form-select:focus {{
         border-color:#3f86d6;
         box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
         background:#fff;
       }}
 
-      /* =========================
-         ACORDEÓN SGSI
-      ========================= */
-      .isoform-acc-item{{
+      .form-control.is-invalid {{
+        border-color:#dc3545 !important;
+        background:#fff5f5 !important;
+        box-shadow:0 0 0 .15rem rgba(220,53,69,.15) !important;
+      }}
+
+      .invalid-feedback {{
+        color:#b42318;
+        background:#fff1f1;
+        border:1px solid #ffd4d4;
+        border-radius:10px;
+        padding:8px 12px;
+      }}
+
+      .isoform-acc-item {{
         border:1px solid #dbe6f4;
         background:#fff;
         border-radius:16px;
         margin-bottom:14px;
         box-shadow:0 6px 14px rgba(0,0,0,.06);
+        overflow:hidden;
       }}
 
-      .isoform-acc-btn{{
+      .isoform-acc-btn {{
         background:#eef5ff;
         font-weight:900;
         padding:16px 18px;
         border-bottom:1px solid #dbe6f4;
       }}
 
-      .isoform-acc-btn:not(.collapsed){{
+      .isoform-acc-btn:not(.collapsed) {{
         background:#dbeafe;
       }}
 
-      .isoform-acc-body{{
+      .isoform-acc-inner {{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+      }}
+
+      .isoform-acc-title-wrap {{
+        display:flex;
+        align-items:center;
+        gap:4px;
+      }}
+
+      .isoform-acc-title {{
+        font-weight:950;
+        color:#0f172a;
+      }}
+
+      .isoform-acc-body {{
         padding:16px;
       }}
 
-      /* =========================
-         BLOQUES
-      ========================= */
-      .isoform-cat-block{{
+      .isoform-cat-block {{
         background:#f8fbff;
         border:1px solid #dbe6f4;
         border-radius:16px;
@@ -102996,7 +103272,29 @@ def ingreso():
         margin-bottom:14px;
       }}
 
-      .isoform-qcard{{
+      .isoform-cat-title {{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:12px;
+        margin-bottom:14px;
+        border-bottom:1px solid #e5edf7;
+        padding-bottom:10px;
+      }}
+
+      .isoform-cat-code {{
+        font-size:.72rem;
+        font-weight:950;
+        color:#1459a6;
+      }}
+
+      .isoform-cat-name {{
+        font-size:.95rem;
+        font-weight:950;
+        color:#0f172a;
+      }}
+
+      .isoform-qcard {{
         background:#fff;
         border:1px solid #e5edf7;
         border-radius:14px;
@@ -103004,60 +103302,82 @@ def ingreso():
         transition:.2s;
       }}
 
-      .isoform-qcard:hover{{
+      .isoform-qcard:hover {{
         transform:translateY(-2px);
         box-shadow:0 8px 18px rgba(0,0,0,.08);
       }}
 
-      /* =========================
-         OPCIONES RADIO
-      ========================= */
-      .isoform-radio-row{{
+      .isoform-qhead {{
+        margin-bottom:10px;
+      }}
+
+      .isoform-qtext {{
+        color:#0f172a;
+        font-weight:800;
+        font-size:.86rem;
+        line-height:1.45;
+      }}
+
+      .isoform-radio-row {{
         display:grid;
         grid-template-columns:repeat(4,1fr);
         gap:10px;
         margin-top:14px;
       }}
 
-      .isoform-radio-card{{
+      .isoform-radio-card {{
         background:#f8fafc;
         border:1px solid #dbe4ee;
         border-radius:12px;
         display:flex;
         justify-content:center;
         align-items:center;
+        gap:8px;
         padding:10px;
         font-weight:800;
         cursor:pointer;
+        transition:.2s;
       }}
 
-      .isoform-radio-card:hover{{
+      .isoform-radio-card:hover {{
         background:#eef6ff;
         border-color:#93c5fd;
       }}
 
-      /* =========================
-         RESPONSIVE
-      ========================= */
-      @media (max-width:1200px){{
-        .isoform-radio-row{{
+      .isoform-radio-card input:checked + span {{
+        color:#1459a6;
+        font-weight:950;
+      }}
+
+      @media (max-width:1200px) {{
+        .isoform-radio-row {{
           grid-template-columns:repeat(2,1fr);
         }}
       }}
 
-      @media (max-width:768px){{
-        .isoform-radio-row{{
+      @media (max-width:768px) {{
+        .isoform-radio-row {{
           grid-template-columns:1fr;
         }}
 
-        .isoform-header-overlay{{
+        .isoform-header-overlay {{
           flex-direction:column;
           text-align:center;
           gap:10px;
         }}
+
+        .isoform-header-overlay::before {{
+          margin-right:0;
+        }}
+
+        .isoform-acc-inner {{
+          flex-direction:column;
+          align-items:flex-start;
+        }}
       }}
     </style>
     """
+
     return render_template_string(BASE, title=APP_TITLE, content=content)
 
 # ===============================
@@ -110766,6 +111086,7 @@ def ingreso():
     respuestas_guardadas = cargar_respuestas_nist(draft.id) if draft else {}
 
     consecutivo_val = (draft.consecutivo if draft else "") or ""
+
     _, _, progreso_inicial = calcular_progreso_nist(
         preguntas,
         respuestas_db=respuestas_guardadas
@@ -110785,7 +111106,6 @@ def ingreso():
         inner = []
 
         for cat_code, payload in cats.items():
-            cat_title = f"{cat_code} — {payload.get('categoria','')}".strip(" —")
             rows = []
 
             for q in payload["items"]:
@@ -110930,14 +111250,18 @@ def ingreso():
            class="btn nistform-btn-main rounded-pill px-4 fw-bold">
           <i class="bi bi-arrow-left me-2"></i>Volver a Madurez NIST
         </a>
-
       </div>
 
       <div class="nistform-card p-4">
 
         {alerta_borrador}
 
-        <form method="POST" action="{url_for('madurez_nist.ingreso_guardar')}">
+        <form id="nistIngresoForm"
+              method="POST"
+              action="{url_for('madurez_nist.ingreso_guardar')}"
+              novalidate
+              autocomplete="off">
+
           <input type="hidden" name="draft_id" value="{draft.id if draft else ''}">
 
           <div class="nistform-section-title">
@@ -110945,15 +111269,22 @@ def ingreso():
           </div>
 
           <div class="mb-4">
-            <label class="text-black form-label fw-semibold">
-              Consecutivo de la Revisión
+            <label class="text-black form-label fw-semibold" for="nistConsecutivoRevision">
+              Consecutivo de la Revisión <span class="text-danger">*</span>
             </label>
 
             <input type="text"
                    class="form-control"
                    name="consecutivo"
+                   id="nistConsecutivoRevision"
                    value="{esc(consecutivo_val)}"
+                   autocomplete="off"
                    required>
+
+            <div id="nistConsecutivoRevisionError"
+                 class="invalid-feedback d-none fw-bold mt-2">
+              Debes ingresar el consecutivo de la Revisión.
+            </div>
           </div>
 
           <div class="nistform-section-title">
@@ -110988,19 +111319,21 @@ def ingreso():
 
           <div class="d-flex justify-content-center gap-3 flex-wrap mt-4">
             <button id="btnGuardarNist"
-                    class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold"
+                    class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold nist-submit-btn"
                     type="submit"
                     name="accion"
-                    value="guardar">
+                    value="guardar"
+                    data-accion="guardar">
               <i class="bi bi-save2 me-2"></i>
               Guardar
             </button>
 
             <button id="btnAnalizarNist"
-                    class="btn btn-primary btn-lg rounded-pill px-5 shadow fw-semibold"
+                    class="btn btn-primary btn-lg rounded-pill px-5 shadow fw-semibold nist-submit-btn"
                     type="submit"
                     name="accion"
                     value="analizar"
+                    data-accion="analizar"
                     {disabled_analizar}>
               <i class="bi bi-bar-chart-line-fill me-2"></i>
               Analizar
@@ -111014,50 +111347,225 @@ def ingreso():
     </div>
 
     <script>
-    function actualizarProgresoNist() {{
-        const radios = document.querySelectorAll('input[type="radio"][name^="st_"]');
-        const nombres = [...new Set(Array.from(radios).map(r => r.name))];
-        const total = nombres.length;
+    (function() {{
 
-        let respondidas = 0;
-        nombres.forEach(nombre => {{
-            const marcado = document.querySelector(`input[name="${{nombre}}"]:checked`);
-            if (marcado) {{
-                respondidas++;
+        let NIST_BLOQUEAR_LOADER = false;
+
+        function nistOcultarLoaderGlobal() {{
+            const ids = [
+                "SGSI_PROGRESS_GLOBAL",
+                "globalLoader",
+                "loader",
+                "progressOverlay",
+                "sgsiProgressGlobal",
+                "globalProgress",
+                "overlayProgress",
+                "loadingOverlay"
+            ];
+
+            ids.forEach(function(id) {{
+                const el = document.getElementById(id);
+                if (el) {{
+                    el.style.display = "none";
+                    el.style.visibility = "hidden";
+                    el.style.opacity = "0";
+                    el.style.pointerEvents = "none";
+                    el.classList.add("d-none");
+                    el.classList.remove("show");
+                }}
+            }});
+
+            document.querySelectorAll(
+                ".modal-backdrop, " +
+                ".progress-overlay, " +
+                ".loader-overlay, " +
+                ".sgsi-loader, " +
+                ".sgsi-progress, " +
+                ".loading-overlay, " +
+                ".global-loader, " +
+                ".global-progress, " +
+                ".progress-global"
+            ).forEach(function(el) {{
+                el.style.display = "none";
+                el.style.visibility = "hidden";
+                el.style.opacity = "0";
+                el.style.pointerEvents = "none";
+                el.classList.add("d-none");
+                el.classList.remove("show");
+            }});
+
+            document.body.classList.remove("modal-open");
+            document.body.style.overflow = "";
+            document.body.style.paddingRight = "";
+        }}
+
+        function nistValidarConsecutivoRevision() {{
+            const input = document.getElementById("nistConsecutivoRevision");
+            const error = document.getElementById("nistConsecutivoRevisionError");
+
+            const valor = input ? input.value.trim() : "";
+
+            if (!valor) {{
+                NIST_BLOQUEAR_LOADER = true;
+                nistOcultarLoaderGlobal();
+
+                if (input) {{
+                    input.classList.add("is-invalid");
+                    input.setAttribute("aria-invalid", "true");
+                    input.focus();
+                }}
+
+                if (error) {{
+                    error.classList.remove("d-none");
+                    error.style.display = "block";
+                }}
+
+                return false;
+            }}
+
+            NIST_BLOQUEAR_LOADER = false;
+
+            if (input) {{
+                input.classList.remove("is-invalid");
+                input.setAttribute("aria-invalid", "false");
+            }}
+
+            if (error) {{
+                error.classList.add("d-none");
+                error.style.display = "none";
+            }}
+
+            return true;
+        }}
+
+        function actualizarProgresoNist() {{
+            const radios = document.querySelectorAll('input[type="radio"][name^="st_"]');
+            const nombres = [...new Set(Array.from(radios).map(r => r.name))];
+            const total = nombres.length;
+
+            let respondidas = 0;
+
+            nombres.forEach(function(nombre) {{
+                const marcado = document.querySelector('input[name="' + nombre + '"]:checked');
+                if (marcado) {{
+                    respondidas++;
+                }}
+            }});
+
+            const porcentaje = total > 0 ? Math.round((respondidas / total) * 100) : 0;
+
+            const bar = document.getElementById("nistProgressBar");
+            const text = document.getElementById("nistProgressText");
+            const btnAnalizar = document.getElementById("btnAnalizarNist");
+
+            if (bar) {{
+                bar.style.width = porcentaje + "%";
+                bar.innerText = porcentaje + "%";
+                bar.setAttribute("aria-valuenow", porcentaje);
+            }}
+
+            if (text) {{
+                text.innerText = porcentaje + "%";
+            }}
+
+            if (btnAnalizar) {{
+                btnAnalizar.disabled = porcentaje < 100;
+                btnAnalizar.classList.toggle("disabled", porcentaje < 100);
+            }}
+        }}
+
+        const posiblesLoaders = [
+            "showLoader",
+            "mostrarLoader",
+            "showGlobalLoader",
+            "mostrarProgresoGlobal",
+            "showProgress",
+            "openLoader",
+            "activarLoader",
+            "SGSI_showLoader"
+        ];
+
+        posiblesLoaders.forEach(function(nombreFuncion) {{
+            const original = window[nombreFuncion];
+
+            if (typeof original === "function" && !original.__nistInterceptado) {{
+                const wrapper = function() {{
+                    if (NIST_BLOQUEAR_LOADER || !nistValidarConsecutivoRevision()) {{
+                        nistOcultarLoaderGlobal();
+                        return false;
+                    }}
+
+                    return original.apply(this, arguments);
+                }};
+
+                wrapper.__nistInterceptado = true;
+                window[nombreFuncion] = wrapper;
             }}
         }});
 
-        const porcentaje = total > 0 ? Math.round((respondidas / total) * 100) : 0;
+        document.addEventListener("change", function(e) {{
+            if (e.target.matches('input[type="radio"][name^="st_"]')) {{
+                actualizarProgresoNist();
+            }}
+        }});
 
-        const bar = document.getElementById("nistProgressBar");
-        const text = document.getElementById("nistProgressText");
-        const btnAnalizar = document.getElementById("btnAnalizarNist");
+        document.addEventListener("click", function(e) {{
+            const btn = e.target.closest(".nist-submit-btn");
 
-        if (bar) {{
-            bar.style.width = porcentaje + "%";
-            bar.innerText = porcentaje + "%";
-            bar.setAttribute("aria-valuenow", porcentaje);
-        }}
+            if (!btn) {{
+                return;
+            }}
 
-        if (text) {{
-            text.innerText = porcentaje + "%";
-        }}
+            if (!nistValidarConsecutivoRevision()) {{
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
 
-        if (btnAnalizar) {{
-            btnAnalizar.disabled = porcentaje < 100;
-            btnAnalizar.classList.toggle("disabled", porcentaje < 100);
-        }}
-    }}
+                NIST_BLOQUEAR_LOADER = true;
+                nistOcultarLoaderGlobal();
 
-    document.addEventListener("change", function(e) {{
-        if (e.target.matches('input[type="radio"][name^="st_"]')) {{
+                return false;
+            }}
+        }}, true);
+
+        window.addEventListener("DOMContentLoaded", function() {{
+            const form = document.getElementById("nistIngresoForm");
+            const input = document.getElementById("nistConsecutivoRevision");
+
+            if (input) {{
+                input.addEventListener("input", function() {{
+                    nistValidarConsecutivoRevision();
+                }});
+
+                input.addEventListener("blur", function() {{
+                    nistValidarConsecutivoRevision();
+                }});
+            }}
+
+            if (form) {{
+                form.addEventListener("submit", function(e) {{
+                    if (!nistValidarConsecutivoRevision()) {{
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+
+                        NIST_BLOQUEAR_LOADER = true;
+                        nistOcultarLoaderGlobal();
+
+                        return false;
+                    }}
+                }}, true);
+            }}
+
             actualizarProgresoNist();
-        }}
-    }});
+            nistOcultarLoaderGlobal();
+        }});
 
-    window.addEventListener("DOMContentLoaded", function() {{
-        actualizarProgresoNist();
-    }});
+        window.addEventListener("pageshow", function() {{
+            nistOcultarLoaderGlobal();
+        }});
+
+    }})();
     </script>
 
     <style>
@@ -111078,9 +111586,6 @@ def ingreso():
         margin:26px auto 24px auto;
       }}
 
-      /* =========================
-         HEADER ESTÁNDAR NIST FORMULARIO
-         ========================= */
       .nistform-header-card{{
         background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
         border-radius:18px;
@@ -111168,9 +111673,6 @@ def ingreso():
         line-height:1.25;
       }}
 
-      /* =========================
-         BOTONES SUPERIORES
-         ========================= */
       .nistform-header-actions{{
         display:flex;
         justify-content:center;
@@ -111207,28 +111709,6 @@ def ingreso():
         border-color:#9ec5fe !important;
       }}
 
-      .nistform-btn-soft{{
-        background:rgba(255,255,255,.88);
-        color:#111 !important;
-        border:1px solid rgba(108,117,125,.35);
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
-
-      .nistform-btn-soft:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-        border-color:#9ec5fe !important;
-      }}
-
-      .btn.rounded-pill,
-      .btn.pill,
-      .pill{{
-        border-radius:999px !important;
-      }}
-
-      /* =========================
-         CARDS
-         ========================= */
       .nistform-card,
       .card,
       .card-soft,
@@ -111245,53 +111725,15 @@ def ingreso():
         padding:1.5rem !important;
       }}
 
-      .card-body{{
-        padding:18px;
-      }}
-
-      .nistform-card .btn-primary,
-      .nistform-card .btn-outline-primary,
-      .nistform-card .btn-outline-secondary{{
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-        font-weight:900;
-      }}
-
-      /* =========================
-         TÍTULOS DE SECCIÓN
-         ========================= */
-      .nistform-section-title,
-      .section-head h5,
-      .card h5,
-      .card h6{{
+      .nistform-section-title{{
         font-weight:950;
         font-size:.95rem;
         color:#1459a6;
-        margin-bottom:0;
-      }}
-
-      .nistform-section-title{{
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
         margin-bottom:16px;
       }}
 
-      .section-head{{
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:12px;
-        flex-wrap:wrap;
-      }}
-
-      .section-sub,
-      .muted{{
-        color:#64748b;
-        font-size:.82rem;
-      }}
-
-      /* =========================
-         PROGRESO
-         ========================= */
       .nistform-progress{{
         height:22px;
         border-radius:999px;
@@ -111304,9 +111746,6 @@ def ingreso():
         font-weight:900;
       }}
 
-      /* =========================
-         FORMULARIOS
-         ========================= */
       .form-label{{
         font-size:.72rem;
         font-weight:900;
@@ -111345,9 +111784,20 @@ def ingreso():
         background:#ffffff;
       }}
 
-      /* =========================
-         ACORDEONES
-         ========================= */
+      .form-control.is-invalid{{
+        border-color:#dc3545 !important;
+        background:#fff5f5 !important;
+        box-shadow:0 0 0 .15rem rgba(220,53,69,.15) !important;
+      }}
+
+      .invalid-feedback{{
+        color:#b42318;
+        background:#fff1f1;
+        border:1px solid #ffd4d4;
+        border-radius:10px;
+        padding:8px 12px;
+      }}
+
       .nistform-accordion{{
         --bs-accordion-border-color:transparent;
         --bs-accordion-btn-focus-box-shadow:0 0 0 .2rem rgba(63,134,214,.12);
@@ -111380,10 +111830,6 @@ def ingreso():
         box-shadow:none !important;
       }}
 
-      .nistform-acc-btn::after{{
-        filter:none;
-      }}
-
       .nistform-acc-inner{{
         width:100%;
         display:flex;
@@ -111412,9 +111858,6 @@ def ingreso():
         padding:18px !important;
       }}
 
-      /* =========================
-         BLOQUES / CATEGORÍAS
-         ========================= */
       .nistform-cat-block{{
         background:#f8fafc;
         border:1px solid #dbe6f4;
@@ -111447,9 +111890,6 @@ def ingreso():
         line-height:1.25;
       }}
 
-      /* =========================
-         PREGUNTAS
-         ========================= */
       .nistform-qcard{{
         background:#ffffff;
         border:1px solid #dbe6f4;
@@ -111480,9 +111920,6 @@ def ingreso():
         line-height:1.45;
       }}
 
-      /* =========================
-         RADIOS
-         ========================= */
       .nistform-radio-row{{
         display:grid;
         grid-template-columns:repeat(4,1fr);
@@ -111515,59 +111952,6 @@ def ingreso():
         transform:scale(1.08);
       }}
 
-      /* =========================
-         TABLAS
-         ========================= */
-      .table-responsive{{
-        max-height:72vh;
-        overflow-y:auto;
-        overflow-x:auto;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:#ffffff;
-      }}
-
-      .table{{
-        margin-bottom:0;
-      }}
-
-      .table thead th{{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#ffffff !important;
-        font-size:.78rem;
-        font-weight:900;
-        border:none !important;
-        white-space:nowrap;
-        vertical-align:middle;
-        text-align:center;
-        padding:9px 8px;
-      }}
-
-      .table tbody td{{
-        vertical-align:top;
-        font-size:.82rem;
-        padding:9px 8px;
-        border-bottom:1px solid #e5edf7;
-        color:#1f2937;
-      }}
-
-      .table tbody tr:nth-child(even){{
-        background:#f8fbff;
-      }}
-
-      .table tbody tr:hover{{
-        background:#eef6ff;
-      }}
-
-      .wrap{{
-        white-space:normal !important;
-        word-break:break-word;
-        overflow-wrap:anywhere;
-      }}
-
       .badge{{
         border-radius:999px;
         font-size:.70rem;
@@ -111575,9 +111959,6 @@ def ingreso():
         font-weight:900;
       }}
 
-      /* =========================
-         RESPONSIVE
-         ========================= */
       @media (max-width:1200px){{
         .nistform-radio-row{{
           grid-template-columns:repeat(2,1fr);
@@ -111600,10 +111981,6 @@ def ingreso():
 
         .nistform-subtitle{{
           font-size:.76rem;
-        }}
-
-        .card-body{{
-          padding:14px;
         }}
       }}
 
@@ -111644,6 +112021,7 @@ def ingreso():
       }}
     </style>
     """
+
     return render_template_string(BASE, title="Ingreso NIST", content=content)
 
 
@@ -117090,9 +117468,6 @@ def ingreso():
     consecutivo = draft.consecutivo if draft else ""
     draft_id = draft.id if draft else ""
 
-    # =========================================================
-    # AGRUPAR POR DOMINIO / CAPÍTULO
-    # =========================================================
     dominios = {}
     for q in preguntas:
         dom = (q.dominio or "Sin dominio").strip()
@@ -117227,13 +117602,32 @@ def ingreso():
       </div>
 
       <div class="dataform-card p-4">
-        <form method="POST" action="{url_for('madurez_datos.ingreso_guardar')}">
+        <form id="datosIngresoForm"
+              method="POST"
+              action="{url_for('madurez_datos.ingreso_guardar')}"
+              novalidate
+              autocomplete="off">
+
           <input type="hidden" name="draft_id" value="{draft_id}">
 
           <div class="row g-3 align-items-end mb-4">
             <div class="col-md-5">
-              <label class="text-black form-label fw-bold">Consecutivo</label>
-              <input type="text" class="form-control" name="consecutivo" value="{escape(consecutivo)}" required>
+              <label class="text-black form-label fw-bold" for="datosConsecutivoRevision">
+                Consecutivo <span class="text-danger">*</span>
+              </label>
+
+              <input type="text"
+                     class="form-control"
+                     name="consecutivo"
+                     id="datosConsecutivoRevision"
+                     value="{escape(consecutivo)}"
+                     autocomplete="off"
+                     required>
+
+              <div id="datosConsecutivoRevisionError"
+                   class="invalid-feedback d-none fw-bold mt-2">
+                Debes ingresar el consecutivo de la Revisión.
+              </div>
             </div>
 
             <div class="col-md-7">
@@ -117260,14 +117654,21 @@ def ingreso():
           </div>
 
           <div class="d-flex justify-content-center gap-3 flex-wrap mt-4">
-            <button class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold"
-                    type="submit" name="accion" value="guardar">
+            <button class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold datos-submit-btn"
+                    type="submit"
+                    name="accion"
+                    value="guardar"
+                    data-accion="guardar">
               <i class="bi bi-save2 me-2"></i>Guardar
             </button>
 
             <button id="btnAnalizarDatos"
-                    class="btn btn-primary btn-lg rounded-pill px-5 shadow fw-semibold"
-                    type="submit" name="accion" value="analizar" {disabled_analizar}>
+                    class="btn btn-primary btn-lg rounded-pill px-5 shadow fw-semibold datos-submit-btn"
+                    type="submit"
+                    name="accion"
+                    value="analizar"
+                    data-accion="analizar"
+                    {disabled_analizar}>
               <i class="bi bi-bar-chart-line-fill me-2"></i>Analizar
             </button>
           </div>
@@ -117276,43 +117677,221 @@ def ingreso():
     </div>
 
     <script>
-    function actualizarProgresoDatos() {{
-        const radios = document.querySelectorAll('input[type="radio"][name^="st_"]');
-        const nombres = [...new Set(Array.from(radios).map(r => r.name))];
-        const total = nombres.length;
-        let respondidas = 0;
+    (function() {{
 
-        nombres.forEach(nombre => {{
-            const marcado = document.querySelector(`input[name="${{nombre}}"]:checked`);
-            if (marcado) respondidas++;
+        let DATOS_BLOQUEAR_LOADER = false;
+
+        function datosOcultarLoaderGlobal() {{
+            const ids = [
+                "SGSI_PROGRESS_GLOBAL",
+                "globalLoader",
+                "loader",
+                "progressOverlay",
+                "sgsiProgressGlobal",
+                "globalProgress",
+                "overlayProgress",
+                "loadingOverlay"
+            ];
+
+            ids.forEach(function(id) {{
+                const el = document.getElementById(id);
+                if (el) {{
+                    el.style.display = "none";
+                    el.style.visibility = "hidden";
+                    el.style.opacity = "0";
+                    el.style.pointerEvents = "none";
+                    el.classList.add("d-none");
+                    el.classList.remove("show");
+                }}
+            }});
+
+            document.querySelectorAll(
+                ".modal-backdrop, " +
+                ".progress-overlay, " +
+                ".loader-overlay, " +
+                ".sgsi-loader, " +
+                ".sgsi-progress, " +
+                ".loading-overlay, " +
+                ".global-loader, " +
+                ".global-progress, " +
+                ".progress-global"
+            ).forEach(function(el) {{
+                el.style.display = "none";
+                el.style.visibility = "hidden";
+                el.style.opacity = "0";
+                el.style.pointerEvents = "none";
+                el.classList.add("d-none");
+                el.classList.remove("show");
+            }});
+
+            document.body.classList.remove("modal-open");
+            document.body.style.overflow = "";
+            document.body.style.paddingRight = "";
+        }}
+
+        function datosValidarConsecutivoRevision() {{
+            const input = document.getElementById("datosConsecutivoRevision");
+            const error = document.getElementById("datosConsecutivoRevisionError");
+
+            const valor = input ? input.value.trim() : "";
+
+            if (!valor) {{
+                DATOS_BLOQUEAR_LOADER = true;
+                datosOcultarLoaderGlobal();
+
+                if (input) {{
+                    input.classList.add("is-invalid");
+                    input.setAttribute("aria-invalid", "true");
+                    input.focus();
+                }}
+
+                if (error) {{
+                    error.classList.remove("d-none");
+                    error.style.display = "block";
+                }}
+
+                return false;
+            }}
+
+            DATOS_BLOQUEAR_LOADER = false;
+
+            if (input) {{
+                input.classList.remove("is-invalid");
+                input.setAttribute("aria-invalid", "false");
+            }}
+
+            if (error) {{
+                error.classList.add("d-none");
+                error.style.display = "none";
+            }}
+
+            return true;
+        }}
+
+        function actualizarProgresoDatos() {{
+            const radios = document.querySelectorAll('input[type="radio"][name^="st_"]');
+            const nombres = [...new Set(Array.from(radios).map(r => r.name))];
+            const total = nombres.length;
+            let respondidas = 0;
+
+            nombres.forEach(function(nombre) {{
+                const marcado = document.querySelector('input[name="' + nombre + '"]:checked');
+                if (marcado) respondidas++;
+            }});
+
+            const porcentaje = total > 0 ? Math.round((respondidas / total) * 100) : 0;
+            const bar = document.getElementById("dataProgressBar");
+            const text = document.getElementById("dataProgressText");
+            const btnAnalizar = document.getElementById("btnAnalizarDatos");
+
+            if (bar) {{
+                bar.style.width = porcentaje + "%";
+                bar.innerText = porcentaje + "%";
+                bar.setAttribute("aria-valuenow", porcentaje);
+            }}
+
+            if (text) {{
+                text.innerText = porcentaje + "%";
+            }}
+
+            if (btnAnalizar) {{
+                btnAnalizar.disabled = porcentaje < 100;
+                btnAnalizar.classList.toggle("disabled", porcentaje < 100);
+            }}
+        }}
+
+        const posiblesLoaders = [
+            "showLoader",
+            "mostrarLoader",
+            "showGlobalLoader",
+            "mostrarProgresoGlobal",
+            "showProgress",
+            "openLoader",
+            "activarLoader",
+            "SGSI_showLoader"
+        ];
+
+        posiblesLoaders.forEach(function(nombreFuncion) {{
+            const original = window[nombreFuncion];
+
+            if (typeof original === "function" && !original.__datosInterceptado) {{
+                const wrapper = function() {{
+                    if (DATOS_BLOQUEAR_LOADER || !datosValidarConsecutivoRevision()) {{
+                        datosOcultarLoaderGlobal();
+                        return false;
+                    }}
+
+                    return original.apply(this, arguments);
+                }};
+
+                wrapper.__datosInterceptado = true;
+                window[nombreFuncion] = wrapper;
+            }}
         }});
 
-        const porcentaje = total > 0 ? Math.round((respondidas / total) * 100) : 0;
-        const bar = document.getElementById("dataProgressBar");
-        const text = document.getElementById("dataProgressText");
-        const btnAnalizar = document.getElementById("btnAnalizarDatos");
+        document.addEventListener("change", function(e) {{
+            if (e.target.matches('input[type="radio"][name^="st_"]')) {{
+                actualizarProgresoDatos();
+            }}
+        }});
 
-        if (bar) {{
-            bar.style.width = porcentaje + "%";
-            bar.innerText = porcentaje + "%";
-            bar.setAttribute("aria-valuenow", porcentaje);
-        }}
+        document.addEventListener("click", function(e) {{
+            const btn = e.target.closest(".datos-submit-btn");
 
-        if (text) text.innerText = porcentaje + "%";
+            if (!btn) {{
+                return;
+            }}
 
-        if (btnAnalizar) {{
-            btnAnalizar.disabled = porcentaje < 100;
-            btnAnalizar.classList.toggle("disabled", porcentaje < 100);
-        }}
-    }}
+            if (!datosValidarConsecutivoRevision()) {{
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
 
-    document.addEventListener("change", function(e) {{
-        if (e.target.matches('input[type="radio"][name^="st_"]')) actualizarProgresoDatos();
-    }});
+                DATOS_BLOQUEAR_LOADER = true;
+                datosOcultarLoaderGlobal();
 
-    window.addEventListener("DOMContentLoaded", function() {{
-        actualizarProgresoDatos();
-    }});
+                return false;
+            }}
+        }}, true);
+
+        window.addEventListener("DOMContentLoaded", function() {{
+            const form = document.getElementById("datosIngresoForm");
+            const input = document.getElementById("datosConsecutivoRevision");
+
+            if (input) {{
+                input.addEventListener("input", function() {{
+                    datosValidarConsecutivoRevision();
+                }});
+
+                input.addEventListener("blur", function() {{
+                    datosValidarConsecutivoRevision();
+                }});
+            }}
+
+            if (form) {{
+                form.addEventListener("submit", function(e) {{
+                    if (!datosValidarConsecutivoRevision()) {{
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+
+                        DATOS_BLOQUEAR_LOADER = true;
+                        datosOcultarLoaderGlobal();
+
+                        return false;
+                    }}
+                }}, true);
+            }}
+
+            actualizarProgresoDatos();
+            datosOcultarLoaderGlobal();
+        }});
+
+        window.addEventListener("pageshow", function() {{
+            datosOcultarLoaderGlobal();
+        }});
+
+    }})();
     </script>
 
     <style>
@@ -117511,6 +118090,20 @@ def ingreso():
         border-color:#3f86d6;
         box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
         background:#ffffff;
+      }}
+
+      .form-control.is-invalid{{
+        border-color:#dc3545 !important;
+        background:#fff5f5 !important;
+        box-shadow:0 0 0 .15rem rgba(220,53,69,.15) !important;
+      }}
+
+      .invalid-feedback{{
+        color:#b42318;
+        background:#fff1f1;
+        border:1px solid #ffd4d4;
+        border-radius:10px;
+        padding:8px 12px;
       }}
 
       .dataform-accordion{{
@@ -123827,6 +124420,7 @@ def ingreso():
 
     company_name = (draft.company_name if draft else "") or ""
     draft_id = draft.id if draft else ""
+    tiene_consecutivo = bool(company_name.strip())
 
     bloques_map = {}
     bloque_actual = "SIN_BLOQUE"
@@ -123855,6 +124449,7 @@ def ingreso():
                     "titulo": "Preguntas del bloque",
                     "items": []
                 })
+
             bloque_actual = bloque_codigo
             continue
 
@@ -123878,6 +124473,7 @@ def ingreso():
 
     for bloque_codigo in PCI_BLOCK_ORDER:
         data_bloque = bloques_map.get(bloque_codigo)
+
         if not data_bloque:
             continue
 
@@ -123887,6 +124483,7 @@ def ingreso():
 
         for _, sec in data_bloque["secciones"].items():
             items = sec.get("items", [])
+
             if not items:
                 continue
 
@@ -123923,29 +124520,29 @@ def ingreso():
 
                     <div class="pciform-radio-row">
                       <label class="pciform-radio-card">
-                        <input class="form-check-input" type="radio" name="st_{q.id}" value="NA" {chk_na}>
+                        <input class="form-check-input pci-control-instrumento" type="radio" name="st_{q.id}" value="NA" {chk_na}>
                         <span>N/A</span>
                       </label>
 
                       <label class="pciform-radio-card">
-                        <input class="form-check-input" type="radio" name="st_{q.id}" value="SI" {chk_si}>
+                        <input class="form-check-input pci-control-instrumento" type="radio" name="st_{q.id}" value="SI" {chk_si}>
                         <span>Sí</span>
                       </label>
 
                       <label class="pciform-radio-card">
-                        <input class="form-check-input" type="radio" name="st_{q.id}" value="PARCIAL" {chk_pa}>
+                        <input class="form-check-input pci-control-instrumento" type="radio" name="st_{q.id}" value="PARCIAL" {chk_pa}>
                         <span>Parcial</span>
                       </label>
 
                       <label class="pciform-radio-card">
-                        <input class="form-check-input" type="radio" name="st_{q.id}" value="NO" {chk_no}>
+                        <input class="form-check-input pci-control-instrumento" type="radio" name="st_{q.id}" value="NO" {chk_no}>
                         <span>No</span>
                       </label>
                     </div>
 
                     <div class="mt-3">
                       <label class="form-label small fw-bold text-black mb-1">Comentarios / evidencia</label>
-                      <textarea class="form-control form-control-sm"
+                      <textarea class="form-control form-control-sm pci-control-instrumento"
                                 name="c_{q.id}"
                                 rows="3"
                                 placeholder="Comentarios / evidencia">{saved_com}</textarea>
@@ -123992,6 +124589,7 @@ def ingreso():
               </div>
             </button>
           </h2>
+
           <div id="c{bloque_key}" class="accordion-collapse collapse {'show' if acc_id == 1 else ''}">
             <div class="accordion-body pciform-acc-body">
               {''.join(inner)}
@@ -124010,7 +124608,7 @@ def ingreso():
         </div>
         """
 
-    disabled_analizar = "" if progreso_inicial == 100 else "disabled"
+    disabled_analizar = "" if progreso_inicial == 100 and tiene_consecutivo else "disabled"
 
     content = f"""
     <div class="pciform-shell">
@@ -124038,7 +124636,13 @@ def ingreso():
 
         {alerta_borrador}
 
-        <form method="POST" action="{url_for('madurez_pci.ingreso_guardar_pci')}">
+        <form id="pciIngresoForm"
+              method="POST"
+              action="{url_for('madurez_pci.ingreso_guardar_pci')}"
+              novalidate
+              autocomplete="off"
+              onsubmit="return pciValidarAntesDeEnviar(event);">
+
           <input type="hidden" name="draft_id" value="{draft_id}">
 
           <div class="pciform-section-title">
@@ -124046,15 +124650,30 @@ def ingreso():
           </div>
 
           <div class="mb-4">
-            <label class="text-black form-label fw-semibold">
-              Consecutivo de la revisión
+            <label class="text-black form-label fw-semibold" for="pciConsecutivoRevision">
+              Consecutivo de la revisión <span class="text-danger">*</span>
             </label>
 
             <input type="text"
                    class="form-control"
                    name="company_name"
+                   id="pciConsecutivoRevision"
                    value="{esc(company_name)}"
-                   required>
+                   autocomplete="off"
+                   required
+                   oninput="pciActualizarBloqueoPorConsecutivo();"
+                   onblur="pciValidarConsecutivoRevision();">
+
+            <div id="pciConsecutivoRevisionError"
+                 class="invalid-feedback d-none fw-bold mt-2">
+              Debes ingresar el consecutivo de la Revisión.
+            </div>
+
+            <div id="pciBloqueoAviso"
+                 class="alert alert-warning rounded-4 mt-3 {'d-none' if tiene_consecutivo else ''}">
+              <i class="bi bi-exclamation-triangle-fill me-2"></i>
+              Primero debes ingresar el <strong>Consecutivo de la revisión</strong> para habilitar el instrumento.
+            </div>
           </div>
 
           <div class="pciform-section-title">
@@ -124079,29 +124698,35 @@ def ingreso():
             </div>
           </div>
 
-          <div class="pciform-section-title">
-            Instrumento de evaluación
-          </div>
+          <div id="pciZonaInstrumento" class="{'pci-zona-bloqueada' if not tiene_consecutivo else ''}">
+            <div class="pciform-section-title">
+              Instrumento de evaluación
+            </div>
 
-          <div class="accordion pciform-accordion" id="accPCI">
-            {''.join(acc_html)}
+            <div class="accordion pciform-accordion" id="accPCI">
+              {''.join(acc_html)}
+            </div>
           </div>
 
           <div class="d-flex justify-content-center gap-3 flex-wrap mt-4">
             <button id="btnGuardarPCI"
-                    class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold"
+                    class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold pci-submit-btn"
                     type="submit"
                     name="accion"
-                    value="guardar">
+                    value="guardar"
+                    data-accion="guardar"
+                    onclick="return pciValidarAntesDeEnviar(event);">
               <i class="bi bi-save2 me-2"></i>
               Guardar
             </button>
 
             <button id="btnAnalizarPCI"
-                    class="btn btn-primary btn-lg rounded-pill px-5 shadow fw-semibold"
+                    class="btn btn-primary btn-lg rounded-pill px-5 shadow fw-semibold pci-submit-btn"
                     type="submit"
                     name="accion"
                     value="analizar"
+                    data-accion="analizar"
+                    onclick="return pciValidarAntesDeEnviar(event);"
                     {disabled_analizar}>
               <i class="bi bi-bar-chart-line-fill me-2"></i>
               Analizar
@@ -124115,14 +124740,139 @@ def ingreso():
     </div>
 
     <script>
+    var PCI_BLOQUEAR_LOADER = true;
+
+    function pciOcultarLoaderGlobal() {{
+        const ids = [
+            "SGSI_PROGRESS_GLOBAL",
+            "globalLoader",
+            "loader",
+            "progressOverlay",
+            "sgsiProgressGlobal",
+            "globalProgress",
+            "overlayProgress",
+            "loadingOverlay"
+        ];
+
+        ids.forEach(function(id) {{
+            const el = document.getElementById(id);
+            if (el) {{
+                el.style.display = "none";
+                el.style.visibility = "hidden";
+                el.style.opacity = "0";
+                el.style.pointerEvents = "none";
+                el.classList.add("d-none");
+                el.classList.remove("show");
+            }}
+        }});
+
+        document.querySelectorAll(
+            ".modal-backdrop, " +
+            ".progress-overlay, " +
+            ".loader-overlay, " +
+            ".sgsi-loader, " +
+            ".sgsi-progress, " +
+            ".loading-overlay, " +
+            ".global-loader, " +
+            ".global-progress, " +
+            ".progress-global"
+        ).forEach(function(el) {{
+            el.style.display = "none";
+            el.style.visibility = "hidden";
+            el.style.opacity = "0";
+            el.style.pointerEvents = "none";
+            el.classList.add("d-none");
+            el.classList.remove("show");
+        }});
+
+        document.body.classList.remove("modal-open");
+        document.body.style.overflow = "";
+        document.body.style.paddingRight = "";
+    }}
+
+    function pciTieneConsecutivo() {{
+        const input = document.getElementById("pciConsecutivoRevision");
+        return !!(input && input.value && input.value.trim().length > 0);
+    }}
+
+    function pciValidarConsecutivoRevision() {{
+        const input = document.getElementById("pciConsecutivoRevision");
+        const error = document.getElementById("pciConsecutivoRevisionError");
+
+        if (!pciTieneConsecutivo()) {{
+            PCI_BLOQUEAR_LOADER = true;
+            pciOcultarLoaderGlobal();
+
+            if (input) {{
+                input.classList.add("is-invalid");
+                input.setAttribute("aria-invalid", "true");
+                input.focus();
+            }}
+
+            if (error) {{
+                error.classList.remove("d-none");
+                error.style.display = "block";
+            }}
+
+            return false;
+        }}
+
+        PCI_BLOQUEAR_LOADER = false;
+
+        if (input) {{
+            input.classList.remove("is-invalid");
+            input.setAttribute("aria-invalid", "false");
+        }}
+
+        if (error) {{
+            error.classList.add("d-none");
+            error.style.display = "none";
+        }}
+
+        return true;
+    }}
+
+    function pciActualizarBloqueoPorConsecutivo() {{
+        const habilitar = pciTieneConsecutivo();
+        const zona = document.getElementById("pciZonaInstrumento");
+        const aviso = document.getElementById("pciBloqueoAviso");
+        const btnGuardar = document.getElementById("btnGuardarPCI");
+
+        PCI_BLOQUEAR_LOADER = !habilitar;
+
+        document.querySelectorAll(".pci-control-instrumento").forEach(function(el) {{
+            el.disabled = !habilitar;
+        }});
+
+        if (zona) {{
+            zona.classList.toggle("pci-zona-bloqueada", !habilitar);
+        }}
+
+        if (aviso) {{
+            aviso.classList.toggle("d-none", habilitar);
+        }}
+
+        if (btnGuardar) {{
+            btnGuardar.disabled = !habilitar;
+            btnGuardar.classList.toggle("disabled", !habilitar);
+        }}
+
+        actualizarProgresoPCI();
+
+        if (!habilitar) {{
+            pciOcultarLoaderGlobal();
+        }}
+    }}
+
     function actualizarProgresoPCI() {{
         const radios = document.querySelectorAll('input[type="radio"][name^="st_"]');
         const nombres = [...new Set(Array.from(radios).map(r => r.name))];
         const total = nombres.length;
 
         let respondidas = 0;
-        nombres.forEach(nombre => {{
-            const marcado = document.querySelector(`input[name="${{nombre}}"]:checked`);
+
+        nombres.forEach(function(nombre) {{
+            const marcado = document.querySelector('input[name="' + nombre + '"]:checked');
             if (marcado) {{
                 respondidas++;
             }}
@@ -124145,23 +124895,109 @@ def ingreso():
         }}
 
         if (btnAnalizar) {{
-            btnAnalizar.disabled = porcentaje < 100;
-            btnAnalizar.classList.toggle("disabled", porcentaje < 100);
+            const bloquear = !pciTieneConsecutivo() || porcentaje < 100;
+            btnAnalizar.disabled = bloquear;
+            btnAnalizar.classList.toggle("disabled", bloquear);
         }}
     }}
 
+    function pciValidarAntesDeEnviar(e) {{
+        if (!pciValidarConsecutivoRevision()) {{
+            if (e) {{
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof e.stopImmediatePropagation === "function") {{
+                    e.stopImmediatePropagation();
+                }}
+            }}
+
+            PCI_BLOQUEAR_LOADER = true;
+            pciOcultarLoaderGlobal();
+            return false;
+        }}
+
+        PCI_BLOQUEAR_LOADER = false;
+        return true;
+    }}
+
     document.addEventListener("change", function(e) {{
+        if (!pciTieneConsecutivo() && e.target.matches(".pci-control-instrumento")) {{
+            e.preventDefault();
+            e.stopPropagation();
+            pciValidarConsecutivoRevision();
+            return false;
+        }}
+
         if (e.target.matches('input[type="radio"][name^="st_"]')) {{
             actualizarProgresoPCI();
         }}
-    }});
+    }}, true);
+
+    document.addEventListener("click", function(e) {{
+        const objetivo = e.target;
+
+        if (!pciTieneConsecutivo()) {{
+            if (
+                objetivo.closest(".pci-submit-btn") ||
+                objetivo.closest(".pciform-radio-card") ||
+                objetivo.closest("#pciZonaInstrumento")
+            ) {{
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof e.stopImmediatePropagation === "function") {{
+                    e.stopImmediatePropagation();
+                }}
+
+                pciValidarConsecutivoRevision();
+                pciOcultarLoaderGlobal();
+                return false;
+            }}
+        }}
+    }}, true);
 
     window.addEventListener("DOMContentLoaded", function() {{
+        pciActualizarBloqueoPorConsecutivo();
         actualizarProgresoPCI();
+        pciOcultarLoaderGlobal();
+    }});
+
+    window.addEventListener("pageshow", function() {{
+        pciActualizarBloqueoPorConsecutivo();
+        pciOcultarLoaderGlobal();
+    }});
+
+    const pciLoadersExternos = [
+        "showLoader",
+        "mostrarLoader",
+        "showGlobalLoader",
+        "mostrarProgresoGlobal",
+        "showProgress",
+        "openLoader",
+        "activarLoader",
+        "SGSI_showLoader"
+    ];
+
+    pciLoadersExternos.forEach(function(nombreFuncion) {{
+        const original = window[nombreFuncion];
+
+        if (typeof original === "function" && !original.__pciInterceptado) {{
+            const wrapper = function() {{
+                if (PCI_BLOQUEAR_LOADER || !pciTieneConsecutivo()) {{
+                    pciValidarConsecutivoRevision();
+                    pciOcultarLoaderGlobal();
+                    return false;
+                }}
+
+                return original.apply(this, arguments);
+            }};
+
+            wrapper.__pciInterceptado = true;
+            window[nombreFuncion] = wrapper;
+        }}
     }});
     </script>
 
-   <style>
+    <style>
       body{{
         background-image:url('/static/img/ccsgsi.jpg');
         background-size:cover;
@@ -124228,13 +125064,6 @@ def ingreso():
         margin-right:14px;
       }}
 
-      .pciform-header-text{{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }}
-
       .pciform-header-text::before{{
         content:"SGSI · Evaluación PCI-DSS";
         display:inline-block;
@@ -124251,16 +125080,12 @@ def ingreso():
         color:#ffffff !important;
         font-weight:950;
         font-size:1.32rem;
-        line-height:1.1;
-        margin:0 !important;
         text-shadow:0 3px 10px rgba(0,0,0,.35);
       }}
 
       .pciform-subtitle{{
         color:rgba(255,255,255,.95);
         font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
       }}
 
       .pciform-header-actions{{
@@ -124271,51 +125096,28 @@ def ingreso():
         margin:10px 0 14px;
       }}
 
-      .pciform-header-actions .btn,
-      .btn{{
-        border-radius:10px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
-
-      .pciform-btn-main,
-      .btn-outline-light{{
+      .pciform-btn-main{{
         background:#ffffff;
         color:#0f172a !important;
         border:1px solid #cfd8e3 !important;
+        font-weight:900;
       }}
 
-      .pciform-btn-main:hover,
-      .btn-outline-light:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-      }}
-
-      .pciform-card,
-      .card{{
+      .pciform-card{{
         background:rgba(255,255,255,.96) !important;
         border-radius:18px !important;
         backdrop-filter:blur(8px);
         box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
         border:1px solid rgba(219,230,244,.9) !important;
         overflow:hidden;
-      }}
-
-      .pciform-card.p-4,
-      .pciform-card{{
         padding:1.5rem !important;
       }}
 
-      .pciform-section-title,
-      .card h5,
-      .card h6{{
+      .pciform-section-title{{
         font-weight:950;
         font-size:.95rem;
         color:#1459a6;
         margin-bottom:14px;
-      }}
-
-      .pciform-section-title{{
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
       }}
@@ -124325,11 +125127,6 @@ def ingreso():
         border-radius:999px;
         overflow:hidden;
         background:#e5edf7;
-        box-shadow:inset 0 1px 3px rgba(15,23,42,.12);
-      }}
-
-      .progress-bar{{
-        font-weight:900;
       }}
 
       .form-label{{
@@ -124342,65 +125139,49 @@ def ingreso():
         border:1px solid #d9eaff;
         padding:6px 10px;
         border-radius:10px;
-        display:inline-block;
-        margin-bottom:6px;
       }}
 
-      .form-control,
-      .form-select{{
+      .form-control{{
         border-radius:10px;
         border:1px solid #d9e3f0;
         min-height:40px;
-        font-size:.86rem;
         background:#f8fafc;
-        box-shadow:none !important;
       }}
 
-      textarea.form-control{{
-        min-height:90px;
+      .form-control.is-invalid{{
+        border-color:#dc3545 !important;
+        background:#fff5f5 !important;
+        box-shadow:0 0 0 .15rem rgba(220,53,69,.15) !important;
       }}
 
-      .form-control:focus,
-      .form-select:focus{{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
+      .invalid-feedback{{
+        color:#b42318;
+        background:#fff1f1;
+        border:1px solid #ffd4d4;
+        border-radius:10px;
+        padding:8px 12px;
       }}
 
-      .pciform-accordion{{
-        --bs-accordion-border-color:transparent;
-        --bs-accordion-btn-focus-box-shadow:0 0 0 .2rem rgba(63,134,214,.12);
+      .pci-zona-bloqueada{{
+        opacity:.45;
+        filter:grayscale(.25);
+        pointer-events:none;
+        user-select:none;
       }}
 
-      .pciform-acc-item,
-      .accordion-item{{
+      .pciform-acc-item{{
         border:1px solid #dbe6f4 !important;
         background:#ffffff !important;
         margin-bottom:14px;
         border-radius:18px !important;
         overflow:hidden;
-        box-shadow:0 6px 14px rgba(15,23,42,.06);
       }}
 
-      .pciform-acc-btn,
-      .accordion-button{{
+      .pciform-acc-btn{{
         background:#eef5ff !important;
         color:#0f172a !important;
         font-weight:900;
         padding:18px 22px !important;
-        border-bottom:1px solid #dbe6f4;
-        box-shadow:none !important;
-      }}
-
-      .pciform-acc-btn:not(.collapsed),
-      .accordion-button:not(.collapsed){{
-        background:#dbeafe !important;
-        color:#1459a6 !important;
-        box-shadow:none !important;
-      }}
-
-      .pciform-acc-btn::after{{
-        filter:none;
       }}
 
       .pciform-acc-inner{{
@@ -124409,26 +125190,6 @@ def ingreso():
         justify-content:space-between;
         align-items:center;
         gap:12px;
-        padding-right:10px;
-      }}
-
-      .pciform-acc-title-wrap{{
-        display:flex;
-        align-items:center;
-        gap:6px;
-        min-width:0;
-      }}
-
-      .pciform-acc-title{{
-        font-size:1rem;
-        font-weight:950;
-        color:#1e293b;
-      }}
-
-      .pciform-acc-body,
-      .accordion-body{{
-        background:rgba(255,255,255,.96) !important;
-        padding:18px !important;
       }}
 
       .pciform-cat-block{{
@@ -124442,7 +125203,6 @@ def ingreso():
       .pciform-cat-title{{
         display:flex;
         justify-content:space-between;
-        align-items:flex-start;
         gap:12px;
         margin-bottom:14px;
         padding-bottom:10px;
@@ -124453,14 +125213,6 @@ def ingreso():
         font-size:.92rem;
         font-weight:950;
         color:#1459a6;
-        line-height:1.15;
-      }}
-
-      .pciform-cat-name{{
-        font-size:.88rem;
-        color:#334155;
-        margin-top:3px;
-        line-height:1.25;
       }}
 
       .pciform-qcard{{
@@ -124468,22 +125220,6 @@ def ingreso():
         border:1px solid #dbe6f4;
         border-radius:16px;
         padding:14px;
-        box-shadow:0 4px 10px rgba(15,23,42,.05);
-        height:100%;
-        transition:.2s ease;
-      }}
-
-      .pciform-qcard:hover{{
-        transform:translateY(-2px);
-        box-shadow:0 8px 20px rgba(15,23,42,.10);
-      }}
-
-      .pciform-qhead{{
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:10px;
-        margin-bottom:10px;
       }}
 
       .pciform-qtext{{
@@ -124510,32 +125246,7 @@ def ingreso():
         border-radius:12px;
         min-height:46px;
         font-weight:900;
-        color:#1f2937;
         cursor:pointer;
-        transition:.2s;
-        padding:8px 10px;
-      }}
-
-      .pciform-radio-card:hover{{
-        background:#eef6ff;
-        border-color:#93c5fd;
-      }}
-
-      .pciform-radio-card input[type="radio"]{{
-        transform:scale(1.08);
-      }}
-
-      .btn.rounded-pill,
-      .btn.pill,
-      .pill{{
-        border-radius:999px !important;
-      }}
-
-      .pciform-card .btn-primary,
-      .pciform-card .btn-outline-primary,
-      .pciform-card .btn-outline-secondary{{
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-        font-weight:900;
       }}
 
       .badge{{
@@ -124551,62 +125262,20 @@ def ingreso():
         }}
       }}
 
-      @media (max-width:991.98px){{
-        .pciform-shell{{
-          width:98%;
-          margin:8px auto 22px auto;
-        }}
-
-        .pciform-header-card{{
-          min-height:88px;
-        }}
-
-        .pciform-title{{
-          font-size:1.20rem;
-        }}
-
-        .pciform-subtitle{{
-          font-size:.76rem;
-        }}
-      }}
-
       @media (max-width:768px){{
+        .pciform-radio-row{{
+          grid-template-columns:1fr;
+        }}
+
         .pciform-header-overlay{{
           flex-direction:column;
           text-align:center;
           gap:10px;
         }}
-
-        .pciform-header-overlay::before{{
-          margin:0;
-        }}
-
-        .pciform-header-text::before{{
-          margin-left:auto;
-          margin-right:auto;
-        }}
-
-        .pciform-title,
-        .pciform-subtitle{{
-          text-align:center;
-        }}
-
-        .pciform-header-actions .btn{{
-          width:100%;
-        }}
-
-        .pciform-acc-inner,
-        .pciform-cat-title{{
-          flex-direction:column;
-          align-items:flex-start;
-        }}
-
-        .pciform-radio-row{{
-          grid-template-columns:1fr;
-        }}
       }}
     </style>
     """
+
     return render_template_string(BASE, title="Ingreso PCI-DSS", content=content)
 
 # =====================================================================
@@ -127058,9 +127727,16 @@ def _eliminar_runs_vacios_soc2(user_id: int | None = None):
 def soc2_pct_from_estados(estados: list[str]) -> float:
     vals = []
     for e in estados:
-        v = SOC2_STATUS_SCORE.get((e or "").strip().upper())
+        estado = (e or "").strip().upper()
+
+        # N/A no suma ni afecta el promedio
+        if estado == "NA":
+            continue
+
+        v = SOC2_STATUS_SCORE.get(estado)
         if v is not None:
             vals.append(v)
+
     return round(sum(vals) / len(vals), 2) if vals else 0.0
 
 
@@ -127963,7 +128639,7 @@ def parametros():
 
 
 # ============================================================
-# INGRESO DE INFORMACIÓN SOC 2 — USUARIO CON PERMISO / AUDITOR NO
+# INGRESO DE INFORMACIÓN SOC 2 — SIN LOADER GLOBAL EN VALIDACIÓN
 # ============================================================
 
 @soc2_madurez_bp.route("/ingreso", methods=["GET"])
@@ -127992,9 +128668,7 @@ def ingreso():
 
     draft = obtener_borrador_soc2(user.id if user else None)
     respuestas_guardadas = cargar_respuestas_soc2(draft.id) if draft else {}
-
     consecutivo_val = (draft.consecutivo if draft else "") or ""
-    _, _, progreso_inicial = calcular_progreso_soc2(preguntas, respuestas_db=respuestas_guardadas)
 
     grouped = _soc2_group_questions()
     acc_html = []
@@ -128016,11 +128690,6 @@ def ingreso():
             qtext = q.pregunta or ""
             cat_code = q.pregunta_codigo or q.seccion_codigo or bloque_codigo
 
-            chk_na = "checked" if saved_estado == "NA" else ""
-            chk_si = "checked" if saved_estado == "SI" else ""
-            chk_pa = "checked" if saved_estado == "PARCIAL" else ""
-            chk_no = "checked" if saved_estado == "NO" else ""
-
             rows.append(f"""
             <div class="col-12 col-xl-6">
               <div class="nistform-qcard h-100">
@@ -128035,19 +128704,22 @@ def ingreso():
 
                 <div class="nistform-radio-row">
                   <label class="nistform-radio-card">
-                    <input class="form-check-input" type="radio" name="st_{q.id}" value="NA" {chk_na}>
+                    <input class="form-check-input" type="radio" name="st_{q.id}" value="NA" {"checked" if saved_estado == "NA" else ""}>
                     <span>N/A</span>
                   </label>
+
                   <label class="nistform-radio-card">
-                    <input class="form-check-input" type="radio" name="st_{q.id}" value="SI" {chk_si}>
+                    <input class="form-check-input" type="radio" name="st_{q.id}" value="SI" {"checked" if saved_estado == "SI" else ""}>
                     <span>Sí</span>
                   </label>
+
                   <label class="nistform-radio-card">
-                    <input class="form-check-input" type="radio" name="st_{q.id}" value="PARCIAL" {chk_pa}>
+                    <input class="form-check-input" type="radio" name="st_{q.id}" value="PARCIAL" {"checked" if saved_estado == "PARCIAL" else ""}>
                     <span>Parcial</span>
                   </label>
+
                   <label class="nistform-radio-card">
-                    <input class="form-check-input" type="radio" name="st_{q.id}" value="NO" {chk_no}>
+                    <input class="form-check-input" type="radio" name="st_{q.id}" value="NO" {"checked" if saved_estado == "NO" else ""}>
                     <span>No</span>
                   </label>
                 </div>
@@ -128069,9 +128741,7 @@ def ingreso():
             <button class="accordion-button {'collapsed' if acc_id != 1 else ''}"
                     type="button"
                     data-bs-toggle="collapse"
-                    data-bs-target="#c{func_key}"
-                    aria-expanded="{'true' if acc_id == 1 else 'false'}"
-                    aria-controls="c{func_key}">
+                    data-bs-target="#c{func_key}">
               <div class="nistform-acc-inner">
                 <div>
                   <div class="nistform-func-title">{esc(titulo_bloque)}</div>
@@ -128098,18 +128768,33 @@ def ingreso():
 
     alerta_borrador = ""
     if draft:
-        alerta_borrador = f"""
+        alerta_borrador = """
         <div class="alert alert-info rounded-4 border-0 shadow-sm">
           <i class="bi bi-info-circle-fill me-2"></i>
           Tienes un borrador SOC 2 cargado automáticamente.
-          <strong>Progreso actual:</strong> {progreso_inicial}%.
         </div>
         """
 
-    disabled_analizar = "" if progreso_inicial == 100 else "disabled"
-
     content = f"""
-    <div class="nistform-shell">
+    <div class="nistform-shell soc2-no-global-loader">
+
+      <style>
+        #SGSI_PROGRESS_GLOBAL,
+        #globalLoader,
+        #loader,
+        #progressOverlay,
+        .modal-backdrop,
+        .progress-overlay,
+        .loader-overlay,
+        .sgsi-loader,
+        .sgsi-progress {{
+          display: none !important;
+          visibility: hidden !important;
+          opacity: 0 !important;
+          pointer-events: none !important;
+        }}
+      </style>
+
       <div class="nistform-header-card">
         <div class="nistform-header-overlay">
           <div class="nistform-header-text">
@@ -128123,6 +128808,7 @@ def ingreso():
         <a href="{url_for('madurez_soc2.inicio_soc2')}" class="btn btn-light rounded-pill px-4 fw-bold">
           <i class="bi bi-arrow-left me-2"></i>Volver
         </a>
+
         <a href="{url_for('madurez_soc2.historial')}" class="btn btn-outline-primary rounded-pill px-4 fw-bold">
           <i class="bi bi-clock-history me-2"></i>Historial
         </a>
@@ -128130,48 +128816,51 @@ def ingreso():
 
       <div class="nistform-card p-4">
         {alerta_borrador}
-        <form method="POST" action="{url_for('madurez_soc2.ingreso_guardar')}">
+
+        <form id="soc2IngresoForm"
+              method="POST"
+              action="{url_for('madurez_soc2.ingreso_guardar')}"
+              novalidate>
+
           <input type="hidden" name="draft_id" value="{draft.id if draft else ''}">
+          <input type="hidden" name="accion" id="soc2Accion" value="guardar">
 
           <div class="nistform-section-title">Información de la revisión</div>
-          <div class="mb-4">
-            <label class="text-black form-label fw-semibold">Consecutivo de la Revisión</label>
-            <input type="text" class="form-control form-control-lg rounded-pill" name="consecutivo" value="{esc(consecutivo_val)}" required>
-          </div>
 
-          <div class="nistform-section-title">📊 Progreso del instrumento</div>
           <div class="mb-4">
-            <div class="progress nistform-progress">
-              <div id="nistProgressBar"
-                   class="progress-bar progress-bar-striped progress-bar-animated"
-                   role="progressbar"
-                   style="width:{progreso_inicial}%"
-                   aria-valuemin="0"
-                   aria-valuemax="100"
-                   aria-valuenow="{progreso_inicial}">{progreso_inicial}%</div>
-            </div>
-            <div class="text-center small text-muted mt-2">
-              <span id="nistProgressText">{progreso_inicial}%</span> del instrumento completado
+            <label class="text-black form-label fw-semibold">
+              Consecutivo de la Revisión <span class="text-danger">*</span>
+            </label>
+
+            <input type="text"
+                   class="form-control form-control-lg rounded-pill"
+                   name="consecutivo"
+                   id="soc2Consecutivo"
+                   value="{esc(consecutivo_val)}"
+                   autocomplete="off">
+
+            <div id="soc2ConsecutivoError"
+                 class="invalid-feedback d-none fw-bold mt-2">
+              Debes ingresar el consecutivo de la Revisión.
             </div>
           </div>
 
           <div class="nistform-section-title">Instrumento de evaluación</div>
-          <div class="accordion nistform-accordion" id="accSoc2">{''.join(acc_html)}</div>
+
+          <div class="accordion nistform-accordion" id="accSoc2">
+            {''.join(acc_html)}
+          </div>
 
           <div class="d-flex justify-content-center gap-3 flex-wrap mt-4">
             <button class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold"
-                    type="submit"
-                    name="accion"
-                    value="guardar">
+                    type="button"
+                    id="btnGuardarSoc2">
               <i class="bi bi-save2 me-2"></i>Guardar
             </button>
 
             <button id="btnAnalizarSoc2"
                     class="btn btn-primary btn-lg rounded-pill px-5 shadow fw-semibold"
-                    type="submit"
-                    name="accion"
-                    value="analizar"
-                    {disabled_analizar}>
+                    type="button">
               <i class="bi bi-bar-chart-line-fill me-2"></i>Analizar
             </button>
           </div>
@@ -128180,49 +128869,166 @@ def ingreso():
     </div>
 
     <script>
-      document.addEventListener("DOMContentLoaded", function () {{
-        const total = {len(preguntas)};
-        const progressBar = document.getElementById("nistProgressBar");
-        const progressText = document.getElementById("nistProgressText");
-        const btnAnalizar = document.getElementById("btnAnalizarSoc2");
+    (function () {{
 
-        function updateProgress() {{
-          const names = new Set();
-          document.querySelectorAll('input[type="radio"][name^="st_"]:checked').forEach(function (r) {{
-            names.add(r.name);
-          }});
+      const total = {len(preguntas)};
 
-          const pct = total > 0 ? Math.round((names.size / total) * 100) : 0;
-
-          if (progressBar) {{
-            progressBar.style.width = pct + "%";
-            progressBar.setAttribute("aria-valuenow", pct);
-            progressBar.textContent = pct + "%";
+      function hideLoader() {{
+        const ids = ["SGSI_PROGRESS_GLOBAL", "globalLoader", "loader", "progressOverlay"];
+        ids.forEach(function(id) {{
+          const el = document.getElementById(id);
+          if (el) {{
+            el.style.display = "none";
+            el.style.visibility = "hidden";
+            el.style.opacity = "0";
+            el.style.pointerEvents = "none";
+            el.classList.add("d-none");
           }}
-
-          if (progressText) {{
-            progressText.textContent = pct + "%";
-          }}
-
-          if (btnAnalizar) {{
-            btnAnalizar.disabled = pct < 100;
-          }}
-        }}
-
-        document.querySelectorAll('input[type="radio"][name^="st_"]').forEach(function (r) {{
-          r.addEventListener("change", updateProgress);
         }});
 
-        updateProgress();
+        document.querySelectorAll(".modal-backdrop, .progress-overlay, .loader-overlay, .sgsi-loader, .sgsi-progress").forEach(function(el) {{
+          el.style.display = "none";
+          el.style.visibility = "hidden";
+          el.style.opacity = "0";
+          el.style.pointerEvents = "none";
+          el.classList.add("d-none");
+        }});
+      }}
+
+      function marcadas() {{
+        const names = new Set();
+        document.querySelectorAll('input[type="radio"][name^="st_"]:checked').forEach(function(r) {{
+          names.add(r.name);
+        }});
+        return names.size;
+      }}
+
+      function validarConsecutivo() {{
+        const consecutivo = document.getElementById("soc2Consecutivo");
+        const msg = document.getElementById("soc2ConsecutivoError");
+
+        if (!consecutivo || !consecutivo.value.trim()) {{
+          hideLoader();
+
+          if (consecutivo) {{
+            consecutivo.classList.add("is-invalid");
+            consecutivo.focus();
+          }}
+
+          if (msg) {{
+            msg.classList.remove("d-none");
+            msg.style.display = "block";
+          }}
+
+          return false;
+        }}
+
+        consecutivo.classList.remove("is-invalid");
+
+        if (msg) {{
+          msg.classList.add("d-none");
+          msg.style.display = "none";
+        }}
+
+        return true;
+      }}
+
+      function enviarSoc2(accion) {{
+        hideLoader();
+
+        if (!validarConsecutivo()) {{
+          hideLoader();
+          return false;
+        }}
+
+        if (accion === "analizar" && marcadas() < total) {{
+          hideLoader();
+          alert("Para analizar debes completar el 100% del instrumento.");
+          return false;
+        }}
+
+        const form = document.getElementById("soc2IngresoForm");
+        const accionInput = document.getElementById("soc2Accion");
+
+        if (!form) {{
+          return false;
+        }}
+
+        if (accionInput) {{
+          accionInput.value = accion;
+        }}
+
+        hideLoader();
+
+        HTMLFormElement.prototype.submit.call(form);
+        return false;
+      }}
+
+      window.soc2GuardarSinLoader = function(e) {{
+        if (e) {{
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+        }}
+        return enviarSoc2("guardar");
+      }};
+
+      window.soc2AnalizarSinLoader = function(e) {{
+        if (e) {{
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+        }}
+        return enviarSoc2("analizar");
+      }};
+
+      document.addEventListener("DOMContentLoaded", function () {{
+        hideLoader();
+
+        const btnGuardar = document.getElementById("btnGuardarSoc2");
+        const btnAnalizar = document.getElementById("btnAnalizarSoc2");
+        const consecutivo = document.getElementById("soc2Consecutivo");
+        const form = document.getElementById("soc2IngresoForm");
+
+        if (btnGuardar) {{
+          btnGuardar.onclick = soc2GuardarSinLoader;
+        }}
+
+        if (btnAnalizar) {{
+          btnAnalizar.onclick = soc2AnalizarSinLoader;
+        }}
+
+        if (consecutivo) {{
+          consecutivo.addEventListener("input", function() {{
+            validarConsecutivo();
+            hideLoader();
+          }});
+        }}
+
+        if (form) {{
+          form.addEventListener("submit", function(e) {{
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            hideLoader();
+            return false;
+          }}, true);
+        }}
+
+        hideLoader();
+        setInterval(hideLoader, 250);
       }});
+    }})();
     </script>
+
     {soc2_nistform_css()}
     """
+
     return render_template_string(BASE, title="Ingreso SOC 2", content=content)
 
 
 # ============================================================
-# GUARDAR / ANALIZAR — USUARIO CON PERMISO / AUDITOR NO
+# GUARDAR / ANALIZAR — SOC 2
 # ============================================================
 
 @soc2_madurez_bp.route("/ingreso/guardar", methods=["POST"])
@@ -128244,7 +129050,11 @@ def ingreso_guardar():
     preguntas = (
         Soc2MadurezPregunta.query
         .filter_by(activo=True, tipo="q")
-        .order_by(Soc2MadurezPregunta.bloque_codigo.asc(), Soc2MadurezPregunta.orden.asc(), Soc2MadurezPregunta.id.asc())
+        .order_by(
+            Soc2MadurezPregunta.bloque_codigo.asc(),
+            Soc2MadurezPregunta.orden.asc(),
+            Soc2MadurezPregunta.id.asc()
+        )
         .all()
     )
 
@@ -128269,6 +129079,7 @@ def ingreso_guardar():
                 Soc2MadurezCriterioAnalisis.query.filter_by(run_id=run.id).delete(synchronize_session=False)
                 db.session.delete(run)
                 db.session.commit()
+
             flash("⚠️ Debes responder al menos una pregunta antes de guardar o analizar.", "warning")
             return redirect(url_for("madurez_soc2.ingreso"))
 
@@ -128295,6 +129106,7 @@ def ingreso_guardar():
         Soc2MadurezRespuesta.query.filter_by(run_id=run.id).delete(synchronize_session=False)
 
         respuestas_insertadas = 0
+
         for q in preguntas:
             st = (request.form.get(f"st_{q.id}") or "").strip().upper()
             cm = (request.form.get(f"cm_{q.id}") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
@@ -128333,139 +129145,442 @@ def ingreso_guardar():
         flash(f"❌ Error guardando la revisión SOC 2: {e}", "danger")
         return redirect(url_for("madurez_soc2.ingreso"))
 
-
 # ============================================================
-# HISTORIAL SOC 2 — VISIBLE PARA USUARIOS CON PERMISO
+# HISTORIAL SOC 2 — COMPACTO SIN LOADER
 # ============================================================
 
 @soc2_madurez_bp.route("/historial", methods=["GET"])
 @login_required
 def historial():
+
     user = User.query.get(session.get("user_id"))
 
-    denied = soc2_check_access_or_redirect(user, "No tiene permiso para ver historial SOC 2.")
+    denied = soc2_check_access_or_redirect(
+        user,
+        "No tiene permiso para ver historial SOC 2."
+    )
+
     if denied:
         return denied
 
     runs = (
         Soc2MadurezRun.query
         .filter(Soc2MadurezRun.estado == "FINALIZADO")
-        .order_by(Soc2MadurezRun.created_at.desc(), Soc2MadurezRun.id.desc())
+        .order_by(
+            Soc2MadurezRun.created_at.desc(),
+            Soc2MadurezRun.id.desc()
+        )
         .all()
     )
 
+    # =========================================================
+    # BOTÓN NUEVA REVISIÓN
+    # =========================================================
     nueva_revision_btn = ""
+
     if soc2_user_can_execute(user):
+
         nueva_revision_btn = f"""
         <a href="{url_for('madurez_soc2.ingreso')}"
-           class="btn btn-primary rounded-pill px-4 fw-bold">
-          <i class="bi bi-plus-circle me-2"></i>Nueva revisión
+           class="btn btn-primary btn-sm rounded-pill px-3 fw-bold shadow-sm soc2-no-loader">
+
+          <i class="bi bi-plus-circle me-1"></i>
+          Nueva revisión
+
         </a>
         """
 
+    # =========================================================
+    # FILAS
+    # =========================================================
     rows = []
 
-    for r in runs:
-        nivel = soc2_resolver_nivel(r.pct_general)
+    for run in runs:
 
-        acciones = f"""
-        <a href="{url_for('madurez_soc2.detalle', run_id=r.id)}"
-           class="btn btn-sm btn-primary rounded-pill px-3">
-          <i class="bi bi-eye me-1"></i>Ver
-        </a>
+        nivel = soc2_resolver_nivel(run.pct_general or 0)
 
-        <a href="{url_for('madurez_soc2.exportar_pdf', run_id=r.id)}"
-           class="btn btn-sm btn-danger rounded-pill px-3">
-          <i class="bi bi-file-earmark-pdf me-1"></i>PDF
-        </a>
+        badge = f"""
+        <span class="soc2hist-badge"
+              style="background:{nivel.get('color','#6c757d')};">
+
+          {escape(nivel.get('nivel','Sin nivel'))}
+
+        </span>
         """
 
+        eliminar_btn = ""
 
-        acciones = f"""
-        <a href="{url_for('madurez_soc2.detalle', run_id=r.id)}"
-           class="btn btn-sm btn-primary rounded-pill px-3">
-          <i class="bi bi-eye me-1"></i>Ver
-        </a>
+        if soc2_user_can_execute(user):
 
-        <a href="{url_for('madurez_soc2.exportar_pdf', run_id=r.id)}"
-           class="btn btn-sm btn-danger rounded-pill px-3">
-          <i class="bi bi-file-earmark-pdf me-1"></i>PDF
-        </a>
-        """
+            eliminar_btn = f"""
+            <form method="POST"
+                  action="{url_for('madurez_soc2.eliminar_run', run_id=run.id)}"
+                  class="d-inline soc2-no-loader"
+                  onsubmit="return confirm('¿Seguro que deseas eliminar esta revisión SOC 2?');">
+
+              <button type="submit"
+                      class="btn btn-danger btn-xs soc2hist-btn">
+
+                <i class="bi bi-trash"></i>
+                Eliminar
+
+              </button>
+
+            </form>
+            """
 
         rows.append(f"""
         <tr>
-          <td class="fw-bold">{escape(r.consecutivo or r.company_name or '')}</td>
-          <td>{r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else ''}</td>
+
+          <td class="fw-semibold soc2hist-text-main">
+            {escape(run.consecutivo or '')}
+          </td>
+
+          <td class="text-center soc2hist-text">
+            {run.created_at.strftime('%Y-%m-%d %H:%M') if run.created_at else ''}
+          </td>
+
           <td class="text-center">
-            <span class="badge rounded-pill"
-                  style="background:{nivel.get('color', '#6c757d')}; color:#fff;">
-              {float(r.pct_general or 0):.2f}%
+            <span class="soc2hist-pct">
+              {float(run.pct_general or 0):.2f}%
             </span>
           </td>
-          <td>{escape(nivel.get('nivel', ''))}</td>
-          <td>{escape(r.estado or '')}</td>
-          <td class="text-end">{acciones}</td>
+
+          <td class="text-center">
+            {badge}
+          </td>
+
+          <td class="text-center">
+
+            <div class="d-flex justify-content-center gap-1 flex-wrap">
+
+              <a href="{url_for('madurez_soc2.detalle', run_id=run.id)}"
+                 class="btn btn-primary btn-xs soc2hist-btn soc2-no-loader">
+
+                <i class="bi bi-eye"></i>
+                Ver
+
+              </a>
+
+              {eliminar_btn}
+
+            </div>
+
+          </td>
+
         </tr>
         """)
 
-    empty_row = """
-    <tr>
-      <td colspan="6" class="text-center text-muted py-4">
-        No hay revisiones SOC 2 finalizadas.
-      </td>
-    </tr>
+    # =========================================================
+    # VACÍO
+    # =========================================================
+    if not rows:
+
+        rows.append("""
+        <tr>
+          <td colspan="5"
+              class="text-center text-muted py-4">
+
+            No existen revisiones SOC 2 finalizadas.
+
+          </td>
+        </tr>
+        """)
+
+    # =========================================================
+    # HTML
+    # =========================================================
+    content = f"""
+
+    <div class="soc2hist-shell">
+
+      <!-- HEADER -->
+      <div class="soc2hist-header-card">
+
+        <div class="soc2hist-header-overlay">
+
+          <div class="soc2hist-header-text">
+
+            <h3 class="soc2hist-title m-0">
+              Historial de Revisiones — SOC 2
+            </h3>
+
+            <div class="soc2hist-subtitle">
+              Consulta de evaluaciones históricas y resultados consolidados.
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- BOTONES -->
+      <div class="soc2hist-header-actions">
+
+        <a href="{url_for('madurez_soc2.inicio_soc2')}"
+           class="btn btn-light btn-sm rounded-pill px-3 fw-bold shadow-sm soc2-no-loader">
+
+          <i class="bi bi-arrow-left me-1"></i>
+          Volver
+
+        </a>
+
+        {nueva_revision_btn}
+
+      </div>
+
+      <!-- TABLA -->
+      <div class="soc2hist-card">
+
+        <div class="soc2hist-section-title">
+          Revisiones finalizadas
+        </div>
+
+        <div class="table-responsive">
+
+          <table class="table table-hover align-middle soc2hist-table">
+
+            <thead>
+              <tr>
+                <th>Consecutivo</th>
+                <th class="text-center">Fecha</th>
+                <th class="text-center">% Cumplimiento</th>
+                <th class="text-center">Nivel</th>
+                <th class="text-center">Acciones</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {''.join(rows)}
+            </tbody>
+
+          </table>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- =================================================== -->
+    <!-- CSS -->
+    <!-- =================================================== -->
+
+    <style>
+
+      body {{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }}
+
+      .soc2hist-shell {{
+        width:94%;
+        max-width:1180px;
+        margin:8px auto 24px auto;
+      }}
+
+      .soc2hist-header-card {{
+        background:linear-gradient(
+          135deg,
+          #2f6fb6 0%,
+          #3f86d6 55%,
+          #5aa3ea 100%
+        );
+
+        height:72px;
+
+        display:flex;
+        align-items:center;
+        justify-content:center;
+
+        border-radius:16px;
+
+        box-shadow:0 10px 24px rgba(0,0,0,.24);
+
+        margin-bottom:10px;
+        overflow:hidden;
+      }}
+
+      .soc2hist-header-overlay {{
+        width:100%;
+        height:100%;
+
+        display:flex;
+        align-items:center;
+        justify-content:center;
+
+        text-align:center;
+
+        background:rgba(0,0,0,.08);
+
+        padding:6px 18px;
+      }}
+
+      .soc2hist-title {{
+        color:#fff;
+        font-size:1.28rem;
+        font-weight:800;
+        line-height:1.1;
+        text-shadow:0 2px 8px rgba(0,0,0,.28);
+      }}
+
+      .soc2hist-subtitle {{
+        color:rgba(255,255,255,.94);
+        font-size:.78rem;
+        margin-top:3px;
+        font-weight:500;
+      }}
+
+      .soc2hist-header-actions {{
+        display:flex;
+        justify-content:center;
+        align-items:center;
+        gap:8px;
+        flex-wrap:wrap;
+        margin:8px 0 10px 0;
+      }}
+
+      .soc2hist-card {{
+        background:rgba(255,255,255,.95);
+        border:1px solid rgba(255,255,255,.60);
+        border-radius:16px;
+        box-shadow:0 10px 24px rgba(0,0,0,.20);
+        padding:12px;
+        overflow:hidden;
+      }}
+
+      .soc2hist-section-title {{
+        color:#0f3d68;
+        font-size:.92rem;
+        font-weight:800;
+        margin-bottom:8px;
+        padding-bottom:6px;
+        border-bottom:1px solid rgba(15,61,104,.12);
+      }}
+
+      .soc2hist-table {{
+        margin-bottom:0;
+        font-size:.80rem;
+      }}
+
+      .soc2hist-table thead th {{
+        background:#0f3d68;
+        color:#fff;
+        font-size:.74rem;
+        font-weight:800;
+        padding:7px 8px;
+        vertical-align:middle;
+        white-space:nowrap;
+      }}
+
+      .soc2hist-table tbody td {{
+        padding:6px 8px;
+        vertical-align:middle;
+        background:rgba(255,255,255,.96);
+        border-bottom:1px solid rgba(15,61,104,.08);
+      }}
+
+      .soc2hist-table tbody tr:hover td {{
+        background:#eef6ff;
+      }}
+
+      .soc2hist-text-main {{
+        color:#111827;
+        font-size:.80rem;
+      }}
+
+      .soc2hist-text {{
+        color:#374151;
+        font-size:.76rem;
+      }}
+
+      .soc2hist-pct {{
+        color:#0d6efd;
+        font-weight:800;
+        font-size:.80rem;
+      }}
+
+      .soc2hist-badge {{
+        display:inline-block;
+        color:#fff;
+        font-size:.68rem;
+        font-weight:800;
+        padding:4px 8px;
+        border-radius:999px;
+        line-height:1;
+        white-space:nowrap;
+      }}
+
+      .soc2hist-btn {{
+        border-radius:999px !important;
+        padding:3px 8px !important;
+        font-size:.70rem !important;
+        font-weight:700 !important;
+        line-height:1.2 !important;
+      }}
+
+      .btn-xs {{
+        --bs-btn-padding-y:.16rem;
+        --bs-btn-padding-x:.40rem;
+        --bs-btn-font-size:.70rem;
+      }}
+
+    </style>
+
+    <!-- =================================================== -->
+    <!-- DESACTIVAR LOADER -->
+    <!-- =================================================== -->
+
+    <script>
+
+      document.addEventListener("DOMContentLoaded", function() {{
+
+        // ==========================================
+        // QUITAR OVERLAY GLOBAL
+        // ==========================================
+        const overlays = [
+          "SGSI_PROGRESS_GLOBAL",
+          "globalLoader",
+          "loader",
+          "progressOverlay"
+        ];
+
+        overlays.forEach(function(id) {{
+
+          const el = document.getElementById(id);
+
+          if (el) {{
+            el.style.display = "none";
+            el.style.visibility = "hidden";
+            el.classList.add("d-none");
+          }}
+
+        }});
+
+        // ==========================================
+        // DESACTIVAR SHOWLOADER
+        // ==========================================
+        document.querySelectorAll(".soc2-no-loader").forEach(function(el) {{
+
+          el.removeAttribute("onclick");
+          el.onclick = null;
+
+        }});
+
+      }});
+
+    </script>
     """
 
-    content = f"""
-<div class="nisthist-shell">
-
-  <div class="nisthist-header-card">
-    <div class="nisthist-header-overlay">
-      <div class="nisthist-header-text">
-        <h3 class="nisthist-title m-0">Historial de Revisiones — SOC 2</h3>
-        <div class="nisthist-subtitle">
-          Consulta de evaluaciones finalizadas y resultados ejecutivos.
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="nisthist-header-actions">
-    <a href="{url_for('madurez_soc2.inicio_soc2')}"
-       class="btn nisthist-btn-main rounded-pill px-4 fw-bold">
-      <i class="bi bi-arrow-left me-2"></i>Volver
-    </a>
-
-    {nueva_revision_btn}
-  </div>
-
-  <div class="nisthist-card p-4">
-    <div class="table-responsive">
-      <table class="table table-hover align-middle">
-        <thead>
-          <tr>
-            <th>Consecutivo</th>
-            <th>Fecha</th>
-            <th class="text-center">Cumplimiento</th>
-            <th>Nivel</th>
-            <th>Estado</th>
-            <th class="text-end">Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          {''.join(rows) if rows else empty_row}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-</div>
-
-{soc2_nist_css('nisthist', '🕘')}
-"""
-
-    return render_template_string(BASE, title="Historial SOC 2", content=content)
+    return render_template_string(
+        BASE,
+        title="Historial SOC 2",
+        content=content
+    )
 
 
 # ============================================================
