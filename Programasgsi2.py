@@ -8434,6 +8434,7 @@ def filtrar_items_menu(items, usuario_actual):
 
 # ============================================================
 # MENÚ GLOBAL SGSI SIEMPRE VISIBLE EN TODOS LOS MÓDULOS
+# CON APERTURA PERSISTENTE, RESALTADO EXACTO Y SCROLL GUARDADO
 # ============================================================
 
 def _sgsi_build_global_menu_html():
@@ -8446,23 +8447,498 @@ def _sgsi_build_global_menu_html():
         if not usuario_actual:
             return ""
 
+        current_path = (request.path or "/").split("?")[0].rstrip("/")
+        if not current_path:
+            current_path = "/"
+
+        current_endpoint = (request.endpoint or "").strip()
+
+        # ============================================================
+        # Reglas exactas por opción del menú
+        # IMPORTANTE:
+        # - No usar /bcp solo para dashboard porque prende todo BCP.
+        # - No usar /madurez como prefijo con "_" porque prende madurez_nist.
+        # - No usar endpoint plan_remediacion como prefijo amplio porque prende competencias.
+        # ============================================================
+        MENU_ACTIVE_RULES = {
+            # Gobierno / Dirección
+            "Declaración de Aplicabilidad (SoA)": {
+                "paths": ["/soa"],
+                "endpoints": ["soa"]
+            },
+            "Gestión de Riesgos": {
+                "paths": ["/riesgos_menu", "/riesgos", "/riesgo"],
+                "endpoints": ["riesgos_menu", "riesgos", "riesgo", "riesgo_matriz", "riesgo_nuevo", "riesgo_editar"]
+            },
+            "Objetivos del Sistema de Gestión": {
+                "paths": ["/objetivos_menu", "/objetivos", "/objetivo"],
+                "endpoints": ["objetivos_menu", "objetivos", "objetivo"]
+            },
+            "Partes Interesadas": {
+                "paths": ["/partes_menu", "/partes", "/parte", "/partes_interesadas", "/parte_interesada"],
+                "endpoints": ["partes_menu", "partes", "parte", "partes_interesadas", "parte_interesada"]
+            },
+            "Contexto Interno": {
+                "paths": ["/contexto_interno_menu", "/contexto_interno"],
+                "endpoints": ["contexto_interno_menu", "contexto_interno"]
+            },
+            "Contexto Externo": {
+                "paths": ["/contexto_externo_menu", "/contexto_externo"],
+                "endpoints": ["contexto_externo_menu", "contexto_externo"]
+            },
+            "DOFA": {
+                "paths": ["/dofa_menu", "/dofa"],
+                "endpoints": ["dofa_menu", "dofa"]
+            },
+            "PESI": {
+                "paths": ["/pesi"],
+                "endpoints": ["pesi"]
+            },
+            "Informe Revisión por la Dirección": {
+                "paths": ["/revision_direccion"],
+                "endpoints": ["revision_direccion"]
+            },
+
+            # Documentación
+            "Listado Maestro de Documentos": {
+                "paths": ["/docs_menu", "/docs", "/documentos"],
+                "endpoints": ["docs_menu", "docs", "documentos"]
+            },
+            "Registro de Comunicaciones": {
+                "paths": ["/comunicaciones_menu", "/comunicaciones"],
+                "endpoints": ["comunicaciones_menu", "comunicaciones"]
+            },
+            "Requisitos Legales": {
+                "paths": ["/requisitos_menu", "/requisitos", "/requisito_legal", "/req_legal"],
+                "endpoints": ["requisitos_menu", "requisitos", "requisito_legal", "req_legal"]
+            },
+
+            # Operación y Control
+            "Gestión de Activos de Información": {
+                "paths": [
+                    "/inventario_software_menu", "/inventario_software",
+                    "/inventario_informacion_menu", "/inventario_informacion",
+                    "/inventario_datos_personales_menu", "/inventario_datos_personales",
+                    "/inventario_fisico_menu", "/inventario_fisico",
+                    "/valor_confidencialidad",
+                    "/valor_integridad",
+                    "/valor_disponibilidad",
+                    "/valor_criticidad_activo",
+                    "/duenos_info"
+                ],
+                "endpoints": [
+                    "inventario_software",
+                    "inventario_informacion",
+                    "inventario_datos_personales",
+                    "inventario_fisico",
+                    "valor_confidencialidad",
+                    "valor_integridad",
+                    "valor_disponibilidad",
+                    "valor_criticidad_activo",
+                    "duenos_info"
+                ]
+            },
+            "Matrices de Activos": {
+                "paths": [
+                    "/inventario_software_menu", "/inventario_software",
+                    "/inventario_informacion_menu", "/inventario_informacion",
+                    "/inventario_datos_personales_menu", "/inventario_datos_personales",
+                    "/inventario_fisico_menu", "/inventario_fisico"
+                ],
+                "endpoints": [
+                    "inventario_software",
+                    "inventario_informacion",
+                    "inventario_datos_personales",
+                    "inventario_fisico"
+                ]
+            },
+            "Inventario de Software": {
+                "paths": ["/inventario_software_menu", "/inventario_software"],
+                "endpoints": ["inventario_software"]
+            },
+            "Inventario de Información": {
+                "paths": ["/inventario_informacion_menu", "/inventario_informacion"],
+                "endpoints": ["inventario_informacion"]
+            },
+            "Inventario de Datos Personales": {
+                "paths": ["/inventario_datos_personales_menu", "/inventario_datos_personales"],
+                "endpoints": ["inventario_datos_personales"]
+            },
+            "Inventario de Físico": {
+                "paths": ["/inventario_fisico_menu", "/inventario_fisico"],
+                "endpoints": ["inventario_fisico"]
+            },
+            "Tablas de Valoración": {
+                "paths": ["/valor_confidencialidad", "/valor_integridad", "/valor_disponibilidad", "/valor_criticidad_activo"],
+                "endpoints": ["valor_confidencialidad", "valor_integridad", "valor_disponibilidad", "valor_criticidad_activo"]
+            },
+            "Confidencialidad": {
+                "paths": ["/valor_confidencialidad"],
+                "endpoints": ["valor_confidencialidad"]
+            },
+            "Integridad": {
+                "paths": ["/valor_integridad"],
+                "endpoints": ["valor_integridad"]
+            },
+            "Disponibilidad": {
+                "paths": ["/valor_disponibilidad"],
+                "endpoints": ["valor_disponibilidad"]
+            },
+            "Criticidad del Activo": {
+                "paths": ["/valor_criticidad_activo"],
+                "endpoints": ["valor_criticidad_activo"]
+            },
+            "Dueños de Información": {
+                "paths": ["/duenos_info"],
+                "endpoints": ["duenos_info"]
+            },
+            "Gestión de Accesos": {
+                "paths": ["/accesos_menu", "/accesos"],
+                "endpoints": ["accesos"]
+            },
+            "Revisión de Accesos": {
+                "paths": ["/revision_accesos_menu", "/revision_accesos"],
+                "endpoints": ["revision_accesos"]
+            },
+            "Gestión de Cambios (RFC)": {
+                "paths": ["/rfc_menu", "/rfc"],
+                "endpoints": ["rfc"]
+            },
+
+            # Gestión de Eventos
+            "Registro de Incidentes": {
+                "paths": ["/incidentes"],
+                "endpoints": ["incidentes", "incidente"]
+            },
+            "Registro de Vulnerabilidades": {
+                "paths": ["/vulnerabilidades_menu", "/vulnerabilidades"],
+                "endpoints": ["vulnerabilidades", "vulnerabilidad", "vuln"]
+            },
+            "Plan de Remediación": {
+                "paths": ["/plan_remediacion_menu", "/plan_remediacion"],
+                "endpoints": [
+                    "plan_remediacion_menu",
+                    "plan_remediacion_matriz",
+                    "plan_remediacion_nuevo",
+                    "plan_remediacion_edit",
+                    "plan_remediacion_detalle",
+                    "plan_remediacion_delete",
+                    "plan_remediacion_ai_sugerir"
+                ]
+            },
+
+            # Competencias y Cultura
+            "Plan de Concientización y Formación": {
+                "paths": ["/plan_diseno_menu", "/plan_diseno"],
+                "endpoints": ["plan_diseno"]
+            },
+            "Seguimiento Plan de Concientización y Formación": {
+                "paths": ["/plan_cf/menu", "/plan_cf"],
+                "endpoints": ["plan_cf"]
+            },
+            "Plan de Competencia": {
+                "paths": ["/plan_remediacion_competencias_menu", "/plan_remediacion_competencias"],
+                "endpoints": ["plan_remediacion_competencias"]
+            },
+
+            # Cadena de Suministro
+            "Cuestionarios de Proponentes": {
+                "paths": ["/cuestionarios_proveedores"],
+                "endpoints": ["cuestionarios_proveedores"]
+            },
+            "Revisión en Listas Restrictivas": {
+                "paths": ["/listas_restrictivas"],
+                "endpoints": ["listas_restrictivas"]
+            },
+            "Security Scorecard de Terceros": {
+                "paths": ["/proponentes/scorecard"],
+                "endpoints": ["scorecard_proponentes", "proponentes"]
+            },
+            "Registro de Proveedores": {
+                "paths": ["/proveedores_menu", "/proveedores"],
+                "endpoints": ["proveedores"]
+            },
+
+            # Continuidad del Negocio
+            "Continuidad del Negocio (BCP/DRP)": {
+                "paths": ["/bcp/dashboard"],
+                "endpoints": ["bcp_dashboard"]
+            },
+            "BIA": {
+                "paths": ["/bcp/bia"],
+                "endpoints": ["bcp_bia"]
+            },
+            "Procesos Críticos": {
+                "paths": ["/bcp/procesos"],
+                "endpoints": ["bcp_procesos"]
+            },
+            "Planes de Continuidad": {
+                "paths": ["/bcp/planes"],
+                "endpoints": ["bcp_planes"]
+            },
+            "DRP": {
+                "paths": ["/bcp/drp"],
+                "endpoints": ["bcp_drp"]
+            },
+            "Gestión de Crisis": {
+                "paths": ["/bcp/crisis"],
+                "endpoints": ["bcp_crisis"]
+            },
+            "Simulacros y Pruebas": {
+                "paths": ["/bcp/pruebas"],
+                "endpoints": ["bcp_pruebas"]
+            },
+            "Dependencias Críticas": {
+                "paths": ["/bcp/dependencias"],
+                "endpoints": ["bcp_dependencias"]
+            },
+            "Madurez BCP": {
+                "paths": ["/bcp/madurez"],
+                "endpoints": ["bcp_madurez"]
+            },
+            "Informe Ejecutivo AI": {
+                "paths": ["/bcp/ia"],
+                "endpoints": ["bcp_ia"]
+            },
+            "Métricas BCP": {
+                "paths": ["/bcp/metricas"],
+                "endpoints": ["bcp_metricas"]
+            },
+
+            # Medición y Mejora
+            "Nivel de Madurez ISO-27001:2022": {
+                "paths": ["/madurez"],
+                "endpoints": ["madurez"]
+            },
+            "Nivel de Madurez NIST CSF V.2.0": {
+                "paths": ["/madurez_nist"],
+                "endpoints": ["madurez_nist"]
+            },
+            "Nivel de Madurez Protección de Datos Personales": {
+                "paths": ["/madurez_datos"],
+                "endpoints": ["madurez_datos"]
+            },
+            "Nivel de Madurez PCI-DSS": {
+                "paths": ["/madurez_pci"],
+                "endpoints": ["madurez_pci"]
+            },
+            "Nivel de Madurez SOC 2": {
+                "paths": ["/madurez_soc2"],
+                "endpoints": ["madurez_soc2"]
+            },
+            "Métricas": {
+                "paths": ["/metricas"],
+                "endpoints": ["metricas"]
+            },
+            "Métricas de Riesgos": {
+                "paths": ["/metricas/riesgos"],
+                "endpoints": ["metricas_riesgos"]
+            },
+            "Métricas de Incidentes": {
+                "paths": ["/metricas/incidentes"],
+                "endpoints": ["metricas_incidentes"]
+            },
+            "Métricas de Vulnerabilidades": {
+                "paths": ["/metricas/vulnerabilidades"],
+                "endpoints": ["metricas_vulnerabilidades"]
+            },
+            "Métrica Cultura de Seguridad": {
+                "paths": ["/metricas/cultura"],
+                "endpoints": ["metricas_cultura"]
+            },
+            "Métricas Planes de Mejora": {
+                "paths": ["/metricas/mejora"],
+                "endpoints": ["metricas_mejora"]
+            },
+            "Configuración de Parámetros": {
+                "paths": ["/metricas/configuracion"],
+                "endpoints": ["metricas_configuracion"]
+            },
+            "Planes de Acción del Sistema de Gestión (Mejora)": {
+                "paths": ["/mejora_menu", "/mejora"],
+                "endpoints": ["mejora"]
+            },
+
+            # Reportes
+            "Reportes": {
+                "paths": ["/reportes"],
+                "endpoints": ["reportes"]
+            },
+
+            # Administración
+            "Configuración Parámetros de la Empresa": {
+                "paths": ["/areas_area", "/areas_division", "/config", "/empresa"],
+                "endpoints": ["areas", "config", "empresa"]
+            },
+            "Estructura Organizacional": {
+                "paths": ["/areas_area", "/areas_division"],
+                "endpoints": ["areas"]
+            },
+            "Áreas": {
+                "paths": ["/areas_area"],
+                "endpoints": ["areas_area"]
+            },
+            "Divisiones": {
+                "paths": ["/areas_division"],
+                "endpoints": ["areas_division"]
+            },
+            "Parámetros Generales": {
+                "paths": ["/config/email", "/empresa/logo"],
+                "endpoints": ["config_email", "empresa_logo"]
+            },
+            "Configuración del Correo": {
+                "paths": ["/config/email"],
+                "endpoints": ["config_email"]
+            },
+            "Logo Empresa": {
+                "paths": ["/empresa/logo"],
+                "endpoints": ["empresa_logo"]
+            },
+            "Configuración AI": {
+                "paths": ["/admin/openrouter_key"],
+                "endpoints": ["admin_openrouter_key", "openrouter_key"]
+            },
+            "Gestión de Usuarios": {
+                "paths": ["/usuarios"],
+                "endpoints": ["usuarios"]
+            },
+            "Logs de Auditoría": {
+                "paths": ["/admin/logs_auditoria"],
+                "endpoints": ["logs_auditoria"]
+            },
+            "Chat con Asistente": {
+                "paths": ["/chatgpt_view"],
+                "endpoints": ["chatgpt_view"]
+            },
+        }
+
+        def _norm_path(p):
+            p = (p or "").split("?")[0].strip().rstrip("/")
+            return p or "/"
+
+        def _path_matches(prefix):
+            prefix = _norm_path(prefix)
+
+            if current_path == prefix:
+                return True
+
+            # Solo subrutas reales con /
+            # Evita que /madurez coincida con /madurez_nist
+            # Evita que /plan_remediacion coincida con /plan_remediacion_competencias
+            if current_path.startswith(prefix + "/"):
+                return True
+
+            return False
+
+        def _endpoint_matches(endpoint_prefix):
+            endpoint_prefix = (endpoint_prefix or "").strip()
+            if not endpoint_prefix:
+                return False
+
+            if current_endpoint == endpoint_prefix:
+                return True
+
+            # Soporta blueprints: madurez_nist.historial
+            if current_endpoint.startswith(endpoint_prefix + "."):
+                return True
+
+            # Soporta funciones internas del mismo módulo,
+            # pero evita falsas coincidencias entre módulos similares.
+            if current_endpoint.startswith(endpoint_prefix + "_"):
+                resto = current_endpoint[len(endpoint_prefix) + 1:]
+
+                # Evita que ISO 27001 quede activo cuando se entra a otros módulos de madurez
+                if endpoint_prefix == "madurez" and (
+                    resto.startswith("nist")
+                    or resto.startswith("datos")
+                    or resto.startswith("pci")
+                    or resto.startswith("soc2")
+                ):
+                    return False
+
+                # Evita que Plan de Remediación quede activo cuando se entra a Plan de Competencias
+                if endpoint_prefix == "plan_remediacion" and resto.startswith("competencias"):
+                    return False
+
+                # Evita que BCP dashboard quede activo en submódulos específicos
+                if endpoint_prefix == "bcp" and resto.startswith((
+                    "bia",
+                    "procesos",
+                    "planes",
+                    "drp",
+                    "crisis",
+                    "pruebas",
+                    "dependencias",
+                    "madurez",
+                    "ia",
+                    "metricas"
+                )):
+                    return False
+
+                return True
+
+            if current_endpoint.endswith("." + endpoint_prefix):
+                return True
+
+            return False
+
+        def _item_is_active(item):
+            href = _norm_path(item.get("href", ""))
+            label = item.get("label", "")
+
+            if href not in ("", "#", "javascript:void(0);"):
+                if _path_matches(href):
+                    return True
+
+            rules = MENU_ACTIVE_RULES.get(label, {})
+
+            for alias in rules.get("paths", []):
+                if _path_matches(alias):
+                    return True
+
+            for endpoint_alias in rules.get("endpoints", []):
+                if _endpoint_matches(endpoint_alias):
+                    return True
+
+            return False
+
+        def _mark_items(items):
+            marked = []
+
+            for it in items:
+                item = dict(it)
+                children = item.get("children") or []
+
+                children_marked = _mark_items(children) if children else []
+                item["_children"] = children_marked
+
+                active_self = _item_is_active(item)
+                active_child = any(ch.get("_active_tree") for ch in children_marked)
+
+                item["_active"] = active_self
+                item["_active_tree"] = active_self or active_child
+
+                marked.append(item)
+
+            return marked
+
         sections = []
         for sec in MENU_SECTIONS:
             allowed_items = filtrar_items_menu(sec.get("items", []), usuario_actual)
             if allowed_items:
                 sec2 = dict(sec)
-                sec2["items"] = allowed_items
+                sec2["items"] = _mark_items(allowed_items)
+                sec2["_active_tree"] = any(it.get("_active_tree") for it in sec2["items"])
                 sections.append(sec2)
 
         return render_template_string("""
         <aside id="sgsiGlobalMenu" class="sgsi-global-menu-wrap">
 
-          <!-- FLECHA PARA OCULTAR / MOSTRAR MENÚ -->
           <div id="sgsiGlobalMenuToggle" class="sgsi-global-menu-arrow">
             <span class="sgsi-arrow-icon">‹</span>
           </div>
 
-          <div class="sgsi-global-menu-card">
+          <div class="sgsi-global-menu-card" id="sgsiGlobalMenuCard">
 
             <div class="sgsi-global-menu-header">
               <div class="sgsi-global-menu-icon">
@@ -8481,80 +8957,48 @@ def _sgsi_build_global_menu_html():
                 <span>Centro de Control</span>
               </a>
 
+              {% macro render_items(items, prefix) %}
+                {% for it in items %}
+                  {% set iid = prefix ~ "_item_" ~ loop.index %}
+
+                  {% if it.get("_children") %}
+                    <li class="sgsi-global-node">
+                      <a class="sgsi-global-item sgsi-global-node-toggle {% if it.get('_active_tree') %}sgsi-active{% endif %}"
+                         href="javascript:void(0);"
+                         data-target="{{ iid }}">
+                        <i class="bi {{ it.get('icon','bi-box') }}"></i>
+                        <span>{{ it["label"] }}</span>
+                      </a>
+
+                      <ul class="sgsi-global-panel sgsi-global-subpanel {% if it.get('_active_tree') %}sgsi-open{% endif %}" id="{{ iid }}">
+                        {{ render_items(it["_children"], iid) }}
+                      </ul>
+                    </li>
+                  {% else %}
+                    <li>
+                      <a class="sgsi-global-item {% if it.get('_active') %}sgsi-active{% endif %}"
+                         href="{{ it.get('href', '#') }}">
+                        <i class="bi {{ it.get('icon','bi-box') }}"></i>
+                        <span>{{ it["label"] }}</span>
+                      </a>
+                    </li>
+                  {% endif %}
+                {% endfor %}
+              {% endmacro %}
+
               {% for sec in sections %}
                 {% set sid = "global_root_" ~ loop.index %}
 
                 <div class="sgsi-global-root-item">
-                  <button class="btn sgsi-global-root-toggle"
+                  <button class="btn sgsi-global-root-toggle {% if sec.get('_active_tree') %}sgsi-active{% endif %}"
                           type="button"
                           data-target="{{ sid }}">
                     <i class="bi {{ sec.get('icon', 'bi-grid-1x2') }}"></i>
                     <span>{{ sec["title"] }}</span>
                   </button>
 
-                  <ul class="sgsi-global-panel" id="{{ sid }}">
-                    {% for it in sec["items"] %}
-
-                      {% if it.get("children") %}
-                        {% set cid = sid ~ "_child_" ~ loop.index %}
-
-                        <li class="sgsi-global-node">
-                          <a class="sgsi-global-item sgsi-global-node-toggle"
-                             href="javascript:void(0);"
-                             data-target="{{ cid }}">
-                            <i class="bi {{ it.get('icon','bi-box') }}"></i>
-                            <span>{{ it["label"] }}</span>
-                          </a>
-
-                          <ul class="sgsi-global-panel sgsi-global-subpanel" id="{{ cid }}">
-                            {% for child in it["children"] %}
-
-                              {% if child.get("children") %}
-                                {% set gcid = cid ~ "_child_" ~ loop.index %}
-
-                                <li class="sgsi-global-node">
-                                  <a class="sgsi-global-item sgsi-global-node-toggle"
-                                     href="javascript:void(0);"
-                                     data-target="{{ gcid }}">
-                                    <i class="bi {{ child.get('icon','bi-diagram-3') }}"></i>
-                                    <span>{{ child["label"] }}</span>
-                                  </a>
-
-                                  <ul class="sgsi-global-panel sgsi-global-subpanel" id="{{ gcid }}">
-                                    {% for sub in child["children"] %}
-                                      <li>
-                                        <a class="sgsi-global-item" href="{{ sub.href }}">
-                                          <i class="bi {{ sub.get('icon','bi-dot') }}"></i>
-                                          <span>{{ sub["label"] }}</span>
-                                        </a>
-                                      </li>
-                                    {% endfor %}
-                                  </ul>
-                                </li>
-
-                              {% else %}
-                                <li>
-                                  <a class="sgsi-global-item" href="{{ child.href }}">
-                                    <i class="bi {{ child.get('icon','bi-dot') }}"></i>
-                                    <span>{{ child["label"] }}</span>
-                                  </a>
-                                </li>
-                              {% endif %}
-
-                            {% endfor %}
-                          </ul>
-                        </li>
-
-                      {% else %}
-                        <li>
-                          <a class="sgsi-global-item" href="{{ it.href }}">
-                            <i class="bi {{ it.get('icon','bi-box') }}"></i>
-                            <span>{{ it["label"] }}</span>
-                          </a>
-                        </li>
-                      {% endif %}
-
-                    {% endfor %}
+                  <ul class="sgsi-global-panel {% if sec.get('_active_tree') %}sgsi-open{% endif %}" id="{{ sid }}">
+                    {{ render_items(sec["items"], sid) }}
                   </ul>
                 </div>
               {% endfor %}
@@ -8576,7 +9020,6 @@ def _sgsi_build_global_menu_html():
             padding-top:var(--sgsi-topbar-h) !important;
           }
 
-          /* BARRA SUPERIOR FIJA */
           .sgsi-topbar{
             position:fixed !important;
             top:0 !important;
@@ -8621,7 +9064,6 @@ def _sgsi_build_global_menu_html():
             padding:8px !important;
           }
 
-          /* FLECHA LATERAL */
           .sgsi-global-menu-arrow{
             position:absolute;
             right:-15px;
@@ -8735,17 +9177,12 @@ def _sgsi_build_global_menu_html():
             box-shadow:0 8px 18px rgba(0,0,0,.22) !important;
           }
 
-          .sgsi-global-panel-control-btn i,
-          .sgsi-global-panel-control-btn span{
-            color:#ffffff !important;
-          }
-
-          .sgsi-global-root-toggle::after{
+          .sgsi-global-root-toggle::after,
+          .sgsi-global-node-toggle::after{
             content:"⌄";
             margin-left:auto;
             font-size:13px;
             font-weight:900;
-            color:#64748b;
             transition:transform .18s ease;
           }
 
@@ -8753,7 +9190,8 @@ def _sgsi_build_global_menu_html():
             content:"" !important;
           }
 
-          .sgsi-global-root-toggle.sgsi-active::after{
+          .sgsi-global-root-toggle.sgsi-active::after,
+          .sgsi-global-node-toggle.sgsi-active::after{
             transform:rotate(180deg);
           }
 
@@ -8806,109 +9244,89 @@ def _sgsi_build_global_menu_html():
             text-align:center;
             flex:0 0 auto;
           }
-
-          .sgsi-global-node-toggle::after{
-            content:"⌄";
-            margin-left:auto;
-            color:inherit;
-            font-size:13px;
-            font-weight:900;
-            transition:transform .18s ease;
-          }
-
-          .sgsi-global-node-toggle.sgsi-active::after{
-            transform:rotate(180deg);
-          }
-
-          @media (max-width:991.98px){
-            body > .container.py-4{
-              margin-left:0 !important;
-              width:100% !important;
-              max-width:100% !important;
-              padding:8px !important;
-            }
-
-            .sgsi-global-menu-wrap{
-              top:calc(var(--sgsi-topbar-h) + 6px) !important;
-              width:235px !important;
-            }
-          }
         </style>
 
         <script>
           (function(){
-            function getPanel(trigger){
-              const id = trigger.getAttribute("data-target");
-              return id ? document.getElementById(id) : null;
+            const STORAGE_KEY = "sgsi_global_menu_scroll_top";
+
+            function menuCard(){
+              return document.getElementById("sgsiGlobalMenuCard");
             }
 
-            function closeChildren(panel){
-              if (!panel) return;
-
-              panel.querySelectorAll(".sgsi-global-panel.sgsi-open").forEach(function(p){
-                p.classList.remove("sgsi-open");
-              });
-
-              panel.querySelectorAll(".sgsi-active").forEach(function(a){
-                a.classList.remove("sgsi-active");
-              });
-            }
-
-            function closeSiblings(trigger){
-              const owner = trigger.closest(".sgsi-global-root-item, .sgsi-global-node");
-              if (!owner) return;
-
-              const parent = owner.parentElement;
-              if (!parent) return;
-
-              parent.querySelectorAll(":scope > .sgsi-global-root-item, :scope > .sgsi-global-node").forEach(function(sibling){
-                if (sibling !== owner) {
-                  sibling.querySelectorAll(".sgsi-global-panel.sgsi-open").forEach(function(panel){
-                    panel.classList.remove("sgsi-open");
-                  });
-
-                  sibling.querySelectorAll(".sgsi-active").forEach(function(active){
-                    active.classList.remove("sgsi-active");
-                  });
-                }
-              });
-            }
-
-            function toggleMenu(trigger){
-              const panel = getPanel(trigger);
-              if (!panel) return;
-
-              const isOpen = panel.classList.contains("sgsi-open");
-
-              closeSiblings(trigger);
-
-              if (isOpen) {
-                trigger.classList.remove("sgsi-active");
-                panel.classList.remove("sgsi-open");
-                closeChildren(panel);
-              } else {
-                trigger.classList.add("sgsi-active");
-                panel.classList.add("sgsi-open");
+            function saveScroll(){
+              const card = menuCard();
+              if(card){
+                localStorage.setItem(STORAGE_KEY, String(card.scrollTop || 0));
               }
             }
 
-            document.querySelectorAll(".sgsi-global-root-toggle, .sgsi-global-node-toggle").forEach(function(toggle){
+            function restoreScroll(){
+              const card = menuCard();
+              if(!card) return;
+
+              const saved = parseInt(localStorage.getItem(STORAGE_KEY) || "0", 10);
+              if(!isNaN(saved) && saved > 0){
+                card.scrollTop = saved;
+              }
+            }
+
+            function toggleMenu(trigger){
+              const id = trigger.getAttribute("data-target");
+              const panel = id ? document.getElementById(id) : null;
+              if(!panel) return;
+
+              const isOpen = panel.classList.contains("sgsi-open");
+
+              if(isOpen){
+                trigger.classList.remove("sgsi-active");
+                panel.classList.remove("sgsi-open");
+              }else{
+                trigger.classList.add("sgsi-active");
+                panel.classList.add("sgsi-open");
+              }
+
+              setTimeout(saveScroll, 50);
+            }
+
+            document.querySelectorAll("#sgsiGlobalMenu .sgsi-global-root-toggle, #sgsiGlobalMenu .sgsi-global-node-toggle").forEach(function(toggle){
               toggle.addEventListener("click", function(e){
-                if (toggle.classList.contains("sgsi-global-panel-control-btn")) return;
+                if(toggle.classList.contains("sgsi-global-panel-control-btn")) return;
                 e.preventDefault();
                 e.stopPropagation();
                 toggleMenu(toggle);
               });
             });
 
+            document.querySelectorAll("#sgsiGlobalMenu a[href]").forEach(function(link){
+              link.addEventListener("click", function(){
+                saveScroll();
+              });
+            });
+
+            const card = menuCard();
+            if(card){
+              card.addEventListener("scroll", function(){
+                saveScroll();
+              });
+            }
+
             const menuToggle = document.getElementById("sgsiGlobalMenuToggle");
-            if (menuToggle) {
+            if(menuToggle){
               menuToggle.addEventListener("click", function(e){
                 e.preventDefault();
                 e.stopPropagation();
                 document.body.classList.toggle("sgsi-menu-collapsed");
+                saveScroll();
               });
             }
+
+            window.addEventListener("beforeunload", saveScroll);
+            window.addEventListener("pageshow", function(){
+              setTimeout(restoreScroll, 60);
+            });
+
+            restoreScroll();
           })();
         </script>
         """, sections=sections)
@@ -8916,8 +9334,7 @@ def _sgsi_build_global_menu_html():
     except Exception as e:
         print("Error construyendo menú global SGSI:", repr(e))
         return ""
-
-
+    
 @app.after_request
 def inject_sgsi_global_vertical_menu(response):
     try:
