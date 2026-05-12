@@ -5569,7 +5569,7 @@ def perfil():
 #                                                               Módulo de envio del password
 # ============================================================================================================================================
 
-def enviar_credenciales_email(destino, username, password):
+def enviar_credenciales_email(destino, username, password, nombre_completo=None):
     cfg = get_email_config()
 
     SMTP_HOST = cfg.get("SMTP_HOST")
@@ -5586,13 +5586,14 @@ def enviar_credenciales_email(destino, username, password):
     if not destino:
         raise RuntimeError("Correo destino vacío.")
 
-    # Mensaje
+    nombre_saludo = (nombre_completo or username or "").strip()
+
     msg = EmailMessage()
     msg["Subject"] = f"Credenciales de acceso - {APP_NAME}"
     msg["From"] = SMTP_FROM
     msg["To"] = destino
     msg.set_content(
-        f"""Hola {username},
+        f"""Hola {nombre_saludo},
 
 Se ha creado tu usuario en {APP_NAME}.
 
@@ -5606,17 +5607,12 @@ Saludos,
 """
     )
 
-    # ✅ IMPORTANTE: igual que tu programa que SÍ funciona
-    # Ignorar validación SSL
     context_ssl = ssl._create_unverified_context()
 
-    # ✅ Puerto 465: SMTP_SSL directo
     if SMTP_PORT == 465:
         with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=context_ssl, timeout=30) as smtp:
             smtp.login(SMTP_USER, SMTP_PASS)
             smtp.send_message(msg)
-
-    # ✅ Otros puertos: STARTTLS (si alguna vez usas 587/25)
     else:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:
             smtp.ehlo()
@@ -5707,14 +5703,126 @@ MODULES = [
     "Logs de Auditoría",
 ]
 
-@app.route('/usuarios', methods=['GET','POST'])
+# ============================================================
+# DB ALTERNA PARA PERFIL DE USUARIOS
+# NO MODIFICA LA TABLA user NI sgsi.db
+# ============================================================
+
+USUARIOS_PERFIL_DB_PATH = os.path.join(app.instance_path, "usuarios_perfil.db")
+
+
+def get_usuarios_perfil_db_connection():
+    os.makedirs(app.instance_path, exist_ok=True)
+    conn = sqlite3.connect(USUARIOS_PERFIL_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_usuarios_perfil_db():
+    conn = get_usuarios_perfil_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios_perfil (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL UNIQUE,
+            nombre_completo TEXT,
+            fecha_creacion TEXT,
+            fecha_actualizacion TEXT
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def obtener_nombre_usuario_alterno(user_id):
+    init_usuarios_perfil_db()
+
+    conn = get_usuarios_perfil_db_connection()
+    row = conn.execute("""
+        SELECT nombre_completo
+        FROM usuarios_perfil
+        WHERE user_id = ?
+    """, (user_id,)).fetchone()
+    conn.close()
+
+    return (row["nombre_completo"] if row else "") or ""
+
+
+def guardar_nombre_usuario_alterno(user_id, nombre_completo):
+    init_usuarios_perfil_db()
+
+    nombre_completo = (nombre_completo or "").strip()
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    conn = get_usuarios_perfil_db_connection()
+    cur = conn.cursor()
+
+    existe = cur.execute("""
+        SELECT id
+        FROM usuarios_perfil
+        WHERE user_id = ?
+    """, (user_id,)).fetchone()
+
+    if existe:
+        cur.execute("""
+            UPDATE usuarios_perfil
+            SET nombre_completo = ?,
+                fecha_actualizacion = ?
+            WHERE user_id = ?
+        """, (nombre_completo, ahora, user_id))
+    else:
+        cur.execute("""
+            INSERT INTO usuarios_perfil (
+                user_id,
+                nombre_completo,
+                fecha_creacion,
+                fecha_actualizacion
+            )
+            VALUES (?, ?, ?, ?)
+        """, (user_id, nombre_completo, ahora, ahora))
+
+    conn.commit()
+    conn.close()
+
+
+def eliminar_nombre_usuario_alterno(user_id):
+    init_usuarios_perfil_db()
+
+    conn = get_usuarios_perfil_db_connection()
+    conn.execute("""
+        DELETE FROM usuarios_perfil
+        WHERE user_id = ?
+    """, (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def cargar_perfiles_usuarios_alternos():
+    init_usuarios_perfil_db()
+
+    conn = get_usuarios_perfil_db_connection()
+    rows = conn.execute("""
+        SELECT user_id, nombre_completo
+        FROM usuarios_perfil
+    """).fetchall()
+    conn.close()
+
+    return {
+        int(r["user_id"]): (r["nombre_completo"] or "")
+        for r in rows
+    }
+
+
+init_usuarios_perfil_db()
+
+
+@app.route('/usuarios', methods=['GET', 'POST'])
 @login_required
 def usuarios():
     user = User.query.get(session.get('user_id'))
 
-    # =========================
-    # VALIDACIÓN DE ACCESO
-    # =========================
     if (
         user.role != 'admin'
         and user.role != 'gestor_accesos'
@@ -5728,11 +5836,11 @@ def usuarios():
         return redirect(url_for('menu'))
 
     usuario_actual = User.query.get(session.get('user_id'))
-    es_admin = (usuario_actual.role == 'admin')
-    es_gestor = (usuario_actual.role == 'gestor_accesos')
+    es_admin = usuario_actual.role == 'admin'
+    es_gestor = usuario_actual.role == 'gestor_accesos'
 
     accion = None
-    
+
     if request.method == 'POST':
         accion = request.form.get('accion')
 
@@ -5740,7 +5848,8 @@ def usuarios():
         # CREAR
         # ======================
         if accion == 'crear':
-            role_nuevo = request.form['role']
+            nombre_completo = (request.form.get('nombre_completo') or "").strip()
+            role_nuevo = request.form.get('role') or 'user'
             username = (request.form.get('username') or "").strip()
             email = (request.form.get('email') or "").strip().lower()
 
@@ -5763,13 +5872,16 @@ def usuarios():
             db.session.add(u)
             db.session.commit()
 
+            guardar_nombre_usuario_alterno(u.id, nombre_completo)
+
             registrar_log(
                 usuario_actual.username,
                 f"Creación de usuario. Usuario creado: {username}. Perfil asignado: {role_nuevo}."
             )
 
             try:
-                enviar_credenciales_email(email, username, password_auto)
+                nombre_para_correo = obtener_nombre_usuario_alterno(u.id) or username
+                enviar_credenciales_email(email, username, password_auto, nombre_para_correo)
                 flash("Usuario creado y contraseña enviada al correo.", "success")
             except Exception as e:
                 print("Error enviando correo:", repr(e))
@@ -5780,6 +5892,7 @@ def usuarios():
         # ======================
         elif accion == 'editar' and (es_admin or es_gestor):
             u = User.query.get(int(request.form['id']))
+
             if not u:
                 flash("Usuario no encontrado.", "danger")
                 return redirect(url_for('usuarios'))
@@ -5787,60 +5900,75 @@ def usuarios():
             username_anterior = u.username or ""
             email_anterior = u.email or ""
             rol_anterior = u.role or ""
+            nombre_anterior = obtener_nombre_usuario_alterno(u.id)
 
+            nuevo_nombre_completo = (request.form.get('nombre_completo') or "").strip()
             nuevo_username = (request.form.get('username') or "").strip()
             nuevo_email = (request.form.get('email') or "").strip().lower()
             nuevo_role = request.form.get('role') or u.role
 
-            # validar username repetido en otro usuario
+            if not nuevo_username:
+                flash("El usuario no puede quedar vacío.", "warning")
+                return redirect(url_for('usuarios'))
+
+            if not nuevo_email:
+                flash("El correo no puede quedar vacío.", "warning")
+                return redirect(url_for('usuarios'))
+
             existe_username = User.query.filter(
                 User.username == nuevo_username,
                 User.id != u.id
             ).first()
+
             if existe_username:
                 flash("Ya existe otro usuario con ese nombre.", "danger")
                 return redirect(url_for('usuarios'))
 
-            # validar email repetido en otro usuario
-            if nuevo_email:
-                existe_email = User.query.filter(
-                    User.email == nuevo_email,
-                    User.id != u.id
-                ).first()
-                if existe_email:
-                    flash("El correo ya está en uso por otro usuario.", "danger")
-                    return redirect(url_for('usuarios'))
+            existe_email = User.query.filter(
+                User.email == nuevo_email,
+                User.id != u.id
+            ).first()
+
+            if existe_email:
+                flash("El correo ya está en uso por otro usuario.", "danger")
+                return redirect(url_for('usuarios'))
 
             u.username = nuevo_username
-            if nuevo_email:
-                u.email = nuevo_email
+            u.email = nuevo_email
+            u.role = nuevo_role
+
             if request.form.get('password'):
                 u.set_password(request.form['password'])
-            u.role = nuevo_role
 
             db.session.commit()
 
+            guardar_nombre_usuario_alterno(u.id, nuevo_nombre_completo)
+
             cambios = []
+
+            if nombre_anterior != nuevo_nombre_completo:
+                cambios.append(f"nombre: '{nombre_anterior}' → '{nuevo_nombre_completo}'")
+
             if username_anterior != u.username:
                 cambios.append(f"usuario: '{username_anterior}' → '{u.username}'")
+
             if email_anterior != (u.email or ""):
                 cambios.append(f"correo: '{email_anterior}' → '{u.email or ''}'")
+
             if rol_anterior != u.role:
                 cambios.append(f"rol: '{rol_anterior}' → '{u.role}'")
+
             if request.form.get('password'):
                 cambios.append("contraseña actualizada")
 
-            if not cambios:
-                detalle_cambios = "sin cambios visibles"
-            else:
-                detalle_cambios = "; ".join(cambios)
+            detalle_cambios = "; ".join(cambios) if cambios else "sin cambios visibles"
 
             registrar_log(
                 usuario_actual.username,
                 f"Modificación de usuario. Usuario afectado: {u.username}. Cambios realizados: {detalle_cambios}."
             )
 
-            flash("Usuario modificado correctamente", "success")
+            flash("Usuario modificado correctamente.", "success")
 
         # ======================
         # ELIMINAR
@@ -5855,10 +5983,12 @@ def usuarios():
                     usuario_actual.username,
                     "Intento bloqueado de eliminar el usuario Administrador."
                 )
-                flash("No se puede eliminar el usuario Administrador", "danger")
+                flash("No se puede eliminar el usuario Administrador.", "danger")
                 return redirect(url_for('usuarios'))
 
             UserPermission.query.filter_by(user_id=u.id).delete()
+            eliminar_nombre_usuario_alterno(u.id)
+
             db.session.delete(u)
             db.session.commit()
 
@@ -5867,7 +5997,7 @@ def usuarios():
                 f"Eliminación de usuario. Usuario eliminado: {username_eliminado}. Perfil que tenía: {rol_eliminado}."
             )
 
-            flash("Usuario eliminado", "info")
+            flash("Usuario eliminado.", "info")
 
         else:
             registrar_log(
@@ -5877,6 +6007,7 @@ def usuarios():
             flash("Acción no permitida.", "warning")
 
     usuarios = User.query.all()
+    perfiles_usuarios = cargar_perfiles_usuarios_alternos()
 
     content = render_template_string("""
     <div class="users-shell">
@@ -5886,15 +6017,11 @@ def usuarios():
           <div class="users-header-text">
             <h3 class="users-title m-0">Gestión de Usuarios</h3>
             <div class="users-subtitle">
-              Administra usuarios, correos, roles, contraseñas y permisos
+              Administra usuarios, nombres, correos, roles, contraseñas y permisos
               de acceso dentro del sistema SGSI.
             </div>
           </div>
         </div>
-      </div>
-
-      <div class="users-header-actions">
-        
       </div>
 
       <div class="users-card p-4 mb-4">
@@ -5907,23 +6034,39 @@ def usuarios():
             <thead class="users-table-head">
               <tr class="text-center">
                 <th>ID</th>
+                <th>Nombre completo</th>
                 <th>Usuario</th>
                 <th>Correo</th>
                 <th>Rol</th>
-                <th style="min-width:260px;">Acciones</th>
+                <th style="min-width:300px;">Acciones</th>
               </tr>
             </thead>
+
             <tbody>
               {% for u in usuarios %}
                 <tr>
                   <td class="text-center">{{ u.id }}</td>
 
                   <td>
-                    <input form="f{{u.id}}" name="username" value="{{u.username}}" class="form-control">
+                    <input form="f{{u.id}}"
+                           name="nombre_completo"
+                           value="{{ perfiles_usuarios.get(u.id, '') }}"
+                           class="form-control"
+                           placeholder="Nombre completo">
                   </td>
 
                   <td>
-                    <input form="f{{u.id}}" name="email" value="{{u.email or ''}}" class="form-control">
+                    <input form="f{{u.id}}"
+                           name="username"
+                           value="{{u.username}}"
+                           class="form-control">
+                  </td>
+
+                  <td>
+                    <input form="f{{u.id}}"
+                           name="email"
+                           value="{{u.email or ''}}"
+                           class="form-control">
                   </td>
 
                   <td>
@@ -5936,16 +6079,25 @@ def usuarios():
                   </td>
 
                   <td>
-                    <input form="f{{u.id}}" name="password" placeholder="Nueva contraseña" class="form-control mb-2">
+                    <input form="f{{u.id}}"
+                           name="password"
+                           placeholder="Nueva contraseña"
+                           class="form-control mb-2">
 
                     <div class="d-flex flex-wrap gap-1">
                       {% if current_role in ['admin', 'gestor_accesos'] %}
-                        <button form="f{{u.id}}" type="submit" name="accion" value="editar"
+                        <button form="f{{u.id}}"
+                                type="submit"
+                                name="accion"
+                                value="editar"
                                 class="btn btn-sm btn-primary rounded-pill px-3">
                           Guardar
                         </button>
 
-                        <button form="f{{u.id}}" type="submit" name="accion" value="eliminar"
+                        <button form="f{{u.id}}"
+                                type="submit"
+                                name="accion"
+                                value="eliminar"
                                 class="btn btn-sm btn-danger rounded-pill px-3"
                                 onclick="return confirm('¿Seguro que deseas eliminar este usuario?');">
                           Eliminar
@@ -5979,20 +6131,34 @@ def usuarios():
         <form method="post">
           <input type="hidden" name="accion" value="crear">
 
-          <div class="row g-3">
+          <div class="users-create-grid">
 
-            <div class="col-md-3">
-              <label class="form-label">Usuario</label>
-              <input name="username" placeholder="Usuario" class="form-control" required>
+            <div class="users-field">
+              <label class="form-label">Nombre completo</label>
+              <input name="nombre_completo"
+                     placeholder="Nombre completo"
+                     class="form-control">
             </div>
 
-            <div class="col-md-4">
+            <div class="users-field">
+              <label class="form-label">Usuario</label>
+              <input name="username"
+                     placeholder="Usuario"
+                     class="form-control"
+                     required>
+            </div>
+
+            <div class="users-field">
               <label class="form-label">Correo del usuario</label>
-              <input name="email" type="email" placeholder="Correo del usuario" class="form-control" required>
+              <input name="email"
+                     type="email"
+                     placeholder="Correo del usuario"
+                     class="form-control"
+                     required>
             </div>
 
             {% if current_role in ['admin', 'gestor_accesos'] %}
-              <div class="col-md-3">
+              <div class="users-field users-role-field">
                 <label class="form-label">Rol</label>
                 <select name="role" class="form-select">
                   <option value="user">Usuario</option>
@@ -6003,8 +6169,10 @@ def usuarios():
               </div>
             {% endif %}
 
-            <div class="col-md-2 d-flex align-items-end">
-              <button class="btn btn-success rounded-pill px-4 w-100">Crear</button>
+            <div class="users-create-actions">
+              <button type="submit" class="btn btn-success users-create-btn">
+                Crear
+              </button>
             </div>
 
           </div>
@@ -6024,7 +6192,7 @@ def usuarios():
 
       .users-shell{
         width:96%;
-        max-width:1450px;
+        max-width:1500px;
         margin:26px auto 24px auto;
         overflow:hidden;
       }
@@ -6114,30 +6282,11 @@ def usuarios():
         overflow-wrap:break-word;
       }
 
-      .users-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
       .btn{
         border-radius:10px !important;
         font-weight:900;
         box-shadow:0 4px 10px rgba(0,0,0,.08);
         max-width:100%;
-      }
-
-      .users-btn-main{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .users-btn-main:hover{
-        background:#edf5ff;
-        color:#0b65d8;
       }
 
       .users-card{
@@ -6177,7 +6326,7 @@ def usuarios():
 
       .users-table-wrap .table{
         margin-bottom:0;
-        min-width:980px;
+        min-width:1250px;
       }
 
       .users-table-head th{
@@ -6200,10 +6349,6 @@ def usuarios():
         color:#334155;
       }
 
-      .table-hover tbody tr:hover{
-        background:#f8fbff;
-      }
-
       .form-control,
       .form-select{
         border-radius:10px;
@@ -6221,16 +6366,61 @@ def usuarios():
         background:#ffffff;
       }
 
-      .badge{
-        border-radius:999px;
-        font-size:.78rem;
-        padding:.45rem .7rem;
-        font-weight:900;
-      }
-
       h3{
         color:#ffffff;
         margin:0;
+      }
+
+      /* ======================================================
+         FORMULARIO CREAR USUARIO - CORREGIDO
+      ====================================================== */
+
+      .users-create-grid{
+        display:grid;
+        grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) minmax(230px,1fr) minmax(150px,.65fr);
+        gap:16px;
+        align-items:end;
+        width:100%;
+        max-width:100%;
+      }
+
+      .users-field{
+        min-width:0;
+        width:100%;
+      }
+
+      .users-role-field{
+        min-width:0;
+      }
+
+      .users-create-actions{
+        grid-column:1 / -1;
+        width:100%;
+        display:flex;
+        justify-content:flex-end;
+        align-items:center;
+        padding-top:4px;
+      }
+
+      .users-create-btn{
+        width:180px;
+        max-width:100%;
+        min-height:44px;
+        padding:0 22px !important;
+        border-radius:12px !important;
+        font-weight:950 !important;
+        font-size:.92rem;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        white-space:nowrap;
+        box-shadow:0 10px 18px rgba(25,135,84,.22) !important;
+      }
+
+      @media (max-width:1200px){
+        .users-create-grid{
+          grid-template-columns:repeat(2,minmax(220px,1fr));
+        }
       }
 
       @media (max-width:992px){
@@ -6252,6 +6442,14 @@ def usuarios():
         .users-card.p-4{
           padding:1rem !important;
         }
+
+        .users-create-actions{
+          justify-content:center;
+        }
+
+        .users-create-btn{
+          width:100%;
+        }
       }
 
       @media (max-width:768px){
@@ -6270,12 +6468,15 @@ def usuarios():
           text-align:center;
         }
 
-        .users-header-actions .btn{
-          width:100%;
+        .users-create-grid{
+          grid-template-columns:1fr;
         }
       }
     </style>
-    """, usuarios=usuarios, current_role=usuario_actual.role)
+    """,
+    usuarios=usuarios,
+    current_role=usuario_actual.role,
+    perfiles_usuarios=perfiles_usuarios)
 
     return render_template_string(BASE, content=content)
 
@@ -6292,22 +6493,18 @@ def editar_permisos(user_id):
     user = User.query.get_or_404(user_id)
     usuario_actual = User.query.get(session.get('user_id'))
 
-    # 🔒 El Gestor de Accesos solo puede gestionar permisos de usuarios con rol 'user'
     if usuario_actual.role == 'gestor_accesos' and user.role != 'user':
         flash("El Gestor de Accesos solo puede gestionar permisos de usuarios con rol 'Usuario'.", "danger")
         return redirect(url_for('usuarios'))
 
-    # ✅ usar siempre la misma fuente de módulos
     modules = MODULES
 
     if request.method == 'POST':
         permisos_seleccionados = request.form.getlist('permisos')
 
         try:
-            # Borrar permisos anteriores
             UserPermission.query.filter_by(user_id=user.id).delete()
 
-            # Guardar permisos nuevos (uno por módulo)
             for module in modules:
                 acceso = module in permisos_seleccionados
                 nuevo = UserPermission(
@@ -6325,7 +6522,6 @@ def editar_permisos(user_id):
             db.session.rollback()
             flash(f"No se pudieron actualizar los permisos: {e}", "danger")
 
-    # GET: cargar permisos actuales
     user_perms = UserPermission.query.filter_by(user_id=user.id, has_access=True).all()
     user_modules = [p.module_name for p in user_perms]
 
@@ -6348,8 +6544,6 @@ def editar_permisos(user_id):
            class="btn rounded-pill px-4 fw-bold perm-back-btn">
           ⬅ Volver a Usuarios
         </a>
-
-        
       </div>
 
       <div class="perm-card">
@@ -6568,13 +6762,6 @@ def editar_permisos(user_id):
         gap:12px;
         margin-top:24px;
         flex-wrap:wrap;
-      }
-
-      .badge{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
       }
 
       @media (max-width:992px){
