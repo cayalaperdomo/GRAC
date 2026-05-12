@@ -16061,7 +16061,7 @@ def configurar_probabilidad_residual():
       <div class="prob-header-card">
         <div class="prob-header-overlay">
           <div class="prob-header-text">
-            <h2 class="prob-title m-0">📈 Configuración de Probabilidad Residual</h2>
+            <h2 class="prob-title m-0">Configuración de Probabilidad Residual</h2>
             <div class="prob-subtitle">
               Definición de rangos y niveles de reducción para el cálculo de probabilidad residual del riesgo
             </div>
@@ -16542,7 +16542,7 @@ def configurar_impacto_residual():
       <div class="imp-header-card">
         <div class="imp-header-overlay">
           <div class="imp-header-text">
-            <h2 class="imp-title m-0">📉 Configuración de Impacto Residual</h2>
+            <h2 class="imp-title m-0">Configuración de Impacto Residual</h2>
             <div class="imp-subtitle">
               Definición de rangos y niveles de reducción para el cálculo de impacto residual del riesgo
             </div>
@@ -16694,7 +16694,7 @@ def configurar_impacto_residual():
       }
 
       .imp-header-overlay::before{
-        content:"📊";
+        content:"📉";
         width:54px;
         height:54px;
         min-width:54px;
@@ -16973,7 +16973,7 @@ def configurar_tipos_riesgo():
       <div class="tipo-header-card">
         <div class="tipo-header-overlay">
           <div class="tipo-header-text">
-            <h2 class="tipo-title m-0">🏷️ Configuración de Tipos de Riesgo</h2>
+            <h2 class="tipo-title m-0">Configuración de Tipos de Riesgo</h2>
             <div class="tipo-subtitle">
               Administración de categorías de riesgo utilizadas en la gestión del SGSI
             </div>
@@ -17149,7 +17149,7 @@ def configurar_tipos_riesgo():
       }
 
       .tipo-header-overlay::before{
-        content:"🏷️";
+        content:"🏷️️";
         width:54px;
         height:54px;
         min-width:54px;
@@ -99365,7 +99365,7 @@ def report_nist(run_id: int):
       <div class="plan-hero">
         <div class="plan-hero-overlay">
           <div class="plan-hero-centered">
-            <h2 class="plan-title">🧩 Nivel de Madurez acorde con NIST</h2>
+            <h2 class="plan-title">Nivel de Madurez acorde con NIST</h2>
             <div class="plan-subtitle">
               Run ISO #{{ run.id }} • {{ run.company_name }} • {{ run.created_at.strftime('%Y-%m-%d %H:%M') }}
             </div>
@@ -106575,8 +106575,26 @@ def _payload_soa(company=""):
           justification,
           motivation
         FROM control
-        ORDER BY nr
     """)
+
+    def _soa_sort_key(row):
+        nr = str(row.get("nr") or "").strip()
+        nr = nr.replace("A.", "").replace("a.", "")
+        parts = nr.split(".")
+
+        nums = []
+        for p in parts:
+            try:
+                nums.append(int(p))
+            except Exception:
+                nums.append(999)
+
+        while len(nums) < 3:
+            nums.append(0)
+
+        return nums
+
+    rows = sorted(rows, key=_soa_sort_key)
 
     cols = ["nr", "chapter", "topic", "applicable", "implemented", "justification", "motivation"]
     labels = ["Control", "Capítulo", "Control", "Aplica", "Implementado", "Justificación", "Evidencia"]
@@ -107870,7 +107888,7 @@ def reportes_home():
       <div class="rep-header-card">
         <div class="rep-header-overlay">
           <div class="rep-header-text">
-            <h3 class="rep-title m-0">Reportes SGSI</h3>
+            <h3 class="rep-title m-0">Reportes del Sistema de Gestión</h3>
             <div class="rep-subtitle">
               La declaración de aplicabilidad, métricas y DOFA se exportan en PDF / Word.
               Matriz de riesgos, registro de incidentes, planes de acción y partes interesadas se exportan en Excel.
