@@ -403,8 +403,10 @@ def calcular_riesgo(probabilidad_txt, impacto_txt):
 
 
 app = Flask(__name__)
+
 # ============================================================
 # BARRA DE PROGRESO GLOBAL SGSI - PARA TODOS LOS PROCESOS
+# CORREGIDA: NO BLOQUEA CUANDO SE CANCELA UN CONFIRM()
 # ============================================================
 
 SGSI_PROGRESS_GLOBAL = """
@@ -419,7 +421,6 @@ SGSI_PROGRESS_GLOBAL = """
     align-items: center;
     justify-content: center;
 }
-
 .sgsi-progress-card {
     width: min(460px, 92vw);
     background: rgba(255,255,255,.96);
@@ -429,27 +430,23 @@ SGSI_PROGRESS_GLOBAL = """
     text-align: center;
     border: 1px solid rgba(255,255,255,.55);
 }
-
 .sgsi-progress-title {
     font-size: 1.2rem;
     font-weight: 800;
     color: #1d4f8f;
     margin-bottom: 8px;
 }
-
 .sgsi-progress-text {
     font-size: .94rem;
     color: #526173;
     margin-bottom: 18px;
 }
-
 .sgsi-progress-percent {
     font-size: 1rem;
     font-weight: 800;
     color: #1d4f8f;
     margin-bottom: 8px;
 }
-
 .sgsi-progress-bar-wrap {
     height: 16px;
     background: #e8eef7;
@@ -457,7 +454,6 @@ SGSI_PROGRESS_GLOBAL = """
     overflow: hidden;
     box-shadow: inset 0 2px 5px rgba(0,0,0,.10);
 }
-
 .sgsi-progress-bar {
     width: 0%;
     height: 100%;
@@ -465,7 +461,6 @@ SGSI_PROGRESS_GLOBAL = """
     background: linear-gradient(135deg, #2f6fb6 0%, #3f86d6 55%, #5aa3ea 100%);
     transition: width .35s ease;
 }
-
 .sgsi-progress-footer {
     margin-top: 14px;
     font-size: .82rem;
@@ -479,16 +474,11 @@ SGSI_PROGRESS_GLOBAL = """
         <div class="sgsi-progress-text" id="sgsiProgressText">
             Por favor espera mientras el sistema ejecuta el proceso...
         </div>
-
         <div class="sgsi-progress-percent" id="sgsiProgressPercent">0%</div>
-
         <div class="sgsi-progress-bar-wrap">
             <div class="sgsi-progress-bar" id="sgsiProgressBar"></div>
         </div>
-
-        <div class="sgsi-progress-footer">
-            SGSI — Arkyntech GRAC
-        </div>
+        <div class="sgsi-progress-footer">SGSI — Arkyntech GRAC</div>
     </div>
 </div>
 
@@ -504,13 +494,8 @@ SGSI_PROGRESS_GLOBAL = """
 
         sgsiProgressValue = Math.max(0, Math.min(100, percent));
 
-        if (bar) {
-            bar.style.width = sgsiProgressValue + "%";
-        }
-
-        if (label) {
-            label.innerText = Math.round(sgsiProgressValue) + "%";
-        }
+        if (bar) bar.style.width = sgsiProgressValue + "%";
+        if (label) label.innerText = Math.round(sgsiProgressValue) + "%";
     }
 
     function startSGSIProgressAuto() {
@@ -533,9 +518,7 @@ SGSI_PROGRESS_GLOBAL = """
 
         if (!overlay) return;
 
-        if (text && message) {
-            text.innerText = message;
-        }
+        if (text && message) text.innerText = message;
 
         overlay.style.display = "flex";
         setSGSIProgress(3);
@@ -543,20 +526,83 @@ SGSI_PROGRESS_GLOBAL = """
     }
 
     function hideSGSIProgress() {
+        const overlay = document.getElementById("sgsiProgressOverlay");
+
+        clearInterval(sgsiProgressTimer);
+        sgsiProgressTimer = null;
+        sgsiUserAction = false;
+
+        if (overlay) overlay.style.display = "none";
+
+        setSGSIProgress(0);
+    }
+
+    function finishSGSIProgress() {
         setSGSIProgress(100);
+        setTimeout(hideSGSIProgress, 350);
+    }
 
-        setTimeout(function () {
-            const overlay = document.getElementById("sgsiProgressOverlay");
+    function shouldIgnoreElement(el) {
+        if (!el) return true;
 
-            if (overlay) {
-                overlay.style.display = "none";
-            }
+        if (el.dataset && el.dataset.noProgress === "true") return true;
 
-            clearInterval(sgsiProgressTimer);
-            sgsiProgressTimer = null;
-            setSGSIProgress(0);
-            sgsiUserAction = false;
-        }, 350);
+        if (
+            el.classList.contains("dropdown-toggle") ||
+            el.getAttribute("data-bs-toggle") ||
+            el.getAttribute("data-toggle")
+        ) {
+            return true;
+        }
+
+        return false;
+    }
+
+    function shouldIgnoreLink(link) {
+        if (!link) return true;
+
+        const href = link.getAttribute("href") || "";
+        const hrefLower = href.toLowerCase();
+
+        if (
+            !href ||
+            href === "#" ||
+            href.startsWith("#") ||
+            href.startsWith("javascript:") ||
+            hrefLower.includes(".pdf") ||
+            hrefLower.includes("pdf") ||
+            hrefLower.includes("reporte") ||
+            hrefLower.includes("descargar") ||
+            hrefLower.includes("download") ||
+            link.target === "_blank" ||
+            link.hasAttribute("download") ||
+            shouldIgnoreElement(link)
+        ) {
+            return true;
+        }
+
+        return false;
+    }
+
+    function isSubmitButton(el) {
+        if (!el) return false;
+
+        const tag = el.tagName.toLowerCase();
+        const type = (el.getAttribute("type") || "").toLowerCase();
+
+        return (
+            (tag === "button" && (type === "" || type === "submit")) ||
+            (tag === "input" && type === "submit")
+        );
+    }
+
+    function hasInlineConfirm(el) {
+        if (!el) return false;
+
+        const onclick = (el.getAttribute("onclick") || "").toLowerCase();
+        const onsubmit = (el.getAttribute("onsubmit") || "").toLowerCase();
+
+        return onclick.includes("confirm(") || onsubmit.includes("confirm(");
     }
 
     window.showSGSIProgress = showSGSIProgress;
@@ -565,63 +611,62 @@ SGSI_PROGRESS_GLOBAL = """
 
     document.addEventListener("submit", function (e) {
         const form = e.target;
+        if (!form || shouldIgnoreElement(form)) return;
 
-        if (!form || form.dataset.noProgress === "true") return;
-
-        sgsiUserAction = true;
-
-        showSGSIProgress(
-            form.dataset.progressText || "Generando y procesando información..."
-        );
-    }, true);
-
-    document.addEventListener("click", function (e) {
-        const btn = e.target.closest("button, a, input[type='submit']");
-
-        if (!btn) return;
-        if (btn.dataset.noProgress === "true") return;
-
-        const tag = btn.tagName.toLowerCase();
-
-        if (tag === "a") {
-            const href = btn.getAttribute("href") || "";
-
-            const hrefLower = href.toLowerCase();
-
-            if (
-                !href ||
-                href === "#" ||
-                href.startsWith("#") ||
-                href.startsWith("javascript:") ||
-                hrefLower.includes(".pdf") ||
-                hrefLower.includes("pdf") ||
-                hrefLower.includes("reporte") ||
-                hrefLower.includes("descargar") ||
-                hrefLower.includes("download") ||
-                btn.target === "_blank" ||
-                btn.hasAttribute("download") ||
-                btn.classList.contains("dropdown-toggle") ||
-                btn.getAttribute("data-bs-toggle") ||
-                btn.getAttribute("data-toggle")
-            ) {
+        setTimeout(function () {
+            if (e.defaultPrevented) {
+                hideSGSIProgress();
                 return;
             }
 
             sgsiUserAction = true;
 
             showSGSIProgress(
-                btn.dataset.progressText || "Cargando información..."
+                form.dataset.progressText || "Generando y procesando información..."
             );
+        }, 0);
+    }, false);
+
+    document.addEventListener("click", function (e) {
+        const btn = e.target.closest("button, a, input[type='submit']");
+        if (!btn) return;
+        if (shouldIgnoreElement(btn)) return;
+
+        const tag = btn.tagName.toLowerCase();
+
+        if (isSubmitButton(btn)) {
+            return;
         }
 
-        if (btn.type === "submit") {
+        if (hasInlineConfirm(btn)) {
+            setTimeout(function () {
+                if (e.defaultPrevented) {
+                    hideSGSIProgress();
+                    return;
+                }
+            }, 0);
+            return;
+        }
+
+        if (tag === "a") {
+            if (shouldIgnoreLink(btn)) return;
+
             sgsiUserAction = true;
-
-            showSGSIProgress(
-                btn.dataset.progressText || "Ejecutando proceso..."
-            );
+            showSGSIProgress(btn.dataset.progressText || "Cargando información...");
         }
-    }, true);
+    }, false);
+
+    const originalConfirm = window.confirm;
+
+    window.confirm = function () {
+        const result = originalConfirm.apply(window, arguments);
+
+        if (!result) {
+            hideSGSIProgress();
+        }
+
+        return result;
+    };
 
     const originalFetch = window.fetch;
 
@@ -629,13 +674,11 @@ SGSI_PROGRESS_GLOBAL = """
         window.fetch = function () {
             const debeMostrar = sgsiUserAction === true;
 
-            if (debeMostrar) {
-                showSGSIProgress("Consultando información...");
-            }
+            if (debeMostrar) showSGSIProgress("Consultando información...");
 
             return originalFetch.apply(this, arguments)
                 .then(function (response) {
-                    if (debeMostrar) hideSGSIProgress();
+                    if (debeMostrar) finishSGSIProgress();
                     return response;
                 })
                 .catch(function (error) {
@@ -645,17 +688,9 @@ SGSI_PROGRESS_GLOBAL = """
         };
     }
 
-    window.addEventListener("pageshow", function () {
-        const overlay = document.getElementById("sgsiProgressOverlay");
-
-        if (overlay) {
-            overlay.style.display = "none";
-        }
-
+    window.addEventListener("pageshow", hideSGSIProgress);
+    window.addEventListener("beforeunload", function () {
         clearInterval(sgsiProgressTimer);
-        sgsiProgressTimer = null;
-        setSGSIProgress(0);
-        sgsiUserAction = false;
     });
 })();
 </script>
@@ -153431,11 +153466,19 @@ def bcp_metricas_actuales():
 
 # ============================================================
 # UI SHELL - MISMO ESTILO BASE DE GRAC
-# BOTONES POR FUERA DEL HEADER (COMO LOS DEMÁS MÓDULOS)
+# BOTÓN PDF SOLO EN INFORME EJECUTIVO AI
 # ============================================================
 
 def bcp_render(title, body_html):
     user = User.query.get(session.get("user_id"))
+
+    ruta_actual = (request.path or "").strip()
+    mostrar_pdf = (
+        ruta_actual.startswith("/bcp/ia")
+        or ruta_actual.startswith("/bcp/ia/matriz")
+        or "Informe Ejecutivo AI" in (title or "")
+        or "Matriz Informes IA BCP" in (title or "")
+    )
 
     shell_html = """
     <style>
@@ -153775,8 +153818,10 @@ def bcp_render(title, body_html):
 
       <div class="bcp-header-actions">
         <a href="{{ url_for('bcp_dashboard') }}" class="btn bcp-btn-main">🏠 Dashboard</a>
-        <a href="{{ url_for('bcp_ia_generar') }}" class="btn bcp-btn-info">🤖 IA</a>
+
+        {% if mostrar_pdf %}
         <a href="{{ url_for('bcp_pdf') }}" class="btn bcp-btn-danger" data-no-progress="true">📄 PDF</a>
+        {% endif %}
       </div>
 
       {{ body_html|safe }}
@@ -153788,7 +153833,8 @@ def bcp_render(title, body_html):
         shell_html,
         title=title,
         body_html=Markup(body_html),
-        user=user
+        user=user,
+        mostrar_pdf=mostrar_pdf
     )
 
     return render_template_string(
@@ -154038,24 +154084,6 @@ def bcp_dashboard():
         </div></div>
       </div>
     </div>
-
-    <div class="bcp-card"><div class="bcp-card-body">
-      <div class="bcp-toolbar">
-        <div>
-          <h2 class="bcp-section-title">Accesos rápidos</h2>
-          <div class="bcp-section-muted">Módulos principales de continuidad, recuperación y resiliencia.</div>
-        </div>
-      </div>
-      <div class="bcp-actions">
-        <a class="btn btn-primary" href="{{ url_for('bcp_bia') }}">BIA</a>
-        <a class="btn btn-warning" href="{{ url_for('bcp_procesos') }}">Procesos Críticos</a>
-        <a class="btn btn-dark" href="{{ url_for('bcp_drp') }}">DRP</a>
-        <a class="btn btn-success" href="{{ url_for('bcp_planes') }}">Planes BCP</a>
-        <a class="btn btn-danger" href="{{ url_for('bcp_crisis') }}">Crisis</a>
-        <a class="btn btn-secondary" href="{{ url_for('bcp_pruebas') }}">Pruebas</a>
-        <a class="btn btn-info text-white" href="{{ url_for('bcp_dependencias') }}">Dependencias</a>
-        <a class="btn btn-outline-primary" href="{{ url_for('bcp_madurez') }}">Madurez</a>
-      </div>
     </div></div>
     """, k=k)
 
@@ -154760,7 +154788,7 @@ with app.app_context():
 
 
 # ============================================================
-# MATRIZ HISTÓRICA INFORMES IA BCP
+# MATRIZ HISTÓRICA INFORMES IA BCP - VERSIÓN EJECUTIVA
 # ============================================================
 
 @app.route("/bcp/ia/matriz")
@@ -154774,105 +154802,299 @@ def bcp_matriz_informes():
 
     conn = get_bcp_db_connection()
     informes = conn.execute("""
-        SELECT *
+        SELECT
+            id,
+            fecha_generacion,
+            generado_por,
+            nivel_madurez,
+            procesos_criticos,
+            sistemas_criticos,
+            rto_promedio,
+            rpo_promedio,
+            cumplimiento_rto_pct,
+            cumplimiento_rpo_pct,
+            backups_fallidos,
+            proveedor_ai
         FROM bcp_informes_ai
         ORDER BY id DESC
     """).fetchall()
     conn.close()
 
     body = render_template_string("""
+    <style>
+      .bcp-ia-summary-grid{
+        display:grid;
+        grid-template-columns:repeat(4,minmax(160px,1fr));
+        gap:12px;
+        margin-bottom:16px;
+      }
+
+      .bcp-ia-mini-card{
+        background:#ffffff;
+        border:1px solid #dbe6f4;
+        border-left:6px solid #1459a6;
+        border-radius:16px;
+        padding:14px 16px;
+        box-shadow:0 8px 18px rgba(15,23,42,.10);
+      }
+
+      .bcp-ia-mini-label{
+        font-size:.72rem;
+        font-weight:900;
+        color:#1459a6;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+      }
+
+      .bcp-ia-mini-value{
+        margin-top:5px;
+        font-size:1.35rem;
+        font-weight:950;
+        color:#1f2937;
+      }
+
+      .bcp-ia-table{
+        min-width:1050px !important;
+      }
+
+      .bcp-ia-table td,
+      .bcp-ia-table th{
+        white-space:nowrap;
+      }
+
+      .bcp-ia-actions{
+        display:flex;
+        justify-content:center;
+        align-items:center;
+        gap:8px;
+        flex-wrap:wrap;
+      }
+
+      @media(max-width:992px){
+        .bcp-ia-summary-grid{
+          grid-template-columns:repeat(2,minmax(160px,1fr));
+        }
+      }
+
+      @media(max-width:576px){
+        .bcp-ia-summary-grid{
+          grid-template-columns:1fr;
+        }
+      }
+    </style>
+
     <div class="bcp-card">
       <div class="bcp-card-body">
 
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-          <h2 class="bcp-section-title mb-0">Matriz Histórica Informes IA BCP/DRP</h2>
+        <div class="bcp-toolbar">
+          <div>
+            <h2 class="bcp-section-title mb-0">
+              Matriz Histórica Informes IA BCP/DRP
+            </h2>
+
+            <div class="bcp-section-muted">
+              Consulta ejecutiva de informes generados por IA para Continuidad del Negocio.
+            </div>
+          </div>
 
           {% if user.role != 'auditor' %}
-          <a href="{{ url_for('bcp_ia_generar') }}" class="btn btn-primary rounded-pill px-4">
+          <a href="{{ url_for('bcp_ia_generar') }}"
+             class="btn btn-primary rounded-pill px-4">
+            <i class="bi bi-stars"></i>
             Generar nuevo informe IA
           </a>
           {% endif %}
         </div>
 
-        <div class="alert alert-info border-0 shadow-sm">
-          Primero visualiza la matriz histórica. Desde esta pantalla puedes generar, consultar o eliminar informes IA BCP.
+        <div class="bcp-ia-summary-grid">
+
+          <div class="bcp-ia-mini-card">
+            <div class="bcp-ia-mini-label">
+              Total informes
+            </div>
+
+            <div class="bcp-ia-mini-value">
+              {{ informes|length }}
+            </div>
+          </div>
+
+          <div class="bcp-ia-mini-card">
+            <div class="bcp-ia-mini-label">
+              Última madurez
+            </div>
+
+            <div class="bcp-ia-mini-value">
+              {% if informes|length > 0 %}
+                {{ informes[0]['nivel_madurez'] or 0 }}/5
+              {% else %}
+                0/5
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="bcp-ia-mini-card">
+            <div class="bcp-ia-mini-label">
+              Último RTO
+            </div>
+
+            <div class="bcp-ia-mini-value">
+              {% if informes|length > 0 %}
+                {{ informes[0]['rto_promedio'] or 0 }} h
+              {% else %}
+                0 h
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="bcp-ia-mini-card">
+            <div class="bcp-ia-mini-label">
+              Último RPO
+            </div>
+
+            <div class="bcp-ia-mini-value">
+              {% if informes|length > 0 %}
+                {{ informes[0]['rpo_promedio'] or 0 }} h
+              {% else %}
+                0 h
+              {% endif %}
+            </div>
+          </div>
+
         </div>
 
-        <div class="table-responsive">
-          <table class="table table-hover table-bordered align-middle bg-white">
-            <thead class="table-primary text-center">
+        <div class="alert alert-info border-0 shadow-sm">
+          Esta matriz muestra únicamente los datos principales.
+          Para consultar el contenido completo del informe,
+          usa el botón <strong>Ver detalle</strong>.
+        </div>
+
+        <div class="bcp-table-wrap">
+          <table class="table table-hover bcp-table bcp-ia-table align-middle">
+
+            <thead>
               <tr>
-                <th>ID</th>
-                <th>Fecha</th>
+                <th style="width:70px;">ID</th>
+                <th>Fecha generación</th>
                 <th>Usuario</th>
                 <th>Madurez</th>
-                <th>Procesos críticos</th>
-                <th>Sistemas críticos</th>
+                <th>Procesos</th>
+                <th>Sistemas</th>
                 <th>RTO</th>
                 <th>RPO</th>
-                <th>Pruebas</th>
-                <th>Cump. RTO</th>
-                <th>Cump. RPO</th>
+                <th>Cumplimiento</th>
                 <th>Backups fallidos</th>
                 <th>Proveedor IA</th>
-                <th style="min-width:200px;">Acciones</th>
+                <th style="width:260px;">Acciones</th>
               </tr>
             </thead>
 
             <tbody>
+
               {% for i in informes %}
               <tr>
-                <td class="text-center">{{ i['id'] }}</td>
-                <td>{{ i['fecha_generacion'] }}</td>
-                <td>{{ i['generado_por'] }}</td>
-                <td class="text-center">{{ i['nivel_madurez'] }}/5</td>
-                <td class="text-center">{{ i['procesos_criticos'] }}</td>
-                <td class="text-center">{{ i['sistemas_criticos'] }}</td>
-                <td class="text-center">{{ i['rto_promedio'] }} h</td>
-                <td class="text-center">{{ i['rpo_promedio'] }} h</td>
-                <td class="text-center">{{ i['pruebas_realizadas'] }}</td>
-                <td class="text-center">{{ i['cumplimiento_rto_pct'] }}%</td>
-                <td class="text-center">{{ i['cumplimiento_rpo_pct'] }}%</td>
-                <td class="text-center">{{ i['backups_fallidos'] }}</td>
-                <td class="text-center">{{ i['proveedor_ai'] }}</td>
+
+                <td class="fw-bold text-primary text-center">
+                  #{{ i['id'] }}
+                </td>
 
                 <td>
-                  <div class="d-flex justify-content-center flex-wrap gap-2">
+                  {{ i['fecha_generacion'] or '—' }}
+                </td>
+
+                <td>
+                  {{ i['generado_por'] or '—' }}
+                </td>
+
+                <td class="text-center">
+                  <span class="badge bg-primary">
+                    {{ i['nivel_madurez'] or 0 }}/5
+                  </span>
+                </td>
+
+                <td class="text-center">
+                  {{ i['procesos_criticos'] or 0 }}
+                </td>
+
+                <td class="text-center">
+                  {{ i['sistemas_criticos'] or 0 }}
+                </td>
+
+                <td class="text-center">
+                  {{ i['rto_promedio'] or 0 }} h
+                </td>
+
+                <td class="text-center">
+                  {{ i['rpo_promedio'] or 0 }} h
+                </td>
+
+                <td class="text-center">
+                  <span class="badge bg-success">
+                    RTO {{ i['cumplimiento_rto_pct'] or 0 }}%
+                  </span>
+
+                  <span class="badge bg-info text-dark">
+                    RPO {{ i['cumplimiento_rpo_pct'] or 0 }}%
+                  </span>
+                </td>
+
+                <td class="text-center">
+                  {% if (i['backups_fallidos'] or 0) > 0 %}
+                    <span class="badge bg-danger">
+                      {{ i['backups_fallidos'] }}
+                    </span>
+                  {% else %}
+                    <span class="badge bg-success">
+                      0
+                    </span>
+                  {% endif %}
+                </td>
+
+                <td class="text-center">
+                  {{ i['proveedor_ai'] or '—' }}
+                </td>
+
+                <td>
+                  <div class="bcp-ia-actions">
 
                     <a href="{{ url_for('bcp_ver_informe_ia', informe_id=i['id']) }}"
                        class="btn btn-sm btn-outline-primary rounded-pill">
-                      <i class="bi bi-eye"></i> Ver
+                      <i class="bi bi-eye"></i>
+                      Ver detalle
                     </a>
 
                     {% if user.role != 'auditor' %}
                     <form method="POST"
                           action="{{ url_for('bcp_eliminar_informe_ia', informe_id=i['id']) }}"
                           style="display:inline;"
-                          onsubmit="return confirm('¿Desea eliminar este informe IA BCP?')">
-                      <button type="submit" class="btn btn-sm btn-danger rounded-pill">
-                        <i class="bi bi-trash"></i> Eliminar
+                          onsubmit="return confirm('¿Desea eliminar este informe IA BCP/DRP?')">
+
+                      <button type="submit"
+                              class="btn btn-sm btn-outline-danger rounded-pill">
+                        <i class="bi bi-trash"></i>
+                        Eliminar
                       </button>
+
                     </form>
                     {% endif %}
 
                   </div>
                 </td>
+
               </tr>
+
               {% else %}
               <tr>
-                <td colspan="14" class="text-center text-muted py-4">
+                <td colspan="12"
+                    class="text-center text-muted py-4">
+
                   No existen informes IA generados.
+
                 </td>
               </tr>
               {% endfor %}
+
             </tbody>
           </table>
-        </div>
-
-        <div class="bcp-actions justify-content-center mt-4">
-          <a href="{{ url_for('bcp_dashboard') }}" class="btn btn-light rounded-pill px-4">
-            Volver
-          </a>
         </div>
 
       </div>
