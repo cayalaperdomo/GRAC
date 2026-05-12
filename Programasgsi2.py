@@ -8399,13 +8399,6 @@ MENU_SECTIONS = [
                                 "btn": "btn-outline-primary",
                                 "module": "Configuración Parámetros de la Empresa"
                             },
-                            {
-                                "label": "Logo Empresa",
-                                "href": "/empresa/logo",
-                                "icon": "bi-building",
-                                "btn": "btn-outline-primary",
-                                "module": "Configuración Parámetros de la Empresa"
-                            }
                         ]
                     }
                 ]
