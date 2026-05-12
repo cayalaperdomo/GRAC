@@ -4789,8 +4789,64 @@ def admin_or_access_manager_required(f):
     return wrapper
 
 def verify_otp(user, otp_code):
+    if not user or not user.otp_secret:
+        return False
+
     totp = pyotp.TOTP(user.otp_secret)
     return totp.verify(otp_code)
+
+
+def _render_qr_otp_setup(user, secret):
+    otp_uri = pyotp.totp.TOTP(secret).provisioning_uri(
+        name=user.username,
+        issuer_name="SGSI"
+    )
+
+    qr = qrcode.make(otp_uri)
+    buffer = io.BytesIO()
+    qr.save(buffer, format="PNG")
+    qr_data = base64.b64encode(buffer.getvalue()).decode()
+
+    content = f"""
+    <div class="col-md-6 offset-md-3 text-center">
+        <h3>Configuración de Autenticación en Dos Pasos</h3>
+
+        <div class="alert alert-info">
+            Escanea este código QR con Google Authenticator, Microsoft Authenticator o Authy.
+            Luego ingresa el código de 6 dígitos para activar el token.
+        </div>
+
+        <img src="data:image/png;base64,{qr_data}"
+             class="img-fluid mb-3"
+             alt="QR Code"
+             style="max-width:260px;">
+
+        <form method="post" action="{url_for('verificar_otp')}">
+            <input type="hidden" name="username" value="{user.username}">
+            <input type="hidden" name="modo" value="setup">
+
+            <div class="mt-3 mb-3">
+                <label class="form-label fw-bold">Código de Verificación</label>
+                <input class="form-control text-center"
+                       name="otp"
+                       placeholder="123456"
+                       required
+                       autocomplete="one-time-code">
+            </div>
+
+            <button class="btn btn-success rounded-pill px-4">
+                Activar token
+            </button>
+
+            <a href="{url_for('login')}" class="btn btn-secondary rounded-pill px-4">
+                Cancelar
+            </a>
+        </form>
+    </div>
+    """
+
+    return render_template_string(BASE, content=content)
+
 
 # =========================
 # AUTENTICACIÓN
@@ -4799,111 +4855,150 @@ def verify_otp(user, otp_code):
 def login():
     if request.method == 'POST':
         username_ingresado = (request.form.get('username') or "").strip()
+        password_ingresado = request.form.get('password') or ""
+
         user = User.query.filter_by(username=username_ingresado).first()
 
-        if user and user.check_password(request.form['password']):
-            # Si el usuario no tiene configurado OTP
+        if user and user.check_password(password_ingresado):
+
+            # =====================================================
+            # CASO 1:
+            # Usuario NO tiene OTP configurado.
+            # Se genera secret temporal en sesión.
+            # NO se guarda todavía en la base de datos.
+            # =====================================================
             if not user.otp_secret:
-                secret = pyotp.random_base32()
-                user.otp_secret = secret
-                db.session.commit()
+                secret_temporal = pyotp.random_base32()
 
-                otp_uri = pyotp.totp.TOTP(secret).provisioning_uri(
-                    name=user.username,
-                    issuer_name="SGSI"
-                )
-                qr = qrcode.make(otp_uri)
-                buffer = io.BytesIO()
-                qr.save(buffer, format="PNG")
-                qr_data = base64.b64encode(buffer.getvalue()).decode()
+                session['temp_user'] = user.username
+                session['pending_otp_secret'] = secret_temporal
 
-                content = f"""
-                <div class="col-md-6 offset-md-3 text-center">
-                    <h3>Configuración de Autenticación en Dos Pasos</h3>
-                    <p>Escanea este código QR con tu aplicación de autenticación (Google Authenticator, Authy, etc.)</p>
-                    <img src="data:image/png;base64,{qr_data}" class="img-fluid" alt="QR Code">
-                    <form method="post" action="/verificar_otp">
-                        <input type="hidden" name="username" value="{user.username}">
-                        <div class="mt-3 mb-3">
-                            <label>Código de Verificación</label>
-                            <input class="form-control text-center" name="otp" placeholder="123456" required>
-                        </div>
-                        <button class="btn btn-success">Verificar</button>
-                    </form>
-                </div>
-                """
-                return render_template_string(BASE, content=content)
+                return _render_qr_otp_setup(user, secret_temporal)
 
+            # =====================================================
+            # CASO 2:
+            # Usuario ya tiene OTP guardado.
+            # Ahora sí se pide token normalmente.
+            # =====================================================
             session['temp_user'] = user.username
+            session.pop('pending_otp_secret', None)
+
             return redirect(url_for('verificar_otp'))
 
-        # LOGIN FALLIDO (usuario o contraseña)
         registrar_log(
             username_ingresado or "Desconocido",
-            f"Acceso fallido al sistema. Usuario ingresado: {username_ingresado or 'Desconocido'}"
+            f"Acceso fallido al sistema. Usuario o contraseña inválida: {username_ingresado or 'Desconocido'}"
         )
 
-        flash("Usuario o contraseña incorrectos", "danger")
+        flash("Usuario o contraseña incorrectos.", "danger")
 
     content = """
     <div class="col-md-4 offset-md-4">
-      <h3>Iniciar Sesión</h3>
-      <form method="post" autocomplete="off">
+      <h3 class="text-center mb-3">Iniciar sesión</h3>
+
+      <form method="post">
         <div class="mb-3">
           <label>Usuario</label>
-          <input
-            class="form-control"
-            name="username"
-            autocomplete="off"
-            autocapitalize="off"
-            spellcheck="false"
-            required>
+          <input class="form-control" name="username" required>
         </div>
+
         <div class="mb-3">
           <label>Contraseña</label>
-          <input
-            type="password"
-            class="form-control"
-            name="password"
-            autocomplete="off"
-            data-lpignore="true"
-            data-1p-ignore="true"
-            autocapitalize="off"
-            spellcheck="false"
-            required>
+          <input class="form-control" name="password" type="password" required>
         </div>
-        <button class="btn btn-primary">Ingresar</button>
+
+        <button class="btn btn-primary w-100">Ingresar</button>
       </form>
     </div>
     """
+
     return render_template_string(BASE, content=content)
+
 
 @app.route('/verificar_otp', methods=['GET', 'POST'])
 def verificar_otp():
     username = session.get('temp_user')
 
+    if not username:
+        flash("Primero inicia sesión.", "warning")
+        return redirect(url_for('login'))
+
+    user = User.query.filter_by(username=username).first()
+
+    if not user:
+        session.pop('temp_user', None)
+        session.pop('pending_otp_secret', None)
+
+        registrar_log(
+            username or "Desconocido",
+            f"Acceso fallido al sistema. Usuario no encontrado en verificación OTP: {username or 'Desconocido'}"
+        )
+
+        flash("Usuario no encontrado.", "danger")
+        return redirect(url_for('login'))
+
     if request.method == 'POST':
-        username = request.form.get('username') or session.get('temp_user')
-        otp = request.form['otp']
+        otp = (request.form.get('otp') or "").strip()
+        modo = (request.form.get('modo') or "").strip()
 
-        user = User.query.filter_by(username=username).first()
+        # =====================================================
+        # SI VIENE DE CONFIGURACIÓN INICIAL:
+        # validar contra secret temporal de sesión.
+        # Solo si es correcto, se guarda en DB.
+        # =====================================================
+        if modo == "setup":
+            secret_temporal = session.get('pending_otp_secret')
 
-        if not user:
+            if not secret_temporal:
+                flash("La configuración del token expiró. Inicia sesión nuevamente.", "warning")
+                return redirect(url_for('login'))
+
+            totp = pyotp.TOTP(secret_temporal)
+
+            if totp.verify(otp):
+                user.otp_secret = secret_temporal
+                db.session.commit()
+
+                session['user_id'] = user.id
+                session['username'] = user.username
+                session['role'] = user.role
+
+                session.pop('temp_user', None)
+                session.pop('pending_otp_secret', None)
+
+                registrar_log(
+                    user.username,
+                    f"Acceso exitoso al sistema. Token OTP configurado y usuario autenticado con perfil: {user.role}"
+                )
+
+                flash(f"Token configurado correctamente. Bienvenido {user.username}", "success")
+                return redirect(url_for('menu'))
+
             registrar_log(
-                username or "Desconocido",
-                f"Acceso fallido al sistema. Usuario no encontrado en verificación OTP: {username or 'Desconocido'}"
+                user.username,
+                f"Configuración OTP fallida. Código inválido para el usuario: {user.username}"
             )
-            flash("Usuario no encontrado", "danger")
+
+            flash("Código OTP inválido. Escanea el QR e intenta nuevamente.", "danger")
+            return _render_qr_otp_setup(user, secret_temporal)
+
+        # =====================================================
+        # LOGIN NORMAL CON OTP YA CONFIGURADO
+        # =====================================================
+        if not user.otp_secret:
+            flash("Este usuario aún no tiene token configurado. Inicia sesión nuevamente.", "warning")
             return redirect(url_for('login'))
 
         totp = pyotp.TOTP(user.otp_secret)
+
         if totp.verify(otp):
             session['user_id'] = user.id
             session['username'] = user.username
             session['role'] = user.role
-            session.pop('temp_user', None)
 
-            # ACCESO EXITOSO
+            session.pop('temp_user', None)
+            session.pop('pending_otp_secret', None)
+
             registrar_log(
                 user.username,
                 f"Acceso exitoso al sistema. Usuario autenticado correctamente con perfil: {user.role}"
@@ -4911,50 +5006,71 @@ def verificar_otp():
 
             flash(f"Bienvenido {user.username}", "success")
             return redirect(url_for('menu'))
-        else:
-            # OTP FALLIDO
-            registrar_log(
-                user.username,
-                f"Acceso fallido al sistema. OTP inválido para el usuario: {user.username}"
-            )
-            flash("Código OTP inválido, intente de nuevo", "danger")
+
+        registrar_log(
+            user.username,
+            f"Acceso fallido al sistema. OTP inválido para el usuario: {user.username}"
+        )
+
+        flash("Código OTP inválido, intente de nuevo.", "danger")
 
     content = f"""
     <div class="col-md-4 offset-md-4 text-center">
       <h3>Verificación de Código OTP</h3>
+
       <form method="post">
-        <input type="hidden" name="username" value="{username}">
+        <input type="hidden" name="username" value="{user.username}">
+
         <div class="mb-3">
           <label>Código OTP</label>
-          <input class="form-control text-center" name="otp" placeholder="123456" required>
+          <input class="form-control text-center"
+                 name="otp"
+                 placeholder="123456"
+                 required
+                 autocomplete="one-time-code">
         </div>
-        <button class="btn btn-success">Verificar</button>
+
+        <button class="btn btn-success rounded-pill px-4">
+          Verificar
+        </button>
+
+        <a href="{url_for('login')}" class="btn btn-secondary rounded-pill px-4">
+          Cancelar
+        </a>
       </form>
     </div>
     """
+
     return render_template_string(BASE, content=content)
+
 
 @app.route('/generar_otp/<username>')
 def generar_otp(username):
     user = User.query.filter_by(username=username).first()
+
     if not user:
         return "Usuario no encontrado", 404
 
-    # Si el usuario no tiene secreto, se genera uno nuevo
-    if not user.otp_secret:
-        user.otp_secret = pyotp.random_base32()
-        db.session.commit()
+    # =====================================================
+    # Si ya tiene OTP guardado, usa ese.
+    # Si no tiene, genera uno temporal SOLO para este QR.
+    # NO lo guarda en la base de datos.
+    # =====================================================
+    secret = user.otp_secret or session.get('pending_otp_secret') or pyotp.random_base32()
 
-    # URL compatible con Google Authenticator
-    otp_uri = pyotp.totp.TOTP(user.otp_secret).provisioning_uri(
-        name=username, issuer_name="Sistema ISO27001"
+    session['temp_user'] = user.username
+    session['pending_otp_secret'] = secret
+
+    otp_uri = pyotp.totp.TOTP(secret).provisioning_uri(
+        name=username,
+        issuer_name="Sistema ISO27001"
     )
 
-    # Generar imagen QR en memoria
     img = qrcode.make(otp_uri)
     buffer = BytesIO()
     img.save(buffer, format="PNG")
     buffer.seek(0)
+
     return send_file(buffer, mimetype='image/png')
 
 @app.route('/logout')
