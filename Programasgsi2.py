@@ -11162,7 +11162,7 @@ def division_delete():
     return redirect(url_for('areas_division'))
 
 # =========================
-# Configuraación de Correo
+# Configuración de Correo
 # =========================
 
 @app.route("/config/email", methods=["GET", "POST"])
@@ -11185,18 +11185,18 @@ def config_email():
         cfg.smtp_from = (request.form.get("smtp_from") or "").strip() or None
         cfg.app_name  = (request.form.get("app_name")  or "SGSI").strip()
 
-        # si no llenan FROM, usa USER
         if not cfg.smtp_from:
             cfg.smtp_from = cfg.smtp_user
 
         db.session.commit()
         flash("Configuración SMTP guardada correctamente.", "success")
-        return redirect(url_for("areas"))
+
+        # ✅ CORREGIDO: antes decía url_for("areas") y ese endpoint no existe
+        return redirect(url_for("config_email"))
 
     inner = render_template_string("""
     <div class="smtp-shell">
 
-      <!-- CABECERA -->
       <div class="smtp-header-card">
         <div class="smtp-header-overlay">
           <div class="smtp-header-text">
@@ -11209,7 +11209,6 @@ def config_email():
         </div>
       </div>
 
-      <!-- FORMULARIO -->
       <div class="smtp-card p-4">
         <div class="smtp-section-title">
           Parámetros de conexión SMTP
@@ -11381,30 +11380,11 @@ def config_email():
         overflow-wrap:break-word;
       }
 
-      .smtp-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
       .btn{
         border-radius:10px !important;
         font-weight:900;
         box-shadow:0 4px 10px rgba(0,0,0,.08);
         max-width:100%;
-      }
-
-      .smtp-btn-main{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .smtp-btn-main:hover{
-        background:#edf5ff;
-        color:#0b65d8;
       }
 
       .smtp-card{
@@ -11418,11 +11398,6 @@ def config_email():
         max-width:100%;
       }
 
-      .smtp-card .card-body{
-        padding:22px;
-        overflow:hidden;
-      }
-
       .smtp-section-title{
         font-weight:950;
         font-size:.95rem;
@@ -11430,7 +11405,6 @@ def config_email():
         margin-bottom:16px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
-        overflow-wrap:break-word;
       }
 
       .form-control,
@@ -11448,25 +11422,6 @@ def config_email():
         border-color:#3f86d6;
         box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
         background:#ffffff;
-      }
-
-      .input-group-text{
-        border-radius:0 10px 10px 0;
-        background:#eef5ff;
-        border-color:#d9e3f0;
-        color:#1459a6;
-        font-weight:900;
-      }
-
-      .smtp-soft-box{
-        background:#f8fbff;
-        border:1px solid #e2ebf5;
-        border-radius:14px;
-        padding:14px 16px;
-        min-width:0;
-        max-width:100%;
-        overflow:hidden;
-        overflow-wrap:break-word;
       }
 
       h3{
@@ -11487,10 +11442,6 @@ def config_email():
         .smtp-subtitle{
           font-size:.76rem;
         }
-
-        .smtp-card .card-body{
-          padding:16px;
-        }
       }
 
       @media (max-width:768px){
@@ -11507,10 +11458,6 @@ def config_email():
         .smtp-title,
         .smtp-subtitle{
           text-align:center;
-        }
-
-        .smtp-header-actions .btn{
-          width:100%;
         }
       }
     </style>
