@@ -6006,7 +6006,7 @@ def usuarios():
             )
             flash("Acción no permitida.", "warning")
 
-    usuarios = User.query.all()
+    usuarios = User.query.order_by(User.id.asc()).all()
     perfiles_usuarios = cargar_perfiles_usuarios_alternos()
 
     content = render_template_string("""
@@ -6033,7 +6033,7 @@ def usuarios():
           <table class="table table-bordered align-middle mb-0">
             <thead class="users-table-head">
               <tr class="text-center">
-                <th>ID</th>
+                <th style="width:70px;">N°</th>
                 <th>Nombre completo</th>
                 <th>Usuario</th>
                 <th>Correo</th>
@@ -6045,7 +6045,9 @@ def usuarios():
             <tbody>
               {% for u in usuarios %}
                 <tr>
-                  <td class="text-center">{{ u.id }}</td>
+                  <td class="text-center fw-bold">
+                    {{ loop.index }}
+                  </td>
 
                   <td>
                     <input form="f{{u.id}}"
@@ -6121,6 +6123,10 @@ def usuarios():
             </tbody>
           </table>
         </div>
+
+        <div class="users-id-note">
+          Nota: el campo N° es consecutivo visual. El ID real del usuario se conserva internamente para permisos y relaciones.
+        </div>
       </div>
 
       <div class="users-card p-4">
@@ -6171,7 +6177,7 @@ def usuarios():
 
             <div class="users-create-actions">
               <button type="submit" class="btn btn-success users-create-btn">
-                Crear
+                Crear Usuario
               </button>
             </div>
 
@@ -6366,14 +6372,18 @@ def usuarios():
         background:#ffffff;
       }
 
+      .users-id-note{
+        margin-top:10px;
+        font-size:.74rem;
+        color:#64748b;
+        font-weight:700;
+        text-align:right;
+      }
+
       h3{
         color:#ffffff;
         margin:0;
       }
-
-      /* ======================================================
-         FORMULARIO CREAR USUARIO - CORREGIDO
-      ====================================================== */
 
       .users-create-grid{
         display:grid;
@@ -6403,7 +6413,7 @@ def usuarios():
       }
 
       .users-create-btn{
-        width:180px;
+        width:190px;
         max-width:100%;
         min-height:44px;
         padding:0 22px !important;
@@ -6449,6 +6459,10 @@ def usuarios():
 
         .users-create-btn{
           width:100%;
+        }
+
+        .users-id-note{
+          text-align:center;
         }
       }
 
