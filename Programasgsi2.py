@@ -135322,7 +135322,6 @@ def detalle(run_id):
                     '</div>'
                 )
             }
-            """}
           </div>
         </div>
       </div>
