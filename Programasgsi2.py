@@ -121165,7 +121165,7 @@ def detalle(run_id):
           <div class="datares-exec-box mt-3">
             {f'<div class="datares-exec-text">{_nl2br(esc(informe_mostrar))}</div>' if informe_mostrar else '''
               <div class="text-center py-4">
-                <div class="mb-2" style="font-size:2rem;">🤖</div>
+                <div class="mb-2" style="font-size:2rem;">&#129302;</div>
                 <div class="fw-bold text-black">Aún no hay informe ejecutivo</div>
                 <div class="text-muted small mt-1">
                   Presiona <b>Generar con IA</b> para construir el informe con base en el resultado de los dominios.
@@ -127856,7 +127856,7 @@ def detalle_resultado_pci(analysis_id: int):
           <div class="pcidet-exec-box mt-3">
             {f'<div class="pcidet-exec-text">{_nl2br(esc(informe_mostrar))}</div>' if informe_mostrar else '''
               <div class="text-center py-4">
-                <div class="mb-2" style="font-size:2rem;">🤖</div>
+                <div class="mb-2" style="font-size:2rem;">&#129302;</div>>
                 <div class="fw-bold text-black">Aún no hay informe ejecutivo</div>
                 <div class="text-muted small mt-1">
                   Presiona <b>Generar con IA</b> para construir el informe con base en el resultado de PCI-DSS.
@@ -130785,7 +130785,7 @@ def detalle(run_id: int):
           <div class="nistdet-exec-box mt-3">
             {f'<div class="nistdet-exec-text">{_nl2br_soc2(escape(informe_mostrar))}</div>' if informe_mostrar else '''
               <div class="text-center py-4">
-                <div class="mb-2" style="font-size:2rem;">🤖</div>
+                <div class="mb-2" style="font-size:2rem;">&#129302;</div>
                 <div class="fw-bold text-black">Aún no hay informe ejecutivo</div>
                 <div class="text-muted small mt-1">
                   No se ha generado informe ejecutivo para esta revisión.
@@ -135307,7 +135307,7 @@ def detalle(run_id):
           <div class="aidet-exec-box mt-3">
             {f'<div class="aidet-exec-text">{_nl2br_ai(escape(informe_mostrar))}</div>' if informe_mostrar else """
               <div class="text-center py-4">
-                <div class="mb-2" style="font-size:2rem;">🤖</div>
+                <div class="mb-2" style="font-size:2rem;">&#129302;</div>
                 <div class="fw-bold text-black">Aún no hay informe ejecutivo</div>
                 <div class="text-muted small mt-1">
                   Presiona <b>Generar con IA</b> para construir el informe con base
