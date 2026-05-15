@@ -113718,7 +113718,7 @@ def detalle(run_id: int):
           <div class="nistdet-exec-box mt-3">
             {f'<div class="nistdet-exec-text">{_nl2br(escape(informe_mostrar))}</div>' if informe_mostrar else '''
               <div class="text-center py-4">
-                <div class="mb-2" style="font-size:2rem;">🤖</div>
+                <div class="mb-2" style="font-size:2rem;">&#129302;</div>>
                 <div class="fw-bold text-black">Aún no hay informe ejecutivo</div>
                 <div class="text-muted small mt-1">
                   Presiona <b>Generar con IA</b> para construir el informe con base en el resultado de los capítulos NIST.
