@@ -132396,6 +132396,27 @@ def _ai_normalizar_texto(v):
 
     return str(v or "").replace("\r\n", "\n").replace("\r", "\n").strip()
 
+def _ai_estado_normalizado(v):
+    estado = str(v or "").strip().upper()
+    estado = estado.replace(" ", "")
+    estado = estado.replace(".", "")
+    estado = estado.replace("-", "")
+    estado = estado.replace("/", "")
+
+    if estado in ("SI", "SÍ", "YES"):
+        return "SI"
+
+    if estado in ("PARCIAL", "PARCIALMENTE", "PARTIAL"):
+        return "PARCIAL"
+
+    if estado in ("NO", "N"):
+        return "NO"
+
+    if estado in ("NA", "N/A", "NOAPLICA", "NOAPLICABLE", "NOTAPPLICABLE"):
+        return "NA"
+
+    return ""
+
 def _ai_key(v):
     txt = str(v or "").strip()
 
@@ -132722,14 +132743,18 @@ def ai_cargar_respuestas(run_id):
         return out
 
     conn = get_ai_madurez_conn()
-    rows = conn.execute("SELECT * FROM ai_madurez_respuestas WHERE run_id = ?", (run_id,)).fetchall()
+    rows = conn.execute(
+        "SELECT * FROM ai_madurez_respuestas WHERE run_id = ?",
+        (run_id,)
+    ).fetchall()
     conn.close()
 
     for r in rows:
         out[int(r["pregunta_id"])] = {
-            "estado": (r["estado"] or "").strip().upper(),
+            "estado": _ai_estado_normalizado(r["estado"]),
             "comentario": (r["comentario"] or "").strip(),
         }
+
     return out
 
 
@@ -132755,10 +132780,11 @@ def ai_calcular_progreso(preguntas, form_data=None, respuestas_db=None):
     for q in preguntas:
         qid = int(q["id"])
         estado = ""
+
         if form_data is not None:
-            estado = (form_data.get(f"st_{qid}") or "").strip().upper()
+            estado = _ai_estado_normalizado(form_data.get(f"st_{qid}"))
         elif respuestas_db is not None:
-            estado = (respuestas_db.get(qid, {}).get("estado") or "").strip().upper()
+            estado = _ai_estado_normalizado(respuestas_db.get(qid, {}).get("estado"))
 
         if estado in ("SI", "PARCIAL", "NO", "NA"):
             respondidas += 1
@@ -132785,6 +132811,7 @@ def ai_group_questions():
 
 def ai_resumen_desde_run(run_id):
     conn = get_ai_madurez_conn()
+
     rows = conn.execute("""
         SELECT
             p.capitulo,
@@ -132796,22 +132823,26 @@ def ai_resumen_desde_run(run_id):
         WHERE r.run_id = ?
         ORDER BY p.capitulo ASC, p.categoria_codigo ASC, p.orden ASC
     """, (run_id,)).fetchall()
+
     conn.close()
 
     resumen = {}
-    total_score = 0.0
-    total_items = 0
 
     for row in rows:
+        estado = _ai_estado_normalizado(row["estado"])
+
+        if estado not in ("SI", "PARCIAL", "NO", "NA"):
+            continue
+
         cap = row["capitulo"] or "Sin capítulo"
         cat = _ai_codigo_limpio(row["categoria_codigo"] or cap)
         cat_name = row["categoria"] or _ai_codigo_visible(cat)
-        estado = (row["estado"] or "").strip().upper()
 
         resumen.setdefault(cap, {})
         resumen[cap].setdefault(cat, {
             "categoria": cat_name,
             "total": 0,
+            "total_respondidas": 0,
             "validos": 0,
             "si": 0,
             "parcial": 0,
@@ -132823,17 +132854,21 @@ def ai_resumen_desde_run(run_id):
 
         d = resumen[cap][cat]
         d["total"] += 1
+        d["total_respondidas"] += 1
 
+        # N/A cuenta como respondida, pero NO entra al porcentaje
         if estado == "NA":
             d["na"] += 1
             continue
 
         score = AI_STATUS_SCORE.get(estado)
+
         if score is None:
             continue
 
         d["validos"] += 1
         d["score"] += float(score)
+
         if estado == "SI":
             d["si"] += 1
         elif estado == "PARCIAL":
@@ -132841,47 +132876,109 @@ def ai_resumen_desde_run(run_id):
         elif estado == "NO":
             d["no"] += 1
 
-        total_score += float(score)
-        total_items += 1
+    # Calcula porcentaje por categoría
+    categorias_validas_pct = []
 
     for cap, cats in resumen.items():
         for cat, d in cats.items():
             validos = int(d.get("validos") or 0)
-            d["pct"] = round((float(d.get("score") or 0) / validos) * 100, 2) if validos else 0.0
+            score = float(d.get("score") or 0)
 
-    pct_general = round((total_score / total_items) * 100, 2) if total_items else 0.0
+            if validos > 0:
+                d["pct"] = round((score / validos) * 100, 2)
+                categorias_validas_pct.append(float(d["pct"]))
+            else:
+                d["pct"] = 0.0
+
+    # Cálculo general correcto:
+    # promedio simple de categorías válidas,
+    # NO promedio por cantidad de preguntas.
+    pct_general = (
+        round(sum(categorias_validas_pct) / len(categorias_validas_pct), 2)
+        if categorias_validas_pct
+        else 0.0
+    )
+
     return resumen, pct_general
-
 
 def ai_pct_por_capitulo(resumen):
     labels = []
     values = []
 
     ordered = []
+
     for cap in AI_CAP_ORDER_DEFAULT:
         if cap in (resumen or {}):
             ordered.append(cap)
+
     for cap in (resumen or {}).keys():
         if cap not in ordered:
             ordered.append(cap)
 
     for cap in ordered:
         cats = (resumen or {}).get(cap, {}) or {}
-        w_sum = 0.0
-        w_cnt = 0.0
+        pcts_validos = []
 
         for _cat_code, d in cats.items():
-            pct = float(d.get("pct", 0) or 0)
-            validos = float(d.get("validos", 0) or 0)
+            validos = int(d.get("validos", 0) or 0)
+
             if validos <= 0:
                 continue
-            w_sum += pct * validos
-            w_cnt += validos
+
+            pcts_validos.append(float(d.get("pct", 0) or 0))
 
         labels.append(cap)
-        values.append(round((w_sum / w_cnt) if w_cnt else 0.0, 2))
+        values.append(
+            round(sum(pcts_validos) / len(pcts_validos), 2)
+            if pcts_validos
+            else 0.0
+        )
 
     return labels, values
+
+def ai_recalcular_y_actualizar_run(run_id):
+    conn = get_ai_madurez_conn()
+
+    rows = conn.execute("""
+        SELECT id, estado
+        FROM ai_madurez_respuestas
+        WHERE run_id = ?
+    """, (run_id,)).fetchall()
+
+    for r in rows:
+        estado_norm = _ai_estado_normalizado(r["estado"])
+
+        if estado_norm:
+            conn.execute("""
+                UPDATE ai_madurez_respuestas
+                SET estado = ?
+                WHERE id = ?
+            """, (estado_norm, r["id"]))
+
+    conn.commit()
+    conn.close()
+
+    resumen, pct_general = ai_resumen_desde_run(run_id)
+
+    conn = get_ai_madurez_conn()
+    conn.execute("""
+        UPDATE ai_madurez_runs
+        SET resumen_json = ?,
+            pct_general = ?,
+            radar_overall_b64 = NULL,
+            updated_at = ?
+        WHERE id = ?
+    """, (
+        json.dumps(resumen, ensure_ascii=False),
+        pct_general,
+        _ai_now(),
+        run_id
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return resumen, pct_general
 
 
 def ai_radar_b64(labels, values, title="Radar ISO 42001"):
@@ -134700,7 +134797,10 @@ def guardar():
     accion = (request.form.get("accion") or "borrador").strip().lower()
     estado_run = "FINALIZADO" if accion in ("finalizar", "analizar") else "BORRADOR"
 
-    respondidas, total, progreso_pct = ai_calcular_progreso(preguntas, form_data=request.form)
+    respondidas, total, progreso_pct = ai_calcular_progreso(
+        preguntas,
+        form_data=request.form
+    )
 
     if estado_run == "FINALIZADO" and progreso_pct < 100:
         flash("⚠️ Para finalizar debes responder todas las preguntas del instrumento.", "warning")
@@ -134715,50 +134815,88 @@ def guardar():
         run_id = int(draft["id"])
         cur.execute("""
             UPDATE ai_madurez_runs
-            SET consecutivo = ?, updated_at = ?, estado = ?, progreso_pct = ?
+            SET consecutivo = ?,
+                updated_at = ?,
+                estado = ?,
+                progreso_pct = ?
             WHERE id = ?
-        """, (consecutivo, now, estado_run, progreso_pct, run_id))
+        """, (
+            consecutivo,
+            now,
+            estado_run,
+            progreso_pct,
+            run_id
+        ))
     else:
         cur.execute("""
             INSERT INTO ai_madurez_runs
-            (created_at, updated_at, consecutivo, user_id, estado, progreso_pct, resumen_json, pct_general)
-            VALUES (?, ?, ?, ?, ?, ?, '{}', 0)
-        """, (now, now, consecutivo, user.id, estado_run, progreso_pct))
+            (
+                created_at,
+                updated_at,
+                consecutivo,
+                user_id,
+                estado,
+                progreso_pct,
+                resumen_json,
+                pct_general,
+                radar_overall_b64
+            )
+            VALUES (?, ?, ?, ?, ?, ?, '{}', 0, NULL)
+        """, (
+            now,
+            now,
+            consecutivo,
+            user.id,
+            estado_run,
+            progreso_pct
+        ))
         run_id = cur.lastrowid
 
     for q in preguntas:
         qid = int(q["id"])
-        estado = (request.form.get(f"st_{qid}") or "").strip().upper()
-        comentario = (request.form.get(f"cm_{qid}") or request.form.get(f"com_{qid}") or "").strip()
+        estado = _ai_estado_normalizado(request.form.get(f"st_{qid}"))
+        comentario = (
+            request.form.get(f"cm_{qid}")
+            or request.form.get(f"com_{qid}")
+            or ""
+        ).strip()
 
         if estado not in ("SI", "PARCIAL", "NO", "NA"):
-            cur.execute("DELETE FROM ai_madurez_respuestas WHERE run_id = ? AND pregunta_id = ?", (run_id, qid))
+            cur.execute("""
+                DELETE FROM ai_madurez_respuestas
+                WHERE run_id = ? AND pregunta_id = ?
+            """, (run_id, qid))
             continue
 
         cur.execute("""
-            INSERT INTO ai_madurez_respuestas (run_id, pregunta_id, estado, comentario)
+            INSERT INTO ai_madurez_respuestas
+            (
+                run_id,
+                pregunta_id,
+                estado,
+                comentario
+            )
             VALUES (?, ?, ?, ?)
             ON CONFLICT(run_id, pregunta_id)
-            DO UPDATE SET estado = excluded.estado, comentario = excluded.comentario
-        """, (run_id, qid, estado, comentario))
+            DO UPDATE SET
+                estado = excluded.estado,
+                comentario = excluded.comentario
+        """, (
+            run_id,
+            qid,
+            estado,
+            comentario
+        ))
 
     conn.commit()
     conn.close()
 
-    resumen, pct_general = ai_resumen_desde_run(run_id)
-    radar_b64 = ""
-
-    conn = get_ai_madurez_conn()
-    conn.execute("""
-        UPDATE ai_madurez_runs
-        SET resumen_json = ?, pct_general = ?, radar_overall_b64 = ?, updated_at = ?
-        WHERE id = ?
-    """, (json.dumps(resumen, ensure_ascii=False), pct_general, radar_b64, _ai_now(), run_id))
-    conn.commit()
-    conn.close()
+    # Recalcula desde respuestas reales.
+    # N/A queda excluido del denominador.
+    resumen, pct_general = ai_recalcular_y_actualizar_run(run_id)
 
     if estado_run == "FINALIZADO":
-        flash("✅ Evaluación finalizada correctamente.", "success")
+        flash("✅ Evaluación finalizada y analizada correctamente.", "success")
         return redirect(url_for("madurez_ai.detalle", run_id=run_id))
 
     flash("✅ Borrador guardado correctamente.", "success")
@@ -135148,11 +135286,18 @@ def detalle(run_id):
     if user.role != "admin" and run["user_id"] != user.id:
         flash("No tiene permiso para consultar esta revisión.", "danger")
         return redirect(url_for("madurez_ai.historial"))
+    # Recalcular siempre desde respuestas reales.
+    # N/A cuenta como respondida para progreso, pero NO cuenta en porcentaje.
+    resumen, pct_general_recalculado = ai_recalcular_y_actualizar_run(run_id)
 
-    try:
-        resumen_raw = json.loads(run["resumen_json"] or "{}")
-    except Exception:
-        resumen_raw = {}
+    conn = get_ai_madurez_conn()
+    run = conn.execute(
+        "SELECT * FROM ai_madurez_runs WHERE id = ?",
+        (run_id,)
+    ).fetchone()
+    conn.close()
+
+    resumen_raw = resumen
 
     resumen = {}
     for cap, cats in (resumen_raw or {}).items():
@@ -137027,12 +137172,13 @@ def _ai_build_pdf_run(run_id):
     conn.close()
 
     if not run:
-        raise RuntimeError("No se encontró la revisión.")
+        raise RuntimeError("No se encontró la revisión.") 
 
-    try:
-        resumen = json.loads(run["resumen_json"] or "{}")
-    except Exception:
-        resumen = {}
+    resumen, pct_general_recalculado = ai_recalcular_y_actualizar_run(run_id)
+
+    conn = get_ai_madurez_conn()
+    run = conn.execute("SELECT * FROM ai_madurez_runs WHERE id = ?", (run_id,)).fetchone()
+    conn.close()
 
     radar_b64 = ""
 
