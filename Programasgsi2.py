@@ -484,55 +484,106 @@ SGSI_PROGRESS_GLOBAL = """
 
 <script>
 (function () {
+    if (window.__SGSI_PROGRESS_READY__) return;
+    window.__SGSI_PROGRESS_READY__ = true;
+
     let sgsiProgressValue = 0;
     let sgsiProgressTimer = null;
-    let sgsiUserAction = false;
+    let sgsiProgressVisible = false;
+    let sgsiAllowBeforeUnload = false;
+
+    function getOverlay() {
+        return document.getElementById("sgsiProgressOverlay");
+    }
 
     function setSGSIProgress(percent) {
         const bar = document.getElementById("sgsiProgressBar");
         const label = document.getElementById("sgsiProgressPercent");
 
-        sgsiProgressValue = Math.max(0, Math.min(100, percent));
+        sgsiProgressValue = Math.max(0, Math.min(100, Number(percent) || 0));
 
         if (bar) bar.style.width = sgsiProgressValue + "%";
         if (label) label.innerText = Math.round(sgsiProgressValue) + "%";
     }
 
+    function stopSGSIProgressAuto() {
+        if (sgsiProgressTimer) {
+            clearInterval(sgsiProgressTimer);
+            sgsiProgressTimer = null;
+        }
+    }
+
     function startSGSIProgressAuto() {
-        clearInterval(sgsiProgressTimer);
+        stopSGSIProgressAuto();
 
         sgsiProgressTimer = setInterval(function () {
-            if (sgsiProgressValue < 55) {
-                setSGSIProgress(sgsiProgressValue + 5);
-            } else if (sgsiProgressValue < 80) {
-                setSGSIProgress(sgsiProgressValue + 3);
-            } else if (sgsiProgressValue < 95) {
-                setSGSIProgress(sgsiProgressValue + 1);
+            if (!sgsiProgressVisible) {
+                stopSGSIProgressAuto();
+                return;
             }
-        }, 500);
+
+            let next = sgsiProgressValue;
+
+            if (next < 15) {
+                next += 3;
+            } else if (next < 35) {
+                next += 2.4;
+            } else if (next < 60) {
+                next += 1.7;
+            } else if (next < 78) {
+                next += 1.1;
+            } else if (next < 90) {
+                next += 0.55;
+            } else if (next < 96) {
+                next += 0.18;
+            } else {
+                next = 96;
+            }
+
+            setSGSIProgress(next);
+        }, 420);
     }
 
     function showSGSIProgress(message) {
-        const overlay = document.getElementById("sgsiProgressOverlay");
+        const overlay = getOverlay();
         const text = document.getElementById("sgsiProgressText");
 
-        if (!overlay) return;
+        if (!overlay) return true;
 
-        if (text && message) text.innerText = message;
+        if (text && message) {
+            text.innerText = message;
+        }
+
+        sgsiProgressVisible = true;
+        sgsiAllowBeforeUnload = true;
 
         overlay.style.display = "flex";
+        overlay.style.visibility = "visible";
+        overlay.style.opacity = "1";
+        overlay.style.pointerEvents = "auto";
+        overlay.classList.remove("d-none");
+
         setSGSIProgress(3);
         startSGSIProgressAuto();
+
+        return true;
     }
 
     function hideSGSIProgress() {
-        const overlay = document.getElementById("sgsiProgressOverlay");
+        const overlay = getOverlay();
 
-        clearInterval(sgsiProgressTimer);
-        sgsiProgressTimer = null;
-        sgsiUserAction = false;
+        sgsiProgressVisible = false;
+        sgsiAllowBeforeUnload = false;
 
-        if (overlay) overlay.style.display = "none";
+        stopSGSIProgressAuto();
+
+        if (overlay) {
+            overlay.style.display = "none";
+            overlay.style.visibility = "hidden";
+            overlay.style.opacity = "0";
+            overlay.style.pointerEvents = "none";
+            overlay.classList.add("d-none");
+        }
 
         setSGSIProgress(0);
     }
@@ -548,7 +599,17 @@ SGSI_PROGRESS_GLOBAL = """
         if (el.dataset && el.dataset.noProgress === "true") return true;
 
         if (
-            el.classList.contains("dropdown-toggle") ||
+            el.classList &&
+            (
+                el.classList.contains("dropdown-toggle") ||
+                el.classList.contains("no-progress") ||
+                el.classList.contains("btn-close")
+            )
+        ) {
+            return true;
+        }
+
+        if (
             el.getAttribute("data-bs-toggle") ||
             el.getAttribute("data-toggle")
         ) {
@@ -587,7 +648,7 @@ SGSI_PROGRESS_GLOBAL = """
     function isSubmitButton(el) {
         if (!el) return false;
 
-        const tag = el.tagName.toLowerCase();
+        const tag = (el.tagName || "").toLowerCase();
         const type = (el.getAttribute("type") || "").toLowerCase();
 
         return (
@@ -596,22 +657,43 @@ SGSI_PROGRESS_GLOBAL = """
         );
     }
 
-    function hasInlineConfirm(el) {
-        if (!el) return false;
+    function closestSubmitterFromEvent(e) {
+        if (!e) return null;
 
-        const onclick = (el.getAttribute("onclick") || "").toLowerCase();
-        const onsubmit = (el.getAttribute("onsubmit") || "").toLowerCase();
+        if (e.submitter) return e.submitter;
 
-        return onclick.includes("confirm(") || onsubmit.includes("confirm(");
+        const active = document.activeElement;
+        if (active && isSubmitButton(active)) return active;
+
+        return null;
     }
 
     window.showSGSIProgress = showSGSIProgress;
     window.hideSGSIProgress = hideSGSIProgress;
+    window.finishSGSIProgress = finishSGSIProgress;
     window.setSGSIProgress = setSGSIProgress;
+    window.startSGSIProgressAuto = startSGSIProgressAuto;
+
+    window.ai42001Progress = function (mensaje) {
+        return showSGSIProgress(mensaje || "Generando y procesando información...");
+    };
+
+    window.sgsiProgressStart = function (mensaje) {
+        return showSGSIProgress(mensaje || "Generando y procesando información...");
+    };
 
     document.addEventListener("submit", function (e) {
         const form = e.target;
-        if (!form || shouldIgnoreElement(form)) return;
+
+        if (!form || shouldIgnoreElement(form)) {
+            return;
+        }
+
+        const submitter = closestSubmitterFromEvent(e);
+
+        if (submitter && shouldIgnoreElement(submitter)) {
+            return;
+        }
 
         setTimeout(function () {
             if (e.defaultPrevented) {
@@ -619,42 +701,35 @@ SGSI_PROGRESS_GLOBAL = """
                 return;
             }
 
-            sgsiUserAction = true;
+            const msg =
+                (submitter && submitter.dataset && submitter.dataset.progressText) ||
+                (form.dataset && form.dataset.progressText) ||
+                "Generando y procesando información...";
 
-            showSGSIProgress(
-                form.dataset.progressText || "Generando y procesando información..."
-            );
-        }, 0);
-    }, false);
+            showSGSIProgress(msg);
+        }, 30);
+    }, true);
 
     document.addEventListener("click", function (e) {
         const btn = e.target.closest("button, a, input[type='submit']");
         if (!btn) return;
         if (shouldIgnoreElement(btn)) return;
 
-        const tag = btn.tagName.toLowerCase();
+        const tag = (btn.tagName || "").toLowerCase();
 
         if (isSubmitButton(btn)) {
-            return;
-        }
-
-        if (hasInlineConfirm(btn)) {
-            setTimeout(function () {
-                if (e.defaultPrevented) {
-                    hideSGSIProgress();
-                    return;
-                }
-            }, 0);
             return;
         }
 
         if (tag === "a") {
             if (shouldIgnoreLink(btn)) return;
 
-            sgsiUserAction = true;
-            showSGSIProgress(btn.dataset.progressText || "Cargando información...");
+            showSGSIProgress(
+                (btn.dataset && btn.dataset.progressText) ||
+                "Cargando información..."
+            );
         }
-    }, false);
+    }, true);
 
     const originalConfirm = window.confirm;
 
@@ -672,25 +747,32 @@ SGSI_PROGRESS_GLOBAL = """
 
     if (originalFetch) {
         window.fetch = function () {
-            const debeMostrar = sgsiUserAction === true;
-
-            if (debeMostrar) showSGSIProgress("Consultando información...");
+            const shouldShow = sgsiProgressVisible === true;
 
             return originalFetch.apply(this, arguments)
                 .then(function (response) {
-                    if (debeMostrar) finishSGSIProgress();
+                    if (shouldShow) finishSGSIProgress();
                     return response;
                 })
                 .catch(function (error) {
-                    if (debeMostrar) hideSGSIProgress();
+                    if (shouldShow) hideSGSIProgress();
                     throw error;
                 });
         };
     }
 
-    window.addEventListener("pageshow", hideSGSIProgress);
+    window.addEventListener("pageshow", function () {
+        hideSGSIProgress();
+    });
+
+    window.addEventListener("pagehide", function () {
+        stopSGSIProgressAuto();
+    });
+
     window.addEventListener("beforeunload", function () {
-        clearInterval(sgsiProgressTimer);
+        if (sgsiAllowBeforeUnload) {
+            setSGSIProgress(Math.max(sgsiProgressValue, 12));
+        }
     });
 })();
 </script>
@@ -705,18 +787,26 @@ def inject_sgsi_progress_bar(response):
         if "text/html" not in content_type:
             return response
 
-        html = response.get_data(as_text=True)
+        html_response = response.get_data(as_text=True)
 
-        if not html or "sgsiProgressOverlay" in html:
+        if not html_response:
             return response
 
-        if "</body>" in html:
-            html = html.replace("</body>", SGSI_PROGRESS_GLOBAL + "\\n</body>")
-        else:
-            html += SGSI_PROGRESS_GLOBAL
+        # Evita inyectar duplicado
+        if "id=\"sgsiProgressOverlay\"" in html_response or "id='sgsiProgressOverlay'" in html_response:
+            return response
 
-        response.set_data(html)
+        if "</body>" in html_response:
+            html_response = html_response.replace(
+                "</body>",
+                SGSI_PROGRESS_GLOBAL + "\n</body>"
+            )
+        else:
+            html_response += SGSI_PROGRESS_GLOBAL
+
+        response.set_data(html_response)
         response.headers["Content-Length"] = str(len(response.get_data()))
+
     except Exception as e:
         print("No se pudo inyectar barra de progreso SGSI:", repr(e))
 
@@ -121111,7 +121201,7 @@ def detalle(run_id):
     top_html = f"""
     <div class="row g-3 mb-4">
 
-      <div class="col-12 col-xl-4">
+      <div class="col-12 col-xl-5">
         <div class="datares-card p-4 h-100">
           <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
             <div>
@@ -121131,12 +121221,20 @@ def detalle(run_id):
           </div>
 
           <div class="text-center mt-3 datares-radar-wrap">
+            <div class="datares-radar-pct-box">
+              <div class="datares-radar-pct-label">Cumplimiento general</div>
+              <div class="datares-radar-pct-value">{float(run.pct_general or 0):.2f}%</div>
+              <div class="datares-radar-pct-subtitle">
+                Nivel {nivel_general.get('score', 0)} · {esc(nivel_general_nombre)}
+              </div>
+            </div>
+
             {f'<img class="img-fluid datares-radar-small" src="data:image/png;base64,{radar_b64}">' if radar_b64 else '<div class="alert alert-warning mb-0">No fue posible generar el radar.</div>'}
           </div>
         </div>
       </div>
 
-      <div class="col-12 col-xl-4">
+      <div class="col-12 col-xl-7">
         <div class="datares-card p-4 h-100">
           <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
             <div>
@@ -121176,8 +121274,12 @@ def detalle(run_id):
         </div>
       </div>
 
-      <div class="col-12 col-xl-4">
-        <div class="datares-card p-4 h-100">
+    </div>
+
+    <div class="row g-3 mb-4">
+
+      <div class="col-12">
+        <div class="datares-card p-4">
           <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
             <div>
               <div class="datares-card-title">🗂️ Plan de trabajo</div>
@@ -121199,14 +121301,13 @@ def detalle(run_id):
                  class="btn btn-primary rounded-pill px-4 fw-bold">
                 <i class="bi bi-pencil-square me-2"></i>Editar
               </a>
-
             </div>
           </div>
 
-          <div class="datares-exec-box mt-3">
+          <div class="datares-exec-box datares-plan-box mt-3">
             {f'<div class="datares-exec-text">{_nl2br(plan_mostrar)}</div>' if plan_mostrar else '''
               <div class="text-center py-4">
-                <div class="mb-2" style="font-size:2rem;">🗂️</div>
+                <div class="mb-2" style="font-size:2rem;">&#128450;</div>
                 <div class="fw-bold text-black">Aún no hay plan de trabajo</div>
                 <div class="text-muted small mt-1">
                   Presiona <b>Generar con IA</b> para construir el plan general.
@@ -121346,19 +121447,19 @@ def detalle(run_id):
 
       .datares-shell{{
         width:96%;
-        max-width:1600px;
-        margin:26px auto 24px auto;
+        max-width:1650px;
+        margin:26px auto 30px auto;
       }}
 
       .datares-header-card{{
         background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
-        border-radius:18px;
+        border-radius:20px;
         padding:16px 24px;
-        min-height:94px;
+        min-height:96px;
         display:flex;
         align-items:center;
         justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        box-shadow:0 14px 28px rgba(15,23,42,.28);
         position:relative;
         overflow:hidden;
         margin-bottom:14px;
@@ -121369,8 +121470,14 @@ def detalle(run_id):
         position:absolute;
         inset:0;
         background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.18),transparent 24%),
+          repeating-linear-gradient(
+            135deg,
+            rgba(255,255,255,.05) 0px,
+            rgba(255,255,255,.05) 1px,
+            transparent 1px,
+            transparent 14px
+          );
         pointer-events:none;
       }}
 
@@ -121379,33 +121486,28 @@ def detalle(run_id):
         display:flex;
         align-items:center;
         justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
         position:relative;
         z-index:1;
       }}
 
       .datares-header-overlay::before{{
         content:"🛡";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
+        width:56px;
+        height:56px;
+        min-width:56px;
+        border-radius:16px;
         background:#ffffff;
         color:#1459a6;
         display:flex;
         align-items:center;
         justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        font-size:1.5rem;
+        box-shadow:0 10px 20px rgba(0,0,0,.22);
         margin-right:14px;
       }}
 
       .datares-header-text{{
         width:100%;
-        display:block !important;
-        transform:none !important;
       }}
 
       .datares-header-text::before{{
@@ -121413,17 +121515,17 @@ def detalle(run_id):
         display:inline-block;
         background:rgba(255,255,255,.18);
         border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
+        padding:4px 10px;
+        font-size:.66rem;
+        font-weight:900;
+        margin-bottom:5px;
         color:#ffffff;
       }}
 
       .datares-title{{
         color:#ffffff !important;
         font-weight:950;
-        font-size:1.32rem;
+        font-size:1.34rem;
         line-height:1.1;
         margin:0 !important;
         text-shadow:0 3px 10px rgba(0,0,0,.35);
@@ -121431,7 +121533,7 @@ def detalle(run_id):
 
       .datares-subtitle{{
         color:rgba(255,255,255,.95);
-        font-size:.78rem;
+        font-size:.79rem;
         margin-top:4px;
         line-height:1.25;
       }}
@@ -121441,12 +121543,12 @@ def detalle(run_id):
         justify-content:center;
         gap:10px;
         flex-wrap:wrap;
-        margin:10px 0 14px;
+        margin:10px 0 16px;
       }}
 
       .datares-header-actions .btn,
       .btn{{
-        border-radius:10px !important;
+        border-radius:12px !important;
         font-weight:900;
         box-shadow:0 4px 10px rgba(0,0,0,.08);
       }}
@@ -121455,7 +121557,7 @@ def detalle(run_id):
       .btn-outline-light{{
         background:#ffffff;
         color:#0f172a !important;
-        border:1px solid #cfd8e3 !important;
+        border:1px solid #d7e0ea !important;
       }}
 
       .datares-btn-main:hover,
@@ -121467,7 +121569,7 @@ def detalle(run_id):
       .datares-btn-soft{{
         background:rgba(255,255,255,.88);
         color:#111 !important;
-        border:1px solid rgba(108,117,125,.35);
+        border:1px solid rgba(108,117,125,.30);
       }}
 
       .datares-btn-soft:hover{{
@@ -121488,11 +121590,11 @@ def detalle(run_id):
 
       .datares-card,
       .card{{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
+        background:rgba(255,255,255,.97) !important;
+        border-radius:20px !important;
         backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
+        box-shadow:0 14px 28px rgba(15,23,42,.16) !important;
+        border:1px solid rgba(219,230,244,.95) !important;
         overflow:hidden;
       }}
 
@@ -121505,30 +121607,74 @@ def detalle(run_id):
       }}
 
       .datares-radar-wrap{{
-        min-height:310px;
+        min-height:420px;
         display:flex;
+        flex-direction:column;
         align-items:center;
-        justify-content:center;
+        justify-content:flex-start;
+      }}
+
+      .datares-radar-pct-box{{
+        width:100%;
+        max-width:320px;
+        margin:4px auto 14px auto;
+        padding:14px 15px;
+        border-radius:18px;
+        background:linear-gradient(135deg,#eef5ff,#ffffff);
+        border:1px solid rgba(63,134,214,.22);
+        box-shadow:0 8px 18px rgba(15,23,42,.08);
+      }}
+
+      .datares-radar-pct-label{{
+        font-size:.72rem;
+        font-weight:950;
+        color:#1459a6;
+        text-transform:uppercase;
+        letter-spacing:.45px;
+      }}
+
+      .datares-radar-pct-value{{
+        font-size:2.45rem;
+        line-height:1;
+        font-weight:950;
+        color:#0f172a;
+        margin:5px 0;
+      }}
+
+      .datares-radar-pct-subtitle{{
+        font-size:.80rem;
+        color:#64748b;
+        font-weight:800;
       }}
 
       .datares-radar-small{{
-        max-width:300px;
+        max-width:370px;
         width:100%;
         height:auto;
       }}
 
       .datares-exec-box{{
-        min-height:310px;
-        background:linear-gradient(180deg,rgba(248,250,252,.94),rgba(255,255,255,.98));
+        min-height:350px;
+        background:linear-gradient(
+          180deg,
+          rgba(248,250,252,.94),
+          rgba(255,255,255,.98)
+        );
         border:1px solid rgba(63,134,214,.16);
         border-radius:16px;
-        padding:18px;
+        padding:20px;
         box-shadow:inset 0 1px 0 rgba(255,255,255,.60);
+      }}
+
+      .datares-plan-box{{
+        min-height:260px;
+        max-height:580px;
+        overflow:auto;
       }}
 
       .datares-exec-text{{
         font-size:.96rem;
-        line-height:1.65;
+        line-height:1.72;
         color:#1f2937;
         white-space:normal;
       }}
@@ -121541,7 +121687,7 @@ def detalle(run_id):
       }}
 
       .datares-gauge-wrap{{
-        min-height:190px;
+        min-height:200px;
         padding:8px;
         display:flex;
         align-items:center;
@@ -121549,13 +121695,13 @@ def detalle(run_id):
       }}
 
       .datares-gauge{{
-        max-width:210px;
-        max-height:150px;
+        max-width:220px;
+        max-height:160px;
       }}
 
       .mini-stat{{
-        border-radius:12px;
-        padding:10px 8px;
+        border-radius:14px;
+        padding:11px 8px;
         text-align:center;
         font-size:.84rem;
         line-height:1.2;
@@ -121566,14 +121712,14 @@ def detalle(run_id):
       .badge{{
         border-radius:999px;
         font-size:.70rem;
-        padding:.35rem .65rem;
+        padding:.38rem .68rem;
         font-weight:900;
       }}
 
       @media (max-width:991.98px){{
         .datares-shell{{
           width:98%;
-          margin:8px auto 22px auto;
+          margin:10px auto 24px auto;
         }}
 
         .datares-header-card{{
@@ -121581,19 +121727,27 @@ def detalle(run_id):
         }}
 
         .datares-title{{
-          font-size:1.20rem;
+          font-size:1.18rem;
         }}
 
         .datares-subtitle{{
           font-size:.76rem;
         }}
 
+        .datares-radar-wrap{{
+          min-height:350px;
+        }}
+
         .datares-radar-small{{
-          max-width:255px;
+          max-width:280px;
         }}
 
         .datares-exec-box{{
-          min-height:240px;
+          min-height:260px;
+        }}
+
+        .datares-radar-pct-value{{
+          font-size:2rem;
         }}
       }}
 
@@ -121620,6 +121774,19 @@ def detalle(run_id):
 
         .datares-header-actions .btn{{
           width:100%;
+        }}
+
+        .datares-radar-pct-box{{
+          max-width:100%;
+        }}
+
+        .datares-radar-small{{
+          max-width:100%;
+        }}
+
+        .datares-exec-box{{
+          min-height:220px;
+          padding:16px;
         }}
       }}
     </style>
@@ -122431,6 +122598,26 @@ def pci_safe_str(x):
         pass
     return str(x).strip()
 
+def pci_estado_normalizado(v):
+    estado = pci_safe_str(v).upper()
+    estado = estado.replace(" ", "")
+    estado = estado.replace(".", "")
+    estado = estado.replace("-", "")
+    estado = estado.replace("/", "")
+
+    if estado in ("SI", "SÍ", "YES"):
+        return "SI"
+
+    if estado in ("PARCIAL", "PARCIALMENTE", "PARTIAL"):
+        return "PARCIAL"
+
+    if estado in ("NO", "N"):
+        return "NO"
+
+    if estado in ("NA", "N/A", "NOAPLICA", "NOAPLICABLE", "NOTAPPLICABLE"):
+        return "NA"
+
+    return ""
 
 def _pci_norm(s: str) -> str:
     s = pci_safe_str(s)
@@ -122560,24 +122747,16 @@ def pci_resumen_instrumento():
 
 
 def cargar_respuestas_pci(run_id):
-    """
-    Devuelve las respuestas de un run en formato:
-    {
-        pregunta_id: {
-            "estado": "SI|PARCIAL|NO|NA",
-            "comentario": "..."
-        }
-    }
-    """
     out = {}
 
     if not run_id:
         return out
 
     rows = PciMadurezRespuesta.query.filter_by(run_id=run_id).all()
+
     for r in rows:
         out[r.pregunta_id] = {
-            "estado": (r.estado or "").strip().upper(),
+            "estado": pci_estado_normalizado(r.estado),
             "comentario": (r.comentario or "").strip()
         }
 
@@ -122585,9 +122764,6 @@ def cargar_respuestas_pci(run_id):
 
 
 def calcular_progreso_pci(preguntas, form_data=None, respuestas_db=None):
-    """
-    Calcula respondidas / total / porcentaje para PCI.
-    """
     total = len(preguntas)
     respondidas = 0
 
@@ -122595,16 +122771,15 @@ def calcular_progreso_pci(preguntas, form_data=None, respuestas_db=None):
         estado = ""
 
         if form_data is not None:
-            estado = (form_data.get(f"st_{q.id}") or "").strip().upper()
+            estado = pci_estado_normalizado(form_data.get(f"st_{q.id}"))
         elif respuestas_db is not None:
-            estado = (respuestas_db.get(q.id, {}).get("estado") or "").strip().upper()
+            estado = pci_estado_normalizado(respuestas_db.get(q.id, {}).get("estado"))
 
         if estado in ("SI", "PARCIAL", "NO", "NA"):
             respondidas += 1
 
     pct = int(round((respondidas / total) * 100)) if total > 0 else 0
     return respondidas, total, pct
-
 
 def _pci_prompt_plan_trabajo(run: "PciAnalysisRun", resultados: dict) -> str:
     partes = []
@@ -123096,11 +123271,18 @@ def build_pci_df_from_db(run_id: int) -> pd.DataFrame:
         db.session.query(PciMadurezRespuesta, PciMadurezPregunta)
         .join(PciMadurezPregunta, PciMadurezPregunta.id == PciMadurezRespuesta.pregunta_id)
         .filter(PciMadurezRespuesta.run_id == run_id)
+        .filter(PciMadurezPregunta.tipo == "q")
         .order_by(PciMadurezPregunta.orden.asc())
     )
 
     rows = []
+
     for r, p in q.all():
+        estado = pci_estado_normalizado(r.estado)
+
+        if estado not in ("SI", "PARCIAL", "NO", "NA"):
+            continue
+
         rows.append({
             "pregunta_id": p.id,
             "bloque_codigo": p.bloque_codigo,
@@ -123109,19 +123291,29 @@ def build_pci_df_from_db(run_id: int) -> pd.DataFrame:
             "seccion_nombre": p.seccion_nombre,
             "pregunta_codigo": p.pregunta_codigo,
             "pregunta": p.pregunta,
-            "estado": (r.estado or "").strip().upper(),
+            "estado": estado,
             "comentario": (r.comentario or "").strip(),
         })
+
     return pd.DataFrame(rows)
 
 def pci_pct_from_estados(estados: list[str]) -> float:
     vals = []
+
     for e in estados:
-        v = PCI_STATUS_SCORE.get((e or "").strip().upper())
+        estado = pci_estado_normalizado(e)
+
+        if estado == "NA":
+            continue
+
+        v = PCI_STATUS_SCORE.get(estado)
+
         if v is not None:
-            vals.append(v)
+            vals.append(float(v))
+
     if not vals:
         return 0.0
+
     return round(sum(vals) / len(vals), 2)
 
 def run_analysis_from_pci_run(pci_run_id: int):
@@ -123145,7 +123337,8 @@ def run_analysis_from_pci_run(pci_run_id: int):
                 company_name=run.company_name,
                 nivel_promedio_general=0,
                 resultados_json=json.dumps({}, ensure_ascii=False),
-                preguntas_json=json.dumps([], ensure_ascii=False)
+                preguntas_json=json.dumps([], ensure_ascii=False),
+                velocimetros_json=json.dumps({}, ensure_ascii=False)
             )
             db.session.add(ar)
         else:
@@ -123153,27 +123346,30 @@ def run_analysis_from_pci_run(pci_run_id: int):
             ar.nivel_promedio_general = 0
             ar.resultados_json = json.dumps({}, ensure_ascii=False)
             ar.preguntas_json = json.dumps([], ensure_ascii=False)
+            ar.velocimetros_json = json.dumps({}, ensure_ascii=False)
 
         db.session.commit()
         return ar.id
 
     for _, row in df.iterrows():
+        estado = pci_estado_normalizado(row["estado"])
+
         preguntas_detalle.append({
             "bloque_codigo": row["bloque_codigo"],
             "seccion_codigo": row["seccion_codigo"],
             "pregunta_codigo": row["pregunta_codigo"],
             "pregunta": row["pregunta"],
-            "estado": row["estado"],
+            "estado": estado,
             "comentario": row["comentario"],
         })
 
     for bloque in PCI_BLOCK_ORDER:
         sub = df[df["bloque_codigo"] == bloque].copy()
+
         if sub.empty:
             continue
 
-        pct = pci_pct_from_estados(sub["estado"].tolist())
-        nivel_info = pci_resolver_nivel(pct)
+        sub["estado"] = sub["estado"].apply(pci_estado_normalizado)
 
         counts = {
             "SI": int((sub["estado"] == "SI").sum()),
@@ -123182,6 +123378,13 @@ def run_analysis_from_pci_run(pci_run_id: int):
             "NA": int((sub["estado"] == "NA").sum()),
         }
 
+        validos = sub[sub["estado"].isin(["SI", "PARCIAL", "NO"])].copy()
+        total_validos = int(len(validos))
+        total_respondidas = int(len(sub))
+
+        pct = pci_pct_from_estados(sub["estado"].tolist())
+        nivel_info = pci_resolver_nivel(pct)
+
         resultados[bloque] = {
             "bloque": bloque,
             "nombre": pci_block_title(bloque),
@@ -123189,19 +123392,24 @@ def run_analysis_from_pci_run(pci_run_id: int):
             "madurez": nivel_info["nivel"],
             "color": nivel_info["color"],
             "descripcion": nivel_info["descripcion"],
-            "total": int(len(sub)),
+            "total": total_respondidas,
+            "total_validos": total_validos,
             "counts": counts,
             "brecha_pct": round(100 - pct, 2)
         }
 
-    promedio_general = round(
-        sum(v["pct"] for v in resultados.values()) / len(resultados),
-        2
-    ) if resultados else 0
+    bloques_validos = [
+        float(v["pct"])
+        for v in resultados.values()
+        if int(v.get("total_validos", 0) or 0) > 0
+    ]
 
-    # ==========================================
-    # REUTILIZAR EL ÚLTIMO ANÁLISIS EN VEZ DE CREAR UNO NUEVO
-    # ==========================================
+    promedio_general = (
+        round(sum(bloques_validos) / len(bloques_validos), 2)
+        if bloques_validos
+        else 0
+    )
+
     ar = (
         PciAnalysisRun.query
         .filter_by(pci_run_id=run.id)
@@ -123220,10 +123428,7 @@ def run_analysis_from_pci_run(pci_run_id: int):
     ar.nivel_promedio_general = promedio_general
     ar.resultados_json = json.dumps(resultados, ensure_ascii=False)
     ar.preguntas_json = json.dumps(preguntas_detalle, ensure_ascii=False)
-
-    # IMPORTANTE:
-    # No tocar informe_ejecutivo_editado ni plan_trabajo_editado
-    # para no perder lo que el usuario haya ajustado manualmente.
+    ar.velocimetros_json = json.dumps(resultados, ensure_ascii=False)
 
     db.session.commit()
     return ar.id
@@ -123283,7 +123488,7 @@ def ingreso_guardar_pci():
         PciMadurezRespuesta.query.filter_by(run_id=run_form.id).delete()
 
         for p in preguntas_q:
-            estado = (request.form.get(f"st_{p.id}") or "").strip().upper()
+            estado = pci_estado_normalizado(request.form.get(f"st_{p.id}"))
             comentario = (request.form.get(f"c_{p.id}") or "").strip()
 
             if estado in ("SI", "PARCIAL", "NO", "NA"):
@@ -123632,6 +123837,65 @@ def pci_normalizar_texto_rico_guardado(texto: str) -> str:
 
     return txt.strip()
 
+def generar_pci_radar_base64(resultados: dict):
+    try:
+        labels = []
+        values = []
+
+        for code in PCI_BLOCK_ORDER:
+            item = (resultados or {}).get(code)
+            if not item:
+                continue
+
+            total_validos = int(item.get("total_validos", 0) or 0)
+
+            # Si todo el bloque es N/A, NO entra al radar
+            if total_validos <= 0:
+                continue
+
+            labels.append(code)
+            values.append(float(item.get("pct", 0) or 0))
+
+        if not labels:
+            return None
+
+        N = len(labels)
+        vals = values + values[:1]
+        angles = [n / float(N) * 2 * math.pi for n in range(N)]
+        angles += angles[:1]
+
+        fig = plt.figure(figsize=(5.2, 4.2), dpi=180)
+        ax = plt.subplot(111, polar=True)
+
+        ax.set_theta_offset(math.pi / 2)
+        ax.set_theta_direction(-1)
+
+        ax.set_xticks(angles[:-1])
+        ax.set_xticklabels(labels, fontsize=8, fontweight="bold")
+
+        ax.set_ylim(0, 100)
+        ax.set_yticks([20, 40, 60, 80, 100])
+        ax.set_yticklabels(["20", "40", "60", "80", "100"], fontsize=7)
+
+        ax.plot(angles, vals, linewidth=2.2)
+        ax.fill(angles, vals, alpha=0.18)
+
+        ax.set_title("Radar de Cumplimiento PCI-DSS", fontsize=11, fontweight="bold", pad=16)
+
+        fig.tight_layout()
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", transparent=True, bbox_inches="tight", pad_inches=0.25)
+        plt.close(fig)
+        buf.seek(0)
+
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+    except Exception as e:
+        print("Error generando radar PCI:", repr(e))
+        plt.close("all")
+        return None
+
 # =========================
 # Resultado y Tablero
 # =========================
@@ -123647,54 +123911,44 @@ def resultado(run_id):
 
     run = PciAnalysisRun.query.get_or_404(run_id)
 
+    # Recalcular automáticamente sin volver a ingresar información.
+    # Usa las respuestas ya guardadas en PciMadurezRespuesta.
+    try:
+        nuevo_analysis_id = run_analysis_from_pci_run(run.pci_run_id)
+        run = PciAnalysisRun.query.get_or_404(nuevo_analysis_id)
+    except Exception as e:
+        print("Error recalculando PCI-DSS:", repr(e))
+
     read_only = (user.role == "auditor")
 
-    # =====================================================
-    # BOTONES BLOQUEADOS / HABILITADOS SEGÚN PERFIL
-    # =====================================================
     if read_only:
         boton_informe_ai = """
-        <button class="btn btn-outline-secondary rounded-pill px-4 fw-bold"
-                type="button"
-                disabled
-                title="El perfil Auditor no puede generar informes con IA">
+        <button class="btn btn-outline-secondary rounded-pill px-4 fw-bold" type="button" disabled>
           <i class="bi bi-magic me-2"></i>Generar
         </button>
         """
 
         boton_editar_informe = """
-        <button class="btn btn-outline-secondary rounded-pill px-4 fw-bold"
-                type="button"
-                disabled
-                title="El perfil Auditor no puede editar el informe ejecutivo">
+        <button class="btn btn-outline-secondary rounded-pill px-4 fw-bold" type="button" disabled>
           <i class="bi bi-pencil-square me-2"></i>Editar
         </button>
         """
 
         boton_plan_ai = """
-        <button class="btn btn-outline-secondary rounded-pill px-4 fw-bold"
-                type="button"
-                disabled
-                title="El perfil Auditor no puede generar el plan de trabajo con IA">
+        <button class="btn btn-outline-secondary rounded-pill px-4 fw-bold" type="button" disabled>
           <i class="bi bi-magic me-2"></i>Generar
         </button>
         """
 
         boton_editar_plan = """
-        <button class="btn btn-outline-secondary rounded-pill px-4 fw-bold"
-                type="button"
-                disabled
-                title="El perfil Auditor no puede editar el plan de trabajo">
+        <button class="btn btn-outline-secondary rounded-pill px-4 fw-bold" type="button" disabled>
           <i class="bi bi-pencil-square me-2"></i>Editar
         </button>
         """
     else:
         boton_informe_ai = f"""
-        <form method="POST"
-              action="{url_for('madurez_pci.informe_ejecutivo_generar_pci', run_id=run.id)}"
-              class="m-0">
-          <button type="submit"
-                  class="btn btn-success rounded-pill px-4 fw-bold">
+        <form method="POST" action="{url_for('madurez_pci.informe_ejecutivo_generar_pci', run_id=run.id)}" class="m-0">
+          <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold">
             <i class="bi bi-magic me-2"></i>Generar
           </button>
         </form>
@@ -123708,11 +123962,8 @@ def resultado(run_id):
         """
 
         boton_plan_ai = f"""
-        <form method="POST"
-              action="{url_for('madurez_pci.plan_trabajo_generar_pci', run_id=run.id)}"
-              class="m-0">
-          <button type="submit"
-                  class="btn btn-success rounded-pill px-4 fw-bold">
+        <form method="POST" action="{url_for('madurez_pci.plan_trabajo_generar_pci', run_id=run.id)}" class="m-0">
+          <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold">
             <i class="bi bi-magic me-2"></i>Generar
           </button>
         </form>
@@ -123729,6 +123980,8 @@ def resultado(run_id):
         resultados = json.loads(run.resultados_json or "{}")
     except Exception:
         resultados = {}
+
+    radar_b64 = generar_pci_radar_base64(resultados)
 
     informe_ai = pci_normalizar_texto_rico_guardado(run.informe_ejecutivo_ai or "")
     informe_editado = pci_normalizar_texto_rico_guardado(run.informe_ejecutivo_editado or "")
@@ -123752,6 +124005,13 @@ def resultado(run_id):
         if not item:
             continue
 
+        total_validos = int(item.get("total_validos", 0) or 0)
+
+        # Si todo el bloque es N/A, NO se muestra en el detalle
+        # Ejemplo: A2 con SI=0, PARCIAL=0, NO=0, NA=3
+        if total_validos <= 0:
+            continue
+
         img_b64 = generar_pci_velocimetro_base64(
             pci_block_title(code),
             item.get("pct", 0),
@@ -123768,11 +124028,13 @@ def resultado(run_id):
             "descripcion": item.get("descripcion", ""),
             "brecha_pct": float(item.get("brecha_pct", 0) or 0),
             "total": int(item.get("total", 0) or 0),
+            "total_validos": total_validos,
             "counts": item.get("counts", {}),
             "img_b64": img_b64,
         })
 
     cards_html = []
+
     for t in tarjetas:
         counts = t["counts"] or {}
 
@@ -123791,7 +124053,9 @@ def resultado(run_id):
               <div>
                 <div class="pcires-card-title">{esc(t["title"])}</div>
                 <div class="small text-muted">
-                  Total ítems: <b>{t["total"]}</b> · Brecha: <b>{t["brecha_pct"]:.2f}%</b>
+                  Total respondidas: <b>{t["total"]}</b> ·
+                  Válidas: <b>{t["total_validos"]}</b> ·
+                  Brecha: <b>{t["brecha_pct"]:.2f}%</b>
                 </div>
               </div>
               <span class="badge rounded-pill px-3 py-2"
@@ -123829,10 +124093,51 @@ def resultado(run_id):
         </div>
         """)
 
+    radar_html = ""
+    if radar_b64:
+        radar_html = f"""
+        <div class="pcires-card p-4 h-100">
+          <div class="pcires-card-title">🕸️ Radar de cumplimiento PCI-DSS</div>
+          <div class="text-muted small mb-2">
+            Vista comparativa por requerimiento. N/A no afecta el cálculo.
+          </div>
+          <div class="text-center">
+            <img src="data:image/png;base64,{radar_b64}"
+                 class="img-fluid pcires-radar"
+                 alt="Radar PCI-DSS">
+          </div>
+        </div>
+        """
+
     top_html = f"""
     <div class="row g-3 mb-4">
 
-      <div class="col-12 col-xl-6">
+      <div class="col-12 col-xl-4">
+        <div class="pcires-card p-4 h-100">
+          <div class="pcires-card-title">📌 Resultado General PCI-DSS</div>
+          <div class="text-muted small mb-3">
+            Cálculo recalculado desde las respuestas guardadas.
+          </div>
+
+          <div class="pcires-general-score-box">
+            <div class="pcires-general-score-label">Cumplimiento general</div>
+            <div class="pcires-general-score-value">{float(run.nivel_promedio_general or 0):.2f}%</div>
+            <div class="pcires-general-score-subtitle">
+              Revisión: <b>{esc(run.company_name or '')}</b>
+            </div>
+          </div>
+
+          <div class="alert alert-info mt-3 mb-0 small rounded-4 border-0">
+            <b>Nota:</b> las respuestas N/A cuentan como respondidas, pero se excluyen del denominador de madurez.
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-xl-4">
+        {radar_html}
+      </div>
+
+      <div class="col-12 col-xl-4">
         <div class="pcires-card p-4 h-100">
           <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
             <div>
@@ -123851,7 +124156,10 @@ def resultado(run_id):
         </div>
       </div>
 
-      <div class="col-12 col-xl-6">
+    </div>
+
+    <div class="row g-3 mb-4">
+      <div class="col-12">
         <div class="pcires-card p-4 h-100">
           <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
             <div>
@@ -123869,7 +124177,6 @@ def resultado(run_id):
           </div>
         </div>
       </div>
-
     </div>
     """
 
@@ -123925,7 +124232,6 @@ def resultado(run_id):
         margin:26px auto 24px auto;
       }}
 
-      /* HEADER SGSI MODERNO */
       .pcires-header-card{{
         background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
         border-radius:18px;
@@ -123978,13 +124284,6 @@ def resultado(run_id):
         margin-right:14px;
       }}
 
-      .pcires-header-text{{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }}
-
       .pcires-header-text::before{{
         content:"SGSI · Resultado PCI-DSS";
         display:inline-block;
@@ -124013,7 +124312,6 @@ def resultado(run_id):
         line-height:1.25;
       }}
 
-      /* BOTONES */
       .pcires-header-actions{{
         display:flex;
         justify-content:center;
@@ -124035,22 +124333,12 @@ def resultado(run_id):
         border:1px solid #cfd8e3 !important;
       }}
 
-      .pcires-btn-main:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-      }}
-
       .pcires-btn-soft{{
         background:rgba(255,255,255,.88);
         color:#111;
         border:1px solid rgba(108,117,125,.35);
       }}
 
-      .pcires-btn-soft:hover{{
-        background:#edf5ff;
-      }}
-
-      /* CARDS */
       .pcires-card,
       .card{{
         background:rgba(255,255,255,.96) !important;
@@ -124061,33 +124349,61 @@ def resultado(run_id):
         overflow:hidden;
       }}
 
-      .pcires-card.p-4{{
-        padding:1.5rem !important;
-      }}
-
-      .pcires-card-title,
-      .card h5{{
+      .pcires-card-title{{
         font-weight:950;
         font-size:1rem;
         color:#1459a6;
-        margin-bottom:12px;
+        margin-bottom:8px;
       }}
 
-      /* GAUGE */
+      .pcires-general-score-box{{
+        background:linear-gradient(135deg,#eef5ff,#ffffff);
+        border:1px solid rgba(63,134,214,.20);
+        border-radius:18px;
+        padding:22px 18px;
+        text-align:center;
+      }}
+
+      .pcires-general-score-label{{
+        font-size:.78rem;
+        font-weight:900;
+        color:#1459a6;
+        text-transform:uppercase;
+      }}
+
+      .pcires-general-score-value{{
+        font-size:3rem;
+        line-height:1;
+        font-weight:950;
+        color:#0f172a;
+        margin:8px 0;
+      }}
+
+      .pcires-general-score-subtitle{{
+        font-size:.82rem;
+        color:#475569;
+      }}
+
+      .pcires-radar{{
+        max-width:420px;
+        width:100%;
+        height:auto;
+      }}
+
       .pcires-gauge{{
         max-width:230px;
         width:100%;
         height:auto;
       }}
 
-      /* RESUMEN EJECUTIVO */
       .pcires-exec-box{{
-        min-height:310px;
+        min-height:220px;
+        max-height:420px;
+        overflow:auto;
         background:linear-gradient(180deg,rgba(248,250,252,.94),rgba(255,255,255,.98));
         border:1px solid rgba(63,134,214,.16);
         border-radius:16px;
         padding:18px;
-        box-shadow:inset 0 1px 0 rgba(255,255,255,.60);
       }}
 
       .pcires-exec-text{{
@@ -124096,7 +124412,6 @@ def resultado(run_id):
         color:#1f2937;
       }}
 
-      /* MINI STATS */
       .mini-stat{{
         border-radius:12px;
         padding:10px 8px;
@@ -124104,30 +124419,6 @@ def resultado(run_id):
         font-size:.84rem;
         font-weight:900;
         box-shadow:0 4px 10px rgba(15,23,42,.08);
-      }}
-
-      /* RESPONSIVE */
-      @media (max-width:991.98px){{
-        .pcires-shell{{
-          width:98%;
-          margin:8px auto 22px auto;
-        }}
-
-        .pcires-header-card{{
-          min-height:88px;
-        }}
-
-        .pcires-title{{
-          font-size:1.20rem;
-        }}
-
-        .pcires-subtitle{{
-          font-size:.76rem;
-        }}
-
-        .pcires-exec-box{{
-          min-height:240px;
-        }}
       }}
 
       @media (max-width:768px){{
@@ -124139,10 +124430,6 @@ def resultado(run_id):
 
         .pcires-header-overlay::before{{
           margin:0;
-        }}
-
-        .pcires-header-text::before{{
-          margin:auto;
         }}
 
         .pcires-title,
@@ -128189,16 +128476,6 @@ def detalle_resultado_pci(analysis_id: int):
 # ==========================================================================================================================================
 #                                                   Módulo de Madurez SOC 2 — Diseño NIST
 # ==========================================================================================================================================
-# INSTRUCCIONES DE INTEGRACIÓN:
-# 1) Pega este bloque en Programasgsi2.py después del módulo PCI-DSS o en la zona de módulos de madurez.
-# 2) Deja el Excel en: static/templates/Matriz SOC 2.xlsx
-#    También acepta: Matriz SOC 2(2).xlsx, SOC 2.xlsx, SOC2.xlsx
-# 3) Agrega "Nivel de madurez SOC 2" a MODULES.
-# 4) Registra el blueprint una sola vez:
-#       app.register_blueprint(soc2_madurez_bp)
-# 5) Este módulo usa BASE DE DATOS INDEPENDIENTE:
-#       instance/soc2_madurez.db
-# ==========================================================================================================================================
 
 soc2_madurez_bp = Blueprint("madurez_soc2", __name__, url_prefix="/madurez_soc2")
 
@@ -128748,32 +129025,97 @@ def generar_soc2_velocimetro_base64(label: str, pct: float, nivel: str, color: s
 
 def soc2_normalizar_texto_rico_guardado(texto: str) -> str:
     txt = (texto or "").strip()
+
     if not txt:
         return ""
+
     txt = txt.replace("\r\n", "\n").replace("\r", "\n")
-    txt = html.unescape(txt).replace("```json", "").replace("```", "").strip()
+    txt = html.unescape(txt)
+    txt = txt.replace("```json", "").replace("```", "").strip()
+
+    # Extrae JSON aunque venga como:
+    # { "informe_ejecutivo": "texto..." }
+    # { "plan_trabajo": "texto..." }
+    # { "texto": "texto..." }
+    obj = None
+
     try:
         obj = json.loads(txt)
-        if isinstance(obj, dict):
-            val = obj.get("informe_ejecutivo") or obj.get("plan_trabajo") or obj.get("texto") or ""
-            if isinstance(val, list):
-                val = json.dumps(val, ensure_ascii=False)
-            if isinstance(val, str) and val.strip():
-                txt = val.strip()
     except Exception:
-        pass
+        try:
+            start = txt.find("{")
+            end = txt.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                obj = json.loads(txt[start:end + 1])
+        except Exception:
+            obj = None
+
+    if isinstance(obj, dict):
+        val = (
+            obj.get("informe_ejecutivo")
+            or obj.get("informe")
+            or obj.get("resumen_ejecutivo")
+            or obj.get("plan_trabajo")
+            or obj.get("plan_accion")
+            or obj.get("texto")
+            or ""
+        )
+
+        if isinstance(val, list):
+            val = _build_plan_accion_soc2_texto(val)
+
+        if isinstance(val, dict):
+            val = json.dumps(val, ensure_ascii=False, indent=2)
+
+        if isinstance(val, str) and val.strip():
+            txt = val.strip()
+
+    txt = html.unescape(txt)
+
+    # Si aún quedaron llaves al inicio y contiene informe_ejecutivo,
+    # intenta extraer por regex como último recurso.
+    m = re.search(
+        r'"informe_ejecutivo"\s*:\s*"(?P<txt>.*)"\s*\}?\s*$',
+        txt,
+        flags=re.IGNORECASE | re.DOTALL
+    )
+
+    if m:
+        extraido = m.group("txt")
+
+        try:
+            # Solo interpreta secuencias JSON reales (\n, \u00f3, etc.)
+            extraido = json.loads(f'"{extraido}"')
+        except Exception:
+            pass
+
+        txt = extraido.strip()
+
     txt = re.sub(r"<\s*br\s*/?\s*>", "\n", txt, flags=re.IGNORECASE)
     txt = re.sub(r"<[^>]+>", "", txt)
+
     patrones = [
+        r"^\s*\{\s*",
+        r"^\s*\"informe_ejecutivo\"\s*:\s*\"?",
+        r"^\s*\"resumen_ejecutivo\"\s*:\s*\"?",
         r"^\s*\*{0,3}\s*INFORME\s+EJECUTIVO\s*(DE\s+MADUREZ\s+SOC\s*2)?\s*\*{0,3}\s*[:\-–—]?\s*",
         r"^\s*#{1,6}\s*INFORME\s+EJECUTIVO\s*(DE\s+MADUREZ\s+SOC\s*2)?\s*[:\-–—]?\s*",
         r"^\s*RESUMEN\s+EJECUTIVO\s*[:\-–—]?\s*",
         r"^\s*PLAN\s+DE\s+TRABAJO\s*[:\-–—]?\s*",
     ]
+
     for p in patrones:
         txt = re.sub(p, "", txt, flags=re.IGNORECASE).strip()
+
+    txt = re.sub(r'"\s*\}\s*$', "", txt).strip()
+    txt = txt.replace("\\n", "\n")
+    txt = txt.replace('\\"', '"')
     txt = txt.replace("**", "").replace("__", "")
+
+    txt = re.sub(r"[ \t]+\n", "\n", txt)
+    txt = re.sub(r"\n[ \t]+", "\n", txt)
     txt = re.sub(r"\n{3,}", "\n\n", txt)
+
     return txt.strip()
 
 
@@ -131064,16 +131406,35 @@ def informe_ejecutivo_generar(run_id: int):
         return soc2_deny_execute("El perfil Auditor no puede generar el informe ejecutivo con IA.")
 
     run = Soc2MadurezRun.query.get_or_404(run_id)
-    resumen = json.loads(run.resumen_json or "{}")
+
+    try:
+        resumen = json.loads(run.resumen_json or "{}")
+    except Exception:
+        resumen = {}
 
     if not resumen:
         flash("⚠️ No hay resultados consolidados para generar el informe ejecutivo.", "warning")
         return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
 
     try:
-        raw = _soc2_ai_text(_soc2_prompt_informe_ejecutivo(run, resumen), max_tokens=1200)
+        raw = _soc2_ai_text(
+            _soc2_prompt_informe_ejecutivo(run, resumen),
+            max_tokens=1200
+        )
+
         obj = _extraer_json_objeto_soc2(raw)
-        informe_ai = (obj.get("informe_ejecutivo") or raw or "").strip() if isinstance(obj, dict) else raw
+
+        if isinstance(obj, dict):
+            informe_ai = (
+                obj.get("informe_ejecutivo")
+                or obj.get("informe")
+                or obj.get("resumen_ejecutivo")
+                or obj.get("texto")
+                or ""
+            )
+        else:
+            informe_ai = raw or ""
+
         informe_ai = soc2_normalizar_texto_rico_guardado(informe_ai)
 
         if not informe_ai:
@@ -131081,6 +131442,9 @@ def informe_ejecutivo_generar(run_id: int):
 
         run.informe_ejecutivo_ai = informe_ai
         run.informe_ejecutivo_editado = informe_ai
+        run.updated_at = datetime.utcnow()
+
+        db.session.add(run)
         db.session.commit()
 
         flash("✅ Informe ejecutivo SOC 2 generado con IA.", "success")
@@ -131103,12 +131467,26 @@ def informe_ejecutivo_editar(run_id: int):
     run = Soc2MadurezRun.query.get_or_404(run_id)
 
     if request.method == "POST":
-        run.informe_ejecutivo_editado = (request.form.get("informe") or "").strip()
+        texto_form = request.form.get("informe") or ""
+        texto_limpio = soc2_normalizar_texto_rico_guardado(texto_form)
+
+        run.informe_ejecutivo_editado = texto_limpio
+        run.updated_at = datetime.utcnow()
+
+        db.session.add(run)
         db.session.commit()
+
         flash("✅ Informe ejecutivo SOC 2 actualizado.", "success")
         return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
 
     texto = run.informe_ejecutivo_editado or run.informe_ejecutivo_ai or ""
+    texto = soc2_normalizar_texto_rico_guardado(texto)
+
+    # Limpia en base de datos si venía guardado como JSON literal
+    if texto and texto != (run.informe_ejecutivo_editado or run.informe_ejecutivo_ai or ""):
+        run.informe_ejecutivo_editado = texto
+        db.session.add(run)
+        db.session.commit()
 
     content = f"""
 <div class="nistdet-shell">
@@ -131122,9 +131500,16 @@ def informe_ejecutivo_editar(run_id: int):
 
   <form method="POST" class="nistdet-card p-4">
     <textarea name="informe" rows="18" class="form-control">{escape(texto)}</textarea>
+
     <div class="text-end mt-3">
-      <a href="{url_for('madurez_soc2.detalle', run_id=run.id)}" class="btn btn-secondary rounded-pill px-4">Cancelar</a>
-      <button class="btn btn-primary rounded-pill px-4 fw-bold">Guardar</button>
+      <a href="{url_for('madurez_soc2.detalle', run_id=run.id)}"
+         class="btn btn-secondary rounded-pill px-4">
+        Cancelar
+      </a>
+
+      <button class="btn btn-primary rounded-pill px-4 fw-bold">
+        Guardar
+      </button>
     </div>
   </form>
 </div>
@@ -132538,42 +132923,17 @@ AI_MADUREZ_PROGRESS_JS = """
 (function () {
     window.ai42001Progress = function (mensaje) {
         try {
-            if (window.__ai42001ProgressTimer) {
-                clearInterval(window.__ai42001ProgressTimer);
-            }
-
             if (typeof window.showSGSIProgress === "function") {
-                window.showSGSIProgress(mensaje || "Procesando solicitud con IA...");
+                window.showSGSIProgress(
+                    mensaje || "Generando y procesando información..."
+                );
             }
-
-            let avance = 3;
-
-            window.__ai42001ProgressTimer = setInterval(function () {
-                if (typeof window.setSGSIProgress !== "function") return;
-
-                if (avance < 50) {
-                    avance += 4;
-                } else if (avance < 78) {
-                    avance += 2;
-                } else if (avance < 95) {
-                    avance += 1;
-                }
-
-                window.setSGSIProgress(avance);
-            }, 550);
-
         } catch (e) {
             console.log("Progreso IA ISO 42001:", e);
         }
 
         return true;
     };
-
-    window.addEventListener("pageshow", function () {
-        if (window.__ai42001ProgressTimer) {
-            clearInterval(window.__ai42001ProgressTimer);
-        }
-    });
 })();
 </script>
 """
