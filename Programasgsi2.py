@@ -2946,199 +2946,6 @@ class GapLevelConfig(db.Model):
     #with app.app_context():
         #db.create_all()
 
-
-#=======================================
-# Escaneo de Vulnerabilidades Kali Linux
-#=======================================
-
-class KaliScannerConfig(db.Model):
-    __tablename__ = "kali_scanner_config"
-
-    id = db.Column(db.Integer, primary_key=True)
-
-    # local o remoto
-    modo = db.Column(db.String(20), nullable=False, default="local")  # local / remoto
-
-    # Si es remoto
-    host = db.Column(db.String(255), nullable=True)
-    puerto_ssh = db.Column(db.Integer, nullable=False, default=22)
-    usuario_ssh = db.Column(db.String(120), nullable=True)
-    password_ssh = db.Column(db.String(255), nullable=True)   # si quieres, luego lo ciframos
-    ruta_base_remota = db.Column(db.String(500), nullable=True)
-
-    # Si es local
-    ruta_nmap = db.Column(db.String(500), nullable=True, default="/usr/bin/nmap")
-    ruta_nikto = db.Column(db.String(500), nullable=True, default="/usr/bin/nikto")
-    ruta_nuclei = db.Column(db.String(255), nullable=True)
-    ruta_whatweb = db.Column(db.String(500), nullable=True, default="/usr/bin/whatweb")
-    ruta_testssl = db.Column(db.String(500), nullable=True, default="/usr/bin/testssl")
-
-    activo = db.Column(db.Boolean, nullable=False, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-class VulnerabilityScanRun(db.Model):
-    __tablename__ = "vulnerability_scan_runs"
-
-    id = db.Column(db.Integer, primary_key=True)
-
-    target = db.Column(db.String(500), nullable=False)   # URL o IP
-    target_type = db.Column(db.String(20), nullable=False)  # url / ip
-    scan_mode = db.Column(db.String(30), nullable=False, default="full")  # full
-    scanner_mode = db.Column(db.String(20), nullable=False)  # local / remoto
-
-    estado = db.Column(db.String(30), nullable=False, default="pendiente")  # pendiente/ejecutando/finalizado/error
-    fecha_inicio = db.Column(db.DateTime, nullable=True)
-    fecha_fin = db.Column(db.DateTime, nullable=True)
-
-    ejecutado_por = db.Column(db.String(120), nullable=True)
-    responsable_asignado = db.Column(db.String(200), nullable=True)
-
-    archivo_resumen_json = db.Column(db.String(500), nullable=True)
-    archivo_reporte_pdf = db.Column(db.String(500), nullable=True)
-    archivo_log = db.Column(db.String(500), nullable=True)
-
-    salida_consola = db.Column(db.Text, nullable=True)
-    error_detalle = db.Column(db.Text, nullable=True)
-
-    total_hallazgos = db.Column(db.Integer, nullable=False, default=0)
-    criticas = db.Column(db.Integer, nullable=False, default=0)
-    altas = db.Column(db.Integer, nullable=False, default=0)
-    medias = db.Column(db.Integer, nullable=False, default=0)
-    bajas = db.Column(db.Integer, nullable=False, default=0)
-    progress_pct = db.Column(db.Integer, nullable=False, default=0)
-    current_stage = db.Column(db.String(100), nullable=True)
-    current_tool = db.Column(db.String(50), nullable=True)
-
-    cancel_requested = db.Column(db.Boolean, nullable=False, default=False)
-    stopped_by_user = db.Column(db.Boolean, nullable=False, default=False)
-
-    findings_streamed = db.Column(db.Integer, nullable=False, default=0)
-
-    created_vulns = db.Column(db.Integer, nullable=False, default=0)
-    created_plans = db.Column(db.Integer, nullable=False, default=0)
-
-    worker_pid = db.Column(db.Integer, nullable=True)
-    deleted_at = db.Column(db.DateTime, nullable=True)
-    active_pid = db.Column(db.Integer, nullable=True)
-    active_command = db.Column(db.Text, nullable=True)
-    monitor_enabled = db.Column(db.Boolean, nullable=False, default=True)
-
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-class VulnerabilityScanFinding(db.Model):
-    __tablename__ = "vulnerability_scan_findings"
-
-    id = db.Column(db.Integer, primary_key=True)
-    run_id = db.Column(db.Integer, db.ForeignKey("vulnerability_scan_runs.id", ondelete="CASCADE"), nullable=False)
-
-    fuente = db.Column(db.String(50), nullable=False)   # nmap / nikto / whatweb / testssl
-    titulo = db.Column(db.String(500), nullable=False)
-    descripcion = db.Column(db.Text, nullable=True)
-
-    severidad = db.Column(db.String(20), nullable=False)  # Crítica/Alta/Media/Baja
-    cvss = db.Column(db.String(20), nullable=True)
-    cve = db.Column(db.String(100), nullable=True)
-
-    puerto = db.Column(db.String(50), nullable=True)
-    protocolo = db.Column(db.String(50), nullable=True)
-    servicio = db.Column(db.String(200), nullable=True)
-    evidencia = db.Column(db.Text, nullable=True)
-    recomendacion_base = db.Column(db.Text, nullable=True)
-
-    vulnerabilidad_registro_id = db.Column(
-        db.Integer,
-        db.ForeignKey("vulnerabilidades_registro.id"),
-        nullable=True
-    )
-
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    run = db.relationship("VulnerabilityScanRun", backref=db.backref("hallazgos", lazy=True, cascade="all, delete-orphan"))
-
-# ==========================================================================================================================================
-#                                               MÓDULO MODELAMIENTO DE AMENAZAS
-# ==========================================================================================================================================
-
-class ThreatModelEntry(db.Model):
-    __tablename__ = "threat_model_entries"
-
-    id = db.Column(db.Integer, primary_key=True)
-
-    # Relaciones con tu ecosistema actual
-    run_id = db.Column(db.Integer, db.ForeignKey("vulnerability_scan_runs.id", ondelete="SET NULL"), nullable=True)
-    finding_id = db.Column(db.Integer, db.ForeignKey("vulnerability_scan_findings.id", ondelete="SET NULL"), nullable=True)
-    vulnerabilidad_registro_id = db.Column(
-        db.Integer,
-        db.ForeignKey("vulnerabilidades_registro.id", ondelete="SET NULL"),
-        nullable=True
-    )
-
-    # Datos del contexto
-    activo = db.Column(db.String(200), nullable=False)
-    herramienta = db.Column(db.String(50), nullable=False)   # nikto / nessus / nuclei / nmap / testssl
-    vulnerabilidad = db.Column(db.String(500), nullable=False)
-    descripcion = db.Column(db.Text, nullable=True)
-    impacto = db.Column(db.Text, nullable=True)
-
-    # Estado
-    severidad = db.Column(db.String(20), nullable=True)
-    confianza = db.Column(db.Integer, default=70)   # 0..100
-
-    # trazabilidad
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    # Relaciones
-    tecnicas = db.relationship(
-        "ThreatModelTechnique",
-        backref="threat_entry",
-        cascade="all, delete-orphan",
-        lazy="selectin"
-    )
-
-    vulnerabilidad_registro = db.relationship(
-        "VulnerabilidadRegistro",
-        backref=db.backref("threat_models", lazy="selectin")
-    )
-
-
-class ThreatModelTechnique(db.Model):
-    __tablename__ = "threat_model_techniques"
-
-    id = db.Column(db.Integer, primary_key=True)
-    threat_entry_id = db.Column(
-        db.Integer,
-        db.ForeignKey("threat_model_entries.id", ondelete="CASCADE"),
-        nullable=False
-    )
-
-    mitre_technique_id = db.Column(db.String(20), nullable=False)      # T1190
-    mitre_technique_name = db.Column(db.String(255), nullable=False)   # Exploit Public-Facing Application
-    mitre_tactic_id = db.Column(db.String(20), nullable=True)          # TA0001
-    mitre_tactic_name = db.Column(db.String(100), nullable=False)      # Initial Access
-
-    rationale = db.Column(db.Text, nullable=True)
-    score = db.Column(db.Integer, default=50)  # score para Navigator / heatmap
-
-class ThreatModelUnmapped(db.Model):
-    __tablename__ = "threat_model_unmapped"
-
-    id = db.Column(db.Integer, primary_key=True)
-    run_id = db.Column(db.Integer, nullable=True)
-    finding_id = db.Column(db.Integer, nullable=True)
-    activo = db.Column(db.String(200), nullable=True)
-    herramienta = db.Column(db.String(50), nullable=True)
-    severidad = db.Column(db.String(20), nullable=True)
-    titulo = db.Column(db.String(500), nullable=True)
-    descripcion = db.Column(db.Text, nullable=True)
-    evidencia = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    def __repr__(self):
-            return f"<ConfigImpactoResidual {self.min}-{self.max} => bajar {self.bajar}>"
-
-
 #---------------------------------------------------------------------------------------------------------------
 #                                         Catálogo de columnas disponibles
 #---------------------------------------------------------------------------------------------------------------
@@ -61407,6 +61214,119 @@ VULN_CLASIFICACIONES = ['Crítica', 'Alta', 'Media', 'Baja']
 #                                           SUBMÓDULO ANÁLISIS AUTOMÁTICO DE VULNERABILIDADES
 # ==========================================================================================================================================
 
+#=======================================
+# Escaneo de Vulnerabilidades Kali Linux
+#=======================================
+
+class KaliScannerConfig(db.Model):
+    __tablename__ = "kali_scanner_config"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # local o remoto
+    modo = db.Column(db.String(20), nullable=False, default="local")  # local / remoto
+
+    # Si es remoto
+    host = db.Column(db.String(255), nullable=True)
+    puerto_ssh = db.Column(db.Integer, nullable=False, default=22)
+    usuario_ssh = db.Column(db.String(120), nullable=True)
+    password_ssh = db.Column(db.String(255), nullable=True)   # si quieres, luego lo ciframos
+    ruta_base_remota = db.Column(db.String(500), nullable=True)
+
+    # Si es local
+    ruta_nmap = db.Column(db.String(500), nullable=True, default="/usr/bin/nmap")
+    ruta_nikto = db.Column(db.String(500), nullable=True, default="/usr/bin/nikto")
+    ruta_nuclei = db.Column(db.String(255), nullable=True)
+    ruta_whatweb = db.Column(db.String(500), nullable=True, default="/usr/bin/whatweb")
+    ruta_testssl = db.Column(db.String(500), nullable=True, default="/usr/bin/testssl")
+    ruta_zap = db.Column(db.String(500))
+
+    activo = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class VulnerabilityScanRun(db.Model):
+    __tablename__ = "vulnerability_scan_runs"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    target = db.Column(db.String(500), nullable=False)   # URL o IP
+    target_type = db.Column(db.String(20), nullable=False)  # url / ip
+    scan_mode = db.Column(db.String(30), nullable=False, default="full")  # full
+    scanner_mode = db.Column(db.String(20), nullable=False)  # local / remoto
+
+    estado = db.Column(db.String(30), nullable=False, default="pendiente")  # pendiente/ejecutando/finalizado/error
+    fecha_inicio = db.Column(db.DateTime, nullable=True)
+    fecha_fin = db.Column(db.DateTime, nullable=True)
+
+    ejecutado_por = db.Column(db.String(120), nullable=True)
+    responsable_asignado = db.Column(db.String(200), nullable=True)
+
+    archivo_resumen_json = db.Column(db.String(500), nullable=True)
+    archivo_reporte_pdf = db.Column(db.String(500), nullable=True)
+    archivo_log = db.Column(db.String(500), nullable=True)
+
+    salida_consola = db.Column(db.Text, nullable=True)
+    error_detalle = db.Column(db.Text, nullable=True)
+
+    total_hallazgos = db.Column(db.Integer, nullable=False, default=0)
+    criticas = db.Column(db.Integer, nullable=False, default=0)
+    altas = db.Column(db.Integer, nullable=False, default=0)
+    medias = db.Column(db.Integer, nullable=False, default=0)
+    bajas = db.Column(db.Integer, nullable=False, default=0)
+    progress_pct = db.Column(db.Integer, nullable=False, default=0)
+    current_stage = db.Column(db.String(100), nullable=True)
+    current_tool = db.Column(db.String(50), nullable=True)
+
+    cancel_requested = db.Column(db.Boolean, nullable=False, default=False)
+    stopped_by_user = db.Column(db.Boolean, nullable=False, default=False)
+
+    findings_streamed = db.Column(db.Integer, nullable=False, default=0)
+
+    created_vulns = db.Column(db.Integer, nullable=False, default=0)
+    created_plans = db.Column(db.Integer, nullable=False, default=0)
+
+    worker_pid = db.Column(db.Integer, nullable=True)
+    deleted_at = db.Column(db.DateTime, nullable=True)
+    active_pid = db.Column(db.Integer, nullable=True)
+    active_command = db.Column(db.Text, nullable=True)
+    monitor_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    herramientas = db.Column(db.Text)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class VulnerabilityScanFinding(db.Model):
+    __tablename__ = "vulnerability_scan_findings"
+
+    id = db.Column(db.Integer, primary_key=True)
+    run_id = db.Column(db.Integer, db.ForeignKey("vulnerability_scan_runs.id", ondelete="CASCADE"), nullable=False)
+
+    fuente = db.Column(db.String(50), nullable=False)   # nmap / nikto / whatweb / testssl
+    titulo = db.Column(db.String(500), nullable=False)
+    descripcion = db.Column(db.Text, nullable=True)
+
+    severidad = db.Column(db.String(20), nullable=False)  # Crítica/Alta/Media/Baja
+    cvss = db.Column(db.String(20), nullable=True)
+    cve = db.Column(db.String(100), nullable=True)
+
+    puerto = db.Column(db.String(50), nullable=True)
+    protocolo = db.Column(db.String(50), nullable=True)
+    servicio = db.Column(db.String(200), nullable=True)
+    evidencia = db.Column(db.Text, nullable=True)
+    recomendacion_base = db.Column(db.Text, nullable=True)
+
+    vulnerabilidad_registro_id = db.Column(
+        db.Integer,
+        db.ForeignKey("vulnerabilidades_registro.id"),
+        nullable=True
+    )
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    run = db.relationship("VulnerabilityScanRun", backref=db.backref("hallazgos", lazy=True, cascade="all, delete-orphan"))
+
+
+
 SCAN_PRIORIDADES = ["Alta", "Media", "Baja"]
 SCAN_ESTADOS = ["pendiente", "ejecutando", "finalizado", "error"]
 SCAN_TARGET_TYPES = ["url", "ip"]
@@ -61426,6 +61346,7 @@ def _scan_cfg():
             ruta_nuclei="/usr/bin/nuclei",
             ruta_whatweb="/usr/bin/whatweb",
             ruta_testssl="/usr/bin/testssl",
+            ruta_zap="/usr/share/zaproxy/zap.sh",
             ruta_base_remota="/tmp"
         )
         db.session.add(cfg)
@@ -62407,6 +62328,7 @@ def validar_herramientas_scan(cfg):
         ("Nikto", cfg.ruta_nikto),
         ("Nuclei", cfg.ruta_nuclei),
         ("testssl", cfg.ruta_testssl),
+        ("OWASP ZAP", cfg.ruta_zap),
     ]
 
     if cfg.modo == "local":
@@ -62654,6 +62576,214 @@ def parse_txt_findings_generic(file_path: str, fuente: str):
 
     return findings
 
+def ejecutar_zap(run_id, cfg, target: str, run_dir: str):
+    out_html = scan_output_file(run_dir, "zap_scan", "html")
+    out_txt = scan_output_file(run_dir, "zap_scan", "txt")
+
+    if cfg.modo == "local":
+        cmd = [
+            cfg.ruta_zap or "/usr/share/zaproxy/zap.sh",
+            "-cmd",
+            "-quickurl", target,
+            "-quickout", out_html
+        ]
+
+        res = ejecutar_comando_scan(run_id, cfg, cmd)
+
+        with open(out_txt, "w", encoding="utf-8") as f:
+            f.write((res.get("stdout") or "") + "\n" + (res.get("stderr") or ""))
+
+        return res
+
+    remote_base = (cfg.ruta_base_remota or "/tmp").rstrip("/")
+    remote_html = f"{remote_base}/zap_scan_{run_id}.html"
+    remote_txt = f"{remote_base}/zap_scan_{run_id}.txt"
+
+    remote_cmd = (
+        f"rm -f {shlex.quote(remote_html)} {shlex.quote(remote_txt)}; "
+        f"if command -v zap-baseline.py >/dev/null 2>&1; then "
+        f"zap-baseline.py -t {shlex.quote(target)} -r {shlex.quote(remote_html)} "
+        f"> {shlex.quote(remote_txt)} 2>&1; "
+        f"else "
+        f"{shlex.quote(cfg.ruta_zap or '/usr/share/zaproxy/zap.sh')} "
+        f"-cmd -quickurl {shlex.quote(target)} -quickout {shlex.quote(remote_html)} "
+        f"> {shlex.quote(remote_txt)} 2>&1; "
+        f"fi; "
+        f"ls -l {shlex.quote(remote_html)} {shlex.quote(remote_txt)} 2>&1"
+    )
+
+    cmd_local_ref = [
+        cfg.ruta_zap or "/usr/share/zaproxy/zap.sh",
+        "-cmd",
+        "-quickurl", target,
+        "-quickout", out_html
+    ]
+
+    res = ejecutar_comando_scan(
+        run_id,
+        cfg,
+        cmd_local_ref,
+        remote_cmd=remote_cmd
+    )
+
+    pull_txt = scp_from_remote(cfg, remote_txt, out_txt)
+
+    pull_html = scp_from_remote(cfg, remote_html, out_html)
+
+    if pull_html["returncode"] != 0:
+        return {
+            "returncode": 1,
+            "stdout": res.get("stdout") or "",
+            "stderr": (
+                "No se pudo traer salida HTML de ZAP. "
+                f"Detalle SCP: {pull_html.get('stderr') or ''}\n\n"
+                f"Salida remota:\n{res.get('stdout') or ''}\n{res.get('stderr') or ''}"
+            )
+        }
+
+    return {
+        "returncode": res.get("returncode", 0),
+        "stdout": res.get("stdout") or "",
+        "stderr": res.get("stderr") or ""
+    }
+
+def parse_zap_findings(run_dir: str):
+
+    findings = []
+
+    html_file = scan_output_file(run_dir, "zap_scan", "html")
+
+    if not os.path.exists(html_file):
+        return findings
+
+    try:
+
+        with open(html_file, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+
+        # =========================
+        # Buscar bloques de alertas
+        # =========================
+
+        patrones = re.findall(
+            r'<h3>(.*?)</h3>.*?Risk.*?<td.*?>(.*?)</td>.*?Description</td>\s*<td.*?>(.*?)</td>',
+            content,
+            re.I | re.S
+        )
+
+        for titulo, risk, descripcion in patrones:
+
+            titulo = re.sub(r'<.*?>', '', titulo).strip()
+
+            titulo = re.sub(
+                r'Generated on.*',
+                '',
+                titulo,
+                flags=re.I | re.S
+            ).strip()
+
+            if not titulo:
+                titulo = "OWASP ZAP Finding"
+            risk = re.sub(r'<.*?>', '', risk).strip()
+            descripcion = html.unescape(
+                re.sub(r'<.*?>', '', descripcion)
+            ).strip()
+
+            sev = severity_from_text(risk)
+
+            findings.append({
+                "fuente": "owasp_zap",
+                "titulo": titulo or f"OWASP ZAP - {risk}",
+                "descripcion": descripcion[:4000],
+                "severidad": sev,
+                "cvss": None,
+                "cve": extraer_cves_desde_texto(descripcion),
+                "puerto": None,
+                "protocolo": "http/https",
+                "servicio": "web",
+                "evidencia": f"Hallazgo identificado por OWASP ZAP ({risk})",
+                "recomendacion_base": (
+                    "Validar el hallazgo reportado por OWASP ZAP "
+                    "y aplicar remediación de seguridad."
+                )
+            })
+
+        # =========================
+        # Parser alterno moderno
+        # =========================
+
+        if not findings:
+
+            bloques = re.findall(
+                r'alert-detail">(.*?)</table>',
+                content,
+                re.I | re.S
+            )
+
+            for bloque in bloques:
+
+                titulo_match = re.search(
+                    r'alert-title">(.*?)<',
+                    bloque,
+                    re.I | re.S
+                )
+
+                risk_match = re.search(
+                    r'Risk.*?<td.*?>(.*?)</td>',
+                    bloque,
+                    re.I | re.S
+                )
+
+                desc_match = re.search(
+                    r'Description.*?<td.*?>(.*?)</td>',
+                    bloque,
+                    re.I | re.S
+                )
+
+                titulo = titulo_match.group(1).strip() if titulo_match else "OWASP ZAP Finding"
+                risk = risk_match.group(1).strip() if risk_match else "Media"
+                descripcion = desc_match.group(1).strip() if desc_match else ""
+
+                titulo = re.sub(r'<.*?>', '', titulo)
+                risk = re.sub(r'<.*?>', '', risk)
+                descripcion = re.sub(r'<.*?>', '', descripcion)
+
+                sev = severity_from_text(risk)
+
+                findings.append({
+                    "fuente": "owasp_zap",
+                    "titulo": titulo,
+                    "descripcion": descripcion[:4000],
+                    "severidad": sev,
+                    "cvss": None,
+                    "cve": extraer_cves_desde_texto(descripcion),
+                    "puerto": None,
+                    "protocolo": "http/https",
+                    "servicio": "web",
+                    "evidencia": f"Hallazgo identificado por OWASP ZAP ({risk})",
+                    "recomendacion_base": (
+                        "Aplicar medidas de remediación al hallazgo detectado."
+                    )
+                })
+
+    except Exception as e:
+
+        findings.append({
+            "fuente": "owasp_zap",
+            "titulo": "Error interpretando OWASP ZAP",
+            "descripcion": str(e),
+            "severidad": "Media",
+            "cvss": None,
+            "cve": None,
+            "puerto": None,
+            "protocolo": None,
+            "servicio": "web",
+            "evidencia": "No fue posible interpretar el reporte.",
+            "recomendacion_base": "Validar el parser de OWASP ZAP."
+        })
+
+    return findings
+
 def crear_vulnerabilidad_desde_hallazgo(run, hallazgo):
     item = VulnerabilidadRegistro(
         clasificacion=hallazgo.get("severidad"),
@@ -62697,76 +62827,172 @@ def ejecutar_scan_web(run, cfg, run_dir: str, crear_vulns=True, crear_planes=Tru
     host = extraer_host_de_target(target)
     logs = []
 
+    try:
+        herramientas = json.loads(run.herramientas or "[]")
+    except Exception:
+        herramientas = []
+
+    if not herramientas:
+        herramientas = ["nmap", "nikto", "nuclei", "whatweb", "testssl", "zap"]
+
     # =========================
     # NMAP
     # =========================
-    if scan_check_cancel(run.id):
-        scan_mark_stopped(run.id)
-        return logs
+    if "nmap" in herramientas:
 
-    scan_set_progress(run.id, pct=5, stage="Preparando Nmap", tool="nmap")
+        if scan_check_cancel(run.id):
+            scan_mark_stopped(run.id)
+            return logs
 
-    if host:
-        res_nmap = ejecutar_nmap(run.id, cfg, host, run_dir)
-        logs.append(f"[NMAP]\nSTDOUT:\n{res_nmap['stdout']}\nSTDERR:\n{res_nmap['stderr']}\n")
-        findings = parse_nmap_xml(run_dir)
-        guardar_findings_y_sincronizar(run, findings, run_dir, crear_vulns, crear_planes)
+        scan_set_progress(run.id, pct=5, stage="Preparando Nmap", tool="nmap")
+
+        if host:
+            res_nmap = ejecutar_nmap(run.id, cfg, host, run_dir)
+            logs.append(f"[NMAP]\nSTDOUT:\n{res_nmap['stdout']}\nSTDERR:\n{res_nmap['stderr']}\n")
+
+            findings = parse_nmap_xml(run_dir)
+
+            guardar_findings_y_sincronizar(
+                run,
+                findings,
+                run_dir,
+                crear_vulns,
+                crear_planes
+            )
+
+    # =========================
+    # WHATWEB
+    # =========================
+    if "whatweb" in herramientas:
+
+        if scan_check_cancel(run.id):
+            scan_mark_stopped(run.id)
+            return logs
+
+        scan_set_progress(run.id, pct=35, stage="Ejecutando WhatWeb", tool="whatweb")
+
+        res_whatweb = ejecutar_whatweb(run.id, cfg, target, run_dir)
+        logs.append(f"[WHATWEB]\nSTDOUT:\n{res_whatweb['stdout']}\nSTDERR:\n{res_whatweb['stderr']}\n")
+
+        findings = parse_txt_findings_generic(
+            scan_output_file(run_dir, "whatweb_scan", "txt"),
+            "whatweb"
+        )
+
+        guardar_findings_y_sincronizar(
+            run,
+            findings,
+            run_dir,
+            crear_vulns,
+            crear_planes
+        )
 
     # =========================
     # NIKTO
     # =========================
-    if scan_check_cancel(run.id):
-        scan_mark_stopped(run.id)
-        return logs
+    if "nikto" in herramientas:
 
-    scan_set_progress(run.id, pct=45, stage="Ejecutando Nikto", tool="nikto")
+        if scan_check_cancel(run.id):
+            scan_mark_stopped(run.id)
+            return logs
 
-    res_nikto = ejecutar_nikto(run.id, cfg, target, run_dir)
-    logs.append(f"[NIKTO]\nSTDOUT:\n{res_nikto['stdout']}\nSTDERR:\n{res_nikto['stderr']}\n")
+        scan_set_progress(run.id, pct=45, stage="Ejecutando Nikto", tool="nikto")
 
-    findings = parse_txt_findings_generic(
-        scan_output_file(run_dir, "nikto_scan", "txt"),
-        "nikto"
-    )
-    guardar_findings_y_sincronizar(run, findings, run_dir, crear_vulns, crear_planes)
+        res_nikto = ejecutar_nikto(run.id, cfg, target, run_dir)
+        logs.append(f"[NIKTO]\nSTDOUT:\n{res_nikto['stdout']}\nSTDERR:\n{res_nikto['stderr']}\n")
+
+        findings = parse_txt_findings_generic(
+            scan_output_file(run_dir, "nikto_scan", "txt"),
+            "nikto"
+        )
+
+        guardar_findings_y_sincronizar(
+            run,
+            findings,
+            run_dir,
+            crear_vulns,
+            crear_planes
+        )
 
     # =========================
     # TESTSSL
     # =========================
-    if scan_check_cancel(run.id):
-        scan_mark_stopped(run.id)
-        return logs
+    if "testssl" in herramientas:
 
-    ssl_target = target
-    if ssl_target.startswith("http://"):
-        ssl_target = "https://" + ssl_target.replace("http://", "", 1)
+        if scan_check_cancel(run.id):
+            scan_mark_stopped(run.id)
+            return logs
 
-    scan_set_progress(run.id, pct=60, stage="Ejecutando testssl", tool="testssl")
+        ssl_target = target
 
-    res_testssl = ejecutar_testssl(run.id, cfg, ssl_target, run_dir)
-    logs.append(f"[TESTSSL]\nSTDOUT:\n{res_testssl['stdout']}\nSTDERR:\n{res_testssl['stderr']}\n")
+        if ssl_target.startswith("http://"):
+            ssl_target = "https://" + ssl_target.replace("http://", "", 1)
 
-    findings = parse_txt_findings_generic(
-        scan_output_file(run_dir, "testssl_scan", "txt"),
-        "testssl"
-    )
-    guardar_findings_y_sincronizar(run, findings, run_dir, crear_vulns, crear_planes)
+        scan_set_progress(run.id, pct=60, stage="Ejecutando testssl", tool="testssl")
 
+        res_testssl = ejecutar_testssl(run.id, cfg, ssl_target, run_dir)
+        logs.append(f"[TESTSSL]\nSTDOUT:\n{res_testssl['stdout']}\nSTDERR:\n{res_testssl['stderr']}\n")
+
+        findings = parse_txt_findings_generic(
+            scan_output_file(run_dir, "testssl_scan", "txt"),
+            "testssl"
+        )
+
+        guardar_findings_y_sincronizar(
+            run,
+            findings,
+            run_dir,
+            crear_vulns,
+            crear_planes
+        )
 
     # =========================
     # NUCLEI
     # =========================
-    if scan_check_cancel(run.id):
-        scan_mark_stopped(run.id)
-        return logs
+    if "nuclei" in herramientas:
 
-    scan_set_progress(run.id, pct=75, stage="Ejecutando Nuclei", tool="nuclei")
+        if scan_check_cancel(run.id):
+            scan_mark_stopped(run.id)
+            return logs
 
-    res_nuclei = ejecutar_nuclei(run.id, cfg, target, run_dir)
-    logs.append(f"[NUCLEI]\nSTDOUT:\n{res_nuclei['stdout']}\nSTDERR:\n{res_nuclei['stderr']}\n")
+        scan_set_progress(run.id, pct=75, stage="Ejecutando Nuclei", tool="nuclei")
 
-    findings = parse_nuclei_jsonl(run_dir)
-    guardar_findings_y_sincronizar(run, findings, run_dir, crear_vulns, crear_planes)
+        res_nuclei = ejecutar_nuclei(run.id, cfg, target, run_dir)
+        logs.append(f"[NUCLEI]\nSTDOUT:\n{res_nuclei['stdout']}\nSTDERR:\n{res_nuclei['stderr']}\n")
+
+        findings = parse_nuclei_jsonl(run_dir)
+
+        guardar_findings_y_sincronizar(
+            run,
+            findings,
+            run_dir,
+            crear_vulns,
+            crear_planes
+        )
+
+    # =========================
+    # OWASP ZAP
+    # =========================
+    if "zap" in herramientas:
+
+        if scan_check_cancel(run.id):
+            scan_mark_stopped(run.id)
+            return logs
+
+        scan_set_progress(run.id, pct=90, stage="Ejecutando OWASP ZAP", tool="zap")
+
+        res_zap = ejecutar_zap(run.id, cfg, target, run_dir)
+        logs.append(f"[OWASP_ZAP]\nSTDOUT:\n{res_zap['stdout']}\nSTDERR:\n{res_zap['stderr']}\n")
+
+        findings = parse_zap_findings(run_dir)
+
+        guardar_findings_y_sincronizar(
+            run,
+            findings,
+            run_dir,
+            crear_vulns,
+            crear_planes
+        )
 
     return logs
 
@@ -62979,7 +63205,7 @@ def ejecutar_full_scan(run_id: int, crear_vulns=True, crear_planes=True):
     run.estado = "ejecutando"
     run.fecha_inicio = datetime.utcnow()
     run.progress_pct = 1
-    run.current_stage = "Inicializando escaneo Nmap/Nikto/testssl/Nuclei"
+    run.current_stage = "Inicializando escaneo con herramientas seleccionadas"
     run.current_tool = "dispatcher"
     run.cancel_requested = False
     run.stopped_by_user = False
@@ -66296,6 +66522,8 @@ def vuln_scan_config():
         cfg.ruta_nuclei = (request.form.get('ruta_nuclei') or '/usr/bin/nuclei').strip()
         cfg.ruta_whatweb = (request.form.get('ruta_whatweb') or '/usr/bin/whatweb').strip()
         cfg.ruta_testssl = (request.form.get('ruta_testssl') or '/usr/bin/testssl').strip()
+        cfg.ruta_zap = (request.form.get('ruta_zap') or '/usr/share/zaproxy/zap.sh').strip()
+
         cfg.updated_at = datetime.utcnow()
 
         db.session.commit()
@@ -66308,62 +66536,98 @@ def vuln_scan_config():
 
       <form method="post">
         <div class="row g-3">
+
           <div class="col-md-4">
             <label class="form-label">Modo de Integración</label>
-            <select name="modo" id="modo" class="form-select" required>
-              <option value="local" {% if cfg.modo == 'local' %}selected{% endif %}>Local (mismo equipo)</option>
-              <option value="remoto" {% if cfg.modo == 'remoto' %}selected{% endif %}>Remoto (otra IP por SSH)</option>
+            <select name="modo" class="form-select">
+              <option value="local" {% if cfg.modo == 'local' %}selected{% endif %}>
+                Local
+              </option>
+              <option value="remoto" {% if cfg.modo == 'remoto' %}selected{% endif %}>
+                Remoto (otra IP por SSH)
+              </option>
             </select>
           </div>
 
           <div class="col-md-4">
             <label class="form-label">Host Kali Remoto</label>
-            <input name="host" class="form-control" value="{{ cfg.host or '' }}" placeholder="192.168.1.50">
+            <input name="host"
+                   class="form-control"
+                   value="{{ cfg.host or '' }}"
+                   placeholder="192.168.1.50">
           </div>
 
           <div class="col-md-4">
             <label class="form-label">Puerto SSH</label>
-            <input name="puerto_ssh" type="number" class="form-control" value="{{ cfg.puerto_ssh or 22 }}">
+            <input name="puerto_ssh"
+                   type="number"
+                   class="form-control"
+                   value="{{ cfg.puerto_ssh or 22 }}">
           </div>
 
           <div class="col-md-4">
             <label class="form-label">Usuario SSH</label>
-            <input name="usuario_ssh" class="form-control" value="{{ cfg.usuario_ssh or '' }}">
+            <input name="usuario_ssh"
+                   class="form-control"
+                   value="{{ cfg.usuario_ssh or '' }}">
           </div>
 
           <div class="col-md-4">
             <label class="form-label">Password SSH</label>
-            <input name="password_ssh" type="password" class="form-control" value="{{ cfg.password_ssh or '' }}">
+            <input name="password_ssh"
+                   type="password"
+                   class="form-control"
+                   value="{{ cfg.password_ssh or '' }}">
           </div>
 
           <div class="col-md-4">
             <label class="form-label">Ruta Base Remota</label>
-            <input name="ruta_base_remota" class="form-control" value="{{ cfg.ruta_base_remota or '/tmp' }}">
+            <input name="ruta_base_remota"
+                   class="form-control"
+                   value="{{ cfg.ruta_base_remota or '/tmp' }}">
           </div>
 
           <div class="col-md-3">
             <label class="form-label">Ruta Nmap</label>
-            <input name="ruta_nmap" class="form-control" value="{{ cfg.ruta_nmap or '/usr/bin/nmap' }}">
+            <input name="ruta_nmap"
+                   class="form-control"
+                   value="{{ cfg.ruta_nmap or '/usr/bin/nmap' }}">
           </div>
 
           <div class="col-md-3">
             <label class="form-label">Ruta Nikto</label>
-            <input name="ruta_nikto" class="form-control" value="{{ cfg.ruta_nikto or '/usr/bin/nikto' }}">
+            <input name="ruta_nikto"
+                   class="form-control"
+                   value="{{ cfg.ruta_nikto or '/usr/bin/nikto' }}">
           </div>
 
           <div class="col-md-3">
-              <label class="form-label">Ruta Nuclei</label>
-              <input name="ruta_nuclei" class="form-control" value="{{ cfg.ruta_nuclei or '/usr/bin/nuclei' }}">
+            <label class="form-label">Ruta Nuclei</label>
+            <input name="ruta_nuclei"
+                   class="form-control"
+                   value="{{ cfg.ruta_nuclei or '/usr/bin/nuclei' }}">
           </div>
 
           <div class="col-md-3">
             <label class="form-label">Ruta WhatWeb</label>
-            <input name="ruta_whatweb" class="form-control" value="{{ cfg.ruta_whatweb or '/usr/bin/whatweb' }}">
+            <input name="ruta_whatweb"
+                   class="form-control"
+                   value="{{ cfg.ruta_whatweb or '/usr/bin/whatweb' }}">
           </div>
 
           <div class="col-md-3">
             <label class="form-label">Ruta testssl</label>
-            <input name="ruta_testssl" class="form-control" value="{{ cfg.ruta_testssl or '/usr/bin/testssl' }}">
+            <input name="ruta_testssl"
+                   class="form-control"
+                   value="{{ cfg.ruta_testssl or '/usr/bin/testssl' }}">
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Ruta OWASP ZAP</label>
+            <input name="ruta_zap"
+                   class="form-control"
+                   value="{{ cfg.ruta_zap or '/usr/share/zaproxy/zap.sh' }}"
+                   placeholder="/usr/share/zaproxy/zap.sh">
           </div>
 
           <div class="col-12">
@@ -66371,16 +66635,23 @@ def vuln_scan_config():
               <button class="btn btn-primary rounded-pill px-4">
                 Guardar Configuración
               </button>
-              <a href="{{ url_for('vulnerabilidades_matriz') }}" class="btn btn-outline-secondary rounded-pill px-4">
+
+              <a href="{{ url_for('vulnerabilidades_matriz') }}"
+                 class="btn btn-outline-secondary rounded-pill px-4">
                 Cancelar
               </a>
             </div>
           </div>
+
         </div>
       </form>
     </div>
     """
-    return vuln_scan_shell("Configuración de Kali Linux", render_template_string(body, cfg=cfg))
+
+    return vuln_scan_shell(
+        "Configuración de Kali Linux",
+        render_template_string(body, cfg=cfg)
+    )
 
 
 # ==========================
@@ -66407,6 +66678,28 @@ def vuln_scan_new():
         crear_vulns = bool(request.form.get('crear_vulns'))
         crear_planes = bool(request.form.get('crear_planes'))
 
+        # ==========================
+        # Herramientas seleccionadas
+        # ==========================
+        herramientas = request.form.getlist("herramientas")
+
+        herramientas_validas = [
+            "nmap",
+            "nikto",
+            "nuclei",
+            "whatweb",
+            "testssl",
+            "zap"
+        ]
+
+        herramientas = [
+            h for h in herramientas
+            if h in herramientas_validas
+        ]
+
+        if not herramientas:
+            herramientas = ["nmap"]
+
         if not target_valido(target):
             flash("Debe ingresar una URL o IP válida.", "danger")
             return redirect(url_for('vuln_scan_new'))
@@ -66430,12 +66723,19 @@ def vuln_scan_new():
             stopped_by_user=False,
             findings_streamed=0,
             created_vulns=0,
-            created_plans=0
+            created_plans=0,
+            herramientas=json.dumps(herramientas)
         )
+
         db.session.add(run)
         db.session.commit()
 
-        lanzar_scan_background(run.id, crear_vulns=crear_vulns, crear_planes=crear_planes)
+        lanzar_scan_background(
+            run.id,
+            crear_vulns=crear_vulns,
+            crear_planes=crear_planes
+        )
+
         return redirect(url_for('vuln_scan_monitor', run_id=run.id))
 
     body = """
@@ -66444,14 +66744,20 @@ def vuln_scan_new():
 
       <form method="post">
         <div class="row g-3">
+
           <div class="col-md-8">
             <label class="form-label">Objetivo a escanear (URL o IP)</label>
-            <input name="target" class="form-control" placeholder="https://midominio.com o 192.168.1.10" required>
+            <input name="target"
+                   class="form-control"
+                   placeholder="https://midominio.com o 192.168.1.10"
+                   required>
           </div>
 
           <div class="col-md-4">
             <label class="form-label">Responsable</label>
-            <input name="responsable" class="form-control" value="{{ current_user.username if current_user.is_authenticated else '' }}">
+            <input name="responsable"
+                   class="form-control"
+                   value="{{ current_user.username if current_user.is_authenticated else '' }}">
           </div>
 
           <div class="col-md-4">
@@ -66461,45 +66767,166 @@ def vuln_scan_new():
 
           <div class="col-md-8">
             <label class="form-label">Motor Kali actual</label>
-            <input class="form-control" value="{% if cfg.modo == 'local' %}Localhost{% else %}{{ cfg.host or 'No configurado' }}{% endif %}" readonly>
+            <input class="form-control"
+                   value="{% if cfg.modo == 'local' %}Localhost{% else %}{{ cfg.host or 'No configurado' }}{% endif %}"
+                   readonly>
           </div>
 
-          <div class="col-md-6">
-            <div class="form-check mt-4">
-              <input class="form-check-input" type="checkbox" name="crear_vulns" id="crear_vulns" checked>
-              <label class="form-check-label" for="crear_vulns">Crear registros en la matriz de vulnerabilidades</label>
+          <div class="col-12">
+            <div class="glass-card p-3 mb-2 mt-2">
+              <div class="section-title">
+                🛠️ Herramientas de Escaneo
+              </div>
+
+              <div class="row">
+
+                <div class="col-md-4 mb-2">
+                  <div class="form-check">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           name="herramientas"
+                           value="nmap"
+                           id="tool_nmap"
+                           checked>
+                    <label class="form-check-label fw-semibold" for="tool_nmap">
+                      Nmap
+                    </label>
+                  </div>
+                </div>
+
+                <div class="col-md-4 mb-2">
+                  <div class="form-check">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           name="herramientas"
+                           value="nikto"
+                           id="tool_nikto"
+                           checked>
+                    <label class="form-check-label fw-semibold" for="tool_nikto">
+                      Nikto
+                    </label>
+                  </div>
+                </div>
+
+                <div class="col-md-4 mb-2">
+                  <div class="form-check">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           name="herramientas"
+                           value="nuclei"
+                           id="tool_nuclei"
+                           checked>
+                    <label class="form-check-label fw-semibold" for="tool_nuclei">
+                      Nuclei
+                    </label>
+                  </div>
+                </div>
+
+                <div class="col-md-4 mb-2">
+                  <div class="form-check">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           name="herramientas"
+                           value="whatweb"
+                           id="tool_whatweb"
+                           checked>
+                    <label class="form-check-label fw-semibold" for="tool_whatweb">
+                      WhatWeb
+                    </label>
+                  </div>
+                </div>
+
+                <div class="col-md-4 mb-2">
+                  <div class="form-check">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           name="herramientas"
+                           value="testssl"
+                           id="tool_testssl"
+                           checked>
+                    <label class="form-check-label fw-semibold" for="tool_testssl">
+                      testssl
+                    </label>
+                  </div>
+                </div>
+
+                <div class="col-md-4 mb-2">
+                  <div class="form-check">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           name="herramientas"
+                           value="zap"
+                           id="tool_zap"
+                           checked>
+                    <label class="form-check-label fw-semibold" for="tool_zap">
+                      OWASP ZAP
+                    </label>
+                  </div>
+                </div>
+
+              </div>
             </div>
           </div>
 
           <div class="col-md-6">
             <div class="form-check mt-4">
-              <input class="form-check-input" type="checkbox" name="crear_planes" id="crear_planes" checked>
-              <label class="form-check-label" for="crear_planes">Crear planes de remediación automáticamente</label>
+              <input class="form-check-input"
+                     type="checkbox"
+                     name="crear_vulns"
+                     id="crear_vulns"
+                     checked>
+              <label class="form-check-label" for="crear_vulns">
+                Crear registros en la matriz de vulnerabilidades
+              </label>
+            </div>
+          </div>
+
+          <div class="col-md-6">
+            <div class="form-check mt-4">
+              <input class="form-check-input"
+                     type="checkbox"
+                     name="crear_planes"
+                     id="crear_planes"
+                     checked>
+              <label class="form-check-label" for="crear_planes">
+                Crear planes de remediación automáticamente
+              </label>
             </div>
           </div>
 
           <div class="col-12 mt-3">
             <div class="toolbar-actions justify-content-center">
               <button class="btn btn-primary rounded-pill px-4">
-                  Ejecutar Escaneo
+                Ejecutar Escaneo
               </button>
-              <a href="{{ url_for('vulnerabilidades_matriz') }}" class="btn btn-outline-secondary rounded-pill px-4">
+
+              <a href="{{ url_for('vulnerabilidades_matriz') }}"
+                 class="btn btn-outline-secondary rounded-pill px-4">
                 Cancelar
               </a>
             </div>
           </div>
+
         </div>
       </form>
     </div>
 
     <div class="glass-card p-3 mt-3">
       <div class="small text-muted">
-        <b>Herramientas usadas:</b> Nmap, Nikto, testssl y Nuclei según el tipo de objetivo y la disponibilidad del motor Kali.
+        <b>Herramientas disponibles:</b>
+        Nmap, Nikto, Nuclei, WhatWeb, testssl y OWASP ZAP.
       </div>
     </div>
     """
-    return vuln_scan_shell("Análisis Automático de Vulnerabilidades", render_template_string(body, cfg=cfg, current_user=current_user))
 
+    return vuln_scan_shell(
+        "Análisis Automático de Vulnerabilidades",
+        render_template_string(
+            body,
+            cfg=cfg,
+            current_user=current_user
+        )
+    )
 
 # ==========================
 # PANTALLA DE MONITOREO CON BARRA Y BOTÓN PARAR
@@ -67355,6 +67782,86 @@ def threat_model_nessus_import():
 # ==========================================================================================================================================
 #                                                       Módulo Modelamiento de Amenazas
 # ==========================================================================================================================================
+
+
+class ThreatModelEntry(db.Model):
+    __tablename__ = "threat_model_entries"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Relaciones con tu ecosistema actual
+    run_id = db.Column(db.Integer, db.ForeignKey("vulnerability_scan_runs.id", ondelete="SET NULL"), nullable=True)
+    finding_id = db.Column(db.Integer, db.ForeignKey("vulnerability_scan_findings.id", ondelete="SET NULL"), nullable=True)
+    vulnerabilidad_registro_id = db.Column(
+        db.Integer,
+        db.ForeignKey("vulnerabilidades_registro.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
+    # Datos del contexto
+    activo = db.Column(db.String(200), nullable=False)
+    herramienta = db.Column(db.String(50), nullable=False)   # nikto / nessus / nuclei / nmap / testssl
+    vulnerabilidad = db.Column(db.String(500), nullable=False)
+    descripcion = db.Column(db.Text, nullable=True)
+    impacto = db.Column(db.Text, nullable=True)
+
+    # Estado
+    severidad = db.Column(db.String(20), nullable=True)
+    confianza = db.Column(db.Integer, default=70)   # 0..100
+
+    # trazabilidad
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relaciones
+    tecnicas = db.relationship(
+        "ThreatModelTechnique",
+        backref="threat_entry",
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
+
+    vulnerabilidad_registro = db.relationship(
+        "VulnerabilidadRegistro",
+        backref=db.backref("threat_models", lazy="selectin")
+    )
+
+
+class ThreatModelTechnique(db.Model):
+    __tablename__ = "threat_model_techniques"
+
+    id = db.Column(db.Integer, primary_key=True)
+    threat_entry_id = db.Column(
+        db.Integer,
+        db.ForeignKey("threat_model_entries.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    mitre_technique_id = db.Column(db.String(20), nullable=False)      # T1190
+    mitre_technique_name = db.Column(db.String(255), nullable=False)   # Exploit Public-Facing Application
+    mitre_tactic_id = db.Column(db.String(20), nullable=True)          # TA0001
+    mitre_tactic_name = db.Column(db.String(100), nullable=False)      # Initial Access
+
+    rationale = db.Column(db.Text, nullable=True)
+    score = db.Column(db.Integer, default=50)  # score para Navigator / heatmap
+
+class ThreatModelUnmapped(db.Model):
+    __tablename__ = "threat_model_unmapped"
+
+    id = db.Column(db.Integer, primary_key=True)
+    run_id = db.Column(db.Integer, nullable=True)
+    finding_id = db.Column(db.Integer, nullable=True)
+    activo = db.Column(db.String(200), nullable=True)
+    herramienta = db.Column(db.String(50), nullable=True)
+    severidad = db.Column(db.String(20), nullable=True)
+    titulo = db.Column(db.String(500), nullable=True)
+    descripcion = db.Column(db.Text, nullable=True)
+    evidencia = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+            return f"<ConfigImpactoResidual {self.min}-{self.max} => bajar {self.bajar}>"
+
 
 ATTACK_DOMAIN = "enterprise-attack"
 
