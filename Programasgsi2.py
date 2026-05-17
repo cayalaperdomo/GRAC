@@ -64389,7 +64389,7 @@ def vulnerabilidades_matriz():
     else:
         if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
             flash("No tiene permiso para ver la matriz de vulnerabilidades.", "danger")
-            return redirect(url_for('vulnerabilidades_matriz'))
+            return redirect(url_for('menu'))
         read_only = False
 
     # ==========================
@@ -64408,6 +64408,7 @@ def vulnerabilidades_matriz():
         'estado',
         'tipo_vulnerabilidad'
     }
+
     if filtro_campo not in campos_validos:
         filtro_campo = 'activo'
 
@@ -64513,7 +64514,7 @@ def vulnerabilidades_matriz():
         <div class="vulnmx-card-body">
 
           <!-- FILTROS -->
-          <form method="get" class="row g-3 mb-3">
+          <form method="get" class="row g-3 mb-3" id="vulnFiltroForm">
             <div class="col-md-3">
               <label class="form-label fw-bold">Campo</label>
               <select name="campo" class="form-select">
@@ -64547,13 +64548,40 @@ def vulnerabilidades_matriz():
               </select>
             </div>
 
-            <div class="col-md-2 d-flex align-items-end gap-2">
-              <button class="btn btn-primary rounded-pill w-100" type="submit">Filtrar</button>
+            <div class="col-md-2 d-flex align-items-end gap-2 flex-wrap vuln-filter-actions">
+              <button class="btn btn-primary rounded-pill" type="submit">
+                Filtrar
+              </button>
+
               <a href="{{ url_for('vulnerabilidades_matriz') }}"
-                 class="btn btn-secondary rounded-pill w-100">
+                 class="btn btn-secondary rounded-pill">
                 Limpiar
               </a>
+
+              {% if not read_only %}
+                <button type="button"
+                        class="btn btn-danger rounded-pill"
+                        onclick="eliminarVulnerabilidadesFiltradas()">
+                  Eliminar filtrados
+                </button>
+              {% else %}
+                <button type="button"
+                        class="btn btn-secondary rounded-pill"
+                        disabled
+                        title="Auditor: solo lectura">
+                  Eliminar filtrados
+                </button>
+              {% endif %}
             </div>
+          </form>
+
+          <form method="post"
+                id="vulnDeleteFiltradosForm"
+                action="{{ url_for('vulnerabilidades_delete_filtrados') }}"
+                style="display:none;">
+            <input type="hidden" name="campo" value="{{ filtro_campo }}">
+            <input type="hidden" name="valor" value="{{ filtro_valor }}">
+            <input type="hidden" name="clasificacion" value="{{ filtro_clasificacion }}">
           </form>
 
           <!-- TABLA -->
@@ -64573,6 +64601,7 @@ def vulnerabilidades_matriz():
                   <th>Acciones</th>
                 </tr>
               </thead>
+
               <tbody>
                 {% for it in items %}
                 <tr>
@@ -64585,13 +64614,33 @@ def vulnerabilidades_matriz():
                   <td>{{ it.clasificacion or '' }}</td>
                   <td>{{ it.responsable or '' }}</td>
                   <td>{{ it.estado or '' }}</td>
+
                   <td class="text-nowrap">
-                    <a href="{{ url_for('vulnerabilidad_detalle', id=it.id) }}"
-                       class="btn btn-sm btn-info text-white rounded-pill">
-                      Ver detalle
-                    </a>
+                    <div class="acciones-wrap">
+
+                      <a href="{{ url_for('vulnerabilidad_detalle', id=it.id) }}"
+                         class="btn btn-sm btn-info text-white rounded-pill">
+                        Ver detalle
+                      </a>
+
+                      {% if not read_only %}
+                        <a href="{{ url_for('vulnerabilidad_delete', id=it.id) }}"
+                           class="btn btn-sm btn-danger rounded-pill"
+                           onclick="return confirmarEliminarVulnerabilidad();">
+                          Eliminar
+                        </a>
+                      {% else %}
+                        <button class="btn btn-sm btn-secondary rounded-pill"
+                                disabled
+                                title="Auditor: solo lectura">
+                          Eliminar
+                        </button>
+                      {% endif %}
+
+                    </div>
                   </td>
                 </tr>
+
                 {% else %}
                 <tr>
                   <td colspan="10" class="text-center text-muted py-4">
@@ -64858,6 +64907,15 @@ def vulnerabilidades_matriz():
         background:#ffffff;
       }
 
+      .vuln-filter-actions .btn{
+        width:100%;
+        min-height:38px;
+        padding:7px 12px !important;
+        font-size:.76rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.12);
+      }
+
       .table-responsive{
         max-height:70vh;
         overflow-y:auto;
@@ -64912,6 +64970,21 @@ def vulnerabilidades_matriz():
 
       .table-hover tbody tr:hover{
         background:#eef6ff;
+      }
+
+      .acciones-wrap{
+        display:flex;
+        gap:6px;
+        flex-wrap:wrap;
+        justify-content:center;
+        align-items:center;
+      }
+
+      .acciones-wrap .btn{
+        font-size:.72rem;
+        font-weight:900;
+        padding:5px 10px;
+        white-space:nowrap;
       }
 
       .table-responsive::-webkit-scrollbar{
@@ -65006,6 +65079,15 @@ def vulnerabilidades_matriz():
           min-width:100%;
           margin-top:10px;
         }
+
+        .acciones-wrap{
+          flex-direction:column;
+          align-items:stretch;
+        }
+
+        .acciones-wrap .btn{
+          width:100%;
+        }
       }
     </style>
 
@@ -65029,6 +65111,69 @@ def vulnerabilidades_matriz():
           menu.classList.remove('show');
         }
       });
+
+      function confirmarEliminarVulnerabilidad(){
+        if(typeof hideLoader === 'function'){
+          hideLoader();
+        }
+
+        return confirm(
+          '¿Está seguro de eliminar esta vulnerabilidad?\\n\\n' +
+          'También se eliminarán sus evidencias asociadas.\\n' +
+          'Esta acción no se puede deshacer.'
+        );
+      }
+
+      function eliminarVulnerabilidadesFiltradas(){
+        const total = {{ items|length }};
+
+        if(total <= 0){
+          alert('No hay registros para eliminar con los filtros aplicados.');
+          return false;
+        }
+
+        const campo = "{{ filtro_campo }}";
+        const valor = "{{ filtro_valor }}";
+        const clasificacion = "{{ filtro_clasificacion }}";
+
+        let mensaje = '¿Está seguro de eliminar las vulnerabilidades filtradas?\\n\\n';
+        mensaje += 'Total registros a eliminar: ' + total + '\\n';
+
+        if(campo && valor){
+          mensaje += 'Filtro: ' + campo + ' contiene "' + valor + '"\\n';
+        }
+
+        if(clasificacion){
+          mensaje += 'Clasificación: ' + clasificacion + '\\n';
+        }
+
+        if(!valor && !clasificacion){
+          mensaje += '\\nADVERTENCIA: No hay filtros aplicados. Se eliminarán TODAS las vulnerabilidades.\\n';
+        }
+
+        mensaje += '\\nTambién se eliminarán evidencias y planes asociados.\\n';
+        mensaje += 'Esta acción no se puede deshacer.';
+
+        if(confirm(mensaje)){
+          const form = document.getElementById('vulnDeleteFiltradosForm');
+          if(form){
+            form.submit();
+          }
+        }
+
+        return false;
+      }
+      {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <script>
+              document.addEventListener('DOMContentLoaded', function(){
+                {% for category, message in messages %}
+                  alert({{ message|tojson }});
+                {% endfor %}
+              });
+            </script>
+          {% endif %}
+        {% endwith %}
     </script>
     """
 
@@ -65041,7 +65186,9 @@ def vulnerabilidades_matriz():
         clasif_choices=VULN_CLASIFICACIONES,
         read_only=read_only
     )
+
     return render_template_string(BASE, content=Markup(inner))
+
 
 
 # ==========================
@@ -66146,6 +66293,10 @@ def vulnerabilidad_evidencia_delete(evi_id):
     flash("Evidencia eliminada.", "success")
     return redirect(url_for('vulnerabilidad_edit', id=vuln_id))
 
+# ==========================
+# Eliminar Vulnerabilidad
+# ==========================
+
 @app.route('/vulnerabilidad/<int:id>/delete')
 @login_required
 def vulnerabilidad_delete(id):
@@ -66159,21 +66310,252 @@ def vulnerabilidad_delete(id):
         flash("No tiene permiso para eliminar vulnerabilidades.", "danger")
         return redirect(url_for('vulnerabilidades_matriz'))
 
+    db.session.rollback()
+
     it = VulnerabilidadRegistro.query.get_or_404(id)
 
-    # Borrar también las evidencias físicas si quieres
-    for ev in it.evidencias:
+    try:
+        # ==========================
+        # Validar si tiene remediación asociada
+        # ==========================
+        plan_asociado = PlanRemediacion.query.filter_by(
+            vulnerabilidad_id=id
+        ).first()
+
+        if plan_asociado:
+            flash(
+                "No se puede eliminar esta vulnerabilidad porque tiene un plan de remediación asociado. "
+                "Primero elimine el plan de remediación correspondiente.",
+                "warning"
+            )
+            return redirect(url_for('vulnerabilidades_matriz'))
+
+        # ==========================
+        # Validar si tiene modelamiento de amenazas asociado
+        # ==========================
         try:
-            path = os.path.join(app.config['UPLOAD_VULNERABILIDADES_DIR'], ev.filename)
-            if os.path.exists(path):
-                os.remove(path)
-            db.session.delete(ev)
+            threat_asociado = ThreatModelEntry.query.filter_by(
+                vulnerabilidad_registro_id=id
+            ).first()
+
+            if threat_asociado:
+                flash(
+                    "No se puede eliminar esta vulnerabilidad porque tiene modelamiento de amenazas asociado. "
+                    "Primero elimine o desvincule el registro asociado.",
+                    "warning"
+                )
+                return redirect(url_for('vulnerabilidades_matriz'))
+
         except Exception:
             pass
 
-    db.session.delete(it)
-    db.session.commit()
-    flash("Vulnerabilidad eliminada.", "success")
+        # ==========================
+        # Desvincular hallazgos de escaneo
+        # ==========================
+        try:
+            VulnerabilityScanFinding.query.filter_by(
+                vulnerabilidad_registro_id=id
+            ).update(
+                {"vulnerabilidad_registro_id": None},
+                synchronize_session=False
+            )
+        except Exception:
+            pass
+
+        # ==========================
+        # Eliminar evidencias físicas y BD
+        # ==========================
+        try:
+            for ev in list(getattr(it, "evidencias", []) or []):
+                try:
+                    filename = getattr(ev, "filename", None)
+
+                    if filename:
+                        path = os.path.join(
+                            app.config['UPLOAD_VULNERABILIDADES_DIR'],
+                            filename
+                        )
+
+                        if os.path.exists(path):
+                            os.remove(path)
+
+                    db.session.delete(ev)
+
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # ==========================
+        # Eliminar vulnerabilidad
+        # ==========================
+        db.session.delete(it)
+        db.session.commit()
+
+        flash("Vulnerabilidad eliminada correctamente.", "success")
+
+    except Exception as e:
+        db.session.rollback()
+        flash(
+            "No fue posible eliminar la vulnerabilidad. "
+            "Verifique si tiene registros asociados en planes de remediación, evidencias, escaneos o modelamiento de amenazas.",
+            "danger"
+        )
+
+    return redirect(url_for('vulnerabilidades_matriz'))
+
+# ==========================
+# Eliminar vulnerabilidades por filtros
+# ==========================
+
+@app.route('/vulnerabilidades/delete_filtrados', methods=['POST'])
+@login_required
+def vulnerabilidades_delete_filtrados():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar registros.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para eliminar vulnerabilidades.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    db.session.rollback()
+
+    filtro_campo = (request.form.get('campo') or 'activo').strip()
+    filtro_valor = (request.form.get('valor') or '').strip()
+    filtro_clasificacion = (request.form.get('clasificacion') or '').strip()
+
+    campos_validos = {
+        'codigo',
+        'activo',
+        'cve',
+        'clasificacion',
+        'responsable',
+        'estado',
+        'tipo_vulnerabilidad'
+    }
+
+    if filtro_campo not in campos_validos:
+        filtro_campo = 'activo'
+
+    q = VulnerabilidadRegistro.query.options(
+        selectinload(VulnerabilidadRegistro.evidencias)
+    )
+
+    if filtro_valor:
+        columna = getattr(VulnerabilidadRegistro, filtro_campo, None)
+        if columna is not None:
+            q = q.filter(columna.ilike(f"%{filtro_valor}%"))
+
+    if filtro_clasificacion:
+        q = q.filter(VulnerabilidadRegistro.clasificacion == filtro_clasificacion)
+
+    registros = q.all()
+
+    if not registros:
+        flash("No se encontraron vulnerabilidades para eliminar con los filtros aplicados.", "warning")
+        return redirect(url_for(
+            'vulnerabilidades_matriz',
+            campo=filtro_campo,
+            valor=filtro_valor,
+            clasificacion=filtro_clasificacion
+        ))
+
+    try:
+        total = len(registros)
+        ids = [int(it.id) for it in registros if it and it.id]
+
+        if not ids:
+            flash("No se encontraron IDs válidos para eliminar.", "warning")
+            return redirect(url_for('vulnerabilidades_matriz'))
+
+        placeholders = ",".join(str(i) for i in ids)
+
+        # ==========================
+        # 1. Eliminar archivos físicos de evidencias
+        # ==========================
+        try:
+            evidencias = VulnerabilidadEvidencia.query.filter(
+                VulnerabilidadEvidencia.vulnerabilidad_id.in_(ids)
+            ).all()
+
+            for ev in evidencias:
+                try:
+                    filename = getattr(ev, "filename", None)
+                    if filename:
+                        path = os.path.join(
+                            app.config['UPLOAD_VULNERABILIDADES_DIR'],
+                            filename
+                        )
+                        if os.path.exists(path):
+                            os.remove(path)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # ==========================
+        # 2. Eliminar evidencias desde el modelo correcto
+        # ==========================
+        try:
+            VulnerabilidadEvidencia.query.filter(
+                VulnerabilidadEvidencia.vulnerabilidad_id.in_(ids)
+            ).delete(synchronize_session=False)
+        except Exception:
+            pass
+
+        # ==========================
+        # 3. Eliminar planes de remediación asociados
+        # ==========================
+        try:
+            db.session.execute(text(f"""
+                DELETE FROM plan_remediacion
+                WHERE vulnerabilidad_id IN ({placeholders})
+            """))
+        except Exception:
+            pass
+
+        # ==========================
+        # 4. Desvincular hallazgos de escaneo
+        # ==========================
+        try:
+            db.session.execute(text(f"""
+                UPDATE vulnerability_scan_findings
+                SET vulnerabilidad_registro_id = NULL
+                WHERE vulnerabilidad_registro_id IN ({placeholders})
+            """))
+        except Exception:
+            pass
+
+        # ==========================
+        # 5. Eliminar modelamiento de amenazas asociado
+        # ==========================
+        try:
+            db.session.execute(text(f"""
+                DELETE FROM threat_model_entries
+                WHERE vulnerabilidad_registro_id IN ({placeholders})
+            """))
+        except Exception:
+            pass
+
+        # ==========================
+        # 6. Eliminar vulnerabilidades
+        # ==========================
+        db.session.execute(text(f"""
+            DELETE FROM vulnerabilidades_registro
+            WHERE id IN ({placeholders})
+        """))
+
+        db.session.commit()
+
+        flash(f"Se eliminaron {total} vulnerabilidades correctamente.", "success")
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f"No fue posible eliminar las vulnerabilidades filtradas: {str(e)}", "danger")
+
     return redirect(url_for('vulnerabilidades_matriz'))
 
 # ==========================
@@ -77702,7 +78084,8 @@ def plan_remediacion_matriz():
 
       <div class="remmat-filter-card">
         <div class="remmat-filter-body">
-          <form method="get">
+
+          <form method="get" id="remmatFiltroForm">
             <div class="row g-2 align-items-end">
 
               <div class="col-md-4">
@@ -77726,15 +78109,44 @@ def plan_remediacion_matriz():
               </div>
 
               <div class="col-md-4">
-                <div class="d-flex gap-2 flex-wrap">
-                  <button type="submit" class="btn btn-primary rounded-pill px-4 fw-bold">Filtrar</button>
+                <div class="d-flex gap-2 flex-wrap remmat-filter-actions">
+                  <button type="submit" class="btn btn-primary rounded-pill px-4 fw-bold">
+                    Filtrar
+                  </button>
+
                   <a href="{{ url_for('plan_remediacion_matriz') }}"
-                     class="btn btn-secondary rounded-pill px-4 fw-bold">Limpiar</a>
+                     class="btn btn-secondary rounded-pill px-4 fw-bold">
+                    Limpiar
+                  </a>
+
+                  {% if not read_only %}
+                    <button type="button"
+                            class="btn btn-danger rounded-pill px-4 fw-bold"
+                            onclick="eliminarRemediacionesFiltradas()">
+                      Eliminar filtrados
+                    </button>
+                  {% else %}
+                    <button type="button"
+                            class="btn btn-secondary rounded-pill px-4 fw-bold"
+                            disabled
+                            title="Auditor: solo lectura">
+                      Eliminar filtrados
+                    </button>
+                  {% endif %}
                 </div>
               </div>
 
             </div>
           </form>
+
+          <form method="post"
+                id="remmatDeleteFiltradosForm"
+                action="{{ url_for('plan_remediacion_delete_filtrados') }}"
+                style="display:none;">
+            <input type="hidden" name="prioridad" value="{{ filtro_prioridad }}">
+            <input type="hidden" name="estado" value="{{ filtro_estado }}">
+          </form>
+
         </div>
       </div>
 
@@ -77894,9 +78306,6 @@ def plan_remediacion_matriz():
         margin:10px auto 24px auto;
       }
 
-      /* =========================
-         HEADER SGSI MODERNO
-      ========================= */
       .remmat-header-card{
         background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
         border-radius:18px;
@@ -77966,9 +78375,6 @@ def plan_remediacion_matriz():
         font-size:.78rem;
       }
 
-      /* =========================
-         BOTONES
-      ========================= */
       .remmat-header-actions{
         display:flex;
         justify-content:center;
@@ -77986,19 +78392,6 @@ def plan_remediacion_matriz():
         box-shadow:0 8px 16px rgba(15,23,42,.15);
       }
 
-      .remmat-back-btn{
-        background:#fff;
-        border:1px solid #cfd8e3;
-      }
-
-      .remmat-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-      }
-
-      /* =========================
-         FILTROS
-      ========================= */
       .remmat-filter-card{
         background:rgba(255,255,255,.96);
         border-radius:18px;
@@ -78031,9 +78424,17 @@ def plan_remediacion_matriz():
         background:#fff;
       }
 
-      /* =========================
-         CARD PRINCIPAL
-      ========================= */
+      .remmat-filter-actions{
+        align-items:center;
+      }
+
+      .remmat-filter-actions .btn{
+        min-height:38px;
+        font-size:.80rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.12);
+      }
+
       .remmat-card{
         background:rgba(255,255,255,.96);
         border-radius:18px;
@@ -78062,9 +78463,6 @@ def plan_remediacion_matriz():
         padding:14px;
       }
 
-      /* =========================
-         TABLA
-      ========================= */
       .remmat-table-wrap{
         border-radius:16px;
         overflow:auto;
@@ -78093,9 +78491,6 @@ def plan_remediacion_matriz():
         background:rgba(63,134,214,.08);
       }
 
-      /* =========================
-         ACCIONES
-      ========================= */
       .remmat-actions-wrap{
         display:flex;
         flex-direction:column;
@@ -78108,21 +78503,60 @@ def plan_remediacion_matriz():
         font-size:.75rem;
       }
 
-      /* =========================
-         RESPONSIVE
-      ========================= */
       @media (max-width:768px){
         .remmat-header-overlay{
           flex-direction:column;
           text-align:center;
         }
 
-        .remmat-header-actions .btn{
+        .remmat-header-actions .btn,
+        .remmat-filter-actions .btn{
           width:100%;
         }
       }
     </style>
+
+    <script>
+      function eliminarRemediacionesFiltradas(){
+        const total = {{ items|length }};
+
+        if(total <= 0){
+          alert('No hay registros para eliminar con los filtros aplicados.');
+          return false;
+        }
+
+        const prioridad = "{{ filtro_prioridad }}";
+        const estado = "{{ filtro_estado }}";
+
+        let mensaje = '¿Está seguro de eliminar los registros filtrados?\\n\\n';
+        mensaje += 'Total registros a eliminar: ' + total + '\\n';
+
+        if(prioridad){
+          mensaje += 'Prioridad: ' + prioridad + '\\n';
+        }
+
+        if(estado){
+          mensaje += 'Estado: ' + estado + '\\n';
+        }
+
+        if(!prioridad && !estado){
+          mensaje += '\\nADVERTENCIA: No hay filtros aplicados. Se eliminarán TODOS los planes de remediación.\\n';
+        }
+
+        mensaje += '\\nEsta acción no se puede deshacer.';
+
+        if(confirm(mensaje)){
+          const form = document.getElementById('remmatDeleteFiltradosForm');
+          if(form){
+            form.submit();
+          }
+        }
+
+        return false;
+      }
+    </script>
     """
+
     inner = render_template_string(
         html,
         items=items,
@@ -78132,6 +78566,7 @@ def plan_remediacion_matriz():
         filtro_prioridad=filtro_prioridad,
         filtro_estado=filtro_estado
     )
+
     return render_template_string(BASE, content=Markup(inner))
 
 # ==========================
@@ -79098,6 +79533,92 @@ def plan_remediacion_delete(id):
     db.session.commit()
 
     flash("Plan de remediación eliminado.", "success")
+    return redirect(url_for('plan_remediacion_matriz'))
+
+# ==========================
+# Eliminar Remediaciones por filtros
+# ==========================
+
+@app.route('/plan_remediacion/delete_filtrados', methods=['POST'])
+@login_required
+def plan_remediacion_delete_filtrados():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar registros.", "danger")
+        return redirect(url_for('plan_remediacion_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Plan de Remediación"):
+        flash("No tiene permiso para eliminar planes de remediación.", "danger")
+        return redirect(url_for('plan_remediacion_matriz'))
+
+    filtro_prioridad = (request.form.get('prioridad') or '').strip()
+    filtro_estado = (request.form.get('estado') or '').strip()
+
+    if not filtro_prioridad and not filtro_estado:
+        flash("Debe aplicar al menos un filtro para eliminar por grupo.", "warning")
+        return redirect(url_for('plan_remediacion_matriz'))
+
+    try:
+        q = PlanRemediacion.query
+
+        if filtro_prioridad:
+            q = q.filter(PlanRemediacion.prioridad == filtro_prioridad)
+
+        if filtro_estado:
+            q = q.filter(PlanRemediacion.estado == filtro_estado)
+
+        planes = q.all()
+
+        if not planes:
+            flash("No se encontraron planes para eliminar con los filtros seleccionados.", "warning")
+            return redirect(url_for(
+                'plan_remediacion_matriz',
+                prioridad=filtro_prioridad,
+                estado=filtro_estado
+            ))
+
+        vuln_ids = list(set([p.vulnerabilidad_id for p in planes if p.vulnerabilidad_id]))
+        total = len(planes)
+
+        for p in planes:
+            db.session.delete(p)
+
+        db.session.flush()
+
+        for vuln_id in vuln_ids:
+            vuln = VulnerabilidadRegistro.query.get(vuln_id)
+            if not vuln:
+                continue
+
+            planes_restantes = PlanRemediacion.query.filter_by(
+                vulnerabilidad_id=vuln_id
+            ).all()
+
+            if not planes_restantes:
+                vuln.estado = "Abierto"
+                vuln.fecha_cierre = None
+            else:
+                cerrado = next(
+                    (x for x in planes_restantes if (x.estado or '').strip().lower() == 'cerrado'),
+                    None
+                )
+
+                if cerrado:
+                    vuln.estado = "Cerrado"
+                    vuln.fecha_cierre = cerrado.fecha_remediacion
+                else:
+                    vuln.estado = "Abierto"
+                    vuln.fecha_cierre = None
+
+        db.session.commit()
+
+        flash(f"Se eliminaron {total} planes de remediación con los filtros seleccionados.", "success")
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f"No fue posible eliminar los planes filtrados: {str(e)}", "danger")
+
     return redirect(url_for('plan_remediacion_matriz'))
 
 
