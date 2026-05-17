@@ -67330,7 +67330,7 @@ def vuln_scan_monitor(run_id):
 
     body = """
     <div class="glass-card p-4 mt-2">
-      <div class="section-title">📡 Monitoreo del Escaneo #{{ run.id }}</div>
+      <div class="section-title">Monitoreo del Escaneo #{{ run.id }}</div>
 
       <div class="row g-3">
         <div class="col-md-8">
@@ -67497,7 +67497,7 @@ def vuln_scan_monitor(run_id):
     findings = VulnerabilityScanFinding.query.filter_by(run_id=run.id).order_by(VulnerabilityScanFinding.id.asc()).all()
 
     return vuln_scan_shell(
-        f"📡 Monitoreo del Escaneo #{run.id}",
+        f"Monitoreo del Escaneo #{run.id}",
         render_template_string(
             body,
             run=run,
@@ -68976,6 +68976,8 @@ def threat_model_dashboard():
         flash("No tiene permiso para acceder al modelamiento de amenazas.", "danger")
         return redirect(url_for('menu'))
 
+    read_only = True if user.role == 'auditor' else False
+
     unmapped_count = ThreatModelUnmapped.query.count()
     mapped_count = ThreatModelEntry.query.count()
     coverage_pct = round((mapped_count / (mapped_count + unmapped_count) * 100), 1) if (mapped_count + unmapped_count) else 0
@@ -69020,17 +69022,21 @@ def threat_model_dashboard():
     <div class="glass-card p-4 mt-2">
       <div class="section-title">🎯 Dashboard de Modelamiento de Amenazas</div>
 
-      <form method="get" class="row g-3 mb-3">
+      <form method="get" class="row g-3 mb-3" id="threatFiltroForm">
         <div class="col-md-3">
           <label class="form-label">Activo</label>
-          <input type="text" name="activo" class="form-control" value="{{ filtro_activo }}" placeholder="Servidor, portal, dominio, IP...">
+          <input type="text"
+                 name="activo"
+                 class="form-control"
+                 value="{{ filtro_activo }}"
+                 placeholder="Servidor, portal, dominio, IP...">
         </div>
 
         <div class="col-md-2">
           <label class="form-label">Herramienta</label>
           <select name="herramienta" class="form-select">
             <option value="">-- Todas --</option>
-            {% for op in ['nikto','nessus','nuclei','nmap','testssl'] %}
+            {% for op in ['nikto','nessus','nuclei','nmap','testssl','owasp_zap','zap'] %}
               <option value="{{ op }}" {% if filtro_herramienta == op %}selected{% endif %}>{{ op|upper }}</option>
             {% endfor %}
           </select>
@@ -69060,11 +69066,42 @@ def threat_model_dashboard():
 
         <div class="col-md-2">
           <label class="form-label d-block">&nbsp;</label>
-          <div class="toolbar-actions">
-            <button class="btn btn-primary rounded-pill px-4">Filtrar</button>
-            <a href="{{ url_for('threat_model_dashboard') }}" class="btn btn-outline-secondary rounded-pill px-4">Limpiar</a>
+          <div class="tm-filter-actions">
+            <button class="btn btn-primary rounded-pill px-3" type="submit">
+              Filtrar
+            </button>
+
+            <a href="{{ url_for('threat_model_dashboard') }}"
+               class="btn btn-outline-secondary rounded-pill px-3">
+              Limpiar
+            </a>
+
+            {% if not read_only %}
+              <button type="button"
+                      class="btn btn-danger rounded-pill px-3"
+                      onclick="eliminarThreatModelFiltrados()">
+                Eliminar filtrados
+              </button>
+            {% else %}
+              <button type="button"
+                      class="btn btn-secondary rounded-pill px-3"
+                      disabled
+                      title="Auditor: solo lectura">
+                Eliminar filtrados
+              </button>
+            {% endif %}
           </div>
         </div>
+      </form>
+
+      <form method="post"
+            id="threatDeleteFiltradosForm"
+            action="{{ url_for('threat_model_delete_filtrados') }}"
+            style="display:none;">
+        <input type="hidden" name="activo" value="{{ filtro_activo }}">
+        <input type="hidden" name="herramienta" value="{{ filtro_herramienta }}">
+        <input type="hidden" name="severidad" value="{{ filtro_severidad }}">
+        <input type="hidden" name="tecnica" value="{{ filtro_tecnica }}">
       </form>
 
       <div class="row g-3 mb-3">
@@ -69091,11 +69128,16 @@ def threat_model_dashboard():
       </div>
 
       <div class="toolbar-actions justify-content-end mb-3">
-        <a href="{{ url_for('threat_model_unmapped_view') }}" class="btn btn-outline-danger rounded-pill px-4">
+        <a href="{{ url_for('threat_model_unmapped_view') }}"
+           class="btn btn-outline-danger rounded-pill px-4">
           🧩 Ver No Mapeados
         </a>
+
         {% if user.role != 'auditor' %}
-          <a href="{{ url_for('threat_model_nessus_import') }}" class="btn btn-warning rounded-pill px-4">📥 Importar Nessus</a>
+          <a href="{{ url_for('threat_model_nessus_import') }}"
+             class="btn btn-warning rounded-pill px-4">
+            📥 Importar Nessus
+          </a>
         {% endif %}
       </div>
 
@@ -69113,6 +69155,7 @@ def threat_model_dashboard():
                 <th>Acciones</th>
               </tr>
             </thead>
+
             <tbody>
               {% for it in items %}
               <tr>
@@ -69121,25 +69164,53 @@ def threat_model_dashboard():
                 <td class="text-center">{{ it.herramienta|upper }}</td>
                 <td class="small">{{ it.vulnerabilidad }}</td>
                 <td class="text-center">{{ badge_severidad_html(it.severidad) }}</td>
+
                 <td class="small">
                   {% for t in it.tecnicas %}
-                    <div><b>{{ t.mitre_technique_id }}</b> - {{ t.mitre_technique_name }}</div>
+                    <div>
+                      <b>{{ t.mitre_technique_id }}</b> - {{ t.mitre_technique_name }}
+                    </div>
                   {% endfor %}
                 </td>
+
                 <td class="text-center">
-                  <a href="{{ url_for('threat_model_asset_view') }}?activo={{ it.activo|urlencode }}" class="btn btn-primary btn-sm rounded-pill px-3">
-                    Ver matriz
-                  </a>
-                  {% if it.vulnerabilidad_registro_id %}
-                    <a href="{{ url_for('vulnerabilidad_edit', id=it.vulnerabilidad_registro_id) }}" class="btn btn-warning btn-sm rounded-pill px-3 mt-1">
-                      Abrir registro
+                  <div class="tm-actions-wrap">
+
+                    <a href="{{ url_for('threat_model_asset_view') }}?activo={{ it.activo|urlencode }}"
+                       class="btn btn-primary btn-sm rounded-pill px-3">
+                      Ver matriz
                     </a>
-                  {% endif %}
+
+                    {% if it.vulnerabilidad_registro_id %}
+                      <a href="{{ url_for('vulnerabilidad_edit', id=it.vulnerabilidad_registro_id) }}"
+                         class="btn btn-warning btn-sm rounded-pill px-3">
+                        Abrir registro
+                      </a>
+                    {% endif %}
+
+                    {% if not read_only %}
+                      <a href="{{ url_for('threat_model_delete', id=it.id) }}"
+                         class="btn btn-danger btn-sm rounded-pill px-3"
+                         onclick="return confirmarEliminarThreatModel();">
+                        Eliminar
+                      </a>
+                    {% else %}
+                      <button class="btn btn-secondary btn-sm rounded-pill px-3"
+                              disabled
+                              title="Auditor: solo lectura">
+                        Eliminar
+                      </button>
+                    {% endif %}
+
+                  </div>
                 </td>
               </tr>
+
               {% else %}
               <tr>
-                <td colspan="7" class="text-center text-muted py-4">No hay modelamientos generados.</td>
+                <td colspan="7" class="text-center text-muted py-4">
+                  No hay modelamientos generados.
+                </td>
               </tr>
               {% endfor %}
             </tbody>
@@ -69147,7 +69218,107 @@ def threat_model_dashboard():
         </div>
       </div>
     </div>
+
+    <style>
+      .tm-filter-actions{
+        display:flex;
+        flex-direction:column;
+        gap:7px;
+        align-items:stretch;
+      }
+
+      .tm-filter-actions .btn{
+        width:100%;
+        min-height:36px;
+        font-size:.76rem;
+        font-weight:900;
+      }
+
+      .tm-actions-wrap{
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+        align-items:center;
+      }
+
+      .tm-actions-wrap .btn{
+        min-width:120px;
+        font-size:.74rem;
+        font-weight:900;
+      }
+
+      @media (max-width:768px){
+        .tm-filter-actions .btn,
+        .tm-actions-wrap .btn{
+          width:100%;
+        }
+      }
+    </style>
+
+    <script>
+      function confirmarEliminarThreatModel(){
+        if(typeof hideLoader === 'function'){
+          hideLoader();
+        }
+
+        return confirm(
+          '¿Está seguro de eliminar este registro de modelamiento de amenazas?\\n\\n' +
+          'También se eliminarán sus técnicas MITRE asociadas.\\n' +
+          'Esta acción no se puede deshacer.'
+        );
+      }
+
+      function eliminarThreatModelFiltrados(){
+        const total = {{ items|length }};
+
+        if(total <= 0){
+          alert('No hay registros para eliminar con los filtros aplicados.');
+          return false;
+        }
+
+        const activo = "{{ filtro_activo }}";
+        const herramienta = "{{ filtro_herramienta }}";
+        const severidad = "{{ filtro_severidad }}";
+        const tecnica = "{{ filtro_tecnica }}";
+
+        let mensaje = '¿Está seguro de eliminar los registros filtrados de modelamiento de amenazas?\\n\\n';
+        mensaje += 'Total registros a eliminar: ' + total + '\\n';
+
+        if(activo){
+          mensaje += 'Activo contiene: ' + activo + '\\n';
+        }
+
+        if(herramienta){
+          mensaje += 'Herramienta: ' + herramienta + '\\n';
+        }
+
+        if(severidad){
+          mensaje += 'Severidad: ' + severidad + '\\n';
+        }
+
+        if(tecnica){
+          mensaje += 'Técnica MITRE: ' + tecnica + '\\n';
+        }
+
+        if(!activo && !herramienta && !severidad && !tecnica){
+          mensaje += '\\nADVERTENCIA: No hay filtros aplicados. Se eliminarán TODOS los registros de modelamiento de amenazas.\\n';
+        }
+
+        mensaje += '\\nTambién se eliminarán las técnicas MITRE asociadas.\\n';
+        mensaje += 'Esta acción no se puede deshacer.';
+
+        if(confirm(mensaje)){
+          const form = document.getElementById('threatDeleteFiltradosForm');
+          if(form){
+            form.submit();
+          }
+        }
+
+        return false;
+      }
+    </script>
     """
+
     return vuln_scan_shell(
         "Modelamiento de Amenazas",
         render_template_string(
@@ -69159,6 +69330,7 @@ def threat_model_dashboard():
             filtro_tecnica=filtro_tecnica,
             tecnicas_disponibles=tecnicas_disponibles,
             user=user,
+            read_only=read_only,
             mapped_count=mapped_count,
             unmapped_count=unmapped_count,
             coverage_pct=coverage_pct,
@@ -69175,6 +69347,8 @@ def threat_model_unmapped_view():
     if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
         flash("No tiene permiso para acceder a los hallazgos no mapeados.", "danger")
         return redirect(url_for('menu'))
+
+    read_only = True if user.role == 'auditor' else False
 
     filtro_herramienta = (request.args.get('herramienta') or '').strip()
     filtro_severidad = (request.args.get('severidad') or '').strip()
@@ -69203,13 +69377,15 @@ def threat_model_unmapped_view():
     <div class="glass-card p-4 mt-2">
       <div class="section-title">🧩 Hallazgos no mapeados MITRE</div>
 
-      <form method="get" class="row g-3 mb-3">
+      <form method="get" class="row g-3 mb-3" id="unmappedFiltroForm">
         <div class="col-md-3">
           <label class="form-label">Herramienta</label>
           <select name="herramienta" class="form-select">
             <option value="">-- Todas --</option>
-            {% for op in ['nikto','nessus','nuclei','nmap','testssl'] %}
-              <option value="{{ op }}" {% if filtro_herramienta == op %}selected{% endif %}>{{ op|upper }}</option>
+            {% for op in ['nikto','nessus','nuclei','nmap','testssl','owasp_zap','zap'] %}
+              <option value="{{ op }}" {% if filtro_herramienta == op %}selected{% endif %}>
+                {{ op|upper }}
+              </option>
             {% endfor %}
           </select>
         </div>
@@ -69219,23 +69395,59 @@ def threat_model_unmapped_view():
           <select name="severidad" class="form-select">
             <option value="">-- Todas --</option>
             {% for op in ['Crítica', 'Alta', 'Media', 'Baja'] %}
-              <option value="{{ op }}" {% if filtro_severidad == op %}selected{% endif %}>{{ op }}</option>
+              <option value="{{ op }}" {% if filtro_severidad == op %}selected{% endif %}>
+                {{ op }}
+              </option>
             {% endfor %}
           </select>
         </div>
 
         <div class="col-md-4">
           <label class="form-label">Texto</label>
-          <input type="text" name="texto" class="form-control" value="{{ filtro_texto }}" placeholder="Buscar palabra o patrón...">
+          <input type="text"
+                 name="texto"
+                 class="form-control"
+                 value="{{ filtro_texto }}"
+                 placeholder="Buscar palabra o patrón...">
         </div>
 
         <div class="col-md-2">
           <label class="form-label d-block">&nbsp;</label>
-          <div class="toolbar-actions">
-            <button class="btn btn-primary rounded-pill px-4">Filtrar</button>
-            <a href="{{ url_for('threat_model_unmapped_view') }}" class="btn btn-outline-secondary rounded-pill px-4">Limpiar</a>
+          <div class="unmapped-filter-actions">
+            <button class="btn btn-primary rounded-pill px-3" type="submit">
+              Filtrar
+            </button>
+
+            <a href="{{ url_for('threat_model_unmapped_view') }}"
+               class="btn btn-outline-secondary rounded-pill px-3">
+              Limpiar
+            </a>
+
+            {% if not read_only %}
+              <button type="button"
+                      class="btn btn-danger rounded-pill px-3"
+                      onclick="eliminarUnmappedFiltrados()">
+                Eliminar filtrados
+              </button>
+            {% else %}
+              <button type="button"
+                      class="btn btn-secondary rounded-pill px-3"
+                      disabled
+                      title="Auditor: solo lectura">
+                Eliminar filtrados
+              </button>
+            {% endif %}
           </div>
         </div>
+      </form>
+
+      <form method="post"
+            id="unmappedDeleteFiltradosForm"
+            action="{{ url_for('threat_model_unmapped_delete_filtrados') }}"
+            style="display:none;">
+        <input type="hidden" name="herramienta" value="{{ filtro_herramienta }}">
+        <input type="hidden" name="severidad" value="{{ filtro_severidad }}">
+        <input type="hidden" name="texto" value="{{ filtro_texto }}">
       </form>
 
       <div class="soft-table-wrap">
@@ -69249,8 +69461,10 @@ def threat_model_unmapped_view():
                 <th>Título</th>
                 <th>Descripción</th>
                 <th>Evidencia</th>
+                <th>Acciones</th>
               </tr>
             </thead>
+
             <tbody>
               {% for it in items %}
               <tr>
@@ -69260,10 +69474,29 @@ def threat_model_unmapped_view():
                 <td class="small">{{ it.titulo }}</td>
                 <td class="small">{{ it.descripcion or '—' }}</td>
                 <td class="small">{{ it.evidencia or '—' }}</td>
+
+                <td class="text-center">
+                  {% if not read_only %}
+                    <a href="{{ url_for('threat_model_unmapped_delete', id=it.id) }}"
+                       class="btn btn-danger btn-sm rounded-pill px-3"
+                       onclick="return confirmarEliminarUnmapped();">
+                      Eliminar
+                    </a>
+                  {% else %}
+                    <button class="btn btn-secondary btn-sm rounded-pill px-3"
+                            disabled
+                            title="Auditor: solo lectura">
+                      Eliminar
+                    </button>
+                  {% endif %}
+                </td>
               </tr>
+
               {% else %}
               <tr>
-                <td colspan="6" class="text-center text-muted py-4">No hay hallazgos no mapeados.</td>
+                <td colspan="7" class="text-center text-muted py-4">
+                  No hay hallazgos no mapeados.
+                </td>
               </tr>
               {% endfor %}
             </tbody>
@@ -69271,7 +69504,86 @@ def threat_model_unmapped_view():
         </div>
       </div>
     </div>
+
+    <style>
+      .unmapped-filter-actions{
+        display:flex;
+        flex-direction:column;
+        gap:7px;
+        align-items:stretch;
+      }
+
+      .unmapped-filter-actions .btn{
+        width:100%;
+        min-height:36px;
+        font-size:.76rem;
+        font-weight:900;
+      }
+
+      @media (max-width:768px){
+        .unmapped-filter-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+
+    <script>
+      function confirmarEliminarUnmapped(){
+        if(typeof hideLoader === 'function'){
+          hideLoader();
+        }
+
+        return confirm(
+          '¿Está seguro de eliminar este hallazgo no mapeado?\\n\\n' +
+          'Esta acción no se puede deshacer.'
+        );
+      }
+
+      function eliminarUnmappedFiltrados(){
+        const total = {{ items|length }};
+
+        if(total <= 0){
+          alert('No hay hallazgos no mapeados para eliminar con los filtros aplicados.');
+          return false;
+        }
+
+        const herramienta = "{{ filtro_herramienta }}";
+        const severidad = "{{ filtro_severidad }}";
+        const texto = "{{ filtro_texto }}";
+
+        let mensaje = '¿Está seguro de eliminar los hallazgos no mapeados filtrados?\\n\\n';
+        mensaje += 'Total registros a eliminar: ' + total + '\\n';
+
+        if(herramienta){
+          mensaje += 'Herramienta: ' + herramienta + '\\n';
+        }
+
+        if(severidad){
+          mensaje += 'Severidad: ' + severidad + '\\n';
+        }
+
+        if(texto){
+          mensaje += 'Texto contiene: ' + texto + '\\n';
+        }
+
+        if(!herramienta && !severidad && !texto){
+          mensaje += '\\nADVERTENCIA: No hay filtros aplicados. Se eliminarán TODOS los hallazgos no mapeados.\\n';
+        }
+
+        mensaje += '\\nEsta acción no se puede deshacer.';
+
+        if(confirm(mensaje)){
+          const form = document.getElementById('unmappedDeleteFiltradosForm');
+          if(form){
+            form.submit();
+          }
+        }
+
+        return false;
+      }
+    </script>
     """
+
     return vuln_scan_shell(
         "No mapeados MITRE",
         render_template_string(
@@ -69280,6 +69592,7 @@ def threat_model_unmapped_view():
             filtro_herramienta=filtro_herramienta,
             filtro_severidad=filtro_severidad,
             filtro_texto=filtro_texto,
+            read_only=read_only,
             badge_severidad_html=badge_severidad_html
         )
     )
@@ -69402,6 +69715,202 @@ def threat_model_export_navigator():
         as_attachment=True,
         download_name=f"mitre_attack_navigator_{safe_name}.json"
     )
+
+# ==========================
+# Eliminar entrada individual — Modelamiento de Amenazas
+# ==========================
+
+@app.route('/vulnerabilidades/threat_model/<int:id>/delete')
+@login_required
+def threat_model_delete(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar registros.", "danger")
+        return redirect(url_for('threat_model_dashboard'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para eliminar registros de modelamiento de amenazas.", "danger")
+        return redirect(url_for('threat_model_dashboard'))
+
+    db.session.rollback()
+
+    item = ThreatModelEntry.query.get_or_404(id)
+
+    try:
+        db.session.delete(item)
+        db.session.commit()
+        flash("Registro de modelamiento de amenazas eliminado correctamente.", "success")
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f"No fue posible eliminar el registro: {str(e)}", "danger")
+
+    return redirect(url_for('threat_model_dashboard'))
+
+
+# ==========================
+# Eliminar por filtros — Modelamiento de Amenazas
+# ==========================
+
+@app.route('/vulnerabilidades/threat_model/delete_filtrados', methods=['POST'])
+@login_required
+def threat_model_delete_filtrados():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar registros.", "danger")
+        return redirect(url_for('threat_model_dashboard'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para eliminar registros de modelamiento de amenazas.", "danger")
+        return redirect(url_for('threat_model_dashboard'))
+
+    db.session.rollback()
+
+    filtro_activo = (request.form.get('activo') or '').strip()
+    filtro_herramienta = (request.form.get('herramienta') or '').strip()
+    filtro_severidad = (request.form.get('severidad') or '').strip()
+    filtro_tecnica = (request.form.get('tecnica') or '').strip()
+
+    q = ThreatModelEntry.query
+
+    if filtro_activo:
+        q = q.filter(ThreatModelEntry.activo.ilike(f"%{filtro_activo}%"))
+
+    if filtro_herramienta:
+        q = q.filter(ThreatModelEntry.herramienta == filtro_herramienta)
+
+    if filtro_severidad:
+        q = q.filter(ThreatModelEntry.severidad == filtro_severidad)
+
+    if filtro_tecnica:
+        q = q.join(ThreatModelTechnique).filter(
+            ThreatModelTechnique.mitre_technique_id == filtro_tecnica
+        )
+
+    registros = q.distinct().all()
+
+    if not registros:
+        flash("No se encontraron registros para eliminar con los filtros aplicados.", "warning")
+        return redirect(url_for(
+            'threat_model_dashboard',
+            activo=filtro_activo,
+            herramienta=filtro_herramienta,
+            severidad=filtro_severidad,
+            tecnica=filtro_tecnica
+        ))
+
+    try:
+        total = len(registros)
+
+        for item in registros:
+            db.session.delete(item)
+
+        db.session.commit()
+        flash(f"Se eliminaron {total} registros de modelamiento de amenazas correctamente.", "success")
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f"No fue posible eliminar los registros filtrados: {str(e)}", "danger")
+
+    return redirect(url_for('threat_model_dashboard'))
+
+
+# ==========================
+# Eliminar individual — No Mapeados MITRE
+# ==========================
+
+@app.route('/vulnerabilidades/threat_model/unmapped/<int:id>/delete')
+@login_required
+def threat_model_unmapped_delete(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar registros.", "danger")
+        return redirect(url_for('threat_model_unmapped_view'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para eliminar hallazgos no mapeados.", "danger")
+        return redirect(url_for('threat_model_unmapped_view'))
+
+    item = ThreatModelUnmapped.query.get_or_404(id)
+
+    try:
+        db.session.delete(item)
+        db.session.commit()
+        flash("Hallazgo no mapeado eliminado correctamente.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"No fue posible eliminar el hallazgo no mapeado: {str(e)}", "danger")
+
+    return redirect(url_for('threat_model_unmapped_view'))
+
+
+# ==========================
+# Eliminar por filtros — No Mapeados MITRE
+# ==========================
+
+@app.route('/vulnerabilidades/threat_model/unmapped/delete_filtrados', methods=['POST'])
+@login_required
+def threat_model_unmapped_delete_filtrados():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar registros.", "danger")
+        return redirect(url_for('threat_model_unmapped_view'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para eliminar hallazgos no mapeados.", "danger")
+        return redirect(url_for('threat_model_unmapped_view'))
+
+    filtro_herramienta = (request.form.get('herramienta') or '').strip()
+    filtro_severidad = (request.form.get('severidad') or '').strip()
+    filtro_texto = (request.form.get('texto') or '').strip()
+
+    q = ThreatModelUnmapped.query
+
+    if filtro_herramienta:
+        q = q.filter(ThreatModelUnmapped.herramienta == filtro_herramienta)
+
+    if filtro_severidad:
+        q = q.filter(ThreatModelUnmapped.severidad == filtro_severidad)
+
+    if filtro_texto:
+        q = q.filter(
+            db.or_(
+                ThreatModelUnmapped.titulo.ilike(f"%{filtro_texto}%"),
+                ThreatModelUnmapped.descripcion.ilike(f"%{filtro_texto}%"),
+                ThreatModelUnmapped.evidencia.ilike(f"%{filtro_texto}%")
+            )
+        )
+
+    registros = q.all()
+
+    if not registros:
+        flash("No se encontraron hallazgos no mapeados con los filtros aplicados.", "warning")
+        return redirect(url_for(
+            'threat_model_unmapped_view',
+            herramienta=filtro_herramienta,
+            severidad=filtro_severidad,
+            texto=filtro_texto
+        ))
+
+    try:
+        total = len(registros)
+
+        for item in registros:
+            db.session.delete(item)
+
+        db.session.commit()
+        flash(f"Se eliminaron {total} hallazgos no mapeados correctamente.", "success")
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f"No fue posible eliminar los hallazgos no mapeados filtrados: {str(e)}", "danger")
+
+    return redirect(url_for('threat_model_unmapped_view'))
+
 
 # ==========================================================================================================================================
 #                                                       Fin del Módulo de Amenazas
