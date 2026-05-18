@@ -5577,6 +5577,7 @@ MODULES = [
     "Requisitos Legales",
     "Partes Interesadas",
     "Registro de Vulnerabilidades",
+    "Modelamiento de Amenazas",
     "Plan de Remediación",
     "Plan de Competencias",
     "Contexto Interno",
@@ -8426,6 +8427,7 @@ MENU_SECTIONS = [
         "items": [
             {"label": "Registro de Incidentes", "href": "/incidentes", "icon": "bi-exclamation-triangle", "btn": "btn-danger", "module": "Registro de Incidentes"},
             {"label": "Registro de Vulnerabilidades", "href": "/vulnerabilidades_menu", "icon": "bi-bug", "btn": "btn-danger", "module": "Registro de Vulnerabilidades"},
+            {"label": "Modelamiento de Amenazas", "href": "/modelamiento_amenazas", "icon": "bi-diagram-3", "btn": "btn-dark", "module": "Modelamiento de Amenazas"},
             {"label": "Plan de Remediación", "href": "/plan_remediacion_menu", "icon": "bi-tools", "btn": "btn-primary", "module": "Plan de Remediación"},
         ],
     },
@@ -8857,6 +8859,10 @@ def _sgsi_build_global_menu_html():
             "Registro de Vulnerabilidades": {
                 "paths": ["/vulnerabilidades_menu", "/vulnerabilidades"],
                 "endpoints": ["vulnerabilidades", "vulnerabilidad", "vuln"]
+            },
+            "Modelamiento de Amenazas": {
+                "paths": ["/modelamiento_amenazas", "/vulnerabilidades/threat_model"],
+                "endpoints": ["threat_model"]
             },
             "Plan de Remediación": {
                 "paths": ["/plan_remediacion_menu", "/plan_remediacion"],
@@ -64044,13 +64050,15 @@ def vuln_scan_shell(title, body_html):
         <h2 class="plan-title">{{ title }}</h2>
       </div>
 
-      <div class="volver-center">
-        <a href="{{ url_for('vulnerabilidades_matriz') }}"
-           class="btn btn-light rounded-pill px-4 fw-semibold"
-           onclick="showLoader()">
-          ⬅ Volver a la Matriz
-        </a>
-      </div>
+      {% if title not in ["Modelamiento de Amenazas", "Matriz MITRE ATT&CK", "No mapeados MITRE"] %}
+        <div class="volver-center">
+          <a href="{{ url_for('vulnerabilidades_matriz') }}"
+             class="btn btn-light rounded-pill px-4 fw-semibold"
+             onclick="showLoader()">
+            ⬅ Volver a la Matriz
+          </a>
+        </div>
+      {% endif %}
 
       {{ body_html|safe }}
     </div>
@@ -65214,12 +65222,6 @@ def vulnerabilidades_matriz():
             </div>
           </div>
 
-          <a href="{{ url_for('threat_model_dashboard') }}"
-             class="btn btn-warning rounded-pill px-4 fw-semibold"
-             onclick="showLoader()">
-            Modelamiento de amenazas
-          </a>
-
         </div>
       </div>
 
@@ -65895,8 +65897,80 @@ def vulnerabilidades_matriz():
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
           document.addEventListener('DOMContentLoaded', function(){
+            let stack = document.getElementById('sgsiFlashStack');
+
+            if(!stack){
+              stack = document.createElement('div');
+              stack.id = 'sgsiFlashStack';
+              stack.style.position = 'fixed';
+              stack.style.top = '92px';
+              stack.style.right = '24px';
+              stack.style.zIndex = '999998';
+              stack.style.display = 'flex';
+              stack.style.flexDirection = 'column';
+              stack.style.gap = '10px';
+              stack.style.maxWidth = '440px';
+              document.body.appendChild(stack);
+            }
+
+            const palette = {
+              success: ['#ecfdf5', '#16a34a', '#14532d', '✅'],
+              warning: ['#fffbeb', '#f59e0b', '#78350f', '⚠️'],
+              danger:  ['#fef2f2', '#dc2626', '#7f1d1d', '⛔'],
+              info:    ['#eff6ff', '#3f86d6', '#1e3a8a', 'ℹ️']
+            };
+
             {% for category, message in messages %}
-              alert({{ message|tojson }});
+              (function(){
+                const cfg = palette[{{ category|tojson }}] || palette.info;
+
+                const box = document.createElement('div');
+                box.style.background = cfg[0];
+                box.style.borderLeft = '6px solid ' + cfg[1];
+                box.style.color = cfg[2];
+                box.style.borderRadius = '16px';
+                box.style.padding = '14px 16px';
+                box.style.boxShadow = '0 14px 34px rgba(0,0,0,.22)';
+                box.style.fontWeight = '800';
+                box.style.fontSize = '.88rem';
+                box.style.lineHeight = '1.35';
+                box.style.display = 'flex';
+                box.style.alignItems = 'flex-start';
+                box.style.gap = '10px';
+
+                const icon = document.createElement('div');
+                icon.textContent = cfg[3];
+                icon.style.fontSize = '1.05rem';
+
+                const text = document.createElement('div');
+                text.textContent = {{ message|tojson }};
+
+                const close = document.createElement('button');
+                close.type = 'button';
+                close.textContent = '×';
+                close.style.marginLeft = 'auto';
+                close.style.border = '0';
+                close.style.background = 'transparent';
+                close.style.color = cfg[2];
+                close.style.fontSize = '1.2rem';
+                close.style.fontWeight = '900';
+                close.style.lineHeight = '1';
+                close.onclick = function(){
+                  box.remove();
+                };
+
+                box.appendChild(icon);
+                box.appendChild(text);
+                box.appendChild(close);
+                stack.appendChild(box);
+
+                setTimeout(function(){
+                  box.style.transition = 'opacity .25s ease, transform .25s ease';
+                  box.style.opacity = '0';
+                  box.style.transform = 'translateX(18px)';
+                  setTimeout(function(){ box.remove(); }, 280);
+                }, 6500);
+              })();
             {% endfor %}
           });
         {% endif %}
@@ -67020,6 +67094,105 @@ def vulnerabilidad_evidencia_delete(evi_id):
     flash("Evidencia eliminada.", "success")
     return redirect(url_for('vulnerabilidad_edit', id=vuln_id))
 
+
+# ==========================
+# Helpers de relación Vulnerabilidades ↔ Modelamiento de Amenazas
+# ==========================
+
+def _normalizar_ids_vulnerabilidad(ids):
+    """Retorna una lista limpia de IDs enteros únicos."""
+    limpios = []
+    vistos = set()
+
+    for valor in ids or []:
+        try:
+            vid = int(valor)
+        except Exception:
+            continue
+
+        if vid > 0 and vid not in vistos:
+            vistos.add(vid)
+            limpios.append(vid)
+
+    return limpios
+
+
+def eliminar_modelamientos_por_vulnerabilidades(vulnerabilidad_ids):
+    """
+    Elimina los registros de modelamiento de amenazas asociados a vulnerabilidades.
+
+    Regla funcional:
+    - Si se elimina una vulnerabilidad, también desaparece su modelamiento de amenazas.
+    - Las técnicas MITRE se eliminan por cascade desde ThreatModelEntry.tecnicas.
+    """
+    ids = _normalizar_ids_vulnerabilidad(vulnerabilidad_ids)
+
+    if not ids:
+        return 0
+
+    try:
+        registros = (
+            ThreatModelEntry.query
+            .options(selectinload(ThreatModelEntry.tecnicas))
+            .filter(ThreatModelEntry.vulnerabilidad_registro_id.in_(ids))
+            .all()
+        )
+
+        total = len(registros)
+
+        for item in registros:
+            db.session.delete(item)
+
+        return total
+
+    except Exception:
+        # Fallback por si el modelo aún no está cargado en algún arranque parcial.
+        placeholders = ",".join(str(i) for i in ids)
+        if not placeholders:
+            return 0
+
+        try:
+            db.session.execute(text(f"""
+                DELETE FROM threat_model_techniques
+                WHERE threat_entry_id IN (
+                    SELECT id
+                    FROM threat_model_entries
+                    WHERE vulnerabilidad_registro_id IN ({placeholders})
+                )
+            """))
+
+            db.session.execute(text(f"""
+                DELETE FROM threat_model_entries
+                WHERE vulnerabilidad_registro_id IN ({placeholders})
+            """))
+
+            return 0
+
+        except Exception:
+            raise
+
+
+def existe_vulnerabilidad_asociada_a_threat_model(item):
+    """
+    Valida si un registro de modelamiento tiene una vulnerabilidad vigente asociada.
+
+    Regla funcional:
+    - No se permite eliminar manualmente un ID de modelamiento si todavía existe
+      la vulnerabilidad relacionada.
+    """
+    if not item:
+        return False
+
+    vuln_id = getattr(item, "vulnerabilidad_registro_id", None)
+
+    if not vuln_id:
+        return False
+
+    try:
+        return VulnerabilidadRegistro.query.get(int(vuln_id)) is not None
+    except Exception:
+        return False
+
 # ==========================
 # Eliminar Vulnerabilidad
 # ==========================
@@ -67058,23 +67231,9 @@ def vulnerabilidad_delete(id):
             return redirect(url_for('vulnerabilidades_matriz'))
 
         # ==========================
-        # Validar si tiene modelamiento de amenazas asociado
+        # Eliminar modelamiento de amenazas asociado
         # ==========================
-        try:
-            threat_asociado = ThreatModelEntry.query.filter_by(
-                vulnerabilidad_registro_id=id
-            ).first()
-
-            if threat_asociado:
-                flash(
-                    "No se puede eliminar esta vulnerabilidad porque tiene modelamiento de amenazas asociado. "
-                    "Primero elimine o desvincule el registro asociado.",
-                    "warning"
-                )
-                return redirect(url_for('vulnerabilidades_matriz'))
-
-        except Exception:
-            pass
+        total_threat = eliminar_modelamientos_por_vulnerabilidades([id])
 
         # ==========================
         # Desvincular hallazgos de escaneo
@@ -67119,13 +67278,19 @@ def vulnerabilidad_delete(id):
         db.session.delete(it)
         db.session.commit()
 
-        flash("Vulnerabilidad eliminada correctamente.", "success")
+        if total_threat:
+            flash(
+                f"Vulnerabilidad eliminada correctamente. También se eliminaron {total_threat} registro(s) de modelamiento de amenazas asociado(s).",
+                "success"
+            )
+        else:
+            flash("Vulnerabilidad eliminada correctamente.", "success")
 
     except Exception as e:
         db.session.rollback()
         flash(
             "No fue posible eliminar la vulnerabilidad. "
-            "Verifique si tiene registros asociados en planes de remediación, evidencias, escaneos o modelamiento de amenazas.",
+            "Verifique si tiene registros asociados en planes de remediación, evidencias o escaneos.",
             "danger"
         )
 
@@ -67245,23 +67410,17 @@ def vulnerabilidades_delete_filtrados():
             pass
 
         # ==========================
-        # 4. Desvincular hallazgos de escaneo
+        # 4. Eliminar modelamiento de amenazas asociado
+        # ==========================
+        total_threat = eliminar_modelamientos_por_vulnerabilidades(ids)
+
+        # ==========================
+        # 5. Desvincular hallazgos de escaneo
         # ==========================
         try:
             db.session.execute(text(f"""
                 UPDATE vulnerability_scan_findings
                 SET vulnerabilidad_registro_id = NULL
-                WHERE vulnerabilidad_registro_id IN ({placeholders})
-            """))
-        except Exception:
-            pass
-
-        # ==========================
-        # 5. Eliminar modelamiento de amenazas asociado
-        # ==========================
-        try:
-            db.session.execute(text(f"""
-                DELETE FROM threat_model_entries
                 WHERE vulnerabilidad_registro_id IN ({placeholders})
             """))
         except Exception:
@@ -67277,7 +67436,13 @@ def vulnerabilidades_delete_filtrados():
 
         db.session.commit()
 
-        flash(f"Se eliminaron {total} vulnerabilidades correctamente.", "success")
+        if total_threat:
+            flash(
+                f"Se eliminaron {total} vulnerabilidades correctamente. También se eliminaron {total_threat} registro(s) de modelamiento de amenazas asociado(s).",
+                "success"
+            )
+        else:
+            flash(f"Se eliminaron {total} vulnerabilidades correctamente.", "success")
 
     except Exception as e:
         db.session.rollback()
@@ -69694,12 +69859,12 @@ def guardar_threat_model_unmapped(run, hallazgo, finding_rec=None):
 # Dashboard
 # ===================
 
-@app.route('/vulnerabilidades/threat_model')
+@app.route('/modelamiento_amenazas')
 @login_required
 def threat_model_dashboard():
     user = User.query.get(session.get('user_id'))
 
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Modelamiento de Amenazas"):
         flash("No tiene permiso para acceder al modelamiento de amenazas.", "danger")
         return redirect(url_for('menu'))
 
@@ -69748,6 +69913,25 @@ def threat_model_dashboard():
     body = """
     <div class="glass-card p-4 mt-2">
       <div class="section-title">🎯 Dashboard de Modelamiento de Amenazas</div>
+
+      <div class="toolbar-actions justify-content-end mb-3 threat-main-actions">
+        <a href="{{ url_for('threat_model_asset_view') }}"
+           class="btn btn-primary rounded-pill px-4">
+          🧭 Matriz MITRE ATT&CK
+        </a>
+
+        <a href="{{ url_for('threat_model_unmapped_view') }}"
+           class="btn btn-outline-danger rounded-pill px-4">
+          🧩 Ver No Mapeados
+        </a>
+
+        {% if user.role != 'auditor' %}
+          <a href="{{ url_for('threat_model_nessus_import') }}"
+             class="btn btn-warning rounded-pill px-4">
+            📥 Importar Nessus
+          </a>
+        {% endif %}
+      </div>
 
       <form method="get" class="row g-3 mb-3" id="threatFiltroForm">
         <div class="col-md-3">
@@ -69854,20 +70038,6 @@ def threat_model_dashboard():
         </div>
       </div>
 
-      <div class="toolbar-actions justify-content-end mb-3">
-        <a href="{{ url_for('threat_model_unmapped_view') }}"
-           class="btn btn-outline-danger rounded-pill px-4">
-          🧩 Ver No Mapeados
-        </a>
-
-        {% if user.role != 'auditor' %}
-          <a href="{{ url_for('threat_model_nessus_import') }}"
-             class="btn btn-warning rounded-pill px-4">
-            📥 Importar Nessus
-          </a>
-        {% endif %}
-      </div>
-
       <div class="soft-table-wrap">
         <div class="table-responsive px-3 pb-3 pt-3">
           <table class="table table-hover align-middle soft-table mb-0">
@@ -69902,18 +70072,6 @@ def threat_model_dashboard():
 
                 <td class="text-center">
                   <div class="tm-actions-wrap">
-
-                    <a href="{{ url_for('threat_model_asset_view') }}?activo={{ it.activo|urlencode }}"
-                       class="btn btn-primary btn-sm rounded-pill px-3">
-                      Ver matriz
-                    </a>
-
-                    {% if it.vulnerabilidad_registro_id %}
-                      <a href="{{ url_for('vulnerabilidad_edit', id=it.vulnerabilidad_registro_id) }}"
-                         class="btn btn-warning btn-sm rounded-pill px-3">
-                        Abrir registro
-                      </a>
-                    {% endif %}
 
                     {% if not read_only %}
                       <a href="{{ url_for('threat_model_delete', id=it.id) }}"
@@ -69959,6 +70117,17 @@ def threat_model_dashboard():
         min-height:36px;
         font-size:.76rem;
         font-weight:900;
+      }
+
+      .threat-main-actions{
+        display:flex;
+        flex-wrap:wrap;
+        gap:10px;
+      }
+
+      .threat-main-actions .btn{
+        font-weight:900;
+        box-shadow:0 8px 18px rgba(0,0,0,.10);
       }
 
       .tm-actions-wrap{
@@ -70066,12 +70235,12 @@ def threat_model_dashboard():
     )
 
 
-@app.route('/vulnerabilidades/threat_model/unmapped')
+@app.route('/modelamiento_amenazas/no_mapeados')
 @login_required
 def threat_model_unmapped_view():
     user = User.query.get(session.get('user_id'))
 
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Modelamiento de Amenazas"):
         flash("No tiene permiso para acceder a los hallazgos no mapeados.", "danger")
         return redirect(url_for('menu'))
 
@@ -70328,12 +70497,12 @@ def threat_model_unmapped_view():
 # Vista Mittre & Attack 
 # =====================
 
-@app.route('/vulnerabilidades/threat_model/matrix')
+@app.route('/modelamiento_amenazas/matriz_mitre')
 @login_required
 def threat_model_asset_view():
     user = User.query.get(session.get('user_id'))
 
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Modelamiento de Amenazas"):
         flash("No tiene permiso para acceder al modelamiento de amenazas.", "danger")
         return redirect(url_for('menu'))
 
@@ -70346,65 +70515,448 @@ def threat_model_asset_view():
     entries = q.order_by(ThreatModelEntry.id.desc()).all()
     matrix = build_attack_matrix_view(entries)
 
+    total_tecnicas = sum(len(items) for items in matrix.values())
+    tacticas_con_hallazgos = sum(1 for items in matrix.values() if items)
+
+    scores = []
+    for items in matrix.values():
+        for item in items:
+            try:
+                scores.append(int(item.get("score") or 0))
+            except Exception:
+                pass
+
+    score_maximo = max(scores) if scores else 0
+
     body = """
-    <div class="glass-card p-4 mt-2">
-      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div class="glass-card p-4 mt-2 mitre-shell">
+
+      <div class="mitre-topbar">
         <div>
           <div class="section-title mb-1">🧭 Matriz MITRE ATT&CK</div>
-          <div class="small text-muted">Visualización tipo ATT&CK Navigator por táctica para el activo filtrado.</div>
+          <div class="small text-muted">
+            Visualización completa por táctica. Usa el desplazamiento horizontal para ver todas las etapas, incluyendo Discovery y Collection.
+          </div>
         </div>
 
-        <div class="toolbar-actions">
-          <a href="{{ url_for('threat_model_dashboard') }}" class="btn btn-outline-secondary rounded-pill px-4">
+        <div class="mitre-actions">
+          <a href="{{ url_for('threat_model_dashboard') }}"
+             class="btn btn-outline-secondary rounded-pill px-4">
             ⬅ Volver
+          </a>
+
+          <a href="{{ url_for('threat_model_export_navigator') }}{% if activo %}?activo={{ activo|urlencode }}{% endif %}"
+             class="btn btn-success rounded-pill px-4 no-progress"
+             data-no-progress="true"
+             download
+             onclick="if(typeof hideSGSIProgress === 'function'){ hideSGSIProgress(); } if(typeof hideLoader === 'function'){ hideLoader(); }">
+            ⬇ Exportar Navigator JSON
           </a>
         </div>
       </div>
 
-      <form method="get" class="row g-3 mb-3">
-        <div class="col-md-9">
-          <label class="form-label">Activo</label>
-          <input type="text" name="activo" value="{{ activo }}" class="form-control" placeholder="Servidor, dominio, web server...">
+      <div class="mitre-summary-grid">
+        <div class="mitre-summary-card">
+          <div class="mitre-summary-label">Tácticas con hallazgos</div>
+          <div class="mitre-summary-value">{{ tacticas_con_hallazgos }}</div>
+          <div class="mitre-summary-help">de {{ matrix|length }} tácticas ATT&CK</div>
         </div>
-        <div class="col-md-3">
+
+        <div class="mitre-summary-card">
+          <div class="mitre-summary-label">Técnicas identificadas</div>
+          <div class="mitre-summary-value">{{ total_tecnicas }}</div>
+          <div class="mitre-summary-help">mapeadas automáticamente</div>
+        </div>
+
+        <div class="mitre-summary-card">
+          <div class="mitre-summary-label">Score máximo</div>
+          <div class="mitre-summary-value">{{ score_maximo }}</div>
+          <div class="mitre-summary-help">prioridad técnica más alta</div>
+        </div>
+      </div>
+
+      <form method="get" class="mitre-filter-card row g-3 mb-3">
+        <div class="col-lg-9 col-md-8">
+          <label class="form-label">Activo</label>
+          <input type="text"
+                 name="activo"
+                 value="{{ activo }}"
+                 class="form-control"
+                 placeholder="Servidor, dominio, web server...">
+        </div>
+
+        <div class="col-lg-3 col-md-4">
           <label class="form-label d-block">&nbsp;</label>
-          <button class="btn btn-primary rounded-pill px-4 w-100">Aplicar filtro</button>
+          <button class="btn btn-primary rounded-pill px-4 w-100">
+            Aplicar filtro
+          </button>
         </div>
       </form>
 
-      <div class="row g-3">
-        {% for tactic, items in matrix.items() %}
-          {% if items %}
-          <div class="col-xl-4 col-lg-6">
-            <div class="card border-0 shadow-sm rounded-4 h-100">
-              <div class="card-header bg-dark text-white rounded-top-4 d-flex justify-content-between align-items-center">
-                <strong>{{ tactic }}</strong>
-                <span class="badge bg-primary">{{ items|length }}</span>
+      <div class="mitre-legend">
+        <span><i class="mitre-dot mitre-low"></i>Bajo</span>
+        <span><i class="mitre-dot mitre-medium"></i>Medio</span>
+        <span><i class="mitre-dot mitre-high"></i>Alto</span>
+        <span><i class="mitre-dot mitre-critical"></i>Crítico</span>
+        <span class="ms-auto text-muted small">Tip: desplázate horizontalmente para ver todas las tácticas.</span>
+      </div>
+
+      <div class="mitre-board-wrap">
+        <div class="mitre-board">
+          {% for tactic, items in matrix.items() %}
+            <div class="mitre-tactic-col {% if not items %}mitre-tactic-empty{% endif %}">
+              <div class="mitre-tactic-head">
+                <div class="mitre-tactic-title">{{ tactic }}</div>
+                <span class="mitre-tactic-count">{{ items|length }}</span>
               </div>
-              <div class="card-body">
-                {% for item in items %}
-                  <div class="border rounded-4 p-3 mb-2 bg-light">
-                    <div class="fw-bold">{{ item.technique_id }} - {{ item.technique_name }}</div>
-                    <div class="small text-muted">{{ item.vulnerability }}</div>
-                    <div class="small mt-2">
-                      <b>Herramienta:</b> {{ item.tool|upper }}<br>
-                      <b>Severidad:</b> {{ item.severity }}<br>
-                      <b>Score:</b> {{ item.score }}<br>
-                      <b>Impacto:</b> {{ item.impacto or '—' }}
+
+              <div class="mitre-tech-list">
+                {% if items %}
+                  {% for item in items %}
+                    {% set score = item.score or 0 %}
+                    {% if score >= 90 %}
+                      {% set sev_class = 'critical' %}
+                    {% elif score >= 70 %}
+                      {% set sev_class = 'high' %}
+                    {% elif score >= 40 %}
+                      {% set sev_class = 'medium' %}
+                    {% else %}
+                      {% set sev_class = 'low' %}
+                    {% endif %}
+
+                    <div class="mitre-tech-card {{ sev_class }}">
+                      <div class="mitre-tech-id">{{ item.technique_id }}</div>
+                      <div class="mitre-tech-name">{{ item.technique_name }}</div>
+
+                      <div class="mitre-tech-meta">
+                        <span>{{ item.tool|upper }}</span>
+                        <span>{{ item.severity or '—' }}</span>
+                        <span>Score {{ item.score or 0 }}</span>
+                      </div>
+
+                      <div class="mitre-tech-vuln">
+                        {{ item.vulnerability }}
+                      </div>
+
+                      {% if item.impacto %}
+                        <details class="mitre-impact">
+                          <summary>Ver impacto</summary>
+                          <div>{{ item.impacto }}</div>
+                        </details>
+                      {% endif %}
                     </div>
+                  {% endfor %}
+                {% else %}
+                  <div class="mitre-empty-state">
+                    Sin técnicas mapeadas
                   </div>
-                {% endfor %}
+                {% endif %}
               </div>
             </div>
-          </div>
-          {% endif %}
-        {% endfor %}
+          {% endfor %}
+        </div>
       </div>
+
     </div>
+
+    <style>
+      .mitre-shell{
+        overflow:hidden;
+      }
+
+      .mitre-topbar{
+        display:flex;
+        align-items:flex-start;
+        justify-content:space-between;
+        gap:14px;
+        flex-wrap:wrap;
+        margin-bottom:14px;
+      }
+
+      .mitre-actions{
+        display:flex;
+        flex-wrap:wrap;
+        justify-content:flex-end;
+        gap:8px;
+      }
+
+      .mitre-actions .btn{
+        font-weight:900;
+        box-shadow:0 8px 18px rgba(0,0,0,.10);
+      }
+
+      .mitre-summary-grid{
+        display:grid;
+        grid-template-columns:repeat(3,minmax(0,1fr));
+        gap:12px;
+        margin-bottom:14px;
+      }
+
+      .mitre-summary-card{
+        background:rgba(255,255,255,.92);
+        border:1px solid rgba(63,134,214,.22);
+        border-radius:18px;
+        padding:14px 16px;
+        box-shadow:0 10px 24px rgba(0,0,0,.10);
+      }
+
+      .mitre-summary-label{
+        font-size:.78rem;
+        font-weight:900;
+        color:#5c6b7d;
+        text-transform:uppercase;
+        letter-spacing:.04em;
+      }
+
+      .mitre-summary-value{
+        font-size:1.85rem;
+        font-weight:950;
+        color:#1d4f8f;
+        line-height:1;
+        margin-top:6px;
+      }
+
+      .mitre-summary-help{
+        color:#7c8898;
+        font-size:.82rem;
+        margin-top:5px;
+      }
+
+      .mitre-filter-card{
+        background:rgba(248,251,255,.94);
+        border:1px solid rgba(63,134,214,.18);
+        border-radius:18px;
+        padding:12px 12px 14px 12px;
+        box-shadow:0 8px 20px rgba(0,0,0,.08);
+      }
+
+      .mitre-legend{
+        display:flex;
+        align-items:center;
+        gap:14px;
+        flex-wrap:wrap;
+        background:rgba(255,255,255,.86);
+        border:1px solid rgba(0,0,0,.06);
+        border-radius:16px;
+        padding:10px 14px;
+        margin-bottom:12px;
+        font-weight:800;
+        font-size:.82rem;
+      }
+
+      .mitre-dot{
+        display:inline-block;
+        width:11px;
+        height:11px;
+        border-radius:999px;
+        margin-right:6px;
+        vertical-align:middle;
+      }
+
+      .mitre-low{ background:#15803d; }
+      .mitre-medium{ background:#ca8a04; }
+      .mitre-high{ background:#ea580c; }
+      .mitre-critical{ background:#b91c1c; }
+
+      .mitre-board-wrap{
+        width:100%;
+        overflow-x:auto;
+        overflow-y:hidden;
+        padding-bottom:10px;
+        border-radius:20px;
+        background:linear-gradient(180deg,rgba(255,255,255,.70),rgba(245,248,252,.78));
+        border:1px solid rgba(63,134,214,.18);
+        box-shadow:inset 0 0 0 1px rgba(255,255,255,.55);
+      }
+
+      .mitre-board{
+        display:grid;
+        grid-template-columns:repeat(14, minmax(245px, 1fr));
+        gap:12px;
+        min-width:3520px;
+        padding:14px;
+      }
+
+      .mitre-tactic-col{
+        background:rgba(255,255,255,.94);
+        border:1px solid rgba(31,73,125,.13);
+        border-radius:18px;
+        box-shadow:0 10px 24px rgba(0,0,0,.10);
+        overflow:hidden;
+        min-height:420px;
+      }
+
+      .mitre-tactic-empty{
+        opacity:.78;
+      }
+
+      .mitre-tactic-head{
+        position:sticky;
+        top:0;
+        z-index:2;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:8px;
+        padding:12px 12px;
+        background:linear-gradient(135deg,#243b53 0%,#304f72 100%);
+        color:#fff;
+      }
+
+      .mitre-tactic-title{
+        font-size:.84rem;
+        font-weight:950;
+        line-height:1.15;
+      }
+
+      .mitre-tactic-count{
+        min-width:28px;
+        height:24px;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        border-radius:999px;
+        background:#3f86d6;
+        color:#fff;
+        font-weight:950;
+        font-size:.78rem;
+      }
+
+      .mitre-tech-list{
+        padding:10px;
+        max-height:680px;
+        overflow-y:auto;
+      }
+
+      .mitre-tech-card{
+        position:relative;
+        background:#fff;
+        border:1px solid rgba(0,0,0,.08);
+        border-left:6px solid #15803d;
+        border-radius:16px;
+        padding:10px 10px 11px 10px;
+        margin-bottom:10px;
+        box-shadow:0 8px 18px rgba(0,0,0,.08);
+      }
+
+      .mitre-tech-card.low{ border-left-color:#15803d; }
+      .mitre-tech-card.medium{ border-left-color:#ca8a04; }
+      .mitre-tech-card.high{ border-left-color:#ea580c; }
+      .mitre-tech-card.critical{ border-left-color:#b91c1c; }
+
+      .mitre-tech-id{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        font-size:.76rem;
+        font-weight:950;
+        color:#1d4f8f;
+        background:#eaf3ff;
+        border:1px solid rgba(63,134,214,.24);
+        border-radius:999px;
+        padding:2px 9px;
+        margin-bottom:6px;
+      }
+
+      .mitre-tech-name{
+        font-size:.83rem;
+        font-weight:950;
+        color:#24364b;
+        line-height:1.2;
+        margin-bottom:6px;
+      }
+
+      .mitre-tech-meta{
+        display:flex;
+        flex-wrap:wrap;
+        gap:5px;
+        margin-bottom:7px;
+      }
+
+      .mitre-tech-meta span{
+        background:#f1f5f9;
+        border:1px solid rgba(0,0,0,.05);
+        color:#536274;
+        border-radius:999px;
+        padding:2px 7px;
+        font-size:.68rem;
+        font-weight:900;
+      }
+
+      .mitre-tech-vuln{
+        font-size:.74rem;
+        color:#5d6877;
+        line-height:1.25;
+        max-height:54px;
+        overflow:auto;
+      }
+
+      .mitre-impact{
+        margin-top:8px;
+        font-size:.72rem;
+        color:#536274;
+      }
+
+      .mitre-impact summary{
+        cursor:pointer;
+        font-weight:900;
+        color:#1d4f8f;
+      }
+
+      .mitre-impact div{
+        margin-top:6px;
+        background:#f8fafc;
+        border-radius:12px;
+        padding:8px;
+        line-height:1.25;
+      }
+
+      .mitre-empty-state{
+        min-height:120px;
+        border:1px dashed rgba(63,134,214,.32);
+        border-radius:16px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        text-align:center;
+        color:#8a96a8;
+        background:#f8fbff;
+        font-size:.8rem;
+        font-weight:850;
+        padding:12px;
+      }
+
+      @media (max-width:992px){
+        .mitre-summary-grid{
+          grid-template-columns:1fr;
+        }
+
+        .mitre-actions{
+          width:100%;
+          justify-content:flex-start;
+        }
+
+        .mitre-actions .btn{
+          width:100%;
+        }
+
+        .mitre-board{
+          grid-template-columns:repeat(14, minmax(230px, 1fr));
+          min-width:3340px;
+        }
+      }
+    </style>
     """
     return vuln_scan_shell(
         "Matriz MITRE ATT&CK",
-        render_template_string(body, activo=activo, matrix=matrix)
+        render_template_string(
+            body,
+            activo=activo,
+            matrix=matrix,
+            total_tecnicas=total_tecnicas,
+            tacticas_con_hallazgos=tacticas_con_hallazgos,
+            score_maximo=score_maximo
+        )
     )
 
 
@@ -70412,12 +70964,13 @@ def threat_model_asset_view():
 # Export Navigator JSON 
 # =====================
 
+@app.route('/modelamiento_amenazas/navigator.json')
 @app.route('/vulnerabilidades/threat_model/navigator.json')
 @login_required
 def threat_model_export_navigator():
     user = User.query.get(session.get('user_id'))
 
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Modelamiento de Amenazas"):
         flash("No tiene permiso para exportar la capa Navigator.", "danger")
         return redirect(url_for('menu'))
 
@@ -70447,6 +71000,7 @@ def threat_model_export_navigator():
 # Eliminar entrada individual — Modelamiento de Amenazas
 # ==========================
 
+@app.route('/modelamiento_amenazas/<int:id>/delete')
 @app.route('/vulnerabilidades/threat_model/<int:id>/delete')
 @login_required
 def threat_model_delete(id):
@@ -70456,7 +71010,7 @@ def threat_model_delete(id):
         flash("El rol Auditor no puede eliminar registros.", "danger")
         return redirect(url_for('threat_model_dashboard'))
 
-    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+    if user.role != 'admin' and not verificar_permiso(user, "Modelamiento de Amenazas"):
         flash("No tiene permiso para eliminar registros de modelamiento de amenazas.", "danger")
         return redirect(url_for('threat_model_dashboard'))
 
@@ -70465,6 +71019,14 @@ def threat_model_delete(id):
     item = ThreatModelEntry.query.get_or_404(id)
 
     try:
+        if existe_vulnerabilidad_asociada_a_threat_model(item):
+            flash(
+                "No se puede eliminar este registro de modelamiento de amenazas porque existe una vulnerabilidad asociada. "
+                "Primero elimine la vulnerabilidad desde la matriz de vulnerabilidades.",
+                "warning"
+            )
+            return redirect(url_for('threat_model_dashboard'))
+
         db.session.delete(item)
         db.session.commit()
         flash("Registro de modelamiento de amenazas eliminado correctamente.", "success")
@@ -70475,11 +71037,11 @@ def threat_model_delete(id):
 
     return redirect(url_for('threat_model_dashboard'))
 
-
 # ==========================
 # Eliminar por filtros — Modelamiento de Amenazas
 # ==========================
 
+@app.route('/modelamiento_amenazas/delete_filtrados', methods=['POST'])
 @app.route('/vulnerabilidades/threat_model/delete_filtrados', methods=['POST'])
 @login_required
 def threat_model_delete_filtrados():
@@ -70489,7 +71051,7 @@ def threat_model_delete_filtrados():
         flash("El rol Auditor no puede eliminar registros.", "danger")
         return redirect(url_for('threat_model_dashboard'))
 
-    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+    if user.role != 'admin' and not verificar_permiso(user, "Modelamiento de Amenazas"):
         flash("No tiene permiso para eliminar registros de modelamiento de amenazas.", "danger")
         return redirect(url_for('threat_model_dashboard'))
 
@@ -70529,13 +71091,42 @@ def threat_model_delete_filtrados():
         ))
 
     try:
-        total = len(registros)
+        eliminables = []
+        bloqueados = 0
 
         for item in registros:
+            if existe_vulnerabilidad_asociada_a_threat_model(item):
+                bloqueados += 1
+            else:
+                eliminables.append(item)
+
+        if not eliminables:
+            flash(
+                "No se eliminó ningún registro de modelamiento porque todos tienen vulnerabilidades asociadas. "
+                "Primero elimine las vulnerabilidades desde la matriz de vulnerabilidades.",
+                "warning"
+            )
+            return redirect(url_for(
+                'threat_model_dashboard',
+                activo=filtro_activo,
+                herramienta=filtro_herramienta,
+                severidad=filtro_severidad,
+                tecnica=filtro_tecnica
+            ))
+
+        for item in eliminables:
             db.session.delete(item)
 
         db.session.commit()
-        flash(f"Se eliminaron {total} registros de modelamiento de amenazas correctamente.", "success")
+
+        if bloqueados:
+            flash(
+                f"Se eliminaron {len(eliminables)} registro(s) de modelamiento sin vulnerabilidad asociada. "
+                f"No se eliminaron {bloqueados} porque tienen vulnerabilidades asociadas.",
+                "warning"
+            )
+        else:
+            flash(f"Se eliminaron {len(eliminables)} registros de modelamiento de amenazas correctamente.", "success")
 
     except Exception as e:
         db.session.rollback()
@@ -70543,11 +71134,11 @@ def threat_model_delete_filtrados():
 
     return redirect(url_for('threat_model_dashboard'))
 
-
 # ==========================
 # Eliminar individual — No Mapeados MITRE
 # ==========================
 
+@app.route('/modelamiento_amenazas/no_mapeados/<int:id>/delete')
 @app.route('/vulnerabilidades/threat_model/unmapped/<int:id>/delete')
 @login_required
 def threat_model_unmapped_delete(id):
@@ -70557,7 +71148,7 @@ def threat_model_unmapped_delete(id):
         flash("El rol Auditor no puede eliminar registros.", "danger")
         return redirect(url_for('threat_model_unmapped_view'))
 
-    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+    if user.role != 'admin' and not verificar_permiso(user, "Modelamiento de Amenazas"):
         flash("No tiene permiso para eliminar hallazgos no mapeados.", "danger")
         return redirect(url_for('threat_model_unmapped_view'))
 
@@ -70578,6 +71169,7 @@ def threat_model_unmapped_delete(id):
 # Eliminar por filtros — No Mapeados MITRE
 # ==========================
 
+@app.route('/modelamiento_amenazas/no_mapeados/delete_filtrados', methods=['POST'])
 @app.route('/vulnerabilidades/threat_model/unmapped/delete_filtrados', methods=['POST'])
 @login_required
 def threat_model_unmapped_delete_filtrados():
@@ -70587,7 +71179,7 @@ def threat_model_unmapped_delete_filtrados():
         flash("El rol Auditor no puede eliminar registros.", "danger")
         return redirect(url_for('threat_model_unmapped_view'))
 
-    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+    if user.role != 'admin' and not verificar_permiso(user, "Modelamiento de Amenazas"):
         flash("No tiene permiso para eliminar hallazgos no mapeados.", "danger")
         return redirect(url_for('threat_model_unmapped_view'))
 
@@ -78546,7 +79138,69 @@ def jira_buscar_usuarios_asignables(query_text=""):
 
     return resp.json() or []
 
-def jira_crear_issue_plan(plan_id: int, assignee_account_id=None, assignee_name=None):
+
+def jira_normalizar_usuario_asignable(usuario):
+    """Convierte un usuario retornado por Jira en una estructura simple."""
+    if not usuario:
+        return {
+            "accountId": "",
+            "displayName": ""
+        }
+
+    return {
+        "accountId": usuario.get("accountId") or "",
+        "displayName": usuario.get("displayName") or usuario.get("emailAddress") or usuario.get("accountId") or ""
+    }
+
+
+def jira_resolver_nombre_usuario(account_id: str, query_text: str = "") -> str:
+    """Obtiene el nombre visible de un usuario Jira a partir del accountId."""
+    if not account_id:
+        return ""
+
+    try:
+        usuarios = jira_buscar_usuarios_asignables(query_text or "")
+        for usuario in usuarios:
+            if usuario.get("accountId") == account_id:
+                return usuario.get("displayName") or usuario.get("emailAddress") or account_id
+    except Exception:
+        pass
+
+    return ""
+
+
+def cargar_usuarios_jira_para_formulario(query_text: str = ""):
+    """Carga usuarios asignables de Jira sin romper el formulario si Jira no está configurado."""
+    try:
+        usuarios = jira_buscar_usuarios_asignables(query_text or "")
+        return [jira_normalizar_usuario_asignable(u) for u in usuarios]
+    except Exception as e:
+        print("ADVERTENCIA: No fue posible cargar usuarios Jira:", e)
+        return []
+
+
+def asignar_usuario_jira_a_plan(plan, account_id: str, assignee_name: str = ""):
+    """
+    Guarda en el plan el usuario Jira seleccionado para esa remediación.
+    No usa un correo global de asignación; cada plan conserva su propio accountId.
+    """
+    if not plan:
+        return
+
+    account_id = (account_id or "").strip()
+    assignee_name = (assignee_name or "").strip()
+
+    plan.jira_account_id = account_id or None
+
+    if account_id:
+        plan.jira_assignee_name = assignee_name or jira_resolver_nombre_usuario(
+            account_id,
+            getattr(plan, "responsable", "") or ""
+        ) or None
+    else:
+        plan.jira_assignee_name = None
+
+def jira_crear_issue_plan(plan_id: int):
     cfg = jira_get_runtime_config()
 
     plan = PlanRemediacion.query.get_or_404(plan_id)
@@ -78578,9 +79232,11 @@ def jira_crear_issue_plan(plan_id: int, assignee_account_id=None, assignee_name=
     if plan.fecha_remediacion:
         payload["fields"]["duedate"] = plan.fecha_remediacion.strftime("%Y-%m-%d")
 
-    if assignee_account_id:
+    # Asignación por cada punto de remediación.
+    # NO se usa un correo global para todos los tickets.
+    if plan.jira_account_id:
         payload["fields"]["assignee"] = {
-            "accountId": assignee_account_id
+            "accountId": plan.jira_account_id
         }
 
     url = f"{cfg['base_url']}/rest/api/3/issue"
@@ -78598,7 +79254,7 @@ def jira_crear_issue_plan(plan_id: int, assignee_account_id=None, assignee_name=
             "Error creando issue Jira: "
             f"{resp.status_code} - {resp.text} | payload={json.dumps(payload, ensure_ascii=False)}"
         )
-    
+
     data = resp.json()
     issue_key = data.get("key")
     issue_id = data.get("id")
@@ -78608,7 +79264,13 @@ def jira_crear_issue_plan(plan_id: int, assignee_account_id=None, assignee_name=
     plan.jira_issue_id = issue_id
     plan.jira_issue_url = issue_url
     plan.jira_status = "Creado"
-    plan.jira_assignee_name = assignee_name or None
+
+    if plan.jira_account_id and not plan.jira_assignee_name:
+        plan.jira_assignee_name = jira_resolver_nombre_usuario(
+            plan.jira_account_id,
+            plan.responsable or ""
+        ) or plan.jira_account_id
+
     plan.jira_synced_at = datetime.utcnow()
 
     db.session.commit()
@@ -78646,6 +79308,8 @@ def jira_actualizar_issue_plan(plan_id: int):
         payload["fields"]["assignee"] = {
             "accountId": plan.jira_account_id
         }
+    else:
+        payload["fields"]["assignee"] = None
 
     url = f"{cfg['base_url']}/rest/api/3/issue/{plan.jira_issue_key}"
 
@@ -78801,6 +79465,8 @@ def plan_remediacion_new():
         VulnerabilidadRegistro.codigo.asc()
     ).all()
 
+    jira_users = cargar_usuarios_jira_para_formulario()
+
     vuln_id_prefill = request.args.get('vulnerabilidad_id', type=int)
     accion_correctiva_ai = (request.args.get('accion_correctiva_ai') or '').strip()
     prioridad_ai = (request.args.get('prioridad_ai') or '').strip()
@@ -78816,6 +79482,8 @@ def plan_remediacion_new():
         estado = (request.form.get('estado') or '').strip()
         fecha_objetivo_str = (request.form.get('fecha_objetivo') or '').strip()
         fecha_remediacion_str = (request.form.get('fecha_remediacion') or '').strip()
+        jira_account_id = (request.form.get('jira_account_id') or '').strip()
+        jira_assignee_name = (request.form.get('jira_assignee_name') or '').strip()
 
         fecha_objetivo = None
         if fecha_objetivo_str:
@@ -78847,6 +79515,13 @@ def plan_remediacion_new():
             recursos_necesarios=recursos_necesarios,
             estado=estado
         )
+
+        asignar_usuario_jira_a_plan(
+            it,
+            jira_account_id,
+            jira_assignee_name
+        )
+
         db.session.add(it)
         db.session.flush()
 
@@ -78955,6 +79630,22 @@ def plan_remediacion_new():
                 </select>
               </div>
 
+              <div class="col-md-8">
+                <label class="form-label">Asignado en Jira para esta remediación</label>
+                <select name="jira_account_id" id="jira_account_id" class="form-select" onchange="actualizarNombreJira(this)">
+                  <option value="">-- Sin asignar en Jira --</option>
+                  {% for ju in jira_users %}
+                    <option value="{{ ju.accountId }}" data-name="{{ ju.displayName }}">
+                      {{ ju.displayName }}
+                    </option>
+                  {% endfor %}
+                </select>
+                <input type="hidden" name="jira_assignee_name" id="jira_assignee_name" value="">
+                <div class="form-text">
+                  Este usuario se usará solo para el ticket Jira de esta remediación.
+                </div>
+              </div>
+
             </div>
 
             <div class="remadd-bottom-actions">
@@ -78982,6 +79673,14 @@ def plan_remediacion_new():
           return;
         }
         window.location.href = "/plan_remediacion/ai_sugerir/" + vulnId;
+      }
+
+      function actualizarNombreJira(select){
+        const opt = select.options[select.selectedIndex];
+        const hidden = document.getElementById('jira_assignee_name');
+        if(hidden){
+          hidden.value = opt ? (opt.getAttribute('data-name') || '') : '';
+        }
       }
     </script>
 
@@ -79238,7 +79937,8 @@ def plan_remediacion_new():
         accion_correctiva_ai=accion_correctiva_ai,
         prioridad_ai=prioridad_ai,
         recursos_ai=recursos_ai,
-        responsable_ai=responsable_ai
+        responsable_ai=responsable_ai,
+        jira_users=jira_users
     )
     return render_template_string(BASE, content=Markup(inner))
 
@@ -79406,7 +80106,8 @@ def plan_remediacion_matriz():
                 <colgroup>
                   <col style="width: 10%;">
                   <col style="width: 28%;">
-                  <col style="width: 16%;">
+                  <col style="width: 14%;">
+                  <col style="width: 14%;">
                   <col style="width: 12%;">
                   <col style="width: 12%;">
                   <col style="width: 10%;">
@@ -79418,6 +80119,7 @@ def plan_remediacion_matriz():
                     <th>ID Vulnerabilidad</th>
                     <th>Acción correctiva</th>
                     <th>Responsable</th>
+                    <th>Asignado Jira</th>
                     <th>Prioridad</th>
                     <th>Fecha objetivo</th>
                     <th>Estado</th>
@@ -79436,6 +80138,8 @@ def plan_remediacion_matriz():
                     </td>
 
                     <td>{{ pr.responsable or '—' }}</td>
+
+                    <td>{{ pr.jira_assignee_name or '—' }}</td>
 
                     <td class="text-center">
                       {% if pr.prioridad == 'Crítica' %}
@@ -79512,7 +80216,7 @@ def plan_remediacion_matriz():
 
                   {% if items|length == 0 %}
                     <tr>
-                      <td colspan="7" class="text-center text-muted py-5">
+                      <td colspan="8" class="text-center text-muted py-5">
                         No se encontraron registros con los filtros aplicados.
                       </td>
                     </tr>
@@ -80334,6 +81038,8 @@ def plan_remediacion_edit(id):
         VulnerabilidadRegistro.codigo.asc()
     ).all()
 
+    jira_users = cargar_usuarios_jira_para_formulario(item.responsable or "")
+
     if request.method == 'POST':
         vuln_id = request.form.get('vulnerabilidad_id', type=int)
         accion_correctiva = (request.form.get('accion_correctiva') or '').strip()
@@ -80343,6 +81049,8 @@ def plan_remediacion_edit(id):
         estado = (request.form.get('estado') or '').strip()
         fecha_objetivo_str = (request.form.get('fecha_objetivo') or '').strip()
         fecha_remediacion_str = (request.form.get('fecha_remediacion') or '').strip()
+        jira_account_id = (request.form.get('jira_account_id') or '').strip()
+        jira_assignee_name = (request.form.get('jira_assignee_name') or '').strip()
 
         fecha_objetivo = None
         if fecha_objetivo_str:
@@ -80372,6 +81080,12 @@ def plan_remediacion_edit(id):
         item.fecha_remediacion = fecha_remediacion
         item.recursos_necesarios = recursos_necesarios
         item.estado = estado
+
+        asignar_usuario_jira_a_plan(
+            item,
+            jira_account_id,
+            jira_assignee_name
+        )
 
         sincronizar_vulnerabilidad_desde_plan(item)
 
@@ -80484,6 +81198,27 @@ def plan_remediacion_edit(id):
                 </select>
               </div>
 
+              <div class="col-md-8">
+                <label class="form-label">Asignado en Jira para esta remediación</label>
+                <select name="jira_account_id" id="jira_account_id" class="form-select" onchange="actualizarNombreJira(this)">
+                  <option value="">-- Sin asignar en Jira --</option>
+                  {% for ju in jira_users %}
+                    <option value="{{ ju.accountId }}"
+                            data-name="{{ ju.displayName }}"
+                            {% if item.jira_account_id == ju.accountId %}selected{% endif %}>
+                      {{ ju.displayName }}
+                    </option>
+                  {% endfor %}
+                </select>
+                <input type="hidden"
+                       name="jira_assignee_name"
+                       id="jira_assignee_name"
+                       value="{{ item.jira_assignee_name or '' }}">
+                <div class="form-text">
+                  Este usuario se usará solo para el ticket Jira de esta remediación.
+                </div>
+              </div>
+
             </div>
 
             <div class="remedit-bottom-actions">
@@ -80501,6 +81236,23 @@ def plan_remediacion_edit(id):
         </div>
       </div>
     </div>
+
+    <script>
+      function actualizarNombreJira(select){
+        const opt = select.options[select.selectedIndex];
+        const hidden = document.getElementById('jira_assignee_name');
+        if(hidden){
+          hidden.value = opt ? (opt.getAttribute('data-name') || '') : '';
+        }
+      }
+
+      document.addEventListener('DOMContentLoaded', function(){
+        const sel = document.getElementById('jira_account_id');
+        if(sel){
+          actualizarNombreJira(sel);
+        }
+      });
+    </script>
 
     <style>
       body{
@@ -80744,7 +81496,12 @@ def plan_remediacion_edit(id):
       }
     </style>
     """
-    inner = render_template_string(html, item=item, vulnerabilidades=vulnerabilidades)
+    inner = render_template_string(
+        html,
+        item=item,
+        vulnerabilidades=vulnerabilidades,
+        jira_users=jira_users
+    )
     return render_template_string(BASE, content=Markup(inner))
 
 # ==========================
@@ -80882,16 +81639,19 @@ def plan_remediacion_jira(id):
         jira_assignee_name = (request.form.get('jira_assignee_name') or '').strip()
         jira_account_id = (request.form.get('jira_account_id') or '').strip()
 
-        if not jira_assignee_name:
-            flash("Debe indicar el responsable que resolverá la vulnerabilidad en Jira.", "danger")
+        if not jira_account_id:
+            flash("Debe seleccionar el usuario Jira asignado para esta remediación.", "danger")
             return redirect(url_for('plan_remediacion_jira', id=id))
 
         try:
-            res = jira_crear_issue_plan(
-                plan_id=plan.id,
-                assignee_account_id=jira_account_id or None,
-                assignee_name=jira_assignee_name
+            asignar_usuario_jira_a_plan(
+                plan,
+                jira_account_id,
+                jira_assignee_name
             )
+            db.session.commit()
+
+            res = jira_crear_issue_plan(plan.id)
 
             if res.get("already_exists"):
                 flash(f"El plan ya tiene ticket Jira asociado: {res.get('issue_key')}", "info")
@@ -80904,12 +81664,8 @@ def plan_remediacion_jira(id):
             flash(f"No se pudo crear el ticket en Jira: {str(e)}", "danger")
             return redirect(url_for('plan_remediacion_matriz'))
 
-    # GET: cuadro previo para preguntar responsable
-    usuarios_jira = []
-    try:
-        usuarios_jira = jira_buscar_usuarios_asignables(plan.responsable or "")
-    except Exception:
-        usuarios_jira = []
+    # GET: usuarios asignables para este punto de remediación
+    usuarios_jira = cargar_usuarios_jira_para_formulario(plan.responsable or "")
 
     html = """
     <div class="jira-shell">
@@ -80954,22 +81710,28 @@ def plan_remediacion_jira(id):
                 </div>
               </div>
 
-              <div class="col-md-6">
-                <label class="form-label">Responsable que resolverá en Jira</label>
-                <input name="jira_assignee_name"
-                       class="form-control"
-                       required
-                       value="{{ plan.responsable or '' }}"
-                       placeholder="Ej: Juan Pérez">
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Account ID Jira (si lo conoces)</label>
-                <input name="jira_account_id"
-                       class="form-control"
-                       placeholder="Ej: 5b10a2844c20165700ede21g">
+              <div class="col-md-12">
+                <label class="form-label">Asignar este ticket Jira a</label>
+                <select name="jira_account_id"
+                        id="jira_account_id"
+                        class="form-select"
+                        required
+                        onchange="actualizarNombreJira(this)">
+                  <option value="">-- Seleccione usuario Jira asignable --</option>
+                  {% for u in usuarios_jira %}
+                    <option value="{{ u.accountId }}"
+                            data-name="{{ u.displayName }}"
+                            {% if plan.jira_account_id == u.accountId %}selected{% endif %}>
+                      {{ u.displayName }}
+                    </option>
+                  {% endfor %}
+                </select>
+                <input type="hidden"
+                       name="jira_assignee_name"
+                       id="jira_assignee_name"
+                       value="{{ plan.jira_assignee_name or '' }}">
                 <small class="text-muted">
-                  Si lo indicas, el ticket quedará asignado directamente en Jira.
+                  La asignación queda guardada solo para este punto de remediación.
                 </small>
               </div>
 
@@ -80984,7 +81746,6 @@ def plan_remediacion_jira(id):
                     <thead class="jira-table-head">
                       <tr>
                         <th>Nombre</th>
-                        <th>Email</th>
                         <th>Account ID</th>
                       </tr>
                     </thead>
@@ -80992,7 +81753,6 @@ def plan_remediacion_jira(id):
                       {% for u in usuarios_jira %}
                       <tr>
                         <td>{{ u.displayName or '—' }}</td>
-                        <td>{{ u.emailAddress or '—' }}</td>
                         <td class="small">{{ u.accountId or '—' }}</td>
                       </tr>
                       {% endfor %}
@@ -81019,6 +81779,23 @@ def plan_remediacion_jira(id):
         </div>
       </div>
     </div>
+
+    <script>
+      function actualizarNombreJira(select){
+        const opt = select.options[select.selectedIndex];
+        const hidden = document.getElementById('jira_assignee_name');
+        if(hidden){
+          hidden.value = opt ? (opt.getAttribute('data-name') || '') : '';
+        }
+      }
+
+      document.addEventListener('DOMContentLoaded', function(){
+        const sel = document.getElementById('jira_account_id');
+        if(sel){
+          actualizarNombreJira(sel);
+        }
+      });
+    </script>
 
     <style>
       body{
@@ -86573,7 +87350,7 @@ def cuestionarios_proveedores_ficha_proponente(detalle_id):
             </div>
 
             <div class="col-12">
-              <div class="proficha-section-title">Reputación / IA</div>
+              <div class="proficha-section-title">Reputación</div>
               <div class="proficha-text-box">
                 {{ detalle.explicacion_reputacion.replace('\\n', '<br>')|safe }}
               </div>
