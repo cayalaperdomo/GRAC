@@ -62580,54 +62580,84 @@ def ejecutar_zap(run_id, cfg, target: str, run_dir: str):
     out_html = scan_output_file(run_dir, "zap_scan", "html")
     out_txt = scan_output_file(run_dir, "zap_scan", "txt")
 
+    os.makedirs(run_dir, exist_ok=True)
+
+    docker_image = "ghcr.io/zaproxy/zaproxy:stable"
+
     if cfg.modo == "local":
         cmd = [
-            cfg.ruta_zap or "/usr/share/zaproxy/zap.sh",
-            "-cmd",
-            "-quickurl", target,
-            "-quickout", out_html
+            "bash",
+            "-lc",
+            (
+                f"rm -f {shlex.quote(out_html)} {shlex.quote(out_txt)}; "
+                f"echo '[OWASP_ZAP] Ejecutando escaneo NORMAL con Docker ZAP' > {shlex.quote(out_txt)}; "
+
+                f"docker run --rm "
+                f"-v {shlex.quote(run_dir)}:/zap/wrk/:rw "
+                f"{docker_image} "
+                f"zap-baseline.py "
+                f"-t {shlex.quote(target)} "
+                f"-r zap_scan.html "
+                f"-I "
+                f">> {shlex.quote(out_txt)} 2>&1; "
+
+                f"if [ ! -f {shlex.quote(out_html)} ]; then "
+                f"echo '<html><body><h2>OWASP ZAP no generó reporte HTML</h2><pre>' > {shlex.quote(out_html)}; "
+                f"cat {shlex.quote(out_txt)} >> {shlex.quote(out_html)} 2>/dev/null; "
+                f"echo '</pre></body></html>' >> {shlex.quote(out_html)}; "
+                f"fi; "
+
+                f"ls -lh {shlex.quote(out_html)} {shlex.quote(out_txt)} 2>&1"
+            )
         ]
 
         res = ejecutar_comando_scan(run_id, cfg, cmd)
 
-        with open(out_txt, "w", encoding="utf-8") as f:
-            f.write((res.get("stdout") or "") + "\n" + (res.get("stderr") or ""))
-
-        return res
+        return {
+            "returncode": res.get("returncode", 0),
+            "stdout": res.get("stdout") or "",
+            "stderr": res.get("stderr") or ""
+        }
 
     remote_base = (cfg.ruta_base_remota or "/tmp").rstrip("/")
-    remote_html = f"{remote_base}/zap_scan_{run_id}.html"
-    remote_txt = f"{remote_base}/zap_scan_{run_id}.txt"
+    remote_dir = f"{remote_base}/zap_normal_scan_{run_id}"
+    remote_html = f"{remote_dir}/zap_scan.html"
+    remote_txt = f"{remote_dir}/zap_scan.txt"
 
     remote_cmd = (
+        f"mkdir -p {shlex.quote(remote_dir)}; "
         f"rm -f {shlex.quote(remote_html)} {shlex.quote(remote_txt)}; "
-        f"if command -v zap-baseline.py >/dev/null 2>&1; then "
-        f"zap-baseline.py -t {shlex.quote(target)} -r {shlex.quote(remote_html)} "
-        f"> {shlex.quote(remote_txt)} 2>&1; "
-        f"else "
-        f"{shlex.quote(cfg.ruta_zap or '/usr/share/zaproxy/zap.sh')} "
-        f"-cmd -quickurl {shlex.quote(target)} -quickout {shlex.quote(remote_html)} "
-        f"> {shlex.quote(remote_txt)} 2>&1; "
-        f"fi; "
-        f"ls -l {shlex.quote(remote_html)} {shlex.quote(remote_txt)} 2>&1"
-    )
 
-    cmd_local_ref = [
-        cfg.ruta_zap or "/usr/share/zaproxy/zap.sh",
-        "-cmd",
-        "-quickurl", target,
-        "-quickout", out_html
-    ]
+        f"echo '[OWASP_ZAP] Ejecutando escaneo NORMAL con Docker ZAP remoto' > {shlex.quote(remote_txt)}; "
+        f"echo '[OWASP_ZAP] Target: {shlex.quote(target)}' >> {shlex.quote(remote_txt)}; "
+        f"docker images | grep zaproxy >> {shlex.quote(remote_txt)} 2>&1 || true; "
+
+        f"docker run --rm "
+        f"-v {shlex.quote(remote_dir)}:/zap/wrk/:rw "
+        f"{docker_image} "
+        f"zap-baseline.py "
+        f"-t {shlex.quote(target)} "
+        f"-r zap_scan.html "
+        f"-I "
+        f">> {shlex.quote(remote_txt)} 2>&1; "
+
+        f"if [ ! -f {shlex.quote(remote_html)} ]; then "
+        f"echo '<html><body><h2>OWASP ZAP no generó reporte HTML</h2><pre>' > {shlex.quote(remote_html)}; "
+        f"cat {shlex.quote(remote_txt)} >> {shlex.quote(remote_html)} 2>/dev/null; "
+        f"echo '</pre></body></html>' >> {shlex.quote(remote_html)}; "
+        f"fi; "
+
+        f"ls -lh {shlex.quote(remote_html)} {shlex.quote(remote_txt)} 2>&1"
+    )
 
     res = ejecutar_comando_scan(
         run_id,
         cfg,
-        cmd_local_ref,
+        ["bash", "-lc", "echo OWASP ZAP normal remoto"],
         remote_cmd=remote_cmd
     )
 
-    pull_txt = scp_from_remote(cfg, remote_txt, out_txt)
-
+    scp_from_remote(cfg, remote_txt, out_txt)
     pull_html = scp_from_remote(cfg, remote_html, out_html)
 
     if pull_html["returncode"] != 0:
@@ -62635,7 +62665,7 @@ def ejecutar_zap(run_id, cfg, target: str, run_dir: str):
             "returncode": 1,
             "stdout": res.get("stdout") or "",
             "stderr": (
-                "No se pudo traer salida HTML de ZAP. "
+                "No se pudo traer reporte HTML de OWASP ZAP normal. "
                 f"Detalle SCP: {pull_html.get('stderr') or ''}\n\n"
                 f"Salida remota:\n{res.get('stdout') or ''}\n{res.get('stderr') or ''}"
             )
@@ -62647,142 +62677,112 @@ def ejecutar_zap(run_id, cfg, target: str, run_dir: str):
         "stderr": res.get("stderr") or ""
     }
 
+
 def parse_zap_findings(run_dir: str):
-
     findings = []
-
     html_file = scan_output_file(run_dir, "zap_scan", "html")
+    txt_file = scan_output_file(run_dir, "zap_scan", "txt")
 
-    if not os.path.exists(html_file):
-        return findings
+    if os.path.exists(html_file):
+        try:
+            with open(html_file, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
 
-    try:
-
-        with open(html_file, "r", encoding="utf-8", errors="ignore") as f:
-            content = f.read()
-
-        # =========================
-        # Buscar bloques de alertas
-        # =========================
-
-        patrones = re.findall(
-            r'<h3>(.*?)</h3>.*?Risk.*?<td.*?>(.*?)</td>.*?Description</td>\s*<td.*?>(.*?)</td>',
-            content,
-            re.I | re.S
-        )
-
-        for titulo, risk, descripcion in patrones:
-
-            titulo = re.sub(r'<.*?>', '', titulo).strip()
-
-            titulo = re.sub(
-                r'Generated on.*',
-                '',
-                titulo,
-                flags=re.I | re.S
-            ).strip()
-
-            if not titulo:
-                titulo = "OWASP ZAP Finding"
-            risk = re.sub(r'<.*?>', '', risk).strip()
-            descripcion = html.unescape(
-                re.sub(r'<.*?>', '', descripcion)
-            ).strip()
-
-            sev = severity_from_text(risk)
-
-            findings.append({
-                "fuente": "owasp_zap",
-                "titulo": titulo or f"OWASP ZAP - {risk}",
-                "descripcion": descripcion[:4000],
-                "severidad": sev,
-                "cvss": None,
-                "cve": extraer_cves_desde_texto(descripcion),
-                "puerto": None,
-                "protocolo": "http/https",
-                "servicio": "web",
-                "evidencia": f"Hallazgo identificado por OWASP ZAP ({risk})",
-                "recomendacion_base": (
-                    "Validar el hallazgo reportado por OWASP ZAP "
-                    "y aplicar remediación de seguridad."
-                )
-            })
-
-        # =========================
-        # Parser alterno moderno
-        # =========================
-
-        if not findings:
-
-            bloques = re.findall(
-                r'alert-detail">(.*?)</table>',
+            patrones = re.findall(
+                r'<h3[^>]*>(.*?)</h3>.*?Risk.*?<td.*?>(.*?)</td>.*?Description</td>\s*<td.*?>(.*?)</td>',
                 content,
                 re.I | re.S
             )
 
-            for bloque in bloques:
+            for titulo, risk, descripcion in patrones:
+                titulo = html.unescape(re.sub(r'<.*?>', '', titulo)).strip()
+                risk = html.unescape(re.sub(r'<.*?>', '', risk)).strip()
+                descripcion = html.unescape(re.sub(r'<.*?>', ' ', descripcion)).strip()
 
-                titulo_match = re.search(
-                    r'alert-title">(.*?)<',
-                    bloque,
-                    re.I | re.S
-                )
+                titulo = re.sub(r'Generated on.*', '', titulo, flags=re.I | re.S).strip()
 
-                risk_match = re.search(
-                    r'Risk.*?<td.*?>(.*?)</td>',
-                    bloque,
-                    re.I | re.S
-                )
-
-                desc_match = re.search(
-                    r'Description.*?<td.*?>(.*?)</td>',
-                    bloque,
-                    re.I | re.S
-                )
-
-                titulo = titulo_match.group(1).strip() if titulo_match else "OWASP ZAP Finding"
-                risk = risk_match.group(1).strip() if risk_match else "Media"
-                descripcion = desc_match.group(1).strip() if desc_match else ""
-
-                titulo = re.sub(r'<.*?>', '', titulo)
-                risk = re.sub(r'<.*?>', '', risk)
-                descripcion = re.sub(r'<.*?>', '', descripcion)
-
-                sev = severity_from_text(risk)
+                if not titulo:
+                    titulo = "OWASP ZAP Finding"
 
                 findings.append({
                     "fuente": "owasp_zap",
-                    "titulo": titulo,
-                    "descripcion": descripcion[:4000],
-                    "severidad": sev,
+                    "titulo": f"OWASP ZAP: {titulo}"[:500],
+                    "descripcion": descripcion[:5000],
+                    "severidad": severity_from_text(risk),
                     "cvss": None,
                     "cve": extraer_cves_desde_texto(descripcion),
                     "puerto": None,
                     "protocolo": "http/https",
                     "servicio": "web",
                     "evidencia": f"Hallazgo identificado por OWASP ZAP ({risk})",
-                    "recomendacion_base": (
-                        "Aplicar medidas de remediación al hallazgo detectado."
-                    )
+                    "recomendacion_base": "Validar el hallazgo reportado por OWASP ZAP y aplicar remediación."
                 })
 
-    except Exception as e:
+        except Exception as e:
+            findings.append({
+                "fuente": "owasp_zap",
+                "titulo": "Error interpretando OWASP ZAP",
+                "descripcion": str(e),
+                "severidad": "Media",
+                "cvss": None,
+                "cve": None,
+                "puerto": None,
+                "protocolo": "http/https",
+                "servicio": "web",
+                "evidencia": "No fue posible interpretar el reporte HTML.",
+                "recomendacion_base": "Validar el parser de OWASP ZAP."
+            })
 
-        findings.append({
-            "fuente": "owasp_zap",
-            "titulo": "Error interpretando OWASP ZAP",
-            "descripcion": str(e),
-            "severidad": "Media",
-            "cvss": None,
-            "cve": None,
-            "puerto": None,
-            "protocolo": None,
-            "servicio": "web",
-            "evidencia": "No fue posible interpretar el reporte.",
-            "recomendacion_base": "Validar el parser de OWASP ZAP."
-        })
+    if not findings and os.path.exists(txt_file):
+        try:
+            with open(txt_file, "r", encoding="utf-8", errors="ignore") as f:
+                lines = [x.strip() for x in f.readlines() if x.strip()]
 
-    return findings
+            for ln in lines:
+                low = ln.lower()
+
+                if any(x in low for x in [
+                    "warn-new:",
+                    "fail-new:",
+                    "x-frame-options",
+                    "content-security-policy",
+                    "cookie",
+                    "missing",
+                    "server leaks",
+                    "strict-transport-security"
+                ]):
+                    findings.append({
+                        "fuente": "owasp_zap",
+                        "titulo": f"OWASP ZAP: {ln[:180]}",
+                        "descripcion": ln[:1000],
+                        "severidad": severity_from_text(ln),
+                        "cvss": None,
+                        "cve": extraer_cves_desde_texto(ln),
+                        "puerto": None,
+                        "protocolo": "http/https",
+                        "servicio": "web",
+                        "evidencia": ln[:1500],
+                        "recomendacion_base": "Validar el hallazgo reportado por OWASP ZAP y aplicar remediación."
+                    })
+        except Exception:
+            pass
+
+    unicos = []
+    vistos = set()
+
+    for h in findings:
+        key = (
+            h.get("titulo"),
+            h.get("evidencia")
+        )
+
+        if key in vistos:
+            continue
+
+        vistos.add(key)
+        unicos.append(h)
+
+    return unicos
 
 def crear_vulnerabilidad_desde_hallazgo(run, hallazgo):
     item = VulnerabilidadRegistro(
@@ -64586,15 +64586,25 @@ def vulnerabilidades_matriz():
 
           <!-- TABLA -->
           <div class="table-responsive">
-            <table class="table table-hover align-middle">
+            <table class="table table-hover align-middle vuln-table">
+
+              <colgroup>
+                <col style="width:6%;">
+                <col style="width:11%;">
+                <col style="width:14%;">
+                <col style="width:34%;">
+                <col style="width:12%;">
+                <col style="width:11%;">
+                <col style="width:8%;">
+                <col style="width:14%;">
+              </colgroup>
+
               <thead class="table-dark">
                 <tr>
                   <th>ID</th>
                   <th>Código</th>
                   <th>Activo</th>
                   <th>Descripción</th>
-                  <th>CVE</th>
-                  <th>CVSS</th>
                   <th>Clasificación</th>
                   <th>Responsable</th>
                   <th>Estado</th>
@@ -64608,9 +64618,7 @@ def vulnerabilidades_matriz():
                   <td>{{ it.id }}</td>
                   <td>{{ it.codigo or '' }}</td>
                   <td>{{ it.activo or '' }}</td>
-                  <td>{{ it.descripcion_vulnerabilidad or '' }}</td>
-                  <td>{{ it.cve or '' }}</td>
-                  <td>{{ it.cvss or '' }}</td>
+                  <td class="desc-cell">{{ it.descripcion_vulnerabilidad or '' }}</td>
                   <td>{{ it.clasificacion or '' }}</td>
                   <td>{{ it.responsable or '' }}</td>
                   <td>{{ it.estado or '' }}</td>
@@ -64643,7 +64651,7 @@ def vulnerabilidades_matriz():
 
                 {% else %}
                 <tr>
-                  <td colspan="10" class="text-center text-muted py-4">
+                  <td colspan="8" class="text-center text-muted py-4">
                     No se encontraron registros.
                   </td>
                 </tr>
@@ -64927,14 +64935,14 @@ def vulnerabilidades_matriz():
         max-width:100%;
       }
 
-      .table{
-        min-width:1200px;
+      .vuln-table{
+        min-width:1180px;
         table-layout:fixed;
         margin-bottom:0;
         background:#ffffff;
       }
 
-      .table thead th{
+      .vuln-table thead th{
         position:sticky;
         top:0;
         z-index:10;
@@ -64949,26 +64957,32 @@ def vulnerabilidades_matriz():
         padding:9px 8px;
       }
 
-      .table th,
-      .table td{
+      .vuln-table th,
+      .vuln-table td{
         vertical-align:top;
         font-size:.78rem;
         padding:9px 8px;
         white-space:normal;
-        word-break:break-word;
-        overflow-wrap:anywhere;
+        word-break:normal;
+        overflow-wrap:break-word;
       }
 
-      .table td{
+      .vuln-table td{
         border-bottom:1px solid #e5edf7;
         color:#1f2937;
       }
 
-      .table tbody tr:nth-child(even){
+      .desc-cell{
+        min-width:360px;
+        line-height:1.45;
+        text-align:left;
+      }
+
+      .vuln-table tbody tr:nth-child(even){
         background:#f8fbff;
       }
 
-      .table-hover tbody tr:hover{
+      .vuln-table tbody tr:hover{
         background:#eef6ff;
       }
 
@@ -65163,17 +65177,16 @@ def vulnerabilidades_matriz():
 
         return false;
       }
+
       {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            <script>
-              document.addEventListener('DOMContentLoaded', function(){
-                {% for category, message in messages %}
-                  alert({{ message|tojson }});
-                {% endfor %}
-              });
-            </script>
-          {% endif %}
-        {% endwith %}
+        {% if messages %}
+          document.addEventListener('DOMContentLoaded', function(){
+            {% for category, message in messages %}
+              alert({{ message|tojson }});
+            {% endfor %}
+          });
+        {% endif %}
+      {% endwith %}
     </script>
     """
 
@@ -84202,7 +84215,7 @@ def cuestionarios_proveedores():
           <div class="propia-section-title">Evaluar grupo de proveedores</div>
           <p class="mb-2">
             Primero sube todos los cuestionarios de los proponentes. Luego, con este botón,
-            se calculará el puntaje de cada uno según sus respuestas y se estimará su reputación con IA.
+            se calculará el puntaje de cada uno según sus respuestas y se estimará su reputación.
           </p>
 
           <form method="post" id="form-evaluar-proveedores" data-no-progress="true">
@@ -84728,7 +84741,7 @@ def cuestionarios_proveedores_recomendado():
 
               <div class="col-12">
                 <div class="propreco-reason-box">
-                  <strong>Motivo (reputación / IA):</strong><br>
+                  <strong>Motivo (reputación):</strong><br>
                   {{ mejor.evaluacion.explicacion_reputacion.replace('\\n', '<br>')|safe }}
                 </div>
               </div>
@@ -142157,18 +142170,9 @@ def listas_restrictivas_historial_proveedor(proveedor_id):
 # ==========================================================================================================================================
 
 # ==========================================================================================================================================
-#            SCORECARD PROVEEDORES INDEPENDIENTE - DNS HEALTH / IP REPUTATION / ESCANEO KALI PROPIO
+#                  MODULO SCORECARD PROVEEDORES INDEPENDIENTE - DNS HEALTH / IP REPUTATION / ESCANEO KALI PROPIO
 # ==========================================================================================================================================
-# Requiere:
-# pip install dnspython
-#
-# IMPORTANTE:
-# - NO usa VulnerabilityScanRun
-# - NO usa VulnerabilityScanFinding
-# - NO usa pantallas de vulnerabilidades
-# - SOLO reutiliza _scan_cfg() para tomar la configuración Kali existente
-# - Base independiente: instance/scorecard_proveedores.db
-# ==========================================================================================================================================
+
 
 try:
     import dns.resolver
@@ -143263,6 +143267,236 @@ def scorecard_score_kali_desde_resumen(resumen):
     return max(0, 100 - min(100, descuento))
 
 
+# ============================================================
+# OWASP ZAP NORMAL (BASELINE)
+# ============================================================
+
+def scorecard_severity_from_text(texto):
+    texto = (texto or "").lower()
+
+    if any(x in texto for x in ["critical", "crítico", "critico"]):
+        return "Crítico"
+
+    if any(x in texto for x in ["high", "alto"]):
+        return "Alto"
+
+    if any(x in texto for x in ["medium", "medio"]):
+        return "Medio"
+
+    return "Bajo"
+
+
+def ejecutar_scorecard_zap_baseline(run_id, dominio):
+    run_dir = scorecard_run_dir(run_id, dominio)
+
+    out_html = os.path.join(run_dir, "zap_scan.html")
+    out_txt = os.path.join(run_dir, "zap_scan.txt")
+
+    url = target_url_scorecard(dominio)
+
+    docker_image = "ghcr.io/zaproxy/zaproxy:stable"
+
+    cmd = [
+        "bash",
+        "-lc",
+        (
+            f"rm -f {shlex.quote(out_html)} {shlex.quote(out_txt)}; "
+
+            f"echo '[OWASP_ZAP] BASELINE iniciado' > {shlex.quote(out_txt)}; "
+
+            f"docker run --rm "
+            f"-v {shlex.quote(run_dir)}:/zap/wrk/:rw "
+            f"{docker_image} "
+            f"zap-baseline.py "
+            f"-t {shlex.quote(url)} "
+            f"-r zap_scan.html "
+            f"-I "
+            f">> {shlex.quote(out_txt)} 2>&1; "
+
+            f"ls -lh {shlex.quote(out_html)} {shlex.quote(out_txt)} 2>&1"
+        )
+    ]
+
+    start = time.time()
+
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=900
+    )
+
+    duracion = round(time.time() - start, 2)
+
+    salida = (proc.stdout or "") + "\n" + (proc.stderr or "")
+
+    guardar_scorecard_output(
+        run_id,
+        "OWASP ZAP",
+        " ".join(cmd),
+        out_html,
+        proc.returncode,
+        duracion
+    )
+
+    return {
+        "exit_code": proc.returncode,
+        "output": salida,
+        "html": out_html,
+        "txt": out_txt
+    }
+
+
+def parse_scorecard_zap_findings(run_id, dominio):
+    findings = []
+
+    run_dir = scorecard_run_dir(run_id, dominio)
+
+    html_file = os.path.join(run_dir, "zap_scan.html")
+    txt_file = os.path.join(run_dir, "zap_scan.txt")
+
+    if os.path.exists(html_file):
+
+        try:
+            with open(html_file, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+
+            patrones = re.findall(
+                r'<h3[^>]*>(.*?)</h3>(.*?)(?=<h3|</body>|</html>)',
+                content,
+                re.I | re.S
+            )
+
+            for titulo_raw, bloque in patrones:
+
+                titulo = html.unescape(
+                    re.sub(r'<.*?>', '', titulo_raw)
+                ).strip()
+
+                if not titulo:
+                    continue
+
+                risk = "Medium"
+
+                risk_match = re.search(
+                    r'Risk.*?<td[^>]*>(.*?)</td>',
+                    bloque,
+                    re.I | re.S
+                )
+
+                if risk_match:
+                    risk = html.unescape(
+                        re.sub(r'<.*?>', '', risk_match.group(1))
+                    ).strip()
+
+                desc = ""
+
+                desc_match = re.search(
+                    r'Description.*?<td[^>]*>(.*?)</td>',
+                    bloque,
+                    re.I | re.S
+                )
+
+                if desc_match:
+                    desc = html.unescape(
+                        re.sub(r'<.*?>', ' ', desc_match.group(1))
+                    ).strip()
+
+                severidad = scorecard_severity_from_text(
+                    risk + " " + titulo + " " + desc
+                )
+
+                findings.append({
+                    "categoria": "OWASP ZAP",
+                    "herramienta": "OWASP ZAP",
+                    "control": titulo[:250],
+                    "estado": "Hallazgo detectado",
+                    "riesgo": severidad,
+                    "severidad": severidad,
+                    "score": (
+                        20 if severidad == "Crítico"
+                        else 45 if severidad == "Alto"
+                        else 70 if severidad == "Medio"
+                        else 90
+                    ),
+                    "evidencia": (
+                        f"OWASP ZAP identificó: {titulo}\n\n"
+                        f"{desc[:2500]}"
+                    ),
+                    "recomendacion": (
+                        "Validar el hallazgo reportado por OWASP ZAP y aplicar remediación."
+                    ),
+                    "archivo_salida": html_file,
+                    "detalle": {
+                        "titulo": titulo,
+                        "risk": risk
+                    }
+                })
+
+        except Exception as e:
+
+            findings.append({
+                "categoria": "OWASP ZAP",
+                "herramienta": "OWASP ZAP",
+                "control": "Error parseando ZAP",
+                "estado": "Error",
+                "riesgo": "Medio",
+                "severidad": "Medio",
+                "score": 50,
+                "evidencia": str(e),
+                "recomendacion": "Validar parser OWASP ZAP.",
+                "archivo_salida": html_file,
+                "detalle": {}
+            })
+
+    if not findings and os.path.exists(txt_file):
+
+        try:
+            with open(txt_file, "r", encoding="utf-8", errors="ignore") as f:
+                lines = [x.strip() for x in f.readlines() if x.strip()]
+
+            for ln in lines:
+
+                low = ln.lower()
+
+                if any(x in low for x in [
+                    "fail-new:",
+                    "warn-new:",
+                    "x-frame-options",
+                    "content-security-policy",
+                    "cookie",
+                    "missing",
+                    "server leaks",
+                    "strict-transport-security"
+                ]):
+
+                    severidad = scorecard_severity_from_text(ln)
+
+                    findings.append({
+                        "categoria": "OWASP ZAP",
+                        "herramienta": "OWASP ZAP",
+                        "control": ln[:250],
+                        "estado": "Hallazgo detectado",
+                        "riesgo": severidad,
+                        "severidad": severidad,
+                        "score": (
+                            20 if severidad == "Crítico"
+                            else 45 if severidad == "Alto"
+                            else 70 if severidad == "Medio"
+                            else 90
+                        ),
+                        "evidencia": ln[:2500],
+                        "recomendacion": "Validar hallazgo reportado por OWASP ZAP.",
+                        "archivo_salida": txt_file,
+                        "detalle": {}
+                    })
+
+        except Exception:
+            pass
+
+    return findings
+
+
 def ejecutar_scorecard_kali_independiente(run_id, dominio):
     cfg = _scan_cfg()
     run_dir = scorecard_run_dir(run_id, dominio)
@@ -143277,13 +143511,20 @@ def ejecutar_scorecard_kali_independiente(run_id, dominio):
         "nikto": scorecard_tool_path(cfg, "nikto"),
         "nuclei": scorecard_tool_path(cfg, "nuclei"),
         "testssl": scorecard_tool_path(cfg, "testssl"),
+        "zap": "Docker OWASP ZAP Baseline"
     }
 
     conn = get_scorecard_db_connection()
     cur = conn.cursor()
     cur.execute("""
         UPDATE scorecard_runs
-        SET modo_kali = ?, herramientas_json = ?, estado = ?, fecha_inicio = ?, progress_pct = ?, current_stage = ?, current_tool = ?
+        SET modo_kali = ?,
+            herramientas_json = ?,
+            estado = ?,
+            fecha_inicio = ?,
+            progress_pct = ?,
+            current_stage = ?,
+            current_tool = ?
         WHERE id = ?
     """, (
         modo,
@@ -143310,6 +143551,94 @@ def ejecutar_scorecard_kali_independiente(run_id, dominio):
 
     comandos = []
 
+    # ============================================================
+    # OWASP ZAP NORMAL / BASELINE
+    # ============================================================
+    try:
+        scorecard_set_progress(
+            run_id,
+            pct=50,
+            stage="Ejecutando OWASP ZAP normal",
+            tool="OWASP ZAP"
+        )
+
+        zap_result = ejecutar_scorecard_zap_baseline(run_id, dominio)
+        zap_findings = parse_scorecard_zap_findings(run_id, dominio)
+
+        resumen_zap = {
+            "exit_code": zap_result.get("exit_code"),
+            "archivo_html": zap_result.get("html"),
+            "archivo_txt": zap_result.get("txt"),
+            "hallazgos": len(zap_findings),
+            "severidades": {
+                "criticas": 0,
+                "altas": 0,
+                "medias": 0,
+                "bajas": 0
+            }
+        }
+
+        for item in zap_findings:
+            guardar_scorecard_finding(run_id, item)
+
+            sev = item.get("severidad")
+
+            if sev == "Crítico":
+                resumen_global["criticas"] += 1
+                resumen_zap["severidades"]["criticas"] += 1
+            elif sev == "Alto":
+                resumen_global["altas"] += 1
+                resumen_zap["severidades"]["altas"] += 1
+            elif sev == "Medio":
+                resumen_global["medias"] += 1
+                resumen_zap["severidades"]["medias"] += 1
+            else:
+                resumen_global["bajas"] += 1
+                resumen_zap["severidades"]["bajas"] += 1
+
+        resumen_global["herramientas"]["OWASP ZAP"] = resumen_zap
+
+        logs.append(
+            "\n\n===== OWASP ZAP NORMAL =====\n" +
+            (zap_result.get("output") or "")[:5000]
+        )
+
+    except Exception as e:
+        resumen_global["errores"] += 1
+        error_text = traceback.format_exc()
+
+        resumen_global["herramientas"]["OWASP ZAP"] = {
+            "exit_code": 99,
+            "archivo": "",
+            "duracion": 0,
+            "severidades": {
+                "criticas": 0,
+                "altas": 0,
+                "medias": 1,
+                "bajas": 0
+            },
+            "error": str(e)
+        }
+
+        guardar_scorecard_finding(run_id, {
+            "categoria": "OWASP ZAP",
+            "herramienta": "OWASP ZAP",
+            "control": "Ejecución OWASP ZAP",
+            "estado": "Error",
+            "riesgo": "Medio",
+            "severidad": "Medio",
+            "score": 50,
+            "evidencia": str(e),
+            "recomendacion": "Validar Docker, permisos del usuario y disponibilidad de la imagen OWASP ZAP.",
+            "archivo_salida": "",
+            "detalle": {"error": str(e)}
+        })
+
+        logs.append(f"\n\n===== OWASP ZAP ERROR =====\n{error_text[:5000]}")
+
+    # ============================================================
+    # NMAP
+    # ============================================================
     if ip:
         comandos.append(("Nmap", [
             herramientas["nmap"],
@@ -143320,12 +143649,18 @@ def ejecutar_scorecard_kali_independiente(run_id, dominio):
             ip
         ], 240))
 
+    # ============================================================
+    # WHATWEB
+    # ============================================================
     comandos.append(("WhatWeb", [
         herramientas["whatweb"],
         "--no-errors",
         url
     ], 180))
 
+    # ============================================================
+    # NIKTO
+    # ============================================================
     comandos.append(("Nikto", [
         herramientas["nikto"],
         "-host",
@@ -143333,6 +143668,9 @@ def ejecutar_scorecard_kali_independiente(run_id, dominio):
         "-nointeractive"
     ], 300))
 
+    # ============================================================
+    # NUCLEI
+    # ============================================================
     comandos.append(("Nuclei", [
         herramientas["nuclei"],
         "-u",
@@ -143342,6 +143680,9 @@ def ejecutar_scorecard_kali_independiente(run_id, dominio):
         "-silent"
     ], 420))
 
+    # ============================================================
+    # TESTSSL
+    # ============================================================
     comandos.append(("testssl", [
         herramientas["testssl"],
         "--fast",
@@ -143353,8 +143694,14 @@ def ejecutar_scorecard_kali_independiente(run_id, dominio):
     total_tools = len(comandos)
 
     for idx, (nombre, cmd, timeout) in enumerate(comandos, start=1):
-        pct = 45 + int((idx / max(total_tools, 1)) * 45)
-        scorecard_set_progress(run_id, pct=pct, stage=f"Ejecutando {nombre}", tool=nombre)
+        pct = 55 + int((idx / max(total_tools, 1)) * 35)
+
+        scorecard_set_progress(
+            run_id,
+            pct=pct,
+            stage=f"Ejecutando {nombre}",
+            tool=nombre
+        )
 
         archivo = scorecard_output_file(run_dir, nombre.lower(), "txt")
 
@@ -143387,6 +143734,7 @@ def ejecutar_scorecard_kali_independiente(run_id, dominio):
             }
 
             riesgo = "Bajo"
+
             if severidades["criticas"] > 0:
                 riesgo = "Crítico"
             elif severidades["altas"] > 0:
@@ -143400,10 +143748,19 @@ def ejecutar_scorecard_kali_independiente(run_id, dominio):
                 "categoria": "Kali Linux Scan",
                 "herramienta": nombre,
                 "control": f"Ejecución {nombre}",
-                "estado": "Ejecutado" if resultado.get("exit_code") in [0, None] else f"Finalizó con código {resultado.get('exit_code')}",
+                "estado": (
+                    "Ejecutado"
+                    if resultado.get("exit_code") in [0, None]
+                    else f"Finalizó con código {resultado.get('exit_code')}"
+                ),
                 "riesgo": riesgo,
                 "severidad": riesgo,
-                "score": 100 if riesgo == "Bajo" else 70 if riesgo == "Medio" else 45 if riesgo == "Alto" else 20,
+                "score": (
+                    100 if riesgo == "Bajo"
+                    else 70 if riesgo == "Medio"
+                    else 45 if riesgo == "Alto"
+                    else 20
+                ),
                 "evidencia": evidencia,
                 "recomendacion": "Revisar la salida técnica y validar remediación con el proveedor.",
                 "archivo_salida": archivo,
@@ -143454,6 +143811,7 @@ def ejecutar_scorecard_kali_independiente(run_id, dominio):
         FROM scorecard_runs
         WHERE id = ?
     """, (run_id,))
+
     row = cur.fetchone()
 
     score_dns = float(row["score_dns"] or 0) if row else 0
@@ -143470,10 +143828,10 @@ def ejecutar_scorecard_kali_independiente(run_id, dominio):
         incluir_kali=True
     )
 
-
     nivel = nivel_riesgo_scorecard(score_total)
 
     resumen_base = {}
+
     try:
         resumen_base = json.loads(row["resumen_json"] or "{}") if row else {}
     except Exception:
@@ -143493,8 +143851,16 @@ def ejecutar_scorecard_kali_independiente(run_id, dominio):
 
     cur.execute("""
         UPDATE scorecard_runs
-        SET score_kali = ?, score_total = ?, nivel_riesgo = ?, estado = ?, progress_pct = ?,
-            current_stage = ?, current_tool = ?, resumen_json = ?, salida_consola = ?, fecha_fin = ?
+        SET score_kali = ?,
+            score_total = ?,
+            nivel_riesgo = ?,
+            estado = ?,
+            progress_pct = ?,
+            current_stage = ?,
+            current_tool = ?,
+            resumen_json = ?,
+            salida_consola = ?,
+            fecha_fin = ?
         WHERE id = ?
     """, (
         score_kali,
@@ -145114,7 +145480,7 @@ def proveedores_scorecard_apis():
         content=Markup(render_template_string(body, estado=estado))
     )
 
-## ============================================================
+# ============================================================
 # DASHBOARD
 # ============================================================
 
@@ -145201,7 +145567,13 @@ def proveedores_scorecard_dashboard():
         inset:0;
         background:
           radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+          repeating-linear-gradient(
+            135deg,
+            rgba(255,255,255,.05) 0px,
+            rgba(255,255,255,.05) 1px,
+            transparent 1px,
+            transparent 14px
+          );
         pointer-events:none;
       }
 
@@ -145357,6 +145729,36 @@ def proveedores_scorecard_dashboard():
         box-shadow:0 4px 10px rgba(0,0,0,.08);
       }
 
+      /* ======================================================
+         BOTON API AZUL SGSI
+      ====================================================== */
+      .btn-api-blue{
+        background:linear-gradient(135deg,#1459a6,#2f7fd1) !important;
+        border:none !important;
+        color:#ffffff !important;
+        border-radius:999px !important;
+        padding:10px 22px !important;
+        font-size:.84rem !important;
+        font-weight:900 !important;
+        box-shadow:0 10px 22px rgba(20,89,166,.35) !important;
+        transition:all .18s ease-in-out;
+      }
+
+      .btn-api-blue:hover{
+        background:linear-gradient(135deg,#0f4f97,#266fbb) !important;
+        color:#ffffff !important;
+        transform:translateY(-1px);
+        box-shadow:0 14px 26px rgba(20,89,166,.45) !important;
+      }
+
+      .btn-api-blue:focus,
+      .btn-api-blue:active{
+        background:linear-gradient(135deg,#0f4f97,#266fbb) !important;
+        color:#ffffff !important;
+        outline:none !important;
+        box-shadow:0 0 0 .18rem rgba(47,127,209,.25) !important;
+      }
+
       .api-mini{
         background:rgba(255,255,255,.96);
         border:1px solid rgba(219,230,244,.9);
@@ -145384,7 +145786,7 @@ def proveedores_scorecard_dashboard():
       <div class="d-flex justify-content-end mb-3 gap-2 flex-wrap">
         {% if not read_only %}
             {% if user.role == 'admin' %}
-              <a href="{{ url_for('proveedores_scorecard_apis') }}" class="btn btn-dark rounded-pill px-4">
+              <a href="{{ url_for('admin_scorecard_proponentes_apis') }}" class="btn btn-api-blue">
                 🔐 Configurar APIs
               </a>
             {% endif %}
@@ -149513,27 +149915,10 @@ def proveedores_scorecard_parametros():
     )
 
 
-# ==========================================================================================================================================
+# =============================================================================
 #            SCORECARD TERCEROS INDEPENDIENTE
 #            DNS HEALTH / IP REPUTATION / HACKER CHATTER / ESCANEO KALI PROPIO
-# ==========================================================================================================================================
-# IMPORTANTE:
-# - NO entra en conflicto con Security Scorecard de Proveedores.
-# - Usa rutas propias: /proponentes/scorecard
-# - Usa base propia: instance/scorecard_proponentes.db
-# - No selecciona proveedor desde lista.
-# - El usuario ingresa manualmente el nombre del proponente.
-# - Reutiliza funciones técnicas ya existentes del módulo Scorecard Proveedores:
-#   limpiar_dominio_scorecard, resolver_ip_scorecard, evaluar_dns_health_scorecard,
-#   evaluar_ip_reputation_scorecard, scorecard_calcular_total, nivel_riesgo_scorecard,
-#   scorecard_badge_color, consultar_incidentes_osint_scorecard,
-#   consultar_leakcheck_hibrido_scorecard, consultar_hibp_hibrido_scorecard,
-#   consultar_shodan_hibrido_scorecard, consultar_hacker_chatter_gdelt_scorecard,
-#   consultar_certificados_ct_scorecard, consultar_github_exposure_scorecard,
-#   scorecard_score_hacker_chatter, _scan_cfg, scorecard_tool_path,
-#   scorecard_run_command, scorecard_detectar_severidades,
-#   scorecard_score_kali_desde_resumen.
-# ==========================================================================================================================================
+# =============================================================================
 
 
 SCORECARD_PROPONENTES_DB_PATH = os.path.join(app.instance_path, "scorecard_proponentes.db")
@@ -149661,6 +150046,58 @@ def migrar_scorecard_proponentes_informe_ai():
 
 
 migrar_scorecard_proponentes_informe_ai()
+
+def migrar_scorecard_proponentes_herramientas_kali():
+    conn = get_scorecard_proponentes_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("PRAGMA table_info(scorecard_proponentes_runs)")
+    cols = [r["name"] for r in cur.fetchall()]
+
+    if "herramientas_kali" not in cols:
+        cur.execute("ALTER TABLE scorecard_proponentes_runs ADD COLUMN herramientas_kali TEXT")
+
+    conn.commit()
+    conn.close()
+
+migrar_scorecard_proponentes_herramientas_kali()
+
+
+SCORECARD_PROPONENTES_HERRAMIENTAS_KALI_VALIDAS = [
+    "nmap",
+    "whatweb",
+    "nikto",
+    "testssl",
+    "nuclei",
+    "zap"
+]
+
+
+def scorecard_proponentes_normalizar_herramientas_kali(lista):
+    herramientas = []
+
+    for h in lista or []:
+        h = (h or "").strip().lower()
+        if h in SCORECARD_PROPONENTES_HERRAMIENTAS_KALI_VALIDAS and h not in herramientas:
+            herramientas.append(h)
+
+    if not herramientas:
+        herramientas = ["nmap", "nikto", "nuclei"]
+
+    return herramientas
+
+
+def scorecard_proponentes_label_herramientas_kali(herramientas):
+    labels = {
+        "nmap": "Nmap",
+        "whatweb": "WhatWeb",
+        "nikto": "Nikto",
+        "testssl": "testssl",
+        "nuclei": "Nuclei",
+        "zap": "OWASP ZAP Full Scan"
+    }
+
+    return ", ".join(labels.get(h, h) for h in herramientas or [])
 
 # ============================================================
 # PERMISOS - SCORECARD PROPONENTES / TERCEROS
@@ -150594,50 +151031,112 @@ def scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, vuln_run_id, min_
     )
 
 
-def ejecutar_scan_web_scorecard_proponentes_sin_whatweb(run, cfg, run_dir, crear_vulns=False, crear_planes=False, scorecard_run_id=None):
+def ejecutar_scan_web_scorecard_proponentes_sin_whatweb(
+    run,
+    cfg,
+    run_dir,
+    crear_vulns=False,
+    crear_planes=False,
+    scorecard_run_id=None
+):
     target = normalizar_target_para_scan(run.target)
+    host = extraer_host_de_target(target)
     logs = []
 
-    # =========================
-    # NIKTO
-    # =========================
-    if scan_check_cancel(run.id):
-        scan_mark_stopped(run.id)
-        return logs
+    try:
+        herramientas = json.loads(run.herramientas or "[]")
+    except Exception:
+        herramientas = []
 
-    scan_set_progress(run.id, pct=25, stage="Ejecutando Nikto", tool="nikto")
-    db.session.commit()
-
-    if scorecard_run_id:
-        scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
-
-    res_nikto = ejecutar_nikto(run.id, cfg, target, run_dir)
-    logs.append(f"[NIKTO]\nSTDOUT:\n{res_nikto['stdout']}\nSTDERR:\n{res_nikto['stderr']}\n")
-
-    findings = parse_txt_findings_generic(
-        scan_output_file(run_dir, "nikto_scan", "txt"),
-        "nikto"
-    )
-    guardar_findings_y_sincronizar(run, findings, run_dir, crear_vulns, crear_planes)
-
-    if scorecard_run_id:
-        scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
+    herramientas = scorecard_proponentes_normalizar_herramientas_kali(herramientas)
 
     # =========================
-    # TESTSSL
+    # NMAP
     # =========================
-    if scan_check_cancel(run.id):
-        scan_mark_stopped(run.id)
-        return logs
+    if "nmap" in herramientas:
+        if scan_check_cancel(run.id):
+            scan_mark_stopped(run.id)
+            return logs
 
-    if target.lower().startswith("https://"):
-        scan_set_progress(run.id, pct=50, stage="Ejecutando testssl", tool="testssl")
+        scan_set_progress(run.id, pct=10, stage="Ejecutando Nmap", tool="nmap")
         db.session.commit()
 
         if scorecard_run_id:
             scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
 
-        res_testssl = ejecutar_testssl(run.id, cfg, target, run_dir)
+        if host:
+            res_nmap = ejecutar_nmap(run.id, cfg, host, run_dir)
+            logs.append(f"[NMAP]\nSTDOUT:\n{res_nmap['stdout']}\nSTDERR:\n{res_nmap['stderr']}\n")
+
+            findings = parse_nmap_xml(run_dir)
+            guardar_findings_y_sincronizar(run, findings, run_dir, crear_vulns, crear_planes)
+
+    # =========================
+    # WHATWEB
+    # =========================
+    if "whatweb" in herramientas:
+        if scan_check_cancel(run.id):
+            scan_mark_stopped(run.id)
+            return logs
+
+        scan_set_progress(run.id, pct=25, stage="Ejecutando WhatWeb", tool="whatweb")
+        db.session.commit()
+
+        if scorecard_run_id:
+            scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
+
+        res_whatweb = ejecutar_whatweb(run.id, cfg, target, run_dir)
+        logs.append(f"[WHATWEB]\nSTDOUT:\n{res_whatweb['stdout']}\nSTDERR:\n{res_whatweb['stderr']}\n")
+
+        findings = parse_txt_findings_generic(
+            scan_output_file(run_dir, "whatweb_scan", "txt"),
+            "whatweb"
+        )
+        guardar_findings_y_sincronizar(run, findings, run_dir, crear_vulns, crear_planes)
+
+    # =========================
+    # NIKTO
+    # =========================
+    if "nikto" in herramientas:
+        if scan_check_cancel(run.id):
+            scan_mark_stopped(run.id)
+            return logs
+
+        scan_set_progress(run.id, pct=40, stage="Ejecutando Nikto", tool="nikto")
+        db.session.commit()
+
+        if scorecard_run_id:
+            scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
+
+        res_nikto = ejecutar_nikto(run.id, cfg, target, run_dir)
+        logs.append(f"[NIKTO]\nSTDOUT:\n{res_nikto['stdout']}\nSTDERR:\n{res_nikto['stderr']}\n")
+
+        findings = parse_txt_findings_generic(
+            scan_output_file(run_dir, "nikto_scan", "txt"),
+            "nikto"
+        )
+        guardar_findings_y_sincronizar(run, findings, run_dir, crear_vulns, crear_planes)
+
+    # =========================
+    # TESTSSL
+    # =========================
+    if "testssl" in herramientas:
+        if scan_check_cancel(run.id):
+            scan_mark_stopped(run.id)
+            return logs
+
+        ssl_target = target
+
+        if ssl_target.startswith("http://"):
+            ssl_target = "https://" + ssl_target.replace("http://", "", 1)
+
+        scan_set_progress(run.id, pct=55, stage="Ejecutando testssl", tool="testssl")
+        db.session.commit()
+
+        if scorecard_run_id:
+            scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
+
+        res_testssl = ejecutar_testssl(run.id, cfg, ssl_target, run_dir)
         logs.append(f"[TESTSSL]\nSTDOUT:\n{res_testssl['stdout']}\nSTDERR:\n{res_testssl['stderr']}\n")
 
         findings = parse_txt_findings_generic(
@@ -150646,27 +151145,45 @@ def ejecutar_scan_web_scorecard_proponentes_sin_whatweb(run, cfg, run_dir, crear
         )
         guardar_findings_y_sincronizar(run, findings, run_dir, crear_vulns, crear_planes)
 
-        if scorecard_run_id:
-            scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
-
     # =========================
     # NUCLEI
     # =========================
-    if scan_check_cancel(run.id):
-        scan_mark_stopped(run.id)
-        return logs
+    if "nuclei" in herramientas:
+        if scan_check_cancel(run.id):
+            scan_mark_stopped(run.id)
+            return logs
 
-    scan_set_progress(run.id, pct=75, stage="Ejecutando Nuclei", tool="nuclei")
-    db.session.commit()
+        scan_set_progress(run.id, pct=70, stage="Ejecutando Nuclei", tool="nuclei")
+        db.session.commit()
 
-    if scorecard_run_id:
-        scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
+        if scorecard_run_id:
+            scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
 
-    res_nuclei = ejecutar_nuclei(run.id, cfg, target, run_dir)
-    logs.append(f"[NUCLEI]\nSTDOUT:\n{res_nuclei['stdout']}\nSTDERR:\n{res_nuclei['stderr']}\n")
+        res_nuclei = ejecutar_nuclei(run.id, cfg, target, run_dir)
+        logs.append(f"[NUCLEI]\nSTDOUT:\n{res_nuclei['stdout']}\nSTDERR:\n{res_nuclei['stderr']}\n")
 
-    findings = parse_nuclei_jsonl(run_dir)
-    guardar_findings_y_sincronizar(run, findings, run_dir, crear_vulns, crear_planes)
+        findings = parse_nuclei_jsonl(run_dir)
+        guardar_findings_y_sincronizar(run, findings, run_dir, crear_vulns, crear_planes)
+
+    # =========================
+    # OWASP ZAP FULL SCAN
+    # =========================
+    if "zap" in herramientas:
+        if scan_check_cancel(run.id):
+            scan_mark_stopped(run.id)
+            return logs
+
+        scan_set_progress(run.id, pct=85, stage="Ejecutando OWASP ZAP Full Scan", tool="zap")
+        db.session.commit()
+
+        if scorecard_run_id:
+            scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
+
+        res_zap = ejecutar_zap(run.id, cfg, target, run_dir)
+        logs.append(f"[OWASP_ZAP_FULL_SCAN]\nSTDOUT:\n{res_zap['stdout']}\nSTDERR:\n{res_zap['stderr']}\n")
+
+        findings = parse_zap_findings(run_dir)
+        guardar_findings_y_sincronizar(run, findings, run_dir, crear_vulns, crear_planes)
 
     if scorecard_run_id:
         scorecard_proponentes_sync_from_vuln_run(scorecard_run_id, run.id)
@@ -150810,27 +151327,10 @@ def ejecutar_full_scan_scorecard_proponentes_sin_whatweb(run_id, scorecard_run_i
         return {"ok": False, "error": str(e)}
 
 def ejecutar_scorecard_proponentes_kali_independiente(run_id, dominio):
-    """
-    Ejecuta Kali Linux para Proponentes usando el MISMO motor del módulo
-    Registro de Vulnerabilidades:
-    - _scan_cfg()
-    - VulnerabilityScanRun
-    - ejecutar_full_scan()
-    - ejecutar_scan_web()
-    - ejecutar_scan_ip()
-    - ejecutar_nmap()
-    - ejecutar_nikto()
-    - ejecutar_testssl()
-    - ejecutar_nuclei()
-
-    No crea vulnerabilidades ni planes desde Scorecard.
-    Solo copia los hallazgos técnicos al Scorecard de Proponentes.
-    """
-
     scorecard_proponentes_set_progress(
         run_id,
         pct=45,
-        stage="Inicializando escaneo Kali con motor de Vulnerabilidades",
+        stage="Inicializando escaneo Kali con herramientas seleccionadas",
         tool="Inicializando",
         estado="ejecutando"
     )
@@ -150843,11 +151343,29 @@ def ejecutar_scorecard_proponentes_kali_independiente(run_id, dominio):
         FROM scorecard_proponentes_runs
         WHERE id = ?
     """, (run_id,))
+
     scorecard_run = cur.fetchone()
     conn.close()
 
     if not scorecard_run:
         raise RuntimeError("Scorecard de Proponentes no encontrado.")
+
+    herramientas_kali = []
+
+    try:
+        if "herramientas_kali" in scorecard_run.keys() and scorecard_run["herramientas_kali"]:
+            herramientas_kali = json.loads(scorecard_run["herramientas_kali"] or "[]")
+    except Exception:
+        herramientas_kali = []
+
+    if not herramientas_kali:
+        try:
+            resumen_tmp = json.loads(scorecard_run["resumen_json"] or "{}")
+            herramientas_kali = resumen_tmp.get("herramientas_kali") or []
+        except Exception:
+            herramientas_kali = []
+
+    herramientas_kali = scorecard_proponentes_normalizar_herramientas_kali(herramientas_kali)
 
     target = target_url_scorecard(dominio)
     target_type = detectar_tipo_objetivo(target)
@@ -150864,13 +151382,14 @@ def ejecutar_scorecard_proponentes_kali_independiente(run_id, dominio):
         ejecutado_por=scorecard_run["usuario"] or "Sistema",
         responsable_asignado=scorecard_run["usuario"] or "Sistema",
         progress_pct=1,
-        current_stage="Encolando escaneo Scorecard de Proponentes",
+        current_stage="Encolando escaneo Scorecard de Terceros",
         current_tool="Inicializando",
         cancel_requested=False,
         stopped_by_user=False,
         findings_streamed=0,
         created_vulns=0,
-        created_plans=0
+        created_plans=0,
+        herramientas=json.dumps(herramientas_kali, ensure_ascii=False)
     )
 
     db.session.add(vuln_run)
@@ -150879,12 +151398,11 @@ def ejecutar_scorecard_proponentes_kali_independiente(run_id, dominio):
     scorecard_proponentes_set_progress(
         run_id,
         pct=50,
-        stage=f"Escaneo Kali iniciado en Registro de Vulnerabilidades #{vuln_run.id}",
+        stage="Escaneo Kali iniciado con: " + scorecard_proponentes_label_herramientas_kali(herramientas_kali),
         tool="Kali Linux"
     )
 
     try:
-        # Ejecuta exactamente el mismo motor de Registro de Vulnerabilidades.
         ejecutar_full_scan_scorecard_proponentes_sin_whatweb(
             vuln_run.id,
             run_id,
@@ -150909,6 +151427,7 @@ def ejecutar_scorecard_proponentes_kali_independiente(run_id, dominio):
             FROM scorecard_proponentes_runs
             WHERE id = ?
         """, (run_id,))
+
         row = cur.fetchone()
 
         score_dns = float(row["score_dns"] or 0) if row else 0
@@ -150939,6 +151458,8 @@ def ejecutar_scorecard_proponentes_kali_independiente(run_id, dominio):
             "kali_score": score_kali,
             "kali_ejecutado": True,
             "kali_motor": "Registro de Vulnerabilidades",
+            "herramientas_kali": herramientas_kali,
+            "herramientas_kali_label": scorecard_proponentes_label_herramientas_kali(herramientas_kali),
             "vulnerability_scan_run_id": vuln_run.id,
             "incident_score": score_incidentes,
             "darkweb_score": score_darkweb,
@@ -150968,7 +151489,7 @@ def ejecutar_scorecard_proponentes_kali_independiente(run_id, dominio):
             nivel,
             "finalizado",
             100,
-            "Escaneo Kali finalizado con motor de Registro de Vulnerabilidades",
+            "Escaneo Kali finalizado con herramientas: " + scorecard_proponentes_label_herramientas_kali(herramientas_kali),
             None,
             json.dumps(resumen_final, ensure_ascii=False),
             salida[:25000],
@@ -150982,7 +151503,7 @@ def ejecutar_scorecard_proponentes_kali_independiente(run_id, dominio):
         guardar_scorecard_proponentes_output(
             run_id,
             "Registro de Vulnerabilidades",
-            f"VulnerabilityScanRun #{vuln_run.id}",
+            f"VulnerabilityScanRun #{vuln_run.id} | Herramientas: {scorecard_proponentes_label_herramientas_kali(herramientas_kali)}",
             vuln_run.archivo_log or "",
             0,
             0
@@ -150994,7 +151515,7 @@ def ejecutar_scorecard_proponentes_kali_independiente(run_id, dominio):
         scorecard_proponentes_set_progress(
             run_id,
             pct=100,
-            stage="Error ejecutando Kali con motor de Registro de Vulnerabilidades",
+            stage="Error ejecutando Kali con herramientas seleccionadas",
             tool=None,
             estado="error",
             error=tb
@@ -151259,7 +151780,13 @@ def proponentes_scorecard_dashboard():
         inset:0;
         background:
           radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+          repeating-linear-gradient(
+            135deg,
+            rgba(255,255,255,.05) 0px,
+            rgba(255,255,255,.05) 1px,
+            transparent 1px,
+            transparent 14px
+          );
         pointer-events:none;
       }
 
@@ -151324,6 +151851,38 @@ def proponentes_scorecard_dashboard():
         font-size:.82rem;
         font-weight:900;
         box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      /* =========================================================
+         BOTON CONFIGURAR API AZUL
+      ========================================================= */
+
+      .btn-api-blue{
+        background:linear-gradient(135deg,#1459a6,#2f7fd1) !important;
+        border:none !important;
+        color:#ffffff !important;
+        border-radius:12px !important;
+        min-height:42px !important;
+        padding:10px 22px !important;
+        font-size:.84rem !important;
+        font-weight:900 !important;
+        box-shadow:0 10px 22px rgba(20,89,166,.35) !important;
+        transition:all .18s ease-in-out;
+      }
+
+      .btn-api-blue:hover{
+        background:linear-gradient(135deg,#0f4f97,#266fbb) !important;
+        color:#ffffff !important;
+        transform:translateY(-1px);
+        box-shadow:0 14px 26px rgba(20,89,166,.45) !important;
+      }
+
+      .btn-api-blue:focus,
+      .btn-api-blue:active{
+        background:linear-gradient(135deg,#0f4f97,#266fbb) !important;
+        color:#ffffff !important;
+        outline:none !important;
+        box-shadow:0 0 0 .18rem rgba(47,127,209,.25) !important;
       }
 
       .soft-card{
@@ -151446,8 +152005,8 @@ def proponentes_scorecard_dashboard():
 
       <div class="score-action-row">
         {% if puede_configurar %}
-          <a href="{{ url_for('admin_scorecard_proponentes_apis') }}" class="btn btn-dark">
-            🔐 Configurar APIs
+          <a href="{{ url_for('admin_scorecard_proponentes_apis') }}" class="btn btn-api-blue">
+              🔐 Configurar APIs
           </a>
 
           <a href="{{ url_for('proponentes_scorecard_parametros') }}" class="btn btn-secondary">
@@ -153787,7 +154346,7 @@ def proponentes_scorecard_eliminar(scorecard_id):
 # Proveedor existente / Proponente manual
 # ============================================================
 
-@app.route("/proponentes/scorecard/scan/nuevo", methods=["GET", "POST"])
+@app.route("/proponentes/scorecard/nuevo", methods=["GET", "POST"])
 @login_required
 def proponentes_scorecard_scan_nuevo():
     user, allowed, read_only = scorecard_proponentes_user_permiso()
@@ -153797,23 +154356,21 @@ def proponentes_scorecard_scan_nuevo():
         return redirect(url_for("menu"))
 
     if read_only:
-        flash("El rol Auditor no puede ejecutar scorecards.", "danger")
+        flash("El rol Auditor no puede ejecutar nuevos scorecards.", "danger")
         return redirect(url_for("proponentes_scorecard_dashboard"))
 
-    proveedores = ProveedorEvaluacion.query.order_by(
-        ProveedorEvaluacion.nombre_proveedor.asc()
-    ).all()
+    proveedores = ProveedorEvaluacion.query.order_by(ProveedorEvaluacion.nombre_proveedor.asc()).all()
 
     if request.method == "POST":
         tipo_tercero = (request.form.get("tipo_tercero") or "").strip()
-        proveedor_id = request.form.get("proveedor_id", type=int)
+        proveedor_id = request.form.get("proveedor_id")
         proponente_nombre_manual = (request.form.get("proponente_nombre") or "").strip()
-        dominio = limpiar_dominio_scorecard(request.form.get("dominio"))
+        dominio = (request.form.get("dominio") or "").strip()
         ejecutar_kali = bool(request.form.get("ejecutar_kali"))
 
-        if tipo_tercero not in ["proveedor", "proponente"]:
-            flash("Debe seleccionar si el tercero es Proveedor o Proponente.", "danger")
-            return redirect(url_for("proponentes_scorecard_scan_nuevo"))
+        herramientas_kali = scorecard_proponentes_normalizar_herramientas_kali(
+            request.form.getlist("herramientas_kali")
+        )
 
         proveedor = None
         proveedor_nombre = ""
@@ -153835,7 +154392,7 @@ def proponentes_scorecard_scan_nuevo():
 
         else:
             if not proponente_nombre_manual:
-                flash("Debe ingresar el nombre del proponente.", "danger")
+                flash("Debe ingresar el nombre del tercero o proponente.", "danger")
                 return redirect(url_for("proponentes_scorecard_scan_nuevo"))
 
             proveedor_id = None
@@ -153844,6 +154401,10 @@ def proponentes_scorecard_scan_nuevo():
 
         if not dominio:
             flash("Debe indicar el dominio autorizado del tercero.", "danger")
+            return redirect(url_for("proponentes_scorecard_scan_nuevo"))
+
+        if ejecutar_kali and not herramientas_kali:
+            flash("Debe seleccionar al menos una herramienta Kali.", "danger")
             return redirect(url_for("proponentes_scorecard_scan_nuevo"))
 
         ip = resolver_ip_scorecard(dominio)
@@ -153862,7 +154423,7 @@ def proponentes_scorecard_scan_nuevo():
         if ejecutar_kali:
             estado = "pendiente"
             progress = 1
-            current_stage = "Escaneo Kali pendiente"
+            current_stage = "Escaneo Kali pendiente con herramientas seleccionadas"
 
         resumen = {
             "tipo_tercero": tipo_tercero,
@@ -153874,7 +154435,9 @@ def proponentes_scorecard_scan_nuevo():
             "kali_score": score_kali,
             "incident_score": score_incidentes,
             "darkweb_score": score_darkweb,
-            "ejecutar_kali": ejecutar_kali
+            "ejecutar_kali": ejecutar_kali,
+            "herramientas_kali": herramientas_kali,
+            "herramientas_kali_label": scorecard_proponentes_label_herramientas_kali(herramientas_kali)
         }
 
         conn = get_scorecard_proponentes_db_connection()
@@ -153885,8 +154448,8 @@ def proponentes_scorecard_scan_nuevo():
             (proponente_nombre, dominio, ip_resuelta,
              score_dns, score_ip, score_kali, score_incidentes, score_darkweb,
              score_total, nivel_riesgo, estado, progress_pct, current_stage,
-             current_tool, resumen_json, usuario, fecha_ejecucion)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             current_tool, resumen_json, usuario, fecha_ejecucion, herramientas_kali)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             proponente_nombre,
             dominio,
@@ -153904,7 +154467,8 @@ def proponentes_scorecard_scan_nuevo():
             None,
             json.dumps(resumen, ensure_ascii=False),
             getattr(user, "username", "Sistema"),
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            json.dumps(herramientas_kali, ensure_ascii=False)
         ))
 
         run_id = cur.lastrowid
@@ -153923,40 +154487,76 @@ def proponentes_scorecard_scan_nuevo():
 
         scorecard_proponentes_set_progress(
             run_id,
-            pct=15,
-            stage="Guardando hallazgos IP Reputation / DNSBL",
-            tool="DNSBL"
+            pct=20,
+            stage="Guardando hallazgos IP Reputation",
+            tool="IP Reputation"
         )
 
         for item in findings_ip:
             guardar_scorecard_proponentes_finding(run_id, item)
 
-        scorecard_proponentes_set_progress(
-            run_id,
-            pct=25,
-            stage="Consultando historial de incidentes / OSINT",
-            tool="GDELT / Catálogo histórico"
-        )
+        try:
+            score_incidentes, riesgo_incidentes, total_incidentes = evaluar_incident_history_proponentes_scorecard(
+                run_id,
+                proponente_nombre,
+                dominio
+            )
+        except Exception:
+            score_incidentes = 100
 
-        score_incidentes, riesgo_incidentes, total_incidentes = evaluar_incident_history_proponentes_scorecard(
-            run_id,
-            proponente_nombre,
-            dominio
-        )
+        try:
+            score_darkweb, riesgo_darkweb, total_darkweb, credencial_confirmada = evaluar_hacker_chatter_proponentes_scorecard(
+                run_id,
+                proponente_nombre,
+                dominio,
+                ip
+            )
+        except Exception:
+            score_darkweb = 100
 
-        scorecard_proponentes_set_progress(
-            run_id,
-            pct=35,
-            stage="Consultando Dark Web / Exposure Intelligence",
-            tool="HIBP / LeakCheck / Shodan / GDELT"
-        )
+        if ejecutar_kali:
+            conn = get_scorecard_proponentes_db_connection()
+            cur = conn.cursor()
 
-        score_darkweb, riesgo_darkweb, total_darkweb, credencial_confirmada = evaluar_hacker_chatter_proponentes_scorecard(
-            run_id,
-            proponente_nombre,
-            dominio,
-            ip
-        )
+            cur.execute("""
+                UPDATE scorecard_proponentes_runs
+                SET score_incidentes = ?,
+                    score_darkweb = ?,
+                    estado = ?,
+                    progress_pct = ?,
+                    current_stage = ?,
+                    current_tool = ?,
+                    resumen_json = ?
+                WHERE id = ?
+            """, (
+                score_incidentes,
+                score_darkweb,
+                "pendiente",
+                45,
+                "Encolando escaneo Kali con herramientas: " + scorecard_proponentes_label_herramientas_kali(herramientas_kali),
+                "Kali Linux",
+                json.dumps({
+                    **resumen,
+                    "incident_score": score_incidentes,
+                    "darkweb_score": score_darkweb,
+                    "herramientas_kali": herramientas_kali,
+                    "herramientas_kali_label": scorecard_proponentes_label_herramientas_kali(herramientas_kali)
+                }, ensure_ascii=False),
+                run_id
+            ))
+
+            conn.commit()
+            conn.close()
+
+            t = threading.Thread(
+                target=scorecard_proponentes_kali_worker,
+                args=(run_id, dominio),
+                daemon=True
+            )
+            t.start()
+
+            flash("Scorecard creado. El escaneo Kali se ejecutará con las herramientas seleccionadas.", "success")
+            return redirect(url_for("proponentes_scorecard_rating", scorecard_id=run_id))
 
         score_total = scorecard_proponentes_calcular_total(
             score_dns,
@@ -153969,17 +154569,14 @@ def proponentes_scorecard_scan_nuevo():
 
         nivel = nivel_riesgo_scorecard_proponentes(score_total)
 
-        resumen.update({
+        resumen_final = {
+            **resumen,
             "incident_score": score_incidentes,
             "darkweb_score": score_darkweb,
-            "incident_total": total_incidentes,
-            "darkweb_total": total_darkweb,
-            "riesgo_incidentes": riesgo_incidentes,
-            "riesgo_darkweb": riesgo_darkweb,
-            "credencial_confirmada": credencial_confirmada,
             "score_total": score_total,
-            "nivel_riesgo": nivel
-        })
+            "nivel_riesgo": nivel,
+            "kali_ejecutado": False
+        }
 
         conn = get_scorecard_proponentes_db_connection()
         cur = conn.cursor()
@@ -153990,50 +154587,32 @@ def proponentes_scorecard_scan_nuevo():
                 score_darkweb = ?,
                 score_total = ?,
                 nivel_riesgo = ?,
-                resumen_json = ?,
+                estado = ?,
                 progress_pct = ?,
-                current_stage = ?
+                current_stage = ?,
+                current_tool = ?,
+                resumen_json = ?,
+                fecha_fin = ?
             WHERE id = ?
         """, (
             score_incidentes,
             score_darkweb,
             score_total,
             nivel,
-            json.dumps(resumen, ensure_ascii=False),
-            40 if ejecutar_kali else 100,
-            "Scorecard base finalizado. Escaneo Kali pendiente." if ejecutar_kali else "Scorecard finalizado sin escaneo Kali",
+            "finalizado",
+            100,
+            "Scorecard finalizado sin escaneo Kali",
+            None,
+            json.dumps(resumen_final, ensure_ascii=False),
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             run_id
         ))
 
         conn.commit()
         conn.close()
 
-        if ejecutar_kali:
-            t = threading.Thread(
-                target=scorecard_proponentes_kali_worker,
-                args=(run_id, dominio),
-                daemon=True
-            )
-            t.start()
-        else:
-            scorecard_proponentes_set_progress(
-                run_id,
-                pct=100,
-                stage="Scorecard de Terceros finalizado",
-                tool=None,
-                estado="finalizado"
-            )
-
-        try:
-            registrar_log(
-                getattr(user, "username", "Sistema"),
-                f"Ejecutó Security Scorecard de Terceros tipo {tipo_tercero}: {proponente_nombre} - dominio {dominio}"
-            )
-        except Exception:
-            pass
-
-        flash("Security Scorecard de Terceros iniciado correctamente.", "success")
-        return redirect(url_for("proponentes_scorecard_detalle", scorecard_id=run_id))
+        flash("Scorecard ejecutado correctamente.", "success")
+        return redirect(url_for("proponentes_scorecard_rating", scorecard_id=run_id))
 
     body = """
     <style>
@@ -154045,288 +154624,241 @@ def proponentes_scorecard_scan_nuevo():
         background-repeat:no-repeat;
       }
 
-      .prop-score-shell{
+      .score-new-shell{
         width:96%;
-        max-width:1200px;
+        max-width:1180px;
         margin:26px auto 24px auto;
       }
 
-      .prop-score-header-card{
+      .score-new-header{
         background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
         border-radius:18px;
-        padding:16px 24px;
+        padding:18px 24px;
         min-height:94px;
         display:flex;
         align-items:center;
-        justify-content:flex-start;
         box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
+        margin-bottom:16px;
+        color:#fff;
       }
 
-      .prop-score-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }
-
-      .prop-score-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }
-
-      .prop-score-header-overlay::before{
-        content:"🚀";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#1459a6;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .prop-score-header-overlay h2{
-        color:#ffffff !important;
+      .score-new-title{
+        font-size:1.35rem;
         font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
+        margin:0;
+        color:#fff;
       }
 
-      .prop-score-header-overlay h2::before{
-        content:"SGSI · Scorecard de Terceros";
-        display:block;
-        width:max-content;
-        max-width:100%;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-        text-shadow:none;
+      .score-card{
+        background:rgba(255,255,255,.96);
+        border-radius:18px;
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        padding:22px;
       }
 
-      .soft-card,
-      .card{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
-        overflow:hidden;
+      .hidden-field{
+        display:none;
       }
 
       .form-label{
-        font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        padding:6px 10px;
-        border-radius:10px;
-        display:inline-block;
-        margin-bottom:6px;
+        color:#25324a;
+        font-size:.82rem;
       }
 
       .form-control,
       .form-select{
         border-radius:10px;
+        min-height:42px;
         border:1px solid #d9e3f0;
-        min-height:40px;
-        font-size:.86rem;
         background:#f8fafc;
-        box-shadow:none !important;
       }
 
-      .form-control:focus,
-      .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
+      .tools-grid{
+        display:grid;
+        grid-template-columns:repeat(3,minmax(0,1fr));
+        gap:12px;
       }
 
-      .selector-box{
-        background:#f8fafc;
+      .tool-check{
+        background:#f8fbff;
         border:1px solid #dbe6f4;
-        border-radius:16px;
-        padding:16px;
-        margin-bottom:16px;
+        border-radius:14px;
+        padding:12px 14px;
+        min-height:74px;
+        display:flex;
+        align-items:flex-start;
+        gap:10px;
       }
 
-      .selector-title{
+      .tool-check:hover{
+        background:#eef6ff;
+        border-color:#9ec5fe;
+      }
+
+      .tool-title{
         font-weight:950;
-        color:#0b3a6e;
-        font-size:.95rem;
-        margin-bottom:8px;
+        color:#1459a6;
+        font-size:.88rem;
       }
 
-      .help-soft{
-        font-size:.78rem;
+      .tool-desc{
         color:#64748b;
-        font-weight:700;
+        font-size:.74rem;
+        line-height:1.25;
       }
 
-      .btn{
-        border-radius:10px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      .zap-box{
+        border-color:#f59e0b;
+        background:#fff7ed;
       }
 
-      .badge{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
+      .zap-box .tool-title{
+        color:#b45309;
       }
 
-      .hidden-field{
-        display:none !important;
-      }
-
-      @media (max-width:992px){
-        .prop-score-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .prop-score-header-card{
-          min-height:88px;
-        }
-
-        .prop-score-header-overlay h2{
-          font-size:1.20rem;
-        }
-      }
-
-      @media (max-width:768px){
-        .prop-score-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .prop-score-header-overlay::before{
-          margin:0;
-        }
-
-        .prop-score-header-overlay h2,
-        .prop-score-header-overlay h2::before{
-          text-align:center;
-          margin-left:auto;
-          margin-right:auto;
+      @media(max-width:768px){
+        .tools-grid{
+          grid-template-columns:1fr;
         }
       }
     </style>
 
-    <div class="prop-score-shell">
+    <div class="score-new-shell">
 
-      <div class="prop-score-header-card">
-        <div class="prop-score-header-overlay">
-          <h2>Nuevo Security Scorecard de Terceros</h2>
+      <div class="score-new-header">
+        <div>
+          <div style="font-size:.72rem;font-weight:900;background:rgba(255,255,255,.18);border-radius:999px;padding:4px 10px;display:inline-block;margin-bottom:6px;">
+            SGSI · Security Scorecard
+          </div>
+          <h2 class="score-new-title">Nuevo Security Scorecard de Terceros</h2>
         </div>
       </div>
 
-      <div class="soft-card p-4">
-        <form method="POST" id="formScorecardTerceros">
+      <div class="score-card">
 
-          <div class="selector-box">
-            <div class="selector-title">Tipo de tercero a evaluar</div>
+        <form method="post">
 
-            <div class="row g-3">
-              <div class="col-md-12">
-                <label class="form-label fw-bold">Seleccione el tipo</label>
-                <select name="tipo_tercero" id="tipo_tercero" class="form-select form-select-lg" required>
-                  <option value="">Seleccione...</option>
-                  <option value="proveedor">Proveedor existente</option>
-                  <option value="proponente">Proponente nuevo / manual</option>
-                </select>
+          <div class="row g-3">
 
-                <div class="help-soft mt-2">
-                  Si selecciona Proveedor, se cargará la lista de proveedores ya registrados.
-                  Si selecciona Proponente, deberá ingresar el nombre manualmente.
-                </div>
+            <div class="col-md-4">
+              <label class="form-label">Tipo de tercero</label>
+              <select name="tipo_tercero" id="tipo_tercero" class="form-select" required>
+                <option value="">Seleccione...</option>
+                <option value="proveedor">Proveedor existente</option>
+                <option value="proponente">Nuevo tercero / proponente</option>
+              </select>
+            </div>
+
+            <div class="col-md-8 hidden-field" id="bloque_proveedor">
+              <label class="form-label">Proveedor existente</label>
+              <select name="proveedor_id" id="proveedor_id" class="form-select">
+                <option value="">Seleccione proveedor...</option>
+                {% for p in proveedores %}
+                  <option value="{{ p.id }}">{{ p.nombre_proveedor }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="col-md-8 hidden-field" id="bloque_proponente">
+              <label class="form-label">Nombre del tercero / proponente</label>
+              <input name="proponente_nombre" id="proponente_nombre" class="form-control"
+                     placeholder="Ejemplo: Empresa ABC S.A.S.">
+            </div>
+
+            <div class="col-md-12">
+              <label class="form-label">Dominio autorizado</label>
+              <input name="dominio" class="form-control" required
+                     placeholder="Ejemplo: tercero.com o https://tercero.com">
+            </div>
+
+            <div class="col-12 mt-3">
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" name="ejecutar_kali" id="ejecutar_kali" checked>
+                <label class="form-check-label fw-bold" for="ejecutar_kali">
+                  Ejecutar escaneo técnico Kali / Docker con herramientas seleccionadas
+                </label>
               </div>
             </div>
-          </div>
 
-          <div id="bloque_proveedor" class="mb-3 hidden-field">
-            <label class="form-label fw-bold">Proveedor existente</label>
-            <select name="proveedor_id" id="proveedor_id" class="form-select form-select-lg">
-              <option value="">Seleccione un proveedor...</option>
-              {% for p in proveedores %}
-                <option value="{{ p.id }}">{{ p.nombre_proveedor }}</option>
-              {% endfor %}
-            </select>
-            <div class="form-text">
-              Lista tomada del módulo Registro de Proveedores.
+            <div class="col-12" id="bloque_herramientas_kali">
+              <label class="form-label">Herramientas de escaneo técnico</label>
+
+              <div class="tools-grid">
+
+                <label class="tool-check">
+                  <input type="checkbox" name="herramientas_kali" value="nmap" checked>
+                  <div>
+                    <div class="tool-title">Nmap</div>
+                    <div class="tool-desc">Puertos abiertos y servicios expuestos.</div>
+                  </div>
+                </label>
+
+                <label class="tool-check">
+                  <input type="checkbox" name="herramientas_kali" value="whatweb">
+                  <div>
+                    <div class="tool-title">WhatWeb</div>
+                    <div class="tool-desc">Tecnologías web detectadas.</div>
+                  </div>
+                </label>
+
+                <label class="tool-check">
+                  <input type="checkbox" name="herramientas_kali" value="nikto" checked>
+                  <div>
+                    <div class="tool-title">Nikto</div>
+                    <div class="tool-desc">Hallazgos comunes de seguridad web.</div>
+                  </div>
+                </label>
+
+                <label class="tool-check">
+                  <input type="checkbox" name="herramientas_kali" value="testssl">
+                  <div>
+                    <div class="tool-title">testssl</div>
+                    <div class="tool-desc">Validación TLS/SSL.</div>
+                  </div>
+                </label>
+
+                <label class="tool-check">
+                  <input type="checkbox" name="herramientas_kali" value="nuclei" checked>
+                  <div>
+                    <div class="tool-title">Nuclei</div>
+                    <div class="tool-desc">Templates de vulnerabilidades web.</div>
+                  </div>
+                </label>
+
+                <label class="tool-check zap-box">
+                  <input type="checkbox" name="herramientas_kali" value="zap">
+                  <div>
+                    <div class="tool-title">OWASP ZAP Full Scan</div>
+                    <div class="tool-desc">Spider + Active Scan usando Docker ZAP.</div>
+                  </div>
+                </label>
+
+              </div>
             </div>
-          </div>
 
-          <div id="bloque_proponente" class="mb-3 hidden-field">
-            <label class="form-label fw-bold">Nombre del proponente</label>
-            <input type="text" name="proponente_nombre" id="proponente_nombre"
-                   class="form-control form-control-lg"
-                   placeholder="Ejemplo: Proponente ABC S.A.S.">
-            <div class="form-text">
-              Este campo solo aplica cuando el tercero es un proponente.
+            <div class="col-12">
+              <div class="alert alert-warning mb-0">
+                <strong>Importante:</strong> use este módulo solo con autorización expresa del proveedor o tercero.
+                OWASP ZAP Full Scan puede ser más intrusivo que un escaneo básico.
+              </div>
             </div>
-          </div>
 
-          <div class="mb-3">
-            <label class="form-label fw-bold">Dominio autorizado del tercero</label>
-            <input type="text" name="dominio" class="form-control form-control-lg"
-                   placeholder="Ejemplo: empresa.com" required>
-            <div class="form-text">
-              Ingrese únicamente el dominio autorizado para evaluación.
+            <div class="col-12 d-flex justify-content-between mt-3">
+              <a href="{{ url_for('proponentes_scorecard_dashboard') }}" class="btn btn-outline-secondary rounded-pill px-4">
+                Volver
+              </a>
+
+              <button class="btn btn-warning text-dark rounded-pill px-4 fw-bold">
+                🚀 Ejecutar Scorecard
+              </button>
             </div>
-          </div>
 
-          <div class="form-check form-switch mb-4">
-            <input class="form-check-input" type="checkbox" name="ejecutar_kali" id="ejecutar_kali" checked>
-            <label class="form-check-label fw-bold" for="ejecutar_kali">
-              Ejecutar escaneo Kali independiente: Nmap, WhatWeb, Nikto, Nuclei y testssl
-            </label>
-          </div>
-
-          <div class="alert alert-warning">
-            <strong>Importante:</strong> use este módulo solo con autorización expresa del proveedor o proponente para evaluar su dominio.
-          </div>
-
-          <div class="d-flex justify-content-between">
-            <a href="{{ url_for('proponentes_scorecard_dashboard') }}" class="btn btn-outline-secondary rounded-pill px-4">
-              Volver
-            </a>
-            <button class="btn btn-warning text-dark rounded-pill px-4 fw-bold">
-              🚀 Ejecutar Scorecard
-            </button>
           </div>
 
         </form>
       </div>
-
     </div>
 
     <script>
@@ -154340,7 +154872,6 @@ def proponentes_scorecard_scan_nuevo():
         if(tipo === "proveedor"){
           bloqueProveedor.classList.remove("hidden-field");
           bloqueProponente.classList.add("hidden-field");
-
           proveedor.setAttribute("required", "required");
           proponente.removeAttribute("required");
           proponente.value = "";
@@ -154348,7 +154879,6 @@ def proponentes_scorecard_scan_nuevo():
         else if(tipo === "proponente"){
           bloqueProveedor.classList.add("hidden-field");
           bloqueProponente.classList.remove("hidden-field");
-
           proveedor.removeAttribute("required");
           proveedor.value = "";
           proponente.setAttribute("required", "required");
@@ -154356,7 +154886,6 @@ def proponentes_scorecard_scan_nuevo():
         else{
           bloqueProveedor.classList.add("hidden-field");
           bloqueProponente.classList.add("hidden-field");
-
           proveedor.removeAttribute("required");
           proveedor.value = "";
           proponente.removeAttribute("required");
@@ -154364,11 +154893,26 @@ def proponentes_scorecard_scan_nuevo():
         }
       }
 
+      function toggleHerramientasKali(){
+        const chk = document.getElementById("ejecutar_kali");
+        const bloque = document.getElementById("bloque_herramientas_kali");
+
+        if(!chk || !bloque) return;
+
+        bloque.style.display = chk.checked ? "block" : "none";
+      }
+
       document.addEventListener("DOMContentLoaded", function(){
         const tipo = document.getElementById("tipo_tercero");
         if(tipo){
           tipo.addEventListener("change", actualizarTipoTercero);
           actualizarTipoTercero();
+        }
+
+        const kali = document.getElementById("ejecutar_kali");
+        if(kali){
+          kali.addEventListener("change", toggleHerramientasKali);
+          toggleHerramientasKali();
         }
       });
     </script>
@@ -157309,6 +157853,10 @@ def proponentes_scorecard_parametros():
             risk_levels=risk_levels
         ))
     )
+
+# ========================================================================================================================================
+#                                                   FIN DEL MÓDULO SECURITY SCORECARD 
+# ========================================================================================================================================
 
 # ========================================================================================================================================
 #                                                   MÓDULO PESI - PLAN ESTRATÉGICO SI
