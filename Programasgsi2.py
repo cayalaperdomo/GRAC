@@ -156447,13 +156447,6 @@ def admin_scorecard_proponentes_apis():
         </a>
       </div>
 
-      <div class="alert alert-info soft-card">
-        <strong>Separación activa:</strong>
-        Estas API Keys se guardan en <code>scorecard_proponentes.db</code>,
-        tabla <code>scorecard_proponentes_api_keys</code>.
-        No afectan el Scorecard de Proveedores.
-      </div>
-
       <div class="row g-4">
 
         <div class="col-md-4">
