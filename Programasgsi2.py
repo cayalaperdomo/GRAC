@@ -13671,154 +13671,7 @@ def ensure_pdf_from_office(filename: str) -> str | None:
 
     except Exception:
         return None
-    
-@app.route('/vista_evidencia/<path:filename>')
-@login_required
-def vista_evidencia(filename):
-    ext = os.path.splitext(filename)[1].lower()
-    is_pdf = ext == '.pdf'
-    is_office = ext in {'.doc', '.docx', '.xls', '.xlsx'}
 
-    # 1) Determinar a dónde volver (lee ?next=...)
-    next_ep = request.args.get('next')  # p.ej. 'duenos_info', 'declaracion_aplicabilidad', etc.
-    # Opcional: etiqueta de botón
-    back_label_map = {
-        'duenos_info': '⬅ Volver a Dueños de la Información',
-        'declaracion_aplicabilidad': '⬅ Volver a SoA',
-        'soa': '⬅ Volver a SoA',
-        'activos_menu': '⬅ Volver a Gestión de Activos',
-        'menu': '⬅ Volver al menú principal',
-    }
-    # Whitelist de endpoints permitidos a los que volver:
-    allowed_back = set(back_label_map.keys())
-
-    if next_ep in allowed_back:
-        back_url = url_for(next_ep)
-        back_label = back_label_map[next_ep]
-    else:
-        # fallback: intentar referrer o menú
-        back_url = request.referrer or url_for('menu')
-        back_label = '⬅ Volver'
-
-    pdf_converted = None
-    if is_office:
-        # genera PDF si hace falta (asegúrate de tener CONVERTED_FOLDER y ensure_pdf_from_office)
-        pdf_converted = ensure_pdf_from_office(filename)
-
-    inner_html = """
-    <div class="container my-3">
-      <!-- Barra superior -->
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        <a href="{{ back_url }}" class="btn btn-secondary rounded-pill px-4 py-2">
-          {{ back_label }}
-        </a>
-        <div class="small text-muted text-truncate">Archivo: {{ filename }}</div>
-      </div>
-
-      <!-- Contenedor del visor -->
-      <div class="card shadow-sm">
-        <div class="card-body p-2">
-          {% if is_pdf %}
-            <div class="pdf-container">
-              <iframe id="pdfFrame"
-                      src="{{ url_for('ver_evidencia', filename=filename) }}#zoom=page-width"
-                      title="Visor PDF"></iframe>
-            </div>
-
-          {% elif pdf_converted %}
-            <div class="pdf-container">
-              <iframe id="pdfFrame"
-                      src="{{ url_for('ver_evidencia_convertido', filename=pdf_converted) }}#zoom=page-width"
-                      title="Visor PDF (convertido)"></iframe>
-            </div>
-            <div class="mt-2 text-center">
-              <a class="btn btn-outline-primary rounded-pill px-4"
-                 href="{{ url_for('ver_evidencia', filename=filename) }}" target="_blank" rel="noopener">
-                Abrir archivo original
-              </a>
-            </div>
-
-          {% elif is_office %}
-            <div class="alert alert-warning m-2">
-              No fue posible generar una vista previa interna del archivo Office.
-              Verifica que LibreOffice esté instalado en el servidor.
-            </div>
-            <div class="text-center mb-2">
-              <a class="btn btn-outline-primary rounded-pill px-4"
-                 href="{{ url_for('ver_evidencia', filename=filename) }}" target="_blank" rel="noopener">
-                Abrir/descargar archivo original
-              </a>
-            </div>
-
-          {% else %}
-            <div class="alert alert-info m-2">
-              Este tipo de archivo (<b>{{ ext }}</b>) no se puede previsualizar. Puedes abrirlo/descargarlo.
-            </div>
-            <div class="text-center mb-2">
-              <a class="btn btn-outline-primary rounded-pill px-4"
-                 href="{{ url_for('ver_evidencia', filename=filename) }}" target="_blank" rel="noopener">
-                Abrir archivo
-              </a>
-            </div>
-          {% endif %}
-        </div>
-      </div>
-    </div>
-
-    <style>
-      /* Altura razonable dentro del layout, sin salirse */
-      .pdf-container {
-        height: min(82vh, 1000px);
-        min-height: 600px;
-        width: 100%;
-      }
-      .pdf-container iframe {
-        width: 100%;
-        height: 100%;
-        border: 1px solid #dee2e6;
-        border-radius: 8px;
-        background: #fff;
-      }
-    </style>
-
-    <script>
-      function setZoom(z) {
-        var f = document.getElementById('pdfFrame');
-        if (!f) return;
-        var base = f.src.split('#')[0];
-        f.src = base + '#zoom=' + encodeURIComponent(z);
-      }
-    </script>
-    <style>
-          body {
-            background-image: url('/static/img/ccsgsi.jpg'); /* Usa tu imagen */
-            background-size: cover;       /* 🔹 ocupa toda la pantalla */
-            background-position: center;  /* 🔹 centrada */
-            background-attachment: fixed; /* 🔹 efecto de fondo fijo elegante */
-            background-repeat: no-repeat;
-          }
-
-          /* Fondo suave en las tarjetas para que se lean bien */
-          .card {
-            background: rgba(255, 255, 255, 0.85) !important;
-            backdrop-filter: blur(4px);
-          }
-        </style>
-    """
-
-    return render_template_string(
-        BASE,
-        content=Markup(render_template_string(
-            inner_html,
-            filename=filename,
-            ext=ext,
-            is_pdf=is_pdf,
-            is_office=is_office,
-            pdf_converted=pdf_converted,
-            back_url=back_url,
-            back_label=back_label
-        ))
-    )
 
 # =========================
 # Borrado de archivos
@@ -37778,6 +37631,154 @@ def duenos_info_delete():
         flash("Registro no encontrado.", "danger")
     return redirect(url_for('duenos_info'))
 
+@app.route('/vista_evidencia/<path:filename>')
+@login_required
+def vista_evidencia(filename):
+    ext = os.path.splitext(filename)[1].lower()
+    is_pdf = ext == '.pdf'
+    is_office = ext in {'.doc', '.docx', '.xls', '.xlsx'}
+
+    # 1) Determinar a dónde volver (lee ?next=...)
+    next_ep = request.args.get('next')  # p.ej. 'duenos_info', 'declaracion_aplicabilidad', etc.
+    # Opcional: etiqueta de botón
+    back_label_map = {
+        'duenos_info': '⬅ Volver a Dueños de la Información',
+        'declaracion_aplicabilidad': '⬅ Volver a SoA',
+        'soa': '⬅ Volver a SoA',
+        'activos_menu': '⬅ Volver a Gestión de Activos',
+        'menu': '⬅ Volver al menú principal',
+    }
+    # Whitelist de endpoints permitidos a los que volver:
+    allowed_back = set(back_label_map.keys())
+
+    if next_ep in allowed_back:
+        back_url = url_for(next_ep)
+        back_label = back_label_map[next_ep]
+    else:
+        # fallback: intentar referrer o menú
+        back_url = request.referrer or url_for('menu')
+        back_label = '⬅ Volver'
+
+    pdf_converted = None
+    if is_office:
+        # genera PDF si hace falta (asegúrate de tener CONVERTED_FOLDER y ensure_pdf_from_office)
+        pdf_converted = ensure_pdf_from_office(filename)
+
+    inner_html = """
+    <div class="container my-3">
+      <!-- Barra superior -->
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <a href="{{ back_url }}" class="btn btn-secondary rounded-pill px-4 py-2">
+          {{ back_label }}
+        </a>
+        <div class="small text-muted text-truncate">Archivo: {{ filename }}</div>
+      </div>
+
+      <!-- Contenedor del visor -->
+      <div class="card shadow-sm">
+        <div class="card-body p-2">
+          {% if is_pdf %}
+            <div class="pdf-container">
+              <iframe id="pdfFrame"
+                      src="{{ url_for('ver_evidencia', filename=filename) }}#zoom=page-width"
+                      title="Visor PDF"></iframe>
+            </div>
+
+          {% elif pdf_converted %}
+            <div class="pdf-container">
+              <iframe id="pdfFrame"
+                      src="{{ url_for('ver_evidencia_convertido', filename=pdf_converted) }}#zoom=page-width"
+                      title="Visor PDF (convertido)"></iframe>
+            </div>
+            <div class="mt-2 text-center">
+              <a class="btn btn-outline-primary rounded-pill px-4"
+                 href="{{ url_for('ver_evidencia', filename=filename) }}" target="_blank" rel="noopener">
+                Abrir archivo original
+              </a>
+            </div>
+
+          {% elif is_office %}
+            <div class="alert alert-warning m-2">
+              No fue posible generar una vista previa interna del archivo Office.
+              Verifica que LibreOffice esté instalado en el servidor.
+            </div>
+            <div class="text-center mb-2">
+              <a class="btn btn-outline-primary rounded-pill px-4"
+                 href="{{ url_for('ver_evidencia', filename=filename) }}" target="_blank" rel="noopener">
+                Abrir/descargar archivo original
+              </a>
+            </div>
+
+          {% else %}
+            <div class="alert alert-info m-2">
+              Este tipo de archivo (<b>{{ ext }}</b>) no se puede previsualizar. Puedes abrirlo/descargarlo.
+            </div>
+            <div class="text-center mb-2">
+              <a class="btn btn-outline-primary rounded-pill px-4"
+                 href="{{ url_for('ver_evidencia', filename=filename) }}" target="_blank" rel="noopener">
+                Abrir archivo
+              </a>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <style>
+      /* Altura razonable dentro del layout, sin salirse */
+      .pdf-container {
+        height: min(82vh, 1000px);
+        min-height: 600px;
+        width: 100%;
+      }
+      .pdf-container iframe {
+        width: 100%;
+        height: 100%;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        background: #fff;
+      }
+    </style>
+
+    <script>
+      function setZoom(z) {
+        var f = document.getElementById('pdfFrame');
+        if (!f) return;
+        var base = f.src.split('#')[0];
+        f.src = base + '#zoom=' + encodeURIComponent(z);
+      }
+    </script>
+    <style>
+          body {
+            background-image: url('/static/img/ccsgsi.jpg'); /* Usa tu imagen */
+            background-size: cover;       /* 🔹 ocupa toda la pantalla */
+            background-position: center;  /* 🔹 centrada */
+            background-attachment: fixed; /* 🔹 efecto de fondo fijo elegante */
+            background-repeat: no-repeat;
+          }
+
+          /* Fondo suave en las tarjetas para que se lean bien */
+          .card {
+            background: rgba(255, 255, 255, 0.85) !important;
+            backdrop-filter: blur(4px);
+          }
+        </style>
+    """
+
+    return render_template_string(
+        BASE,
+        content=Markup(render_template_string(
+            inner_html,
+            filename=filename,
+            ext=ext,
+            is_pdf=is_pdf,
+            is_office=is_office,
+            pdf_converted=pdf_converted,
+            back_url=back_url,
+            back_label=back_label
+        ))
+    )
+
 
 @app.route('/duenos_info/delete_file/<int:owner_id>/<path:filename>', methods=['POST'])
 @login_required
@@ -39026,6 +39027,29 @@ def inventario_informacion():
         .all()
     )
 
+    matriz_items = []
+
+    for item in items:
+        conf_row = ValoracionConfidencialidad.query.filter_by(nivel_num=item.c_nivel).first() if item.c_nivel is not None else None
+        inte_row = ValoracionIntegridad.query.filter_by(nivel_num=item.i_nivel).first() if item.i_nivel is not None else None
+        disp_row = ValoracionDisponibilidad.query.filter_by(nivel_num=item.d_nivel).first() if item.d_nivel is not None else None
+        valor_row = ValoracionCriticidadActivo.query.filter_by(nivel_num=item.valor_activo).first() if item.valor_activo is not None else None
+
+        conf_texto = conf_row.clasificacion if conf_row and getattr(conf_row, 'clasificacion', None) else (item.etiqueta_conf_texto or (f"Nivel {item.c_nivel}" if item.c_nivel is not None else "—"))
+        inte_texto = inte_row.nivel if inte_row and getattr(inte_row, 'nivel', None) else (f"Nivel {item.i_nivel}" if item.i_nivel is not None else "—")
+        disp_texto = disp_row.nivel if disp_row and getattr(disp_row, 'nivel', None) else (f"Nivel {item.d_nivel}" if item.d_nivel is not None else "—")
+        valor_texto = valor_row.nivel_texto if valor_row and getattr(valor_row, 'nivel_texto', None) else (f"Nivel {item.valor_activo}" if item.valor_activo is not None else "—")
+
+        matriz_items.append({
+            "item": item,
+            "conf_texto": conf_texto,
+            "inte_texto": inte_texto,
+            "disp_texto": disp_texto,
+            "valor_texto": valor_texto,
+            "criticidad_texto": item.criticidad_texto or (f"Nivel {item.criticidad_num}" if item.criticidad_num is not None else "—"),
+            "etiquetado_texto": item.etiqueta_conf_texto or (f"Nivel {item.etiqueta_conf_num}" if item.etiqueta_conf_num is not None else "—"),
+        })
+
     html = """
     <div class="invinfomat-shell">
 
@@ -39041,7 +39065,6 @@ def inventario_informacion():
       </div>
 
       <div class="invinfomat-header-actions">
-
         {% if not read_only %}
           <a href="{{ url_for('inventario_informacion_new') }}"
              class="btn btn-primary rounded-pill px-4 fw-bold">
@@ -39067,11 +39090,12 @@ def inventario_informacion():
           <div>
             <h5 class="invinfomat-top-title mb-1">Resumen de activos de información</h5>
             <div class="invinfomat-top-note">
-              La matriz muestra únicamente los campos esenciales. Para consultar toda la información utilice el botón <strong>Ver detalle</strong>.
+              La matriz muestra los niveles de valoración en texto. Para consultar toda la información utilice el botón <strong>Ver detalle</strong>.
             </div>
           </div>
+
           <div class="invinfomat-counter-badge">
-            Total registros: {{ items|length }}
+            Total registros: {{ matriz_items|length }}
           </div>
         </div>
 
@@ -39079,17 +39103,18 @@ def inventario_informacion():
           <div class="invinfomat-table-wrap">
             <div class="table-responsive">
               <table class="table table-bordered table-hover align-middle invinfomat-table mb-0">
+
                 <colgroup>
-                  <col style="width: 13%;">
-                  <col style="width: 16%;">
-                  <col style="width: 13%;">
-                  <col style="width: 6%;">
-                  <col style="width: 6%;">
-                  <col style="width: 6%;">
-                  <col style="width: 11%;">
                   <col style="width: 12%;">
-                  <col style="width: 17%;">
-                  <col style="width: 16%;">
+                  <col style="width: 15%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 14%;">
+                  <col style="width: 15%;">
                 </colgroup>
 
                 <thead>
@@ -39097,46 +39122,61 @@ def inventario_informacion():
                     <th>Área</th>
                     <th>Nombre del Activo</th>
                     <th>Propietario</th>
-                    <th>C</th>
-                    <th>I</th>
-                    <th>D</th>
+                    <th>Confidencialidad</th>
+                    <th>Integridad</th>
+                    <th>Disponibilidad</th>
                     <th>Valor del Activo</th>
                     <th>Criticidad</th>
-                    <th class="invinfomat-col-etiquetado">Etiquetado (según C)</th>
+                    <th>Etiquetado</th>
                     <th class="invinfomat-col-acciones">Acciones</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {% for item in items %}
+                  {% for row in matriz_items %}
+                    {% set item = row.item %}
                     <tr>
                       <td>{{ item.area.area if item.area else '—' }}</td>
+
                       <td class="invinfomat-cell-main">
                         <div class="invinfomat-main-text">{{ item.nombre_activo or '—' }}</div>
                       </td>
+
                       <td>{{ item.propietario or '—' }}</td>
 
                       <td class="text-center">
-                        <span class="badge badge-n{{ item.c_nivel or 1 }}">{{ item.c_nivel or '—' }}</span>
-                      </td>
-                      <td class="text-center">
-                        <span class="badge badge-n{{ item.i_nivel or 1 }}">{{ item.i_nivel or '—' }}</span>
-                      </td>
-                      <td class="text-center">
-                        <span class="badge badge-n{{ item.d_nivel or 1 }}">{{ item.d_nivel or '—' }}</span>
+                        <span class="badge badge-n{{ item.c_nivel or 1 }} invinfomat-badge-text">
+                          {{ row.conf_texto }}
+                        </span>
                       </td>
 
                       <td class="text-center">
-                        <span class="badge badge-n{{ item.valor_activo or 1 }}">{{ item.valor_activo or '—' }}</span>
+                        <span class="badge badge-n{{ item.i_nivel or 1 }} invinfomat-badge-text">
+                          {{ row.inte_texto }}
+                        </span>
                       </td>
 
                       <td class="text-center">
-                        <span class="badge badge-n{{ item.criticidad_num or 1 }}">{{ item.criticidad_texto or '—' }}</span>
+                        <span class="badge badge-n{{ item.d_nivel or 1 }} invinfomat-badge-text">
+                          {{ row.disp_texto }}
+                        </span>
                       </td>
 
-                      <td class="text-center invinfomat-col-etiquetado">
-                        <span class="badge badge-n{{ item.etiqueta_conf_num or 1 }} invinfomat-badge-wide">
-                          {{ item.etiqueta_conf_texto or '—' }}
+                      <td class="text-center">
+                        <span class="badge badge-n{{ item.valor_activo or 1 }} invinfomat-badge-text">
+                          {{ row.valor_texto }}
+                        </span>
+                      </td>
+
+                      <td class="text-center">
+                        <span class="badge badge-n{{ item.criticidad_num or 1 }} invinfomat-badge-text">
+                          {{ row.criticidad_texto }}
+                        </span>
+                      </td>
+
+                      <td class="text-center">
+                        <span class="badge badge-n{{ item.etiqueta_conf_num or 1 }} invinfomat-badge-text">
+                          {{ row.etiquetado_texto }}
                         </span>
                       </td>
 
@@ -39166,7 +39206,7 @@ def inventario_informacion():
                     </tr>
                   {% endfor %}
 
-                  {% if items|length == 0 %}
+                  {% if matriz_items|length == 0 %}
                     <tr>
                       <td colspan="10" class="text-center text-muted py-5">
                         Sin registros
@@ -39174,6 +39214,7 @@ def inventario_informacion():
                     </tr>
                   {% endif %}
                 </tbody>
+
               </table>
             </div>
           </div>
@@ -39193,7 +39234,7 @@ def inventario_informacion():
 
       .invinfomat-shell{
         width:96%;
-        max-width:1650px;
+        max-width:1750px;
         margin:10px auto 24px auto;
       }
 
@@ -39290,19 +39331,6 @@ def inventario_informacion():
         box-shadow:0 8px 16px rgba(15,23,42,.14);
       }
 
-      .invinfomat-back-btn{
-        background:#fff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-        box-shadow:0 6px 14px rgba(0,0,0,.10);
-      }
-
-      .invinfomat-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
       .invinfomat-card{
         background:rgba(255,255,255,.96) !important;
         border-radius:18px;
@@ -39357,7 +39385,7 @@ def inventario_informacion():
       }
 
       .invinfomat-table{
-        min-width:1500px;
+        min-width:1600px;
         table-layout:fixed;
         margin-bottom:0;
       }
@@ -39376,7 +39404,7 @@ def inventario_informacion():
       .invinfomat-table th,
       .invinfomat-table td{
         vertical-align:top;
-        font-size:.78rem;
+        font-size:.76rem;
         padding:9px 8px;
         white-space:normal;
         word-break:break-word;
@@ -39400,25 +39428,20 @@ def inventario_informacion():
         color:#0f172a;
       }
 
-      .invinfomat-col-etiquetado{
-        min-width:180px !important;
-      }
-
-      .invinfomat-badge-wide{
-        display:inline-block;
-        max-width:100%;
-        white-space:normal !important;
-        word-break:normal !important;
-        overflow-wrap:break-word;
-        text-align:center;
+      .invinfomat-badge-text{
+        font-size:.68rem !important;
         line-height:1.15;
-        font-weight:900;
+        padding:5px 8px;
         border-radius:999px;
+        font-weight:900;
+        white-space:normal;
+        max-width:130px;
+        display:inline-block;
       }
 
       .invinfomat-col-acciones{
-        width:170px !important;
-        min-width:170px !important;
+        width:160px !important;
+        min-width:160px !important;
       }
 
       .invinfomat-actions-wrap{
@@ -39480,27 +39503,6 @@ def inventario_informacion():
         .invinfomat-card-body{
           padding:12px;
         }
-
-        .invinfomat-topbar{
-          padding:12px 14px 0 14px;
-        }
-
-        .invinfomat-col-etiquetado{
-          min-width:160px !important;
-        }
-
-        .invinfomat-col-acciones{
-          width:160px !important;
-          min-width:160px !important;
-        }
-
-        .invinfomat-btn-action,
-        .invinfomat-actions-wrap .badge{
-          min-width:102px;
-          max-width:102px;
-          font-size:.68rem !important;
-          padding:4px 8px !important;
-        }
       }
 
       @media (max-width:768px){
@@ -39520,7 +39522,13 @@ def inventario_informacion():
       }
     </style>
     """
-    inner = render_template_string(html, items=items, read_only=read_only)
+
+    inner = render_template_string(
+        html,
+        matriz_items=matriz_items,
+        read_only=read_only
+    )
+
     return render_template_string(BASE, content=Markup(inner))
 
 # =========================
@@ -40102,6 +40110,80 @@ def inventario_informacion_delete(id):
 # =========================
 # ENTRADA DIRECTA — Inventario de Software
 # =========================
+
+# =========================
+# Carpeta de evidencias — Inventario de Software
+# =========================
+UPLOAD_INVENTARIO_SOFTWARE_DIR = os.path.join(app.root_path, 'uploads', 'inventario_software')
+os.makedirs(UPLOAD_INVENTARIO_SOFTWARE_DIR, exist_ok=True)
+app.config['UPLOAD_INVENTARIO_SOFTWARE_DIR'] = UPLOAD_INVENTARIO_SOFTWARE_DIR
+
+
+class InventarioSoftwareEvidencia(db.Model):
+    __tablename__ = 'inventario_software_evidencias'
+
+    id = db.Column(db.Integer, primary_key=True)
+    registro_id = db.Column(
+        db.Integer,
+        db.ForeignKey('inventario_software.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True
+    )
+    filename = db.Column(db.String(255), nullable=False)
+    original_name = db.Column(db.String(255), nullable=False)
+    mime = db.Column(db.String(120), default='application/pdf')
+    size = db.Column(db.Integer, default=0)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    uploaded_by = db.Column(db.String(200))
+
+    registro = db.relationship(
+        'InventarioSoftware',
+        backref=db.backref(
+            'evidencias',
+            lazy=True,
+            cascade='all, delete-orphan',
+            passive_deletes=True
+        )
+    )
+
+def guardar_evidencias_inventario_software(item):
+    """Guarda evidencias PDF para Inventario de Software."""
+    files = request.files.getlist('evidencias')
+
+    if not files:
+        return
+
+    upload_dir = app.config.get('UPLOAD_INVENTARIO_SOFTWARE_DIR')
+    if not upload_dir:
+        raise RuntimeError('No está configurada la carpeta UPLOAD_INVENTARIO_SOFTWARE_DIR.')
+
+    os.makedirs(upload_dir, exist_ok=True)
+
+    user = User.query.get(session.get('user_id'))
+    uploaded_by = getattr(user, 'email', None) or getattr(user, 'username', None) or getattr(user, 'usuario', None) or 'Sistema'
+
+    for f in files:
+        if not f or not f.filename:
+            continue
+
+        if not is_allowed_pdf(f.filename):
+            flash(f'Archivo no permitido. Solo se aceptan PDF: {f.filename}', 'danger')
+            continue
+
+        store_name = unique_store_name(f.filename)
+        path = os.path.join(upload_dir, store_name)
+        f.save(path)
+
+        ev = InventarioSoftwareEvidencia(
+            registro=item,
+            filename=store_name,
+            original_name=secure_filename(f.filename),
+            mime='application/pdf',
+            size=os.path.getsize(path),
+            uploaded_by=uploaded_by
+        )
+        db.session.add(ev)
+
 @app.route('/inventario_software_menu')
 @login_required
 def inventario_software_menu():
@@ -40208,6 +40290,8 @@ def inventario_software_new():
             observaciones=(request.form.get('observaciones') or '').strip()
         )
         db.session.add(it)
+        db.session.flush()
+        guardar_evidencias_inventario_software(it)
         db.session.commit()
         flash("Activo de software creado.", "success")
         return redirect(url_for('inventario_software'))
@@ -40236,7 +40320,7 @@ def inventario_software_new():
 
       <div class="invsoft-card">
         <div class="invsoft-card-body">
-          <form method="post">
+          <form method="post" enctype="multipart/form-data">
             <div class="row g-3">
 
               <div class="col-md-4">
@@ -40383,6 +40467,16 @@ def inventario_software_new():
               <div class="col-md-6">
                 <label class="form-label">Observaciones</label>
                 <input type="text" name="observaciones" class="form-control">
+              </div>
+
+              <div class="col-md-12">
+                <div class="invsoft-evidence-box">
+                  <label class="form-label mb-1">Evidencias PDF</label>
+                  <input type="file" name="evidencias" class="form-control" accept="application/pdf,.pdf" multiple>
+                  <div class="invsoft-evidence-help">
+                    Puedes adjuntar uno o varios archivos PDF como evidencia del activo de software.
+                  </div>
+                </div>
               </div>
 
             </div>
@@ -40615,6 +40709,19 @@ def inventario_software_new():
         border-color:#9ec5fe;
       }
 
+      .invsoft-evidence-box{
+        background:#f8fbff;
+        border:1px dashed #9ec5fe;
+        border-radius:14px;
+        padding:12px;
+      }
+
+      .invsoft-evidence-help{
+        color:#64748b;
+        font-size:.74rem;
+        margin-top:5px;
+      }
+
       /* =========================
          GENERALES
       ========================= */
@@ -40625,6 +40732,39 @@ def inventario_software_new():
       /* =========================
          RESPONSIVE
       ========================= */
+      .invsoftedit-evidence-box,
+      .invsoftedit-evidence-list{
+        background:#f8fbff;
+        border:1px dashed #9ec5fe;
+        border-radius:14px;
+        padding:12px;
+      }
+
+      .invsoftedit-evidence-help,
+      .invsoftedit-empty-evidence{
+        color:#64748b;
+        font-size:.74rem;
+        margin-top:5px;
+      }
+
+      .invsoftedit-evidence-title{
+        color:#0f172a;
+        font-size:.86rem;
+        font-weight:950;
+        margin-bottom:8px;
+      }
+
+      .invsoftedit-evidence-list table th{
+        background:#1d5fa9 !important;
+        color:#fff;
+        font-size:.75rem;
+        text-align:center;
+      }
+
+      .invsoftedit-evidence-list table td{
+        font-size:.75rem;
+      }
+
       @media (max-width:992px){
         .invsoft-shell{
           width:98%;
@@ -40729,6 +40869,10 @@ def inventario_software_edit(id):
     item = InventarioSoftware.query.get_or_404(id)
     areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
 
+    evidencias = InventarioSoftwareEvidencia.query.filter_by(
+        registro_id=item.id
+    ).order_by(InventarioSoftwareEvidencia.id.desc()).all()
+
     conf_opts = ValoracionConfidencialidad.query.order_by(ValoracionConfidencialidad.nivel_num.asc()).all()
     inte_opts = ValoracionIntegridad.query.order_by(ValoracionIntegridad.nivel_num.asc()).all()
     disp_opts = ValoracionDisponibilidad.query.order_by(ValoracionDisponibilidad.nivel_num.asc()).all()
@@ -40743,7 +40887,6 @@ def inventario_software_edit(id):
         item.area = selected_area.area if selected_area else ''
         item.division = (request.form.get('division') or '').strip()
         item.proceso = (request.form.get('proceso') or '').strip()
-
         item.nombre_activo = (request.form.get('nombre_activo') or '').strip()
         item.administrador = (request.form.get('administrador') or '').strip()
         item.dueno_tecnico = (request.form.get('dueno_tecnico') or '').strip()
@@ -40752,14 +40895,11 @@ def inventario_software_edit(id):
         item.ubicacion_tipo = (request.form.get('ubicacion') or '').strip()
         item.ubicacion_nombre = (request.form.get('ubicacion_nombre') or '').strip()
         item.descripcion = (request.form.get('descripcion') or '').strip()
-
         item.accesos_autorizados = (request.form.get('accesos_autorizados') or '').strip()
-
         item.info_personal = request.form.get('info_personal') or 'No'
         item.info_regulada = request.form.get('info_regulada') or 'No'
         item.info_sensible_compania = request.form.get('info_sensible_compania') or 'No'
         item.info_sensible_clientes = request.form.get('info_sensible_clientes') or 'No'
-
         item.observaciones = (request.form.get('observaciones') or '').strip()
 
         try:
@@ -40795,9 +40935,11 @@ def inventario_software_edit(id):
         item.criticidad_texto = crit_row.nivel_texto if crit_row else f"Nivel {item.valor_activo}"
 
         db.session.add(item)
+        guardar_evidencias_inventario_software(item)
         db.session.commit()
+
         flash("Cambios guardados.", "success")
-        return redirect(url_for('inventario_software'))
+        return redirect(url_for('inventario_software_edit', id=item.id))
 
     html = """
     <div class="invsoftedit-shell">
@@ -40819,11 +40961,17 @@ def inventario_software_edit(id):
           ⬅ Volver a la Matriz
         </a>
 
+        <a href="{{ url_for('inventario_software_detalle', id=item.id) }}"
+           class="btn btn-info rounded-pill px-4 fw-bold text-white">
+          Ver detalle
+        </a>
       </div>
 
       <div class="invsoftedit-card">
         <div class="invsoftedit-card-body">
-          <form method="post">
+
+          <form id="formEditarInventarioSoftware" method="post" enctype="multipart/form-data">
+
             <div class="row g-3">
 
               <div class="col-md-4">
@@ -40981,12 +41129,25 @@ def inventario_software_edit(id):
                 <input type="text" name="observaciones" class="form-control" value="{{ item.observaciones or '' }}">
               </div>
 
+              <div class="col-md-12">
+                <div class="invsoftedit-evidence-upload">
+                  <label class="form-label mb-1">Agregar nuevas evidencias PDF</label>
+                  <input type="file" name="evidencias" class="form-control" accept="application/pdf,.pdf" multiple>
+                  <div class="invsoftedit-evidence-help">
+                    Los nuevos PDF se sumarán a las evidencias existentes del activo.
+                  </div>
+                </div>
+              </div>
+
             </div>
 
             <div class="invsoftedit-bottom-actions">
-              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
+              <button class="btn btn-success rounded-pill px-4 fw-bold"
+                      type="submit"
+                      form="formEditarInventarioSoftware">
                 Guardar cambios
               </button>
+
               <a href="{{ url_for('inventario_software') }}"
                  class="btn rounded-pill px-4 fw-bold invsoftedit-cancel-btn">
                 Cancelar
@@ -40994,6 +41155,60 @@ def inventario_software_edit(id):
             </div>
 
           </form>
+
+          <div class="invsoftedit-evidence-section">
+            <div class="invsoftedit-section-title">📎 Evidencias actuales</div>
+
+            {% if evidencias %}
+              <div class="invsoftedit-evidence-grid">
+
+                {% for ev in evidencias %}
+                  <div class="invsoftedit-evidence-card">
+
+                    <div class="invsoftedit-evidence-icon">📄</div>
+
+                    <div class="invsoftedit-evidence-content">
+                      <div class="invsoftedit-evidence-name">
+                        {{ ev.original_name or ev.filename }}
+                      </div>
+
+                      <div class="invsoftedit-evidence-meta">
+                        {{ ev.uploaded_at.strftime('%Y-%m-%d %H:%M') if ev.uploaded_at else '—' }}
+                        ·
+                        {{ ev.uploaded_by or 'Sistema' }}
+                      </div>
+                    </div>
+
+                    <div class="invsoftedit-evidence-actions">
+
+                      <a href="/inventario_software/evidencia/{{ ev.id }}/pdf"
+                         class="btn btn-sm btn-primary rounded-pill fw-bold">
+                        Ver evidencia
+                      </a>
+
+                      <form method="post"
+                            action="/inventario_software/evidencia/{{ ev.id }}/delete"
+                            class="d-inline"
+                            onsubmit="return confirm('¿Eliminar esta evidencia?');">
+                        <button type="submit"
+                                class="btn btn-sm btn-danger rounded-pill fw-bold">
+                          Eliminar
+                        </button>
+                      </form>
+
+                    </div>
+
+                  </div>
+                {% endfor %}
+
+              </div>
+            {% else %}
+              <div class="invsoftedit-no-evidence">
+                No hay evidencias PDF cargadas para este activo.
+              </div>
+            {% endif %}
+          </div>
+
         </div>
       </div>
     </div>
@@ -41164,6 +41379,104 @@ def inventario_software_edit(id):
         box-shadow:0 0 0 0.15rem rgba(63,134,214,.18);
       }
 
+      .invsoftedit-evidence-upload{
+        background:#f8fbff;
+        border:1px dashed #9ec5fe;
+        border-radius:14px;
+        padding:12px;
+      }
+
+      .invsoftedit-evidence-help{
+        color:#64748b;
+        font-size:.74rem;
+        margin-top:5px;
+      }
+
+      .invsoftedit-evidence-section{
+        margin-top:18px;
+        background:#f8fbff;
+        border:1px solid #dbeafe;
+        border-radius:16px;
+        padding:14px;
+      }
+
+      .invsoftedit-section-title{
+        color:#0f172a;
+        font-size:.92rem;
+        font-weight:950;
+        margin-bottom:10px;
+      }
+
+      .invsoftedit-evidence-grid{
+        display:grid;
+        grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+        gap:12px;
+      }
+
+      .invsoftedit-evidence-card{
+        background:#ffffff;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        padding:14px;
+        display:flex;
+        align-items:center;
+        gap:12px;
+        box-shadow:0 8px 16px rgba(15,23,42,.08);
+      }
+
+      .invsoftedit-evidence-icon{
+        width:46px;
+        height:46px;
+        min-width:46px;
+        border-radius:14px;
+        background:linear-gradient(135deg,#e0f2fe,#dbeafe);
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.4rem;
+      }
+
+      .invsoftedit-evidence-content{
+        flex:1;
+        min-width:0;
+      }
+
+      .invsoftedit-evidence-name{
+        color:#0f172a;
+        font-size:.82rem;
+        font-weight:950;
+        word-break:break-word;
+      }
+
+      .invsoftedit-evidence-meta{
+        color:#64748b;
+        font-size:.72rem;
+        margin-top:3px;
+      }
+
+      .invsoftedit-evidence-actions{
+        display:flex;
+        gap:6px;
+        flex-wrap:wrap;
+        justify-content:flex-end;
+      }
+
+      .invsoftedit-evidence-actions .btn{
+        font-size:.70rem;
+        font-weight:900;
+        padding:5px 11px;
+      }
+
+      .invsoftedit-no-evidence{
+        background:#fff;
+        border:1px dashed #9ec5fe;
+        border-radius:14px;
+        padding:14px;
+        color:#64748b;
+        font-size:.82rem;
+        font-weight:700;
+      }
+
       .invsoftedit-bottom-actions{
         display:flex;
         justify-content:center;
@@ -41227,6 +41540,16 @@ def inventario_software_edit(id):
         .invsoftedit-bottom-actions .btn{
           width:100%;
         }
+
+        .invsoftedit-evidence-card{
+          flex-direction:column;
+          align-items:flex-start;
+        }
+
+        .invsoftedit-evidence-actions{
+          width:100%;
+          justify-content:flex-start;
+        }
       }
     </style>
 
@@ -41235,6 +41558,7 @@ def inventario_software_edit(id):
         const areaSel = document.getElementById('softArea');
         const divSel  = document.getElementById('softDivision');
         const divisionActual = "{{ item.division|e }}";
+
         if (!areaSel || !divSel) return;
 
         const areaId = areaSel.value;
@@ -41251,11 +41575,16 @@ def inventario_software_edit(id):
             }
 
             divSel.innerHTML = '<option value="">-- Seleccione --</option>';
+
             data.divisiones.forEach(d => {
               const opt = document.createElement('option');
               opt.value = d.nombre;
               opt.textContent = d.nombre;
-              if (d.nombre === divisionActual) opt.selected = true;
+
+              if (d.nombre === divisionActual) {
+                opt.selected = true;
+              }
+
               divSel.appendChild(opt);
             });
           })
@@ -41267,22 +41596,29 @@ def inventario_software_edit(id):
 
       document.addEventListener('DOMContentLoaded', () => {
         const areaSel = document.getElementById('softArea');
+
         if (areaSel) {
           areaSel.addEventListener('change', cargarDivisionesSoftwareEdit);
-          if (areaSel.value) cargarDivisionesSoftwareEdit();
+
+          if (areaSel.value) {
+            cargarDivisionesSoftwareEdit();
+          }
         }
       });
     </script>
     """
+
     inner = render_template_string(
         html,
         item=item,
         areas=areas,
+        evidencias=evidencias,
         current_area_id=current_area_id,
         conf_opts=conf_opts,
         inte_opts=inte_opts,
         disp_opts=disp_opts
     )
+
     return render_template_string(BASE, content=Markup(inner))
 
 # =========================
@@ -41303,6 +41639,59 @@ def inventario_software():
 
     items = InventarioSoftware.query.order_by(InventarioSoftware.id.desc()).all()
 
+    matriz_items = []
+
+    for item in items:
+        conf_row = ValoracionConfidencialidad.query.filter_by(
+            nivel_num=item.c_nivel
+        ).first() if item.c_nivel is not None else None
+
+        inte_row = ValoracionIntegridad.query.filter_by(
+            nivel_num=item.i_nivel
+        ).first() if item.i_nivel is not None else None
+
+        disp_row = ValoracionDisponibilidad.query.filter_by(
+            nivel_num=item.d_nivel
+        ).first() if item.d_nivel is not None else None
+
+        valor_row = ValoracionCriticidadActivo.query.filter_by(
+            nivel_num=item.valor_activo
+        ).first() if item.valor_activo is not None else None
+
+        conf_texto = (
+            conf_row.clasificacion
+            if conf_row and getattr(conf_row, 'clasificacion', None)
+            else (item.etiqueta_conf_texto or (f"Nivel {item.c_nivel}" if item.c_nivel is not None else "—"))
+        )
+
+        inte_texto = (
+            inte_row.nivel
+            if inte_row and getattr(inte_row, 'nivel', None)
+            else (f"Nivel {item.i_nivel}" if item.i_nivel is not None else "—")
+        )
+
+        disp_texto = (
+            disp_row.nivel
+            if disp_row and getattr(disp_row, 'nivel', None)
+            else (f"Nivel {item.d_nivel}" if item.d_nivel is not None else "—")
+        )
+
+        valor_texto = (
+            valor_row.nivel_texto
+            if valor_row and getattr(valor_row, 'nivel_texto', None)
+            else (f"Nivel {item.valor_activo}" if item.valor_activo is not None else "—")
+        )
+
+        matriz_items.append({
+            "item": item,
+            "conf_texto": conf_texto,
+            "inte_texto": inte_texto,
+            "disp_texto": disp_texto,
+            "valor_texto": valor_texto,
+            "criticidad_texto": item.criticidad_texto or (f"Nivel {item.criticidad_num}" if item.criticidad_num is not None else "—"),
+            "etiquetado_texto": item.etiqueta_conf_texto or (f"Nivel {item.etiqueta_conf_num}" if item.etiqueta_conf_num is not None else "—"),
+        })
+
     html = """
     <div class="invsoftmat-shell">
 
@@ -41318,7 +41707,6 @@ def inventario_software():
       </div>
 
       <div class="invsoftmat-header-actions">
-
         {% if not read_only %}
           <a href="{{ url_for('inventario_software_new') }}"
              class="btn btn-primary rounded-pill px-4 fw-bold">
@@ -41344,11 +41732,12 @@ def inventario_software():
           <div>
             <h5 class="invsoftmat-top-title mb-1">Resumen de activos de software</h5>
             <div class="invsoftmat-top-note">
-              La matriz muestra únicamente los campos esenciales. Para consultar toda la información utilice el botón <strong>Ver detalle</strong>.
+              La matriz muestra los niveles de valoración en texto. Para consultar toda la información utilice el botón <strong>Ver detalle</strong>.
             </div>
           </div>
+
           <div class="invsoftmat-counter-badge">
-            Total registros: {{ items|length }}
+            Total registros: {{ matriz_items|length }}
           </div>
         </div>
 
@@ -41356,18 +41745,19 @@ def inventario_software():
           <div class="invsoftmat-table-wrap">
             <div class="table-responsive">
               <table class="table table-bordered table-hover align-middle invsoftmat-table mb-0">
+
                 <colgroup>
-                  <col style="width: 12%;">
-                  <col style="width: 12%;">
-                  <col style="width: 12%;">
-                  <col style="width: 18%;">
-                  <col style="width: 6%;">
-                  <col style="width: 6%;">
-                  <col style="width: 6%;">
-                  <col style="width: 9%;">
                   <col style="width: 11%;">
+                  <col style="width: 11%;">
+                  <col style="width: 11%;">
+                  <col style="width: 15%;">
                   <col style="width: 12%;">
-                  <col style="width: 16%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 14%;">
                 </colgroup>
 
                 <thead>
@@ -41376,9 +41766,9 @@ def inventario_software():
                     <th>División</th>
                     <th>Proceso</th>
                     <th>Nombre del Activo</th>
-                    <th>C</th>
-                    <th>I</th>
-                    <th>D</th>
+                    <th>Confidencialidad</th>
+                    <th>Integridad</th>
+                    <th>Disponibilidad</th>
                     <th>Valor</th>
                     <th>Criticidad</th>
                     <th>Etiquetado</th>
@@ -41387,36 +41777,56 @@ def inventario_software():
                 </thead>
 
                 <tbody>
-                  {% for item in items %}
+                  {% for row in matriz_items %}
+                    {% set item = row.item %}
                     <tr>
                       <td>{{ item.area or '—' }}</td>
                       <td>{{ item.division or '—' }}</td>
                       <td>{{ item.proceso or '—' }}</td>
+
                       <td class="invsoftmat-cell-main">
                         <div class="invsoftmat-main-text">{{ item.nombre_activo or '—' }}</div>
                       </td>
 
                       <td class="text-center">
-                        <span class="badge badge-n{{ item.c_nivel or 1 }}">{{ item.c_nivel or '—' }}</span>
+                        <span class="badge badge-n{{ item.c_nivel or 1 }} invsoftmat-badge-text">
+                          {{ row.conf_texto }}
+                        </span>
                       </td>
+
                       <td class="text-center">
-                        <span class="badge badge-n{{ item.i_nivel or 1 }}">{{ item.i_nivel or '—' }}</span>
+                        <span class="badge badge-n{{ item.i_nivel or 1 }} invsoftmat-badge-text">
+                          {{ row.inte_texto }}
+                        </span>
                       </td>
+
                       <td class="text-center">
-                        <span class="badge badge-n{{ item.d_nivel or 1 }}">{{ item.d_nivel or '—' }}</span>
+                        <span class="badge badge-n{{ item.d_nivel or 1 }} invsoftmat-badge-text">
+                          {{ row.disp_texto }}
+                        </span>
                       </td>
+
                       <td class="text-center">
-                        <span class="badge badge-n{{ item.valor_activo or 1 }}">{{ item.valor_activo or '—' }}</span>
+                        <span class="badge badge-n{{ item.valor_activo or 1 }} invsoftmat-badge-text">
+                          {{ row.valor_texto }}
+                        </span>
                       </td>
+
                       <td class="text-center">
-                        <span class="badge badge-n{{ item.criticidad_num or 1 }}">{{ item.criticidad_texto or '—' }}</span>
+                        <span class="badge badge-n{{ item.criticidad_num or 1 }} invsoftmat-badge-text">
+                          {{ row.criticidad_texto }}
+                        </span>
                       </td>
+
                       <td class="text-center">
-                        <span class="badge badge-n{{ item.etiqueta_conf_num or 1 }}">{{ item.etiqueta_conf_texto or '—' }}</span>
+                        <span class="badge badge-n{{ item.etiqueta_conf_num or 1 }} invsoftmat-badge-text">
+                          {{ row.etiquetado_texto }}
+                        </span>
                       </td>
 
                       <td class="text-center invsoftmat-col-acciones">
                         <div class="invsoftmat-actions-wrap">
+
                           <a href="{{ url_for('inventario_software_detalle', id=item.id) }}"
                              class="btn btn-info btn-sm rounded-pill invsoftmat-btn-action text-white fw-bold">
                             Ver detalle
@@ -41436,12 +41846,13 @@ def inventario_software():
                           {% else %}
                             <span class="badge bg-secondary">Solo lectura</span>
                           {% endif %}
+
                         </div>
                       </td>
                     </tr>
                   {% endfor %}
 
-                  {% if items|length == 0 %}
+                  {% if matriz_items|length == 0 %}
                     <tr>
                       <td colspan="11" class="text-center text-muted py-5">
                         Sin registros
@@ -41449,6 +41860,7 @@ def inventario_software():
                     </tr>
                   {% endif %}
                 </tbody>
+
               </table>
             </div>
           </div>
@@ -41468,7 +41880,7 @@ def inventario_software():
 
       .invsoftmat-shell{
         width:96%;
-        max-width:1650px;
+        max-width:1750px;
         margin:10px auto 24px auto;
       }
 
@@ -41572,18 +41984,6 @@ def inventario_software():
         box-shadow:0 8px 16px rgba(15,23,42,.15);
       }
 
-      .invsoftmat-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invsoftmat-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
       .invsoftmat-card{
         background:rgba(255,255,255,.96) !important;
         border-radius:18px;
@@ -41637,7 +42037,7 @@ def inventario_software():
       }
 
       .invsoftmat-table{
-        min-width:1500px;
+        min-width:1650px;
         table-layout:fixed;
         margin-bottom:0;
       }
@@ -41656,7 +42056,7 @@ def inventario_software():
       .invsoftmat-table th,
       .invsoftmat-table td{
         vertical-align:top;
-        font-size:.78rem;
+        font-size:.76rem;
         padding:9px 8px;
         white-space:normal;
         word-break:break-word;
@@ -41680,9 +42080,20 @@ def inventario_software():
         color:#0f172a;
       }
 
+      .invsoftmat-badge-text{
+        font-size:.68rem !important;
+        line-height:1.15;
+        padding:5px 8px;
+        border-radius:999px;
+        font-weight:900;
+        white-space:normal;
+        max-width:130px;
+        display:inline-block;
+      }
+
       .invsoftmat-col-acciones{
-        width:170px !important;
-        min-width:170px !important;
+        width:160px !important;
+        min-width:160px !important;
       }
 
       .invsoftmat-actions-wrap{
@@ -41727,19 +42138,6 @@ def inventario_software():
         .invsoftmat-topbar{
           padding:12px 14px 0 14px;
         }
-
-        .invsoftmat-col-acciones{
-          width:160px !important;
-          min-width:160px !important;
-        }
-
-        .invsoftmat-btn-action,
-        .invsoftmat-actions-wrap .badge{
-          min-width:102px;
-          max-width:102px;
-          font-size:.68rem !important;
-          padding:4px 8px !important;
-        }
       }
 
       @media (max-width:768px){
@@ -41759,7 +42157,13 @@ def inventario_software():
       }
     </style>
     """
-    inner = render_template_string(html, items=items, read_only=read_only)
+
+    inner = render_template_string(
+        html,
+        matriz_items=matriz_items,
+        read_only=read_only
+    )
+
     return render_template_string(BASE, content=Markup(inner))
 
 # =========================
@@ -41777,50 +42181,21 @@ def inventario_software_detalle(id):
 
     item = InventarioSoftware.query.get_or_404(id)
 
-    conf_row = ValoracionConfidencialidad.query.filter_by(
-        nivel_num=item.c_nivel
-    ).first() if item.c_nivel is not None else None
+    evidencias = InventarioSoftwareEvidencia.query.filter_by(
+        registro_id=item.id
+    ).order_by(InventarioSoftwareEvidencia.id.desc()).all()
 
-    inte_row = ValoracionIntegridad.query.filter_by(
-        nivel_num=item.i_nivel
-    ).first() if item.i_nivel is not None else None
+    conf_row = ValoracionConfidencialidad.query.filter_by(nivel_num=item.c_nivel).first() if item.c_nivel is not None else None
+    inte_row = ValoracionIntegridad.query.filter_by(nivel_num=item.i_nivel).first() if item.i_nivel is not None else None
+    disp_row = ValoracionDisponibilidad.query.filter_by(nivel_num=item.d_nivel).first() if item.d_nivel is not None else None
+    valor_row = ValoracionCriticidadActivo.query.filter_by(nivel_num=item.valor_activo).first() if item.valor_activo is not None else None
 
-    disp_row = ValoracionDisponibilidad.query.filter_by(
-        nivel_num=item.d_nivel
-    ).first() if item.d_nivel is not None else None
+    conf_texto = conf_row.clasificacion if conf_row and getattr(conf_row, 'clasificacion', None) else (item.etiqueta_conf_texto or (f"Nivel {item.c_nivel}" if item.c_nivel is not None else "—"))
+    inte_texto = inte_row.nivel if inte_row and getattr(inte_row, 'nivel', None) else (f"Nivel {item.i_nivel}" if item.i_nivel is not None else "—")
+    disp_texto = disp_row.nivel if disp_row and getattr(disp_row, 'nivel', None) else (f"Nivel {item.d_nivel}" if item.d_nivel is not None else "—")
+    valor_texto = valor_row.nivel_texto if valor_row and getattr(valor_row, 'nivel_texto', None) else (f"Nivel {item.valor_activo}" if item.valor_activo is not None else "—")
 
-    valor_row = ValoracionCriticidadActivo.query.filter_by(
-        nivel_num=item.valor_activo
-    ).first() if item.valor_activo is not None else None
-
-    conf_texto = (
-        conf_row.clasificacion
-        if conf_row and getattr(conf_row, 'clasificacion', None)
-        else (item.etiqueta_conf_texto or (f"Nivel {item.c_nivel}" if item.c_nivel is not None else "—"))
-    )
-
-    inte_texto = (
-        inte_row.nivel
-        if inte_row and getattr(inte_row, 'nivel', None)
-        else (f"Nivel {item.i_nivel}" if item.i_nivel is not None else "—")
-    )
-
-    disp_texto = (
-        disp_row.nivel
-        if disp_row and getattr(disp_row, 'nivel', None)
-        else (f"Nivel {item.d_nivel}" if item.d_nivel is not None else "—")
-    )
-
-    valor_texto = (
-        valor_row.nivel_texto
-        if valor_row and getattr(valor_row, 'nivel_texto', None)
-        else (f"Nivel {item.valor_activo}" if item.valor_activo is not None else "—")
-    )
-
-    criticidad_texto = item.criticidad_texto or (
-        f"Nivel {item.criticidad_num}" if item.criticidad_num is not None else "—"
-    )
-
+    criticidad_texto = item.criticidad_texto or (f"Nivel {item.criticidad_num}" if item.criticidad_num is not None else "—")
     etiquetado_texto = item.etiqueta_conf_texto or (
         conf_row.clasificacion if conf_row and getattr(conf_row, 'clasificacion', None)
         else (f"Nivel {item.etiqueta_conf_num}" if item.etiqueta_conf_num is not None else "—")
@@ -41884,159 +42259,91 @@ def inventario_software_detalle(id):
         <div class="invsoftdet-card-body">
 
           <div class="row g-3">
-            <div class="col-md-4">
-              <div class="invsoftdet-field">
-                <div class="invsoftdet-label">Área</div>
-                <div class="invsoftdet-value">{{ item.area or '—' }}</div>
-              </div>
-            </div>
 
-            <div class="col-md-4">
-              <div class="invsoftdet-field">
-                <div class="invsoftdet-label">División</div>
-                <div class="invsoftdet-value">{{ item.division or '—' }}</div>
-              </div>
-            </div>
+            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">Área</div><div class="invsoftdet-value">{{ item.area or '—' }}</div></div></div>
+            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">División</div><div class="invsoftdet-value">{{ item.division or '—' }}</div></div></div>
+            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">Proceso</div><div class="invsoftdet-value">{{ item.proceso or '—' }}</div></div></div>
 
-            <div class="col-md-4">
-              <div class="invsoftdet-field">
-                <div class="invsoftdet-label">Proceso</div>
-                <div class="invsoftdet-value">{{ item.proceso or '—' }}</div>
-              </div>
-            </div>
+            <div class="col-md-6"><div class="invsoftdet-field"><div class="invsoftdet-label">Nombre del Activo</div><div class="invsoftdet-value">{{ item.nombre_activo or '—' }}</div></div></div>
+            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">Owner/Admin</div><div class="invsoftdet-value">{{ item.administrador or '—' }}</div></div></div>
+            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">Dueño Técnico</div><div class="invsoftdet-value">{{ item.dueno_tecnico or '—' }}</div></div></div>
 
-            <div class="col-md-6">
-              <div class="invsoftdet-field">
-                <div class="invsoftdet-label">Nombre del Activo</div>
-                <div class="invsoftdet-value">{{ item.nombre_activo or '—' }}</div>
-              </div>
-            </div>
+            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">Propietario</div><div class="invsoftdet-value">{{ item.propietario or '—' }}</div></div></div>
+            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">Medio</div><div class="invsoftdet-value">{{ item.medio or '—' }}</div></div></div>
+            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">Ubicación</div><div class="invsoftdet-value">{{ item.ubicacion_tipo or '—' }} — {{ item.ubicacion_nombre or '—' }}</div></div></div>
 
-            <div class="col-md-3">
-              <div class="invsoftdet-field">
-                <div class="invsoftdet-label">Owner/Admin</div>
-                <div class="invsoftdet-value">{{ item.administrador or '—' }}</div>
-              </div>
-            </div>
+            <div class="col-md-12"><div class="invsoftdet-field"><div class="invsoftdet-label">Descripción</div><div class="invsoftdet-value">{{ item.descripcion or '—' }}</div></div></div>
+            <div class="col-md-12"><div class="invsoftdet-field"><div class="invsoftdet-label">Accesos Autorizados</div><div class="invsoftdet-value">{{ item.accesos_autorizados or '—' }}</div></div></div>
 
-            <div class="col-md-3">
-              <div class="invsoftdet-field">
-                <div class="invsoftdet-label">Dueño Técnico</div>
-                <div class="invsoftdet-value">{{ item.dueno_tecnico or '—' }}</div>
-              </div>
-            </div>
+            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Confidencialidad</div><span class="badge {{ conf_badge }} invsoftdet-badge">{{ conf_texto }}</span></div></div>
+            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Integridad</div><span class="badge {{ inte_badge }} invsoftdet-badge">{{ inte_texto }}</span></div></div>
+            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Disponibilidad</div><span class="badge {{ disp_badge }} invsoftdet-badge">{{ disp_texto }}</span></div></div>
+            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Valor del Activo</div><span class="badge {{ valor_badge }} invsoftdet-badge">{{ valor_texto }}</span></div></div>
+            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Criticidad</div><span class="badge {{ criticidad_badge }} invsoftdet-badge">{{ criticidad_texto }}</span></div></div>
+            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Etiquetado</div><span class="badge {{ etiquetado_badge }} invsoftdet-badge">{{ etiquetado_texto }}</span></div></div>
 
-            <div class="col-md-4">
-              <div class="invsoftdet-field">
-                <div class="invsoftdet-label">Propietario</div>
-                <div class="invsoftdet-value">{{ item.propietario or '—' }}</div>
-              </div>
-            </div>
+            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">¿Info Personal?</div><div class="invsoftdet-value">{{ item.info_personal or '—' }}</div></div></div>
+            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">¿Regulada?</div><div class="invsoftdet-value">{{ item.info_regulada or '—' }}</div></div></div>
+            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">¿Sens. Compañía?</div><div class="invsoftdet-value">{{ item.info_sensible_compania or '—' }}</div></div></div>
+            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">¿Sens. Clientes?</div><div class="invsoftdet-value">{{ item.info_sensible_clientes or '—' }}</div></div></div>
 
-            <div class="col-md-4">
-              <div class="invsoftdet-field">
-                <div class="invsoftdet-label">Medio</div>
-                <div class="invsoftdet-value">{{ item.medio or '—' }}</div>
-              </div>
-            </div>
+            <div class="col-md-12"><div class="invsoftdet-field"><div class="invsoftdet-label">Observaciones</div><div class="invsoftdet-value">{{ item.observaciones or '—' }}</div></div></div>
 
-            <div class="col-md-4">
-              <div class="invsoftdet-field">
-                <div class="invsoftdet-label">Ubicación</div>
-                <div class="invsoftdet-value">{{ item.ubicacion_tipo or '—' }} — {{ item.ubicacion_nombre or '—' }}</div>
-              </div>
-            </div>
+          </div>
 
-            <div class="col-md-12">
-              <div class="invsoftdet-field">
-                <div class="invsoftdet-label">Descripción</div>
-                <div class="invsoftdet-value">{{ item.descripcion or '—' }}</div>
-              </div>
-            </div>
+          <div class="invsoftdet-evidence-section">
+            <div class="invsoftdet-section-title">📎 Evidencias PDF</div>
 
-            <div class="col-md-12">
-              <div class="invsoftdet-field">
-                <div class="invsoftdet-label">Accesos Autorizados</div>
-                <div class="invsoftdet-value">{{ item.accesos_autorizados or '—' }}</div>
-              </div>
-            </div>
+            {% if evidencias %}
+              <div class="invsoftdet-evidence-grid">
 
-            <div class="col-md-2">
-              <div class="invsoftdet-field text-center">
-                <div class="invsoftdet-label">Confidencialidad</div>
-                <span class="badge {{ conf_badge }} invsoftdet-badge">{{ conf_texto }}</span>
-              </div>
-            </div>
+                {% for ev in evidencias %}
+                  <div class="invsoftdet-evidence-card">
 
-            <div class="col-md-2">
-              <div class="invsoftdet-field text-center">
-                <div class="invsoftdet-label">Integridad</div>
-                <span class="badge {{ inte_badge }} invsoftdet-badge">{{ inte_texto }}</span>
-              </div>
-            </div>
+                    <div class="invsoftdet-evidence-icon">📄</div>
 
-            <div class="col-md-2">
-              <div class="invsoftdet-field text-center">
-                <div class="invsoftdet-label">Disponibilidad</div>
-                <span class="badge {{ disp_badge }} invsoftdet-badge">{{ disp_texto }}</span>
-              </div>
-            </div>
+                    <div class="invsoftdet-evidence-content">
+                      <div class="invsoftdet-evidence-name">
+                        {{ ev.original_name or ev.filename }}
+                      </div>
 
-            <div class="col-md-2">
-              <div class="invsoftdet-field text-center">
-                <div class="invsoftdet-label">Valor del Activo</div>
-                <span class="badge {{ valor_badge }} invsoftdet-badge">{{ valor_texto }}</span>
-              </div>
-            </div>
+                      <div class="invsoftdet-evidence-meta">
+                        {{ ev.uploaded_at.strftime('%Y-%m-%d %H:%M') if ev.uploaded_at else '—' }}
+                        ·
+                        {{ ev.uploaded_by or 'Sistema' }}
+                      </div>
+                    </div>
 
-            <div class="col-md-2">
-              <div class="invsoftdet-field text-center">
-                <div class="invsoftdet-label">Criticidad</div>
-                <span class="badge {{ criticidad_badge }} invsoftdet-badge">{{ criticidad_texto }}</span>
-              </div>
-            </div>
+                    <div class="invsoftdet-evidence-actions">
 
-            <div class="col-md-2">
-              <div class="invsoftdet-field text-center">
-                <div class="invsoftdet-label">Etiquetado</div>
-                <span class="badge {{ etiquetado_badge }} invsoftdet-badge">{{ etiquetado_texto }}</span>
-              </div>
-            </div>
+                      <a href="/inventario_software/evidencia/{{ ev.id }}/pdf"
+                         class="btn btn-sm btn-primary rounded-pill fw-bold">
+                        Ver evidencia
+                      </a>
 
-            <div class="col-md-3">
-              <div class="invsoftdet-field">
-                <div class="invsoftdet-label">¿Info Personal?</div>
-                <div class="invsoftdet-value">{{ item.info_personal or '—' }}</div>
-              </div>
-            </div>
+                      {% if user.role != 'auditor' %}
+                        <form method="post"
+                              action="/inventario_software/evidencia/{{ ev.id }}/delete"
+                              class="d-inline"
+                              onsubmit="return confirm('¿Eliminar esta evidencia?');">
+                          <button type="submit"
+                                  class="btn btn-sm btn-danger rounded-pill fw-bold">
+                            Eliminar
+                          </button>
+                        </form>
+                      {% endif %}
 
-            <div class="col-md-3">
-              <div class="invsoftdet-field">
-                <div class="invsoftdet-label">¿Regulada?</div>
-                <div class="invsoftdet-value">{{ item.info_regulada or '—' }}</div>
-              </div>
-            </div>
+                    </div>
 
-            <div class="col-md-3">
-              <div class="invsoftdet-field">
-                <div class="invsoftdet-label">¿Sens. Compañía?</div>
-                <div class="invsoftdet-value">{{ item.info_sensible_compania or '—' }}</div>
-              </div>
-            </div>
+                  </div>
+                {% endfor %}
 
-            <div class="col-md-3">
-              <div class="invsoftdet-field">
-                <div class="invsoftdet-label">¿Sens. Clientes?</div>
-                <div class="invsoftdet-value">{{ item.info_sensible_clientes or '—' }}</div>
               </div>
-            </div>
-
-            <div class="col-md-12">
-              <div class="invsoftdet-field">
-                <div class="invsoftdet-label">Observaciones</div>
-                <div class="invsoftdet-value">{{ item.observaciones or '—' }}</div>
+            {% else %}
+              <div class="invsoftdet-no-evidence">
+                No hay evidencias PDF cargadas para este activo.
               </div>
-            </div>
+            {% endif %}
           </div>
 
           <div class="invsoftdet-bottom-actions">
@@ -42059,18 +42366,12 @@ def inventario_software_detalle(id):
         background-repeat:no-repeat;
       }
 
-      /* =========================
-         CONTENEDOR
-         ========================= */
       .invsoftdet-shell{
         width:96%;
         max-width:1400px;
         margin:10px auto 24px auto;
       }
 
-      /* =========================
-         HEADER SGSI PRO
-         ========================= */
       .invsoftdet-header-card{
         background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
         border-radius:18px;
@@ -42152,9 +42453,6 @@ def inventario_software_detalle(id):
         margin-top:4px;
       }
 
-      /* =========================
-         BOTONES SUPERIORES
-         ========================= */
       .invsoftdet-header-actions{
         display:flex;
         justify-content:center;
@@ -42184,9 +42482,6 @@ def inventario_software_detalle(id):
         border-color:#9ec5fe;
       }
 
-      /* =========================
-         CARD PRINCIPAL
-         ========================= */
       .invsoftdet-card{
         background:rgba(255,255,255,.96)!important;
         border-radius:18px;
@@ -42199,9 +42494,6 @@ def inventario_software_detalle(id):
         padding:20px;
       }
 
-      /* =========================
-         CAMPOS
-         ========================= */
       .invsoftdet-field{
         background:linear-gradient(180deg,#f8fafc,#ffffff);
         border:1px solid #e2e8f0;
@@ -42228,9 +42520,6 @@ def inventario_software_detalle(id):
         line-height:1.35;
       }
 
-      /* =========================
-         BADGES
-         ========================= */
       .invsoftdet-badge{
         font-size:.72rem;
         padding:6px 10px;
@@ -42240,9 +42529,91 @@ def inventario_software_detalle(id):
         box-shadow:0 4px 10px rgba(0,0,0,.08);
       }
 
-      /* =========================
-         BOTONES INFERIORES
-         ========================= */
+      .invsoftdet-evidence-section{
+        margin-top:18px;
+        background:#f8fbff;
+        border:1px solid #dbeafe;
+        border-radius:16px;
+        padding:14px;
+      }
+
+      .invsoftdet-section-title{
+        color:#0f172a;
+        font-size:.92rem;
+        font-weight:950;
+        margin-bottom:10px;
+      }
+
+      .invsoftdet-evidence-grid{
+        display:grid;
+        grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+        gap:12px;
+      }
+
+      .invsoftdet-evidence-card{
+        background:#ffffff;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        padding:14px;
+        display:flex;
+        align-items:center;
+        gap:12px;
+        box-shadow:0 8px 16px rgba(15,23,42,.08);
+      }
+
+      .invsoftdet-evidence-icon{
+        width:46px;
+        height:46px;
+        min-width:46px;
+        border-radius:14px;
+        background:linear-gradient(135deg,#e0f2fe,#dbeafe);
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.4rem;
+      }
+
+      .invsoftdet-evidence-content{
+        flex:1;
+        min-width:0;
+      }
+
+      .invsoftdet-evidence-name{
+        color:#0f172a;
+        font-size:.82rem;
+        font-weight:950;
+        word-break:break-word;
+      }
+
+      .invsoftdet-evidence-meta{
+        color:#64748b;
+        font-size:.72rem;
+        margin-top:3px;
+      }
+
+      .invsoftdet-evidence-actions{
+        display:flex;
+        gap:6px;
+        flex-wrap:wrap;
+        justify-content:flex-end;
+      }
+
+      .invsoftdet-evidence-actions .btn{
+        font-size:.70rem;
+        font-weight:900;
+        padding:5px 11px;
+      }
+
+      .invsoftdet-no-evidence{
+        background:#fff;
+        border:1px dashed #9ec5fe;
+        border-radius:14px;
+        padding:14px;
+        color:#64748b;
+        font-size:.82rem;
+        font-weight:700;
+      }
+
       .invsoftdet-bottom-actions{
         display:flex;
         justify-content:center;
@@ -42270,9 +42641,6 @@ def inventario_software_detalle(id):
         background:#f1f5f9;
       }
 
-      /* =========================
-         RESPONSIVE
-         ========================= */
       @media (max-width:992px){
         .invsoftdet-shell{
           width:98%;
@@ -42307,13 +42675,25 @@ def inventario_software_detalle(id):
         .invsoftdet-header-actions .btn{
           width:100%;
         }
+
+        .invsoftdet-evidence-card{
+          flex-direction:column;
+          align-items:flex-start;
+        }
+
+        .invsoftdet-evidence-actions{
+          width:100%;
+          justify-content:flex-start;
+        }
       }
     </style>
     """
+
     inner = render_template_string(
         html,
         item=item,
         user=user,
+        evidencias=evidencias,
         conf_texto=conf_texto,
         inte_texto=inte_texto,
         disp_texto=disp_texto,
@@ -42327,7 +42707,281 @@ def inventario_software_detalle(id):
         criticidad_badge=criticidad_badge,
         etiquetado_badge=etiquetado_badge
     )
+
     return render_template_string(BASE, content=Markup(inner))
+
+# =========================
+# VISTA — Evidencia Inventario de Software
+# =========================
+@app.route('/inventario_software/evidencia/<int:evidencia_id>/pdf')
+@login_required
+def inventario_software_evidencia_pdf(evidencia_id):
+
+    user = User.query.get(session.get('user_id'))
+
+    if user.role != 'auditor':
+
+        if user.role != 'admin' and not verificar_permiso(
+            user,
+            "Gestión de Activos de Información"
+        ):
+
+            flash(
+                "No tiene permiso para ver evidencias de activos de software.",
+                "danger"
+            )
+
+            return redirect(url_for('inventario_software'))
+
+    ev = InventarioSoftwareEvidencia.query.get_or_404(evidencia_id)
+
+    item = InventarioSoftware.query.get_or_404(
+        ev.registro_id
+    )
+
+    upload_dir = app.config.get(
+        'UPLOAD_INVENTARIO_SOFTWARE_DIR'
+    )
+
+    if not upload_dir:
+        abort(404)
+
+    file_path = os.path.join(
+        upload_dir,
+        ev.filename
+    )
+
+    if not os.path.exists(file_path):
+
+        flash(
+            "No se encontró el archivo de evidencia.",
+            "danger"
+        )
+
+        return redirect(
+            url_for(
+                'inventario_software_detalle',
+                id=ev.registro_id
+            )
+        )
+
+    inner_html = """
+
+    <div class="container my-3">
+
+      <!-- =========================
+           BOTONES SUPERIORES
+      ========================== -->
+      <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+
+        <a href="{{ url_for('inventario_software_detalle', id=item.id) }}"
+           class="btn btn-secondary rounded-pill px-4 py-2 fw-bold">
+
+          ⬅ Volver al Detalle
+
+        </a>
+
+        <div class="small text-muted text-truncate">
+          Archivo: {{ ev.original_name or ev.filename }}
+        </div>
+
+      </div>
+
+      <!-- =========================
+           CARD VISOR PDF
+      ========================== -->
+      <div class="card shadow-sm evidencia-card">
+
+        <div class="card-header evidencia-header">
+
+          <div>
+
+            <small>
+              Activo:
+              {{ item.nombre_activo or '—' }}
+            </small>
+
+          </div>
+
+        </div>
+
+        <div class="card-body p-2">
+
+          <div class="pdf-container">
+
+            <iframe
+              id="pdfFrame"
+              src="{{ url_for('inventario_software_evidencia_pdf_raw', evidencia_id=ev.id) }}#zoom=page-width"
+              title="Visor PDF">
+            </iframe>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <style>
+
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .evidencia-card{
+        background:rgba(255,255,255,.90)!important;
+        backdrop-filter:blur(4px);
+        border-radius:14px;
+        overflow:hidden;
+        border:none;
+      }
+
+      .evidencia-header{
+        background:linear-gradient(
+          135deg,
+          #0b3a6e,
+          #1459a6,
+          #2c7be5
+        );
+
+        color:#fff !important;
+        border:none;
+      }
+
+      .pdf-container{
+        height:min(82vh,1000px);
+        min-height:600px;
+        width:100%;
+      }
+
+      .pdf-container iframe{
+        width:100%;
+        height:100%;
+        border:1px solid #dee2e6;
+        border-radius:8px;
+        background:#fff;
+      }
+
+      @media (max-width:768px){
+
+        .pdf-container{
+          min-height:500px;
+        }
+
+      }
+
+    </style>
+
+    """
+
+    return render_template_string(
+        BASE,
+        content=Markup(
+            render_template_string(
+                inner_html,
+                ev=ev,
+                item=item
+            )
+        )
+    )
+
+
+# =========================
+# PDF RAW — Evidencia Inventario de Software
+# =========================
+@app.route('/inventario_software/evidencia/<int:evidencia_id>/pdf/raw')
+@login_required
+def inventario_software_evidencia_pdf_raw(evidencia_id):
+
+    user = User.query.get(session.get('user_id'))
+
+    if user.role != 'auditor':
+
+        if user.role != 'admin' and not verificar_permiso(
+            user,
+            "Gestión de Activos de Información"
+        ):
+
+            flash(
+                "No tiene permiso para ver evidencias de activos de software.",
+                "danger"
+            )
+
+            return redirect(url_for('inventario_software'))
+
+    ev = InventarioSoftwareEvidencia.query.get_or_404(
+        evidencia_id
+    )
+
+    upload_dir = app.config.get(
+        'UPLOAD_INVENTARIO_SOFTWARE_DIR'
+    )
+
+    if not upload_dir:
+        abort(404)
+
+    file_path = os.path.join(
+        upload_dir,
+        ev.filename
+    )
+
+    if not os.path.exists(file_path):
+
+        flash(
+            "No se encontró el archivo de evidencia.",
+            "danger"
+        )
+
+        return redirect(
+            url_for(
+                'inventario_software_detalle',
+                id=ev.registro_id
+            )
+        )
+
+    return send_from_directory(
+        upload_dir,
+        ev.filename,
+        mimetype='application/pdf',
+        as_attachment=False,
+        download_name=ev.original_name or ev.filename
+    )
+
+@app.route('/inventario_software/evidencia/<int:evidencia_id>/delete', methods=['POST'])
+@login_required
+def inventario_software_evidencia_delete(evidencia_id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar evidencias.", "danger")
+        return redirect(url_for('inventario_software'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
+        flash("No tiene permiso para eliminar evidencias.", "danger")
+        return redirect(url_for('inventario_software'))
+
+    ev = InventarioSoftwareEvidencia.query.get_or_404(evidencia_id)
+    registro_id = ev.registro_id
+
+    upload_dir = app.config.get('UPLOAD_INVENTARIO_SOFTWARE_DIR')
+    file_path = os.path.join(upload_dir, ev.filename) if upload_dir else None
+
+    try:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception:
+        pass
+
+    db.session.delete(ev)
+    db.session.commit()
+
+    flash("Evidencia eliminada correctamente.", "success")
+    return redirect(url_for('inventario_software_detalle', id=registro_id))
 
 # =========================
 # ELIMINAR — Inventario de Software
@@ -42345,6 +42999,18 @@ def inventario_software_delete(id):
         return redirect(url_for('inventario_software_menu'))
 
     it = InventarioSoftware.query.get_or_404(id)
+
+    upload_dir = app.config.get('UPLOAD_INVENTARIO_SOFTWARE_DIR')
+    if upload_dir:
+        try:
+            for ev in list(it.evidencias or []):
+                if ev.filename:
+                    file_path = os.path.join(upload_dir, ev.filename)
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+        except Exception as e:
+            print("Error eliminando evidencias del activo de software:", repr(e))
+
     db.session.delete(it)
     db.session.commit()
     flash("Eliminado correctamente.", "success")
@@ -43647,6 +44313,28 @@ def inventario_fisico():
         .all()
     )
 
+    matriz_items = []
+
+    for item in items:
+        conf_row = ValoracionConfidencialidad.query.filter_by(nivel_num=item.c_nivel).first() if item.c_nivel is not None else None
+        inte_row = ValoracionIntegridad.query.filter_by(nivel_num=item.i_nivel).first() if item.i_nivel is not None else None
+        disp_row = ValoracionDisponibilidad.query.filter_by(nivel_num=item.d_nivel).first() if item.d_nivel is not None else None
+        valor_row = ValoracionCriticidadActivo.query.filter_by(nivel_num=item.valor_activo).first() if item.valor_activo is not None else None
+
+        conf_texto = conf_row.clasificacion if conf_row and getattr(conf_row, 'clasificacion', None) else (item.etiqueta_conf_texto or (f"Nivel {item.c_nivel}" if item.c_nivel is not None else "—"))
+        inte_texto = inte_row.nivel if inte_row and getattr(inte_row, 'nivel', None) else (f"Nivel {item.i_nivel}" if item.i_nivel is not None else "—")
+        disp_texto = disp_row.nivel if disp_row and getattr(disp_row, 'nivel', None) else (f"Nivel {item.d_nivel}" if item.d_nivel is not None else "—")
+        valor_texto = valor_row.nivel_texto if valor_row and getattr(valor_row, 'nivel_texto', None) else (f"Nivel {item.valor_activo}" if item.valor_activo is not None else "—")
+
+        matriz_items.append({
+            "item": item,
+            "conf_texto": conf_texto,
+            "inte_texto": inte_texto,
+            "disp_texto": disp_texto,
+            "valor_texto": valor_texto,
+            "criticidad_texto": item.criticidad_texto or (f"Nivel {item.criticidad_num}" if item.criticidad_num is not None else "—"),
+        })
+
     html = """
     <div class="invfismat-shell">
 
@@ -43662,7 +44350,6 @@ def inventario_fisico():
       </div>
 
       <div class="invfismat-header-actions">
-
         {% if not read_only %}
           <a href="{{ url_for('inventario_fisico_new') }}"
              class="btn btn-primary rounded-pill px-4 fw-bold">
@@ -43688,11 +44375,12 @@ def inventario_fisico():
           <div>
             <h5 class="invfismat-top-title mb-1">Resumen de activos físicos</h5>
             <div class="invfismat-top-note">
-              La matriz muestra únicamente los campos esenciales. Para consultar toda la información utilice el botón <strong>Ver detalle</strong>.
+              La matriz muestra los niveles de valoración en texto. Para consultar toda la información utilice el botón <strong>Ver detalle</strong>.
             </div>
           </div>
+
           <div class="invfismat-counter-badge">
-            Total registros: {{ items|length }}
+            Total registros: {{ matriz_items|length }}
           </div>
         </div>
 
@@ -43700,18 +44388,19 @@ def inventario_fisico():
           <div class="invfismat-table-wrap">
             <div class="table-responsive">
               <table class="table table-bordered table-hover align-middle invfismat-table mb-0">
+
                 <colgroup>
-                  <col style="width: 12%;">
-                  <col style="width: 12%;">
-                  <col style="width: 16%;">
-                  <col style="width: 10%;">
-                  <col style="width: 10%;">
-                  <col style="width: 6%;">
-                  <col style="width: 6%;">
-                  <col style="width: 6%;">
-                  <col style="width: 8%;">
+                  <col style="width: 11%;">
+                  <col style="width: 11%;">
                   <col style="width: 14%;">
-                  <col style="width: 16%;">
+                  <col style="width: 10%;">
+                  <col style="width: 10%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 14%;">
                 </colgroup>
 
                 <thead>
@@ -43721,9 +44410,9 @@ def inventario_fisico():
                     <th>Nombre del dispositivo</th>
                     <th>Clase</th>
                     <th>Marca</th>
-                    <th>C</th>
-                    <th>I</th>
-                    <th>D</th>
+                    <th>Confidencialidad</th>
+                    <th>Integridad</th>
+                    <th>Disponibilidad</th>
                     <th>Valor</th>
                     <th>Criticidad</th>
                     <th class="invfismat-col-acciones">Acciones</th>
@@ -43731,34 +44420,52 @@ def inventario_fisico():
                 </thead>
 
                 <tbody>
-                  {% for item in items %}
+                  {% for row in matriz_items %}
+                    {% set item = row.item %}
                     <tr>
                       <td>{{ item.area.area if item.area else '—' }}</td>
                       <td>{{ item.division or '—' }}</td>
+
                       <td class="invfismat-cell-main">
                         <div class="invfismat-main-text">{{ item.nombre_dispositivo or '—' }}</div>
                       </td>
+
                       <td>{{ item.clase_activo or '—' }}</td>
                       <td>{{ item.marca or '—' }}</td>
 
                       <td class="text-center">
-                        <span class="badge badge-n{{ item.c_nivel or 1 }}">{{ item.c_nivel or '—' }}</span>
+                        <span class="badge badge-n{{ item.c_nivel or 1 }} invfismat-badge-text">
+                          {{ row.conf_texto }}
+                        </span>
                       </td>
+
                       <td class="text-center">
-                        <span class="badge badge-n{{ item.i_nivel or 1 }}">{{ item.i_nivel or '—' }}</span>
+                        <span class="badge badge-n{{ item.i_nivel or 1 }} invfismat-badge-text">
+                          {{ row.inte_texto }}
+                        </span>
                       </td>
+
                       <td class="text-center">
-                        <span class="badge badge-n{{ item.d_nivel or 1 }}">{{ item.d_nivel or '—' }}</span>
+                        <span class="badge badge-n{{ item.d_nivel or 1 }} invfismat-badge-text">
+                          {{ row.disp_texto }}
+                        </span>
                       </td>
+
                       <td class="text-center">
-                        <span class="badge badge-n{{ item.valor_activo or 1 }}">{{ item.valor_activo or '—' }}</span>
+                        <span class="badge badge-n{{ item.valor_activo or 1 }} invfismat-badge-text">
+                          {{ row.valor_texto }}
+                        </span>
                       </td>
+
                       <td class="text-center">
-                        <span class="badge badge-n{{ item.criticidad_num or 1 }}">{{ item.criticidad_texto or '—' }}</span>
+                        <span class="badge badge-n{{ item.criticidad_num or 1 }} invfismat-badge-text">
+                          {{ row.criticidad_texto }}
+                        </span>
                       </td>
 
                       <td class="text-center invfismat-col-acciones">
                         <div class="invfismat-actions-wrap">
+
                           <a href="{{ url_for('inventario_fisico_detalle', id=item.id) }}"
                              class="btn btn-info btn-sm rounded-pill invfismat-btn-action text-white fw-bold">
                             Ver detalle
@@ -43778,12 +44485,13 @@ def inventario_fisico():
                           {% else %}
                             <span class="badge bg-secondary">Solo lectura</span>
                           {% endif %}
+
                         </div>
                       </td>
                     </tr>
                   {% endfor %}
 
-                  {% if items|length == 0 %}
+                  {% if matriz_items|length == 0 %}
                     <tr>
                       <td colspan="11" class="text-center text-muted py-5">
                         Sin registros
@@ -43811,7 +44519,7 @@ def inventario_fisico():
 
       .invfismat-shell{
         width:96%;
-        max-width:1650px;
+        max-width:1750px;
         margin:10px auto 24px auto;
       }
 
@@ -43915,18 +44623,6 @@ def inventario_fisico():
         box-shadow:0 8px 16px rgba(15,23,42,.15);
       }
 
-      .invfismat-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invfismat-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
       .invfismat-card{
         background:rgba(255,255,255,.96) !important;
         border-radius:18px;
@@ -43980,7 +44676,7 @@ def inventario_fisico():
       }
 
       .invfismat-table{
-        min-width:1500px;
+        min-width:1650px;
         table-layout:fixed;
         margin-bottom:0;
       }
@@ -43999,7 +44695,7 @@ def inventario_fisico():
       .invfismat-table th,
       .invfismat-table td{
         vertical-align:top;
-        font-size:.78rem;
+        font-size:.76rem;
         padding:9px 8px;
         white-space:normal;
         word-break:break-word;
@@ -44023,9 +44719,20 @@ def inventario_fisico():
         color:#0f172a;
       }
 
+      .invfismat-badge-text{
+        font-size:.68rem !important;
+        line-height:1.15;
+        padding:5px 8px;
+        border-radius:999px;
+        font-weight:900;
+        white-space:normal;
+        max-width:130px;
+        display:inline-block;
+      }
+
       .invfismat-col-acciones{
-        width:170px !important;
-        min-width:170px !important;
+        width:160px !important;
+        min-width:160px !important;
       }
 
       .invfismat-actions-wrap{
@@ -44070,19 +44777,6 @@ def inventario_fisico():
         .invfismat-topbar{
           padding:12px 14px 0 14px;
         }
-
-        .invfismat-col-acciones{
-          width:160px !important;
-          min-width:160px !important;
-        }
-
-        .invfismat-btn-action,
-        .invfismat-actions-wrap .badge{
-          min-width:102px;
-          max-width:102px;
-          font-size:.68rem !important;
-          padding:4px 8px !important;
-        }
       }
 
       @media (max-width:768px){
@@ -44102,7 +44796,13 @@ def inventario_fisico():
       }
     </style>
     """
-    inner = render_template_string(html, items=items, read_only=read_only)
+
+    inner = render_template_string(
+        html,
+        matriz_items=matriz_items,
+        read_only=read_only
+    )
+
     return render_template_string(BASE, content=Markup(inner))
 
 # =========================
