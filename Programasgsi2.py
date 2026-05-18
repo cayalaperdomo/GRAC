@@ -44325,6 +44325,11 @@ def inventario_fisico():
         inte_texto = inte_row.nivel if inte_row and getattr(inte_row, 'nivel', None) else (f"Nivel {item.i_nivel}" if item.i_nivel is not None else "—")
         disp_texto = disp_row.nivel if disp_row and getattr(disp_row, 'nivel', None) else (f"Nivel {item.d_nivel}" if item.d_nivel is not None else "—")
         valor_texto = valor_row.nivel_texto if valor_row and getattr(valor_row, 'nivel_texto', None) else (f"Nivel {item.valor_activo}" if item.valor_activo is not None else "—")
+        criticidad_texto = item.criticidad_texto or (f"Nivel {item.criticidad_num}" if item.criticidad_num is not None else "—")
+        etiquetado_texto = item.etiqueta_conf_texto or (
+            conf_row.clasificacion if conf_row and getattr(conf_row, 'clasificacion', None)
+            else (f"Nivel {item.etiqueta_conf_num}" if item.etiqueta_conf_num is not None else "—")
+        )
 
         matriz_items.append({
             "item": item,
@@ -44332,7 +44337,8 @@ def inventario_fisico():
             "inte_texto": inte_texto,
             "disp_texto": disp_texto,
             "valor_texto": valor_texto,
-            "criticidad_texto": item.criticidad_texto or (f"Nivel {item.criticidad_num}" if item.criticidad_num is not None else "—"),
+            "criticidad_texto": criticidad_texto,
+            "etiquetado_texto": etiquetado_texto,
         })
 
     html = """
@@ -44390,15 +44396,16 @@ def inventario_fisico():
               <table class="table table-bordered table-hover align-middle invfismat-table mb-0">
 
                 <colgroup>
-                  <col style="width: 11%;">
-                  <col style="width: 11%;">
-                  <col style="width: 14%;">
                   <col style="width: 10%;">
                   <col style="width: 10%;">
-                  <col style="width: 12%;">
-                  <col style="width: 12%;">
-                  <col style="width: 12%;">
-                  <col style="width: 12%;">
+                  <col style="width: 13%;">
+                  <col style="width: 9%;">
+                  <col style="width: 9%;">
+                  <col style="width: 11%;">
+                  <col style="width: 11%;">
+                  <col style="width: 11%;">
+                  <col style="width: 11%;">
+                  <col style="width: 11%;">
                   <col style="width: 12%;">
                   <col style="width: 14%;">
                 </colgroup>
@@ -44415,6 +44422,7 @@ def inventario_fisico():
                     <th>Disponibilidad</th>
                     <th>Valor</th>
                     <th>Criticidad</th>
+                    <th>Etiquetado</th>
                     <th class="invfismat-col-acciones">Acciones</th>
                   </tr>
                 </thead>
@@ -44463,6 +44471,12 @@ def inventario_fisico():
                         </span>
                       </td>
 
+                      <td class="text-center">
+                        <span class="badge badge-n{{ item.etiqueta_conf_num or 1 }} invfismat-badge-text">
+                          {{ row.etiquetado_texto }}
+                        </span>
+                      </td>
+
                       <td class="text-center invfismat-col-acciones">
                         <div class="invfismat-actions-wrap">
 
@@ -44493,7 +44507,7 @@ def inventario_fisico():
 
                   {% if matriz_items|length == 0 %}
                     <tr>
-                      <td colspan="11" class="text-center text-muted py-5">
+                      <td colspan="12" class="text-center text-muted py-5">
                         Sin registros
                       </td>
                     </tr>
@@ -44519,7 +44533,7 @@ def inventario_fisico():
 
       .invfismat-shell{
         width:96%;
-        max-width:1750px;
+        max-width:1850px;
         margin:10px auto 24px auto;
       }
 
@@ -44676,7 +44690,7 @@ def inventario_fisico():
       }
 
       .invfismat-table{
-        min-width:1650px;
+        min-width:1800px;
         table-layout:fixed;
         margin-bottom:0;
       }
@@ -44695,7 +44709,7 @@ def inventario_fisico():
       .invfismat-table th,
       .invfismat-table td{
         vertical-align:top;
-        font-size:.76rem;
+        font-size:.75rem;
         padding:9px 8px;
         white-space:normal;
         word-break:break-word;
@@ -44720,7 +44734,7 @@ def inventario_fisico():
       }
 
       .invfismat-badge-text{
-        font-size:.68rem !important;
+        font-size:.67rem !important;
         line-height:1.15;
         padding:5px 8px;
         border-radius:999px;
