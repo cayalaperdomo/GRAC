@@ -2223,196 +2223,6 @@ class DocEvidencia(db.Model):
 
     documento = db.relationship('DocMaestroDocumento', back_populates='evidencias')
 
-class CambioRFCRegistro(db.Model):
-    __tablename__ = 'cambio_rfc_registro'
-
-    id = db.Column(db.Integer, primary_key=True)
-
-    # --- Información general ---
-    ticket = db.Column(db.String(50), nullable=False)
-    fecha_solicitud = db.Column(db.Date, nullable=False)
-
-    responsable_solicitud_id = db.Column(db.Integer, nullable=True)  # FK opcional
-    responsable_solicitud_nombre = db.Column(db.String(150))
-    responsable_solicitud_cargo = db.Column(db.String(150))
-
-    # --- Información del cambio ---
-    descripcion = db.Column(db.Text)          # Qué se requiere
-    antecedentes = db.Column(db.Text)        # Por qué se requiere
-    objetivo = db.Column(db.Text)            # Qué se busca lograr
-    alcance = db.Column(db.Text)
-    ambiente = db.Column(db.String(30))      # Producción / Contingencia
-    partes_interesadas = db.Column(db.Text)
-    recursos_necesarios = db.Column(db.Text)
-
-    tipo_cambio = db.Column(db.String(30))   # Planificado / No planificado / Tipificado
-    prioridad = db.Column(db.String(10))     # Alta / Media / Baja
-
-    # --- Evaluación de riesgos (1 fila básica) ---
-    #sistema_procedente = db.Column(db.Text)
-    #riesgo = db.Column(db.Text)
-    #impacto = db.Column(db.Text)
-    #controles_aplicar = db.Column(db.Text)
-    #responsable_riesgo = db.Column(db.Text)
-
-    # --- Plan de pruebas (si aplica) ---
-    #plan_pruebas_actividad = db.Column(db.Text)
-    #plan_pruebas_fecha_inicio = db.Column(db.DateTime)
-    #plan_pruebas_fecha_fin = db.Column(db.DateTime)
-    #plan_pruebas_responsable = db.Column(db.Text)
-    #plan_pruebas_entregables = db.Column(db.Text)
-    #plan_pruebas_acciones = db.Column(db.Text)
-
-    # --- Plan de Marcha Atrás / Rollback ---
-    #rollback_actividad = db.Column(db.Text)
-    #rollback_responsable = db.Column(db.Text)
-    #rollback_ejecucion = db.Column(db.Text)
-
-    # --- Actividades implementadas del cambio ---
-    #impl_actividad = db.Column(db.Text)
-    #impl_responsable = db.Column(db.Text)
-    #impl_fecha = db.Column(db.Date)
-    #impl_ejecucion = db.Column(db.Text)
-    #impl_tiempo_monitoreo = db.Column(db.String(50))
-    #impl_fecha_aprobacion = db.Column(db.Date)
-    #impl_fecha_tentativa_cierre = db.Column(db.Date)
-    #impl_fecha_real_cierre = db.Column(db.Date)
-    #impl_observaciones = db.Column(db.Text)
-
-    # --- Aprobación del cambio ---
-    ajustes_requeridos = db.Column(db.String(2))     # 'Si' / 'No'
-    cambios_requeridos = db.Column(db.Text)
-
-    # Revisa
-    revisa_persona_id = db.Column(db.Integer)
-    revisa_nombre = db.Column(db.String(150))
-    revisa_cargo = db.Column(db.String(150))
-    revisa_observaciones = db.Column(db.Text)
-    revisa_fecha = db.Column(db.Date)
-
-    # Aprueba (Comité)
-    aprueba_persona_id = db.Column(db.Integer)
-    aprueba_nombre = db.Column(db.String(150))
-    aprueba_cargo = db.Column(db.String(150))
-    aprueba_observaciones = db.Column(db.Text)
-    aprueba_fecha = db.Column(db.Date)
-
-    # Implementa
-    implementa_persona_id = db.Column(db.Integer)
-    implementa_nombre = db.Column(db.String(150))
-    implementa_cargo = db.Column(db.String(150))
-    implementa_observaciones = db.Column(db.Text)
-    implementa_fecha = db.Column(db.Date)
-
-    # Seguimiento del cambio
-    cambio_eficaz = db.Column(db.String(2))   # 'Si' / 'No'
-    descripcion_seguimiento = db.Column(db.Text)
-
-    # Relación con evidencias
-    evidencias = db.relationship('CambioRFCEvidencia', backref='rfc', lazy=True)
-
-
-# =========================
-# DETALLE — Evaluación de riesgos RFC
-# =========================
-class CambioRFCRiesgo(db.Model):
-    __tablename__ = 'cambio_rfc_riesgo'
-
-    id = db.Column(db.Integer, primary_key=True)
-    rfc_id = db.Column(db.Integer, db.ForeignKey('cambio_rfc_registro.id'), nullable=False, index=True)
-
-    sistema_procedente = db.Column(db.Text, nullable=True)
-    riesgo = db.Column(db.Text, nullable=True)
-    impacto = db.Column(db.Text, nullable=True)
-    controles_aplicar = db.Column(db.Text, nullable=True)
-    responsable_riesgo = db.Column(db.Text, nullable=True)
-
-    rfc = db.relationship('CambioRFCRegistro', backref=db.backref(
-        'riesgos',
-        lazy=True,
-        cascade='all, delete-orphan'
-    ))
-
-# =========================
-# DETALLE — Plan de pruebas RFC
-# =========================
-class CambioRFCPlanPruebas(db.Model):
-    __tablename__ = 'cambio_rfc_plan_pruebas'
-
-    id = db.Column(db.Integer, primary_key=True)
-    rfc_id = db.Column(db.Integer, db.ForeignKey('cambio_rfc_registro.id'), nullable=False, index=True)
-
-    actividad = db.Column(db.Text, nullable=True)
-    fecha_inicio = db.Column(db.String(30), nullable=True)   # o DateTime si luego quieres tiparlo mejor
-    fecha_fin = db.Column(db.String(30), nullable=True)
-    responsable = db.Column(db.Text, nullable=True)
-    entregables = db.Column(db.Text, nullable=True)
-    acciones = db.Column(db.Text, nullable=True)
-
-    rfc = db.relationship('CambioRFCRegistro', backref=db.backref(
-        'planes_pruebas',
-        lazy=True,
-        cascade='all, delete-orphan'
-    ))
-
-
-# =========================
-# DETALLE — Rollback RFC
-# =========================
-class CambioRFCRollback(db.Model):
-    __tablename__ = 'cambio_rfc_rollback'
-
-    id = db.Column(db.Integer, primary_key=True)
-    rfc_id = db.Column(db.Integer, db.ForeignKey('cambio_rfc_registro.id'), nullable=False, index=True)
-
-    actividad = db.Column(db.Text, nullable=True)
-    responsable = db.Column(db.Text, nullable=True)
-    ejecucion = db.Column(db.Text, nullable=True)
-
-    rfc = db.relationship('CambioRFCRegistro', backref=db.backref(
-        'rollbacks',
-        lazy=True,
-        cascade='all, delete-orphan'
-    ))
-
-
-# =========================
-# DETALLE — Actividades implementadas RFC
-# =========================
-class CambioRFCImplementacion(db.Model):
-    __tablename__ = 'cambio_rfc_implementacion'
-
-    id = db.Column(db.Integer, primary_key=True)
-    rfc_id = db.Column(db.Integer, db.ForeignKey('cambio_rfc_registro.id'), nullable=False, index=True)
-
-    actividad = db.Column(db.Text, nullable=True)
-    responsable = db.Column(db.Text, nullable=True)
-    fecha = db.Column(db.String(20), nullable=True)
-    ejecucion = db.Column(db.Text, nullable=True)
-    tiempo_monitoreo = db.Column(db.String(120), nullable=True)
-    fecha_aprobacion = db.Column(db.String(20), nullable=True)
-    fecha_tentativa_cierre = db.Column(db.String(20), nullable=True)
-    fecha_real_cierre = db.Column(db.String(20), nullable=True)
-    observaciones = db.Column(db.Text, nullable=True)
-
-    rfc = db.relationship('CambioRFCRegistro', backref=db.backref(
-        'implementaciones',
-        lazy=True,
-        cascade='all, delete-orphan'
-    ))
-        
-
-class CambioRFCEvidencia(db.Model):
-    __tablename__ = 'cambio_rfc_evidencia'
-
-    id = db.Column(db.Integer, primary_key=True)
-    rfc_id = db.Column(db.Integer, db.ForeignKey('cambio_rfc_registro.id'), nullable=False)
-
-    filename = db.Column(db.String(255), nullable=False)      # nombre interno
-    original_name = db.Column(db.String(255), nullable=False) # nombre original
-    mime = db.Column(db.String(100))
-    size = db.Column(db.Integer)
-    created_at = db.Column(db.DateTime, server_default=db.func.now())
 
 class MatrizComunicacionRegistro(db.Model):
     __tablename__ = 'matriz_comunicaciones'
@@ -54914,6 +54724,212 @@ def revision_accesos_delete(id):
 # ==========================================================================================================================================
 
 
+class CambioRFCRegistro(db.Model):
+    __tablename__ = 'cambio_rfc_registro'
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # --- Información general ---
+    ticket = db.Column(db.String(50), nullable=False)
+    fecha_solicitud = db.Column(db.Date, nullable=False)
+
+    responsable_solicitud_id = db.Column(db.Integer, nullable=True)  # FK opcional
+    responsable_solicitud_nombre = db.Column(db.String(150))
+    responsable_solicitud_cargo = db.Column(db.String(150))
+
+    # --- Información del cambio ---
+    descripcion = db.Column(db.Text)          # Qué se requiere
+    antecedentes = db.Column(db.Text)        # Por qué se requiere
+    objetivo = db.Column(db.Text)            # Qué se busca lograr
+    alcance = db.Column(db.Text)
+    ambiente = db.Column(db.String(30))      # Producción / Contingencia
+    partes_interesadas = db.Column(db.Text)
+    recursos_necesarios = db.Column(db.Text)
+
+    estado_seguridad = db.Column(db.String(80), default="Pendiente de aprobación por seguridad")
+
+    aprueba_seguridad_fecha = db.Column(db.Date, nullable=True)
+    aprueba_seguridad_nombre = db.Column(db.String(255), nullable=True)
+    aprueba_seguridad_cargo = db.Column(db.String(255), nullable=True)
+    aprueba_seguridad_observacion = db.Column(db.Text, nullable=True)
+
+    tipo_cambio = db.Column(db.String(30))   # Planificado / No planificado / Tipificado
+    prioridad = db.Column(db.String(10))     # Alta / Media / Baja
+
+    # --- Aprobación del cambio ---
+    ajustes_requeridos = db.Column(db.String(2))     # 'Si' / 'No'
+    cambios_requeridos = db.Column(db.Text)
+
+    # Revisa
+    revisa_persona_id = db.Column(db.Integer)
+    revisa_nombre = db.Column(db.String(150))
+    revisa_cargo = db.Column(db.String(150))
+    revisa_observaciones = db.Column(db.Text)
+    revisa_fecha = db.Column(db.Date)
+
+    # Aprueba (Comité)
+    aprueba_persona_id = db.Column(db.Integer)
+    aprueba_nombre = db.Column(db.String(150))
+    aprueba_cargo = db.Column(db.String(150))
+    aprueba_observaciones = db.Column(db.Text)
+    aprueba_fecha = db.Column(db.Date)
+
+    # Implementa
+    implementa_persona_id = db.Column(db.Integer)
+    implementa_nombre = db.Column(db.String(150))
+    implementa_cargo = db.Column(db.String(150))
+    implementa_observaciones = db.Column(db.Text)
+    implementa_fecha = db.Column(db.Date)
+
+    # Seguimiento del cambio
+    cambio_eficaz = db.Column(db.String(2))   # 'Si' / 'No'
+    descripcion_seguimiento = db.Column(db.Text)
+
+    # Relación con evidencias
+    evidencias = db.relationship('CambioRFCEvidencia', backref='rfc', lazy=True)
+
+
+# =========================
+# DETALLE — Evaluación de riesgos RFC
+# =========================
+class CambioRFCRiesgo(db.Model):
+    __tablename__ = 'cambio_rfc_riesgo'
+
+    id = db.Column(db.Integer, primary_key=True)
+    rfc_id = db.Column(db.Integer, db.ForeignKey('cambio_rfc_registro.id'), nullable=False, index=True)
+
+    sistema_procedente = db.Column(db.Text, nullable=True)
+    riesgo = db.Column(db.Text, nullable=True)
+    impacto = db.Column(db.Text, nullable=True)
+    controles_aplicar = db.Column(db.Text, nullable=True)
+    responsable_riesgo = db.Column(db.Text, nullable=True)
+
+    rfc = db.relationship('CambioRFCRegistro', backref=db.backref(
+        'riesgos',
+        lazy=True,
+        cascade='all, delete-orphan'
+    ))
+
+# =========================
+# DETALLE — Plan de pruebas RFC
+# =========================
+class CambioRFCPlanPruebas(db.Model):
+    __tablename__ = 'cambio_rfc_plan_pruebas'
+
+    id = db.Column(db.Integer, primary_key=True)
+    rfc_id = db.Column(db.Integer, db.ForeignKey('cambio_rfc_registro.id'), nullable=False, index=True)
+
+    actividad = db.Column(db.Text, nullable=True)
+    fecha_inicio = db.Column(db.String(30), nullable=True)   # o DateTime si luego quieres tiparlo mejor
+    fecha_fin = db.Column(db.String(30), nullable=True)
+    responsable = db.Column(db.Text, nullable=True)
+    entregables = db.Column(db.Text, nullable=True)
+    acciones = db.Column(db.Text, nullable=True)
+
+    rfc = db.relationship('CambioRFCRegistro', backref=db.backref(
+        'planes_pruebas',
+        lazy=True,
+        cascade='all, delete-orphan'
+    ))
+
+
+# =========================
+# DETALLE — Rollback RFC
+# =========================
+class CambioRFCRollback(db.Model):
+    __tablename__ = 'cambio_rfc_rollback'
+
+    id = db.Column(db.Integer, primary_key=True)
+    rfc_id = db.Column(db.Integer, db.ForeignKey('cambio_rfc_registro.id'), nullable=False, index=True)
+
+    actividad = db.Column(db.Text, nullable=True)
+    responsable = db.Column(db.Text, nullable=True)
+    ejecucion = db.Column(db.Text, nullable=True)
+
+    rfc = db.relationship('CambioRFCRegistro', backref=db.backref(
+        'rollbacks',
+        lazy=True,
+        cascade='all, delete-orphan'
+    ))
+
+
+# =========================
+# DETALLE — Actividades implementadas RFC
+# =========================
+class CambioRFCImplementacion(db.Model):
+    __tablename__ = 'cambio_rfc_implementacion'
+
+    id = db.Column(db.Integer, primary_key=True)
+    rfc_id = db.Column(db.Integer, db.ForeignKey('cambio_rfc_registro.id'), nullable=False, index=True)
+
+    actividad = db.Column(db.Text, nullable=True)
+    responsable = db.Column(db.Text, nullable=True)
+    fecha = db.Column(db.String(20), nullable=True)
+    ejecucion = db.Column(db.Text, nullable=True)
+    tiempo_monitoreo = db.Column(db.String(120), nullable=True)
+    fecha_aprobacion = db.Column(db.String(20), nullable=True)
+    fecha_tentativa_cierre = db.Column(db.String(20), nullable=True)
+    fecha_real_cierre = db.Column(db.String(20), nullable=True)
+    observaciones = db.Column(db.Text, nullable=True)
+
+    rfc = db.relationship('CambioRFCRegistro', backref=db.backref(
+        'implementaciones',
+        lazy=True,
+        cascade='all, delete-orphan'
+    ))
+        
+
+class CambioRFCEvidencia(db.Model):
+    __tablename__ = 'cambio_rfc_evidencia'
+
+    id = db.Column(db.Integer, primary_key=True)
+    rfc_id = db.Column(db.Integer, db.ForeignKey('cambio_rfc_registro.id'), nullable=False)
+
+    filename = db.Column(db.String(255), nullable=False)      # nombre interno
+    original_name = db.Column(db.String(255), nullable=False) # nombre original
+    mime = db.Column(db.String(100))
+    size = db.Column(db.Integer)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+
+def asegurar_columnas_aprobacion_seguridad_rfc():
+    with app.app_context():
+        inspector = db.inspect(db.engine)
+        table_name = CambioRFCRegistro.__tablename__
+
+        columnas = [c["name"] for c in inspector.get_columns(table_name)]
+
+        alteraciones = []
+
+        if "estado_seguridad" not in columnas:
+            alteraciones.append(
+                "ALTER TABLE {} ADD COLUMN estado_seguridad VARCHAR(80) DEFAULT 'Pendiente de aprobación por seguridad'".format(table_name)
+            )
+
+        if "aprueba_seguridad_fecha" not in columnas:
+            alteraciones.append(
+                "ALTER TABLE {} ADD COLUMN aprueba_seguridad_fecha DATE".format(table_name)
+            )
+
+        if "aprueba_seguridad_nombre" not in columnas:
+            alteraciones.append(
+                "ALTER TABLE {} ADD COLUMN aprueba_seguridad_nombre VARCHAR(255)".format(table_name)
+            )
+
+        if "aprueba_seguridad_cargo" not in columnas:
+            alteraciones.append(
+                "ALTER TABLE {} ADD COLUMN aprueba_seguridad_cargo VARCHAR(255)".format(table_name)
+            )
+
+        if "aprueba_seguridad_observacion" not in columnas:
+            alteraciones.append(
+                "ALTER TABLE {} ADD COLUMN aprueba_seguridad_observacion TEXT".format(table_name)
+            )
+
+        for sql in alteraciones:
+            db.session.execute(db.text(sql))
+
+        db.session.commit()
+
 # ==========================
 # ENTRADA DIRECTA — RFC
 # ==========================
@@ -55071,7 +55087,7 @@ def rfc_new():
 
             ajustes_requeridos=ajustes_req,
             cambios_requeridos=cambios_req,
-
+            estado_seguridad="Pendiente de aprobación por seguridad",
             revisa_persona_id=revisa_id,
             revisa_nombre=revisa_nombre,
             revisa_cargo=revisa_cargo,
@@ -56172,6 +56188,488 @@ def rfc_new():
     inner = render_template_string(html, areas=areas)
     return render_template_string(BASE, content=Markup(inner))
 
+@app.route('/rfc/aprobar_seguridad/<int:id>', methods=['GET', 'POST'])
+@login_required
+def rfc_aprobar_seguridad(id):
+    user = User.query.get(session.get('user_id'))
+
+    item = CambioRFCRegistro.query.get_or_404(id)
+    aprobado = item.estado_seguridad == "Aprobado por seguridad"
+
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Gestión de Cambios (RFC)"):
+        flash("No tiene permiso para acceder a la aprobación de seguridad.", "danger")
+        return redirect(url_for('rfc_matriz'))
+
+    if request.method == 'POST':
+        if user.role == 'auditor':
+            flash("El rol Auditor no puede aprobar registros.", "danger")
+            return redirect(url_for('rfc_matriz'))
+
+        if user.role != 'admin' and not verificar_permiso(user, "Gestión de Cambios (RFC)"):
+            flash("No tiene permiso para aprobar cambios por seguridad.", "danger")
+            return redirect(url_for('rfc_matriz'))
+
+        fecha = parse_date_safe(request.form.get('aprueba_seguridad_fecha'))
+        persona_id = request.form.get('aprueba_seguridad_persona_id', type=int)
+        observacion = (request.form.get('aprueba_seguridad_observacion') or '').strip()
+
+        if not fecha:
+            flash("La fecha de aprobación de seguridad es obligatoria.", "danger")
+            return redirect(url_for('rfc_aprobar_seguridad', id=id))
+
+        if not persona_id:
+            flash("Debe seleccionar el responsable que aprueba por seguridad.", "danger")
+            return redirect(url_for('rfc_aprobar_seguridad', id=id))
+
+        area = AreaEmpresa.query.get(persona_id)
+        if not area:
+            flash("No se encontró el responsable seleccionado.", "danger")
+            return redirect(url_for('rfc_aprobar_seguridad', id=id))
+
+        item.aprueba_seguridad_fecha = fecha
+        item.aprueba_seguridad_nombre = getattr(area, 'responsable_nombre', '') or ''
+        item.aprueba_seguridad_cargo = getattr(area, 'responsable_cargo', '') or ''
+        item.aprueba_seguridad_observacion = observacion
+        item.estado_seguridad = "Aprobado por seguridad"
+
+        db.session.commit()
+
+        flash("RFC aprobado por seguridad correctamente.", "success")
+        return redirect(url_for('rfc_matriz'))
+
+    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
+
+    html = """
+    <div class="rfcsec-shell">
+
+      <div class="rfcsec-header-card">
+        <div class="rfcsec-header-overlay">
+          <div class="rfcsec-header-text">
+            <h3 class="rfcsec-title m-0">
+              {% if aprobado %}Ver aprobación de seguridad{% else %}7.4 Aprueba Seguridad{% endif %}
+            </h3>
+            <div class="rfcsec-subtitle">
+              Solicitud de cambio RFC {{ item.ticket or item.id }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rfcsec-header-actions">
+        <a href="{{ url_for('rfc_matriz') }}"
+           class="btn rounded-pill px-5 fw-bold rfcsec-back-btn"
+           onclick="showLoader()">
+          ⬅ Volver a la Matriz RFC
+        </a>
+      </div>
+
+      <div class="rfcsec-card">
+        <div class="rfcsec-card-body">
+
+          <div class="rfcsec-status-box">
+            <div>
+              <div class="rfcsec-status-title">Estado actual de seguridad</div>
+              <div class="rfcsec-status-subtitle">
+                {% if aprobado %}
+                  Consulta de la aprobación registrada por seguridad.
+                {% else %}
+                  Complete los datos requeridos para aprobar formalmente el cambio desde seguridad.
+                {% endif %}
+              </div>
+            </div>
+
+            {% if aprobado %}
+              <span class="badge rfcsec-badge rfcsec-badge-ok">Aprobado por seguridad</span>
+            {% else %}
+              <span class="badge rfcsec-badge rfcsec-badge-pending">Pendiente de aprobación por seguridad</span>
+            {% endif %}
+          </div>
+
+          <form method="post">
+            <div class="row g-3">
+
+              <div class="col-12">
+                <div class="rfcsec-section-title">
+                  Información de aprobación de seguridad
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Fecha aprobación seguridad</label>
+                <input type="date"
+                       name="aprueba_seguridad_fecha"
+                       class="form-control"
+                       value="{{ item.aprueba_seguridad_fecha.strftime('%Y-%m-%d') if item.aprueba_seguridad_fecha else '' }}"
+                       {% if aprobado %}readonly disabled{% else %}required{% endif %}>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Nombre</label>
+
+                {% if aprobado %}
+                  <input type="text"
+                         class="form-control"
+                         value="{{ item.aprueba_seguridad_nombre or '—' }}"
+                         readonly>
+                {% else %}
+                  <select name="aprueba_seguridad_persona_id"
+                          id="aprueba_seguridad_persona_id"
+                          class="form-select"
+                          onchange="fillCargoDesdeArea('aprueba_seguridad_persona_id','aprueba_seguridad_cargo')"
+                          required>
+                    <option value="">-- Seleccione --</option>
+                    {% for a in areas %}
+                      <option value="{{ a.id }}"
+                              data-cargo="{{ a.responsable_cargo or '' }}"
+                              {% if item.aprueba_seguridad_nombre == a.responsable_nombre %}selected{% endif %}>
+                        {{ a.responsable_nombre }}
+                      </option>
+                    {% endfor %}
+                  </select>
+                {% endif %}
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Cargo</label>
+                <input type="text"
+                       id="aprueba_seguridad_cargo"
+                       class="form-control"
+                       value="{{ item.aprueba_seguridad_cargo or '' }}"
+                       readonly>
+              </div>
+
+              <div class="col-12">
+                <label class="form-label">Observación</label>
+                <textarea name="aprueba_seguridad_observacion"
+                          class="form-control"
+                          rows="4"
+                          {% if aprobado %}readonly disabled{% endif %}
+                          placeholder="Registre la observación de aprobación de seguridad">{{ item.aprueba_seguridad_observacion or '' }}</textarea>
+              </div>
+
+            </div>
+
+            <div class="rfcsec-bottom-actions">
+
+              {% if not aprobado %}
+                <button type="submit"
+                        class="btn btn-success rounded-pill px-4 fw-bold">
+                  Guardar aprobación
+                </button>
+              {% endif %}
+
+              <a href="{{ url_for('rfc_matriz') }}"
+                 class="btn rounded-pill px-4 fw-bold rfcsec-cancel-btn"
+                 onclick="showLoader()">
+                {% if aprobado %}Volver{% else %}Cancelar{% endif %}
+              </a>
+            </div>
+          </form>
+
+        </div>
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .rfcsec-shell{
+        width:96%;
+        max-width:1500px;
+        margin:10px auto 24px auto;
+      }
+
+      .rfcsec-header-card{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .rfcsec-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .rfcsec-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent;
+        padding:0;
+        position:relative;
+        z-index:1;
+      }
+
+      .rfcsec-header-overlay::before{
+        content:"🛡️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .rfcsec-header-text{
+        width:100%;
+        max-width:1200px;
+      }
+
+      .rfcsec-header-text::before{
+        content:"SGSI · Gestión de Cambios / RFC";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#fff;
+      }
+
+      .rfcsec-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .rfcsec-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+        line-height:1.25;
+      }
+
+      .rfcsec-header-actions,
+      .rfcsec-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .rfcsec-header-actions .btn,
+      .rfcsec-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:38px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .rfcsec-back-btn,
+      .rfcsec-cancel-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .rfcsec-back-btn:hover,
+      .rfcsec-cancel-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .rfcsec-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .rfcsec-card-body{
+        padding:18px;
+      }
+
+      .rfcsec-status-box{
+        background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        padding:14px 16px;
+        margin-bottom:16px;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+        box-shadow:0 6px 14px rgba(15,23,42,.08);
+      }
+
+      .rfcsec-status-title{
+        font-weight:950;
+        font-size:.90rem;
+        color:#0f172a;
+      }
+
+      .rfcsec-status-subtitle{
+        color:#64748b;
+        font-size:.78rem;
+        margin-top:2px;
+      }
+
+      .rfcsec-section-title{
+        font-weight:950;
+        font-size:.88rem;
+        color:#1459a6;
+        padding:9px 12px;
+        border-radius:12px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        margin:4px 0 12px;
+      }
+
+      .rfcsec-card .form-label{
+        font-weight:800;
+        color:#25324a;
+        margin-bottom:4px;
+        font-size:.78rem;
+      }
+
+      .rfcsec-card .form-control,
+      .rfcsec-card .form-select{
+        border-radius:9px;
+        border:1px solid #d9e3f0;
+        min-height:38px;
+        font-size:.80rem;
+        background:#f8fafc;
+      }
+
+      .rfcsec-card textarea.form-control{
+        min-height:95px;
+        resize:vertical;
+      }
+
+      .rfcsec-card .form-control:focus,
+      .rfcsec-card .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
+        background:#ffffff;
+      }
+
+      .rfcsec-badge{
+        border-radius:999px;
+        font-size:.72rem;
+        padding:.45rem .75rem;
+        font-weight:900;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        text-align:center;
+        line-height:1.15;
+        white-space:normal;
+      }
+
+      .rfcsec-badge-ok{
+        background:#dcfce7;
+        color:#166534;
+      }
+
+      .rfcsec-badge-pending{
+        background:#fef3c7;
+        color:#92400e;
+      }
+
+      @media (max-width:992px){
+        .rfcsec-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .rfcsec-header-card{
+          min-height:88px;
+        }
+
+        .rfcsec-title{
+          font-size:1.20rem;
+        }
+
+        .rfcsec-card-body{
+          padding:14px;
+        }
+
+        .rfcsec-status-box{
+          flex-direction:column;
+          align-items:flex-start;
+        }
+      }
+
+      @media (max-width:768px){
+        .rfcsec-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .rfcsec-header-overlay::before{
+          margin:0;
+        }
+
+        .rfcsec-header-actions .btn,
+        .rfcsec-bottom-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+
+    <script>
+      function fillCargoDesdeArea(selectId, cargoInputId){
+        const sel = document.getElementById(selectId);
+        const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
+        const cargo = opt ? (opt.getAttribute('data-cargo') || '') : '';
+        const inpCar = document.getElementById(cargoInputId);
+        if (inpCar) inpCar.value = cargo;
+      }
+
+      window.addEventListener('DOMContentLoaded', function(){
+        const sel = document.getElementById('aprueba_seguridad_persona_id');
+        if(sel){
+          fillCargoDesdeArea('aprueba_seguridad_persona_id','aprueba_seguridad_cargo');
+        }
+      });
+    </script>
+    """
+
+    inner = render_template_string(
+        html,
+        item=item,
+        areas=areas,
+        aprobado=aprobado
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
 # ==========================
 # MATRIZ — RFC
 # ==========================
@@ -56188,9 +56686,6 @@ def rfc_matriz():
             return redirect(url_for('menu'))
         read_only = False
 
-    # ==========================
-    # FILTROS
-    # ==========================
     filtro_ticket = (request.args.get('ticket') or '').strip()
     filtro_tipo = (request.args.get('tipo_cambio') or '').strip()
     filtro_prioridad = (request.args.get('prioridad') or '').strip()
@@ -56212,9 +56707,6 @@ def rfc_matriz():
 
     items = query.order_by(CambioRFCRegistro.id.desc()).all()
 
-    # ==========================
-    # OPCIONES FILTROS
-    # ==========================
     opciones_tipo = [
         x[0] for x in db.session.query(CambioRFCRegistro.tipo_cambio)
         .filter(CambioRFCRegistro.tipo_cambio.isnot(None))
@@ -56248,7 +56740,6 @@ def rfc_matriz():
     html = """
     <div class="rfcmat-shell">
 
-      <!-- CABECERA -->
       <div class="rfcmat-header-card">
         <div class="rfcmat-header-overlay">
           <div class="rfcmat-header-text">
@@ -56260,10 +56751,7 @@ def rfc_matriz():
         </div>
       </div>
 
-      <!-- BOTONES SUPERIORES -->
       <div class="rfcmat-header-actions">
-        
-
         {% if not read_only %}
         <a href="{{ url_for('rfc_new') }}"
            class="btn btn-primary rounded-pill px-4 fw-bold"
@@ -56273,7 +56761,6 @@ def rfc_matriz():
         {% endif %}
       </div>
 
-      <!-- RESUMEN -->
       <div class="rfcmat-topbar">
         <div class="rfcmat-topbar-card">
           <div class="rfcmat-topbar-title">Resumen de solicitudes RFC</div>
@@ -56285,7 +56772,6 @@ def rfc_matriz():
         </div>
       </div>
 
-      <!-- FILTROS -->
       <div class="rfcmat-filter-card">
         <div class="rfcmat-filter-head">
           <span>Filtros de búsqueda</span>
@@ -56350,7 +56836,6 @@ def rfc_matriz():
         </div>
       </div>
 
-      <!-- TABLA -->
       <div class="rfcmat-card">
         <div class="rfcmat-card-body">
           <div class="table-responsive">
@@ -56365,9 +56850,11 @@ def rfc_matriz():
                   <th>Prioridad</th>
                   <th>Ambiente</th>
                   <th>¿Eficaz?</th>
+                  <th>Estado Seguridad</th>
                   <th class="rfcmat-col-acciones">Acciones</th>
                 </tr>
               </thead>
+
               <tbody>
                 {% for it in items %}
                 <tr>
@@ -56376,6 +56863,7 @@ def rfc_matriz():
                   <td>{{ it.fecha_solicitud.strftime('%Y-%m-%d') if it.fecha_solicitud else '—' }}</td>
                   <td>{{ it.responsable_solicitud_nombre or '—' }}</td>
                   <td>{{ it.tipo_cambio or '—' }}</td>
+
                   <td>
                     {% set p = (it.prioridad or '')|lower %}
                     {% if p == 'alta' %}
@@ -56388,7 +56876,9 @@ def rfc_matriz():
                       <span class="badge rfcmat-badge rfcmat-badge-neutro">—</span>
                     {% endif %}
                   </td>
+
                   <td>{{ it.ambiente or '—' }}</td>
+
                   <td>
                     {% set e = (it.cambio_eficaz or '')|lower %}
                     {% if e == 'si' %}
@@ -56399,29 +56889,58 @@ def rfc_matriz():
                       <span class="badge rfcmat-badge rfcmat-badge-neutro">—</span>
                     {% endif %}
                   </td>
+
+                  <td>
+                    {% if it.estado_seguridad == 'Aprobado por seguridad' %}
+                      <span class="badge rfcmat-badge rfcmat-badge-ok">
+                        Aprobado
+                      </span>
+                    {% else %}
+                      <span class="badge rfcmat-badge rfcmat-badge-pendiente">
+                        Pendiente de aprobación
+                      </span>
+                    {% endif %}
+                  </td>
+
                   <td class="rfcmat-col-acciones">
                     <div class="rfcmat-actions-wrap">
+
                       <a href="{{ url_for('rfc_view', id=it.id) }}"
                          class="btn btn-info btn-sm rounded-pill rfcmat-btn-action"
                          onclick="showLoader()">
                         Ver detalle
                       </a>
 
-                      {% if not read_only %}
-                      <a href="{{ url_for('rfc_edit', id=it.id) }}"
-                         class="btn btn-warning btn-sm rounded-pill rfcmat-btn-action"
-                         onclick="showLoader()">
-                        Editar
-                      </a>
-
-                      <a href="{{ url_for('rfc_delete', id=it.id) }}"
-                         class="btn btn-danger btn-sm rounded-pill rfcmat-btn-action"
-                         onclick="return confirm('¿Está seguro de eliminar esta solicitud RFC?');">
-                        Eliminar
-                      </a>
-                      {% else %}
-                      <span class="badge bg-secondary">Solo lectura</span>
+                      {% if it.estado_seguridad == 'Aprobado por seguridad' %}
+                        <a href="{{ url_for('rfc_aprobar_seguridad', id=it.id) }}"
+                           class="btn btn-secondary btn-sm rounded-pill rfcmat-btn-action"
+                           onclick="showLoader()">
+                          Ver aprobación
+                        </a>
+                      {% elif not read_only %}
+                        <a href="{{ url_for('rfc_aprobar_seguridad', id=it.id) }}"
+                           class="btn btn-success btn-sm rounded-pill rfcmat-btn-action"
+                           onclick="showLoader()">
+                          Aprobar
+                        </a>
                       {% endif %}
+
+                      {% if not read_only %}
+                        <a href="{{ url_for('rfc_edit', id=it.id) }}"
+                           class="btn btn-warning btn-sm rounded-pill rfcmat-btn-action"
+                           onclick="showLoader()">
+                          Editar
+                        </a>
+
+                        <a href="{{ url_for('rfc_delete', id=it.id) }}"
+                           class="btn btn-danger btn-sm rounded-pill rfcmat-btn-action"
+                           onclick="return confirm('¿Está seguro de eliminar esta solicitud RFC?');">
+                          Eliminar
+                        </a>
+                      {% else %}
+                        <span class="badge bg-secondary">Solo lectura</span>
+                      {% endif %}
+
                     </div>
                   </td>
                 </tr>
@@ -56429,7 +56948,7 @@ def rfc_matriz():
 
                 {% if not items %}
                 <tr>
-                  <td colspan="9" class="text-center text-muted py-4">
+                  <td colspan="10" class="text-center text-muted py-4">
                     No hay registros RFC para los filtros seleccionados.
                   </td>
                 </tr>
@@ -56442,7 +56961,7 @@ def rfc_matriz():
 
     </div>
 
-   <style>
+    <style>
       body{
         background-image:url('/static/img/ccsgsi.jpg');
         background-size:cover;
@@ -56453,7 +56972,7 @@ def rfc_matriz():
 
       .rfcmat-shell{
         width:96%;
-        max-width:1600px;
+        max-width:1700px;
         margin:10px auto 24px auto;
       }
 
@@ -56554,18 +57073,6 @@ def rfc_matriz():
         box-shadow:0 8px 16px rgba(15,23,42,.15);
       }
 
-      .rfcmat-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .rfcmat-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
       .rfcmat-topbar-card,
       .rfcmat-filter-card,
       .rfcmat-card{
@@ -56644,7 +57151,6 @@ def rfc_matriz():
         padding:12px 16px 16px 16px;
       }
 
-      .rfcmat-table-wrap,
       .table-responsive{
         max-height:70vh;
         overflow-y:auto;
@@ -56655,7 +57161,7 @@ def rfc_matriz():
       }
 
       .rfcmat-table{
-        min-width:1300px;
+        min-width:1650px;
         table-layout:fixed;
         margin-bottom:0;
       }
@@ -56677,10 +57183,10 @@ def rfc_matriz():
 
       .rfcmat-table th,
       .rfcmat-table td{
-        vertical-align:top;
+        vertical-align:middle;
         font-size:.78rem;
         padding:9px 8px;
-        white-space:normal;
+        white-space:normal !important;
         word-break:break-word;
         overflow-wrap:anywhere;
       }
@@ -56698,9 +57204,34 @@ def rfc_matriz():
         background:#eef6ff;
       }
 
+      .rfcmat-table th:nth-child(9),
+      .rfcmat-table td:nth-child(9){
+        width:230px !important;
+        min-width:230px !important;
+        max-width:230px !important;
+        text-align:center !important;
+        vertical-align:middle !important;
+      }
+
+      .rfcmat-table td:nth-child(9) .badge,
+      .rfcmat-badge-pendiente{
+        width:185px !important;
+        max-width:185px !important;
+        white-space:normal !important;
+        word-break:normal !important;
+        overflow-wrap:break-word !important;
+        line-height:1.15 !important;
+        padding:.45rem .55rem !important;
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        text-align:center !important;
+        border-radius:999px !important;
+      }
+
       .rfcmat-col-acciones{
-        width:180px !important;
-        min-width:180px !important;
+        width:190px !important;
+        min-width:190px !important;
         text-align:center;
         vertical-align:middle !important;
       }
@@ -56714,8 +57245,8 @@ def rfc_matriz():
       }
 
       .rfcmat-btn-action{
-        min-width:110px;
-        max-width:125px;
+        min-width:115px;
+        max-width:135px;
         padding:4px 12px !important;
         font-size:.70rem !important;
         line-height:1.2;
@@ -56734,35 +57265,13 @@ def rfc_matriz():
         text-align:center;
       }
 
-      .rfcmat-badge-alta{
-        background:#fee2e2;
-        color:#991b1b;
-      }
-
-      .rfcmat-badge-media{
-        background:#fef3c7;
-        color:#92400e;
-      }
-
-      .rfcmat-badge-baja{
-        background:#dcfce7;
-        color:#166534;
-      }
-
-      .rfcmat-badge-ok{
-        background:#dcfce7;
-        color:#166534;
-      }
-
-      .rfcmat-badge-no{
-        background:#fee2e2;
-        color:#991b1b;
-      }
-
-      .rfcmat-badge-neutro{
-        background:#e5e7eb;
-        color:#374151;
-      }
+      .rfcmat-badge-alta{ background:#fee2e2; color:#991b1b; }
+      .rfcmat-badge-media{ background:#fef3c7; color:#92400e; }
+      .rfcmat-badge-baja{ background:#dcfce7; color:#166534; }
+      .rfcmat-badge-ok{ background:#dcfce7; color:#166534; }
+      .rfcmat-badge-no{ background:#fee2e2; color:#991b1b; }
+      .rfcmat-badge-neutro{ background:#e5e7eb; color:#374151; }
+      .rfcmat-badge-pendiente{ background:#fef3c7; color:#92400e; }
 
       @media (max-width:992px){
         .rfcmat-shell{
@@ -56784,8 +57293,14 @@ def rfc_matriz():
         }
 
         .rfcmat-col-acciones{
-          width:165px !important;
-          min-width:165px !important;
+          width:170px !important;
+          min-width:170px !important;
+        }
+
+        .rfcmat-table th:nth-child(9),
+        .rfcmat-table td:nth-child(9){
+          width:210px !important;
+          min-width:210px !important;
         }
       }
 
@@ -167795,6 +168310,7 @@ app.register_blueprint(madurez_datos_bp)
 app.register_blueprint(pci_madurez_bp)
 app.register_blueprint(soc2_madurez_bp)
 app.register_blueprint(ai_madurez_bp)
+asegurar_columnas_aprobacion_seguridad_rfc()
 
 def get_free_port(start=5000):
     port = start
