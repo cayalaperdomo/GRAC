@@ -4461,11 +4461,28 @@ def get_personas_empresa():
 #                                                               Autenticación de Usuarios
 # ============================================================================================================================================
 
+from functools import wraps
+from flask import (
+    render_template_string,
+    request,
+    redirect,
+    url_for,
+    flash,
+    session,
+    send_file
+)
+
+import pyotp
+import qrcode
+import io
+import base64
+
+from io import BytesIO
+
 
 # =========================
 # DECORADOR DE LOGIN
 # =========================
-from functools import wraps
 def login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -4475,25 +4492,37 @@ def login_required(f):
         return f(*args, **kwargs)
     return wrapper
 
+
 def admin_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
         user = User.query.get(session.get('user_id'))
+
         if not user or user.role != 'admin':
             flash("Acceso solo permitido a administradores.", "danger")
             return redirect(url_for('menu'))
+
         return f(*args, **kwargs)
+
     return wrapper
+
 
 def admin_or_access_manager_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
         user = User.query.get(session.get('user_id'))
+
         if not user or user.role not in ('admin', 'gestor_accesos'):
-            flash("Acceso solo permitido a administradores o gestores de accesos.", "danger")
+            flash(
+                "Acceso solo permitido a administradores o gestores de accesos.",
+                "danger"
+            )
             return redirect(url_for('menu'))
+
         return f(*args, **kwargs)
+
     return wrapper
+
 
 def verify_otp(user, otp_code):
     if not user or not user.otp_secret:
@@ -4503,23 +4532,32 @@ def verify_otp(user, otp_code):
     return totp.verify(otp_code)
 
 
+# ============================================================================================================================================
+#                                                           RENDER QR OTP
+# ============================================================================================================================================
 def _render_qr_otp_setup(user, secret):
+
     otp_uri = pyotp.totp.TOTP(secret).provisioning_uri(
         name=user.username,
         issuer_name="SGSI"
     )
 
     qr = qrcode.make(otp_uri)
+
     buffer = io.BytesIO()
+
     qr.save(buffer, format="PNG")
+
     qr_data = base64.b64encode(buffer.getvalue()).decode()
 
     content = f"""
     <div class="col-md-6 offset-md-3 text-center">
+
         <h3>Configuración de Autenticación en Dos Pasos</h3>
 
         <div class="alert alert-info">
-            Escanea este código QR con Google Authenticator, Microsoft Authenticator o Authy.
+            Escanea este código QR con Google Authenticator,
+            Microsoft Authenticator o Authy.
             Luego ingresa el código de 6 dígitos para activar el token.
         </div>
 
@@ -4528,26 +4566,44 @@ def _render_qr_otp_setup(user, secret):
              alt="QR Code"
              style="max-width:260px;">
 
-        <form method="post" action="{url_for('verificar_otp')}">
+        <form method="post"
+              action="{url_for('verificar_otp')}"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="none"
+              spellcheck="false">
+
             <input type="hidden" name="username" value="{user.username}">
             <input type="hidden" name="modo" value="setup">
 
             <div class="mt-3 mb-3">
-                <label class="form-label fw-bold">Código de Verificación</label>
+                <label class="form-label fw-bold">
+                    Código de Verificación
+                </label>
+
                 <input class="form-control text-center"
                        name="otp"
-                       placeholder="123456"
+                       type="password"
+                       inputmode="numeric"
+                       pattern="[0-9]{{6}}"
+                       maxlength="6"
+                       placeholder="••••••"
                        required
-                       autocomplete="one-time-code">
+                       autocomplete="off"
+                       autocorrect="off"
+                       autocapitalize="none"
+                       spellcheck="false">
             </div>
 
             <button class="btn btn-success rounded-pill px-4">
                 Activar token
             </button>
 
-            <a href="{url_for('login')}" class="btn btn-secondary rounded-pill px-4">
+            <a href="{url_for('login')}"
+               class="btn btn-secondary rounded-pill px-4">
                 Cancelar
             </a>
+
         </form>
     </div>
     """
@@ -4555,217 +4611,617 @@ def _render_qr_otp_setup(user, secret):
     return render_template_string(BASE, content=content)
 
 
-# =========================
-# AUTENTICACIÓN
-# =========================
+# ============================================================================================================================================
+#                                                               LOGIN
+# ============================================================================================================================================
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+
     if request.method == 'POST':
-        username_ingresado = (request.form.get('username') or "").strip()
-        password_ingresado = request.form.get('password') or ""
 
-        user = User.query.filter_by(username=username_ingresado).first()
+        username_ingresado = (
+            request.form.get('sgsi_user_secure') or
+            ""
+        ).strip()
 
+        password_ingresado = (
+            request.form.get('sgsi_password_secure') or
+            ""
+        )
+
+        user = User.query.filter_by(
+            username=username_ingresado
+        ).first()
+
+        # ============================================================
+        # LOGIN CORRECTO
+        # ============================================================
         if user and user.check_password(password_ingresado):
 
             # =====================================================
-            # CASO 1:
-            # Usuario NO tiene OTP configurado.
-            # Se genera secret temporal en sesión.
-            # NO se guarda todavía en la base de datos.
+            # USUARIO SIN OTP CONFIGURADO
             # =====================================================
             if not user.otp_secret:
+
                 secret_temporal = pyotp.random_base32()
 
                 session['temp_user'] = user.username
                 session['pending_otp_secret'] = secret_temporal
 
-                return _render_qr_otp_setup(user, secret_temporal)
+                return _render_qr_otp_setup(
+                    user,
+                    secret_temporal
+                )
 
             # =====================================================
-            # CASO 2:
-            # Usuario ya tiene OTP guardado.
-            # Ahora sí se pide token normalmente.
+            # USUARIO YA TIENE OTP
             # =====================================================
             session['temp_user'] = user.username
-            session.pop('pending_otp_secret', None)
 
-            return redirect(url_for('verificar_otp'))
+            session.pop(
+                'pending_otp_secret',
+                None
+            )
 
+            return redirect(
+                url_for('verificar_otp')
+            )
+
+        # ============================================================
+        # LOGIN FALLIDO
+        # ============================================================
         registrar_log(
             username_ingresado or "Desconocido",
-            f"Acceso fallido al sistema. Usuario o contraseña inválida: {username_ingresado or 'Desconocido'}"
+            (
+                "Acceso fallido al sistema. "
+                f"Usuario o contraseña inválida: "
+                f"{username_ingresado or 'Desconocido'}"
+            )
         )
 
-        flash("Usuario o contraseña incorrectos.", "danger")
+        flash(
+            "Usuario o contraseña incorrectos.",
+            "danger"
+        )
 
+    # ====================================================================
+    # HTML LOGIN
+    # ====================================================================
     content = """
+    <style>
+
+      input::-ms-reveal,
+      input::-ms-clear{
+        display:none;
+      }
+
+      input[type="password"]::-webkit-credentials-auto-fill-button,
+      input[type="password"]::-webkit-textfield-decoration-container{
+        display:none !important;
+        visibility:hidden;
+        pointer-events:none;
+      }
+
+      .login-card{
+        background:#ffffff;
+        border-radius:24px;
+        padding:32px;
+        box-shadow:0 10px 30px rgba(15,23,42,.08);
+      }
+
+      .login-title{
+        font-size:2rem;
+        font-weight:900;
+        text-align:center;
+        margin-bottom:24px;
+        color:#1e293b;
+      }
+
+      .login-label{
+        font-weight:800;
+        margin-bottom:8px;
+        color:#334155;
+      }
+
+      .login-input{
+        height:52px;
+        border-radius:14px;
+        border:1px solid #dbe2ea;
+        font-size:1rem;
+        padding-left:14px;
+        transition:.2s ease;
+      }
+
+      .login-input:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .18rem rgba(63,134,214,.15);
+      }
+
+      .login-btn{
+        height:52px;
+        border-radius:14px;
+        font-weight:900;
+        font-size:1rem;
+        background:#3f86d6;
+        border:none;
+      }
+
+      .login-btn:hover{
+        background:#2f6fb6;
+      }
+
+    </style>
+
     <div class="col-md-4 offset-md-4">
-      <h3 class="text-center mb-3">Iniciar sesión</h3>
 
-      <form method="post">
-        <div class="mb-3">
-          <label>Usuario</label>
-          <input class="form-control" name="username" required>
+      <div class="login-card">
+
+        <div class="login-title">
+          Iniciar sesión
         </div>
 
-        <div class="mb-3">
-          <label>Contraseña</label>
-          <input class="form-control" name="password" type="password" required>
-        </div>
+        <form method="post"
+              id="sgsiLoginForm"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="none"
+              spellcheck="false">
 
-        <button class="btn btn-primary w-100">Ingresar</button>
-      </form>
+            <!-- CAMPOS TRAMPA -->
+            <input type="text"
+                   style="display:none"
+                   tabindex="-1"
+                   autocomplete="off">
+
+            <input type="password"
+                   style="display:none"
+                   tabindex="-1"
+                   autocomplete="new-password">
+
+            <!-- USUARIO -->
+            <div class="mb-3">
+
+              <label class="login-label">
+                Usuario
+              </label>
+
+              <input class="form-control login-input"
+                     id="sgsi_user_secure"
+                     name="sgsi_user_secure"
+                     type="text"
+                     required
+
+                     autocomplete="off"
+                     autocorrect="off"
+                     autocapitalize="none"
+                     spellcheck="false"
+
+                     data-form-type="other"
+
+                     readonly
+                     onfocus="this.removeAttribute('readonly');"
+
+                     placeholder="Digite su usuario">
+
+            </div>
+
+            <!-- PASSWORD -->
+            <div class="mb-4">
+
+              <label class="login-label">
+                Contraseña
+              </label>
+
+              <input class="form-control login-input"
+                     id="sgsi_password_secure"
+                     name="sgsi_password_secure"
+                     type="password"
+                     required
+
+                     autocomplete="off"
+                     autocorrect="off"
+                     autocapitalize="none"
+                     spellcheck="false"
+
+                     data-form-type="other"
+                     data-lpignore="true"
+
+                     readonly
+                     onfocus="this.removeAttribute('readonly');"
+
+                     placeholder="••••••••">
+
+            </div>
+
+            <button class="btn btn-primary w-100 login-btn">
+              Ingresar
+            </button>
+
+        </form>
+
+      </div>
+
     </div>
+
+    <script>
+
+    document.addEventListener('DOMContentLoaded', function(){
+
+        const form = document.getElementById('sgsiLoginForm');
+
+        const user = document.getElementById('sgsi_user_secure');
+
+        const pass = document.getElementById('sgsi_password_secure');
+
+        // LIMPIAR AUTOFILL
+        if(user){
+            user.value = '';
+
+            setTimeout(function(){
+                user.value = '';
+            }, 100);
+        }
+
+        if(pass){
+            pass.value = '';
+
+            setTimeout(function(){
+                pass.value = '';
+            }, 100);
+        }
+
+        // BLOQUEAR DETECCIÓN DE LOGIN
+        if(form){
+
+            form.setAttribute(
+                'autocomplete',
+                'off'
+            );
+
+            form.addEventListener(
+                'submit',
+                function(){
+
+                    user.setAttribute(
+                        'autocomplete',
+                        'off'
+                    );
+
+                    pass.setAttribute(
+                        'autocomplete',
+                        'new-password'
+                    );
+
+                }
+            );
+
+        }
+
+        // DESBLOQUEAR READONLY AL HACER FOCUS
+        [user, pass].forEach(function(el){
+
+            if(!el) return;
+
+            el.addEventListener('focus', function(){
+
+                this.removeAttribute(
+                    'readonly'
+                );
+
+                this.setAttribute(
+                    'autocomplete',
+                    'off'
+                );
+
+            });
+
+        });
+
+    });
+
+    </script>
     """
 
-    return render_template_string(BASE, content=content)
+    return render_template_string(
+        BASE,
+        content=content
+    )
 
 
+# ============================================================================================================================================
+#                                                               OTP
+# ============================================================================================================================================
 @app.route('/verificar_otp', methods=['GET', 'POST'])
 def verificar_otp():
+
     username = session.get('temp_user')
 
     if not username:
-        flash("Primero inicia sesión.", "warning")
-        return redirect(url_for('login'))
+        flash(
+            "Primero inicia sesión.",
+            "warning"
+        )
 
-    user = User.query.filter_by(username=username).first()
+        return redirect(
+            url_for('login')
+        )
+
+    user = User.query.filter_by(
+        username=username
+    ).first()
 
     if not user:
+
         session.pop('temp_user', None)
-        session.pop('pending_otp_secret', None)
+
+        session.pop(
+            'pending_otp_secret',
+            None
+        )
 
         registrar_log(
             username or "Desconocido",
-            f"Acceso fallido al sistema. Usuario no encontrado en verificación OTP: {username or 'Desconocido'}"
+            (
+                "Acceso fallido al sistema. "
+                "Usuario no encontrado "
+                f"en verificación OTP: "
+                f"{username or 'Desconocido'}"
+            )
         )
 
-        flash("Usuario no encontrado.", "danger")
-        return redirect(url_for('login'))
+        flash(
+            "Usuario no encontrado.",
+            "danger"
+        )
+
+        return redirect(
+            url_for('login')
+        )
 
     if request.method == 'POST':
-        otp = (request.form.get('otp') or "").strip()
-        modo = (request.form.get('modo') or "").strip()
+
+        otp = (
+            request.form.get('otp') or ""
+        ).strip()
+
+        modo = (
+            request.form.get('modo') or ""
+        ).strip()
 
         # =====================================================
-        # SI VIENE DE CONFIGURACIÓN INICIAL:
-        # validar contra secret temporal de sesión.
-        # Solo si es correcto, se guarda en DB.
+        # CONFIGURACIÓN INICIAL OTP
         # =====================================================
         if modo == "setup":
-            secret_temporal = session.get('pending_otp_secret')
+
+            secret_temporal = session.get(
+                'pending_otp_secret'
+            )
 
             if not secret_temporal:
-                flash("La configuración del token expiró. Inicia sesión nuevamente.", "warning")
-                return redirect(url_for('login'))
 
-            totp = pyotp.TOTP(secret_temporal)
+                flash(
+                    "La configuración del token expiró. "
+                    "Inicia sesión nuevamente.",
+                    "warning"
+                )
+
+                return redirect(
+                    url_for('login')
+                )
+
+            totp = pyotp.TOTP(
+                secret_temporal
+            )
 
             if totp.verify(otp):
+
                 user.otp_secret = secret_temporal
+
                 db.session.commit()
 
                 session['user_id'] = user.id
                 session['username'] = user.username
                 session['role'] = user.role
 
-                session.pop('temp_user', None)
-                session.pop('pending_otp_secret', None)
+                session.pop(
+                    'temp_user',
+                    None
+                )
+
+                session.pop(
+                    'pending_otp_secret',
+                    None
+                )
 
                 registrar_log(
                     user.username,
-                    f"Acceso exitoso al sistema. Token OTP configurado y usuario autenticado con perfil: {user.role}"
+                    (
+                        "Acceso exitoso al sistema. "
+                        "Token OTP configurado "
+                        f"y usuario autenticado "
+                        f"con perfil: {user.role}"
+                    )
                 )
 
-                flash(f"Token configurado correctamente. Bienvenido {user.username}", "success")
-                return redirect(url_for('menu'))
+                flash(
+                    f"Token configurado correctamente. "
+                    f"Bienvenido {user.username}",
+                    "success"
+                )
+
+                return redirect(
+                    url_for('menu')
+                )
 
             registrar_log(
                 user.username,
-                f"Configuración OTP fallida. Código inválido para el usuario: {user.username}"
+                (
+                    "Configuración OTP fallida. "
+                    f"Código inválido para "
+                    f"el usuario: {user.username}"
+                )
             )
 
-            flash("Código OTP inválido. Escanea el QR e intenta nuevamente.", "danger")
-            return _render_qr_otp_setup(user, secret_temporal)
+            flash(
+                "Código OTP inválido. "
+                "Escanea el QR e intenta nuevamente.",
+                "danger"
+            )
+
+            return _render_qr_otp_setup(
+                user,
+                secret_temporal
+            )
 
         # =====================================================
-        # LOGIN NORMAL CON OTP YA CONFIGURADO
+        # LOGIN NORMAL OTP
         # =====================================================
         if not user.otp_secret:
-            flash("Este usuario aún no tiene token configurado. Inicia sesión nuevamente.", "warning")
-            return redirect(url_for('login'))
 
-        totp = pyotp.TOTP(user.otp_secret)
+            flash(
+                "Este usuario aún no tiene "
+                "token configurado. "
+                "Inicia sesión nuevamente.",
+                "warning"
+            )
+
+            return redirect(
+                url_for('login')
+            )
+
+        totp = pyotp.TOTP(
+            user.otp_secret
+        )
 
         if totp.verify(otp):
+
             session['user_id'] = user.id
             session['username'] = user.username
             session['role'] = user.role
 
-            session.pop('temp_user', None)
-            session.pop('pending_otp_secret', None)
+            session.pop(
+                'temp_user',
+                None
+            )
+
+            session.pop(
+                'pending_otp_secret',
+                None
+            )
 
             registrar_log(
                 user.username,
-                f"Acceso exitoso al sistema. Usuario autenticado correctamente con perfil: {user.role}"
+                (
+                    "Acceso exitoso al sistema. "
+                    "Usuario autenticado "
+                    f"correctamente con perfil: "
+                    f"{user.role}"
+                )
             )
 
-            flash(f"Bienvenido {user.username}", "success")
-            return redirect(url_for('menu'))
+            flash(
+                f"Bienvenido {user.username}",
+                "success"
+            )
+
+            return redirect(
+                url_for('menu')
+            )
 
         registrar_log(
             user.username,
-            f"Acceso fallido al sistema. OTP inválido para el usuario: {user.username}"
+            (
+                "Acceso fallido al sistema. "
+                f"OTP inválido para el usuario: "
+                f"{user.username}"
+            )
         )
 
-        flash("Código OTP inválido, intente de nuevo.", "danger")
+        flash(
+            "Código OTP inválido, intente de nuevo.",
+            "danger"
+        )
 
+    # ====================================================================
+    # HTML OTP
+    # ====================================================================
     content = f"""
     <div class="col-md-4 offset-md-4 text-center">
+
       <h3>Verificación de Código OTP</h3>
 
-      <form method="post">
-        <input type="hidden" name="username" value="{user.username}">
+      <form method="post"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="none"
+            spellcheck="false">
+
+        <input type="hidden"
+               name="username"
+               value="{user.username}">
 
         <div class="mb-3">
-          <label>Código OTP</label>
+
+          <label>
+            Código OTP
+          </label>
+
           <input class="form-control text-center"
                  name="otp"
-                 placeholder="123456"
+                 type="password"
+                 inputmode="numeric"
+                 pattern="[0-9]{{6}}"
+                 maxlength="6"
+                 placeholder="••••••"
                  required
-                 autocomplete="one-time-code">
+                 autocomplete="off"
+                 autocorrect="off"
+                 autocapitalize="none"
+                 spellcheck="false">
+
         </div>
 
         <button class="btn btn-success rounded-pill px-4">
           Verificar
         </button>
 
-        <a href="{url_for('login')}" class="btn btn-secondary rounded-pill px-4">
+        <a href="{url_for('login')}"
+           class="btn btn-secondary rounded-pill px-4">
           Cancelar
         </a>
+
       </form>
+
     </div>
     """
 
-    return render_template_string(BASE, content=content)
+    return render_template_string(
+        BASE,
+        content=content
+    )
 
 
+# ============================================================================================================================================
+#                                                           GENERAR OTP
+# ============================================================================================================================================
 @app.route('/generar_otp/<username>')
 def generar_otp(username):
-    user = User.query.filter_by(username=username).first()
+
+    user = User.query.filter_by(
+        username=username
+    ).first()
 
     if not user:
         return "Usuario no encontrado", 404
 
-    # =====================================================
-    # Si ya tiene OTP guardado, usa ese.
-    # Si no tiene, genera uno temporal SOLO para este QR.
-    # NO lo guarda en la base de datos.
-    # =====================================================
-    secret = user.otp_secret or session.get('pending_otp_secret') or pyotp.random_base32()
+    secret = (
+        user.otp_secret or
+        session.get('pending_otp_secret') or
+        pyotp.random_base32()
+    )
 
     session['temp_user'] = user.username
+
     session['pending_otp_secret'] = secret
 
     otp_uri = pyotp.totp.TOTP(secret).provisioning_uri(
@@ -4774,21 +5230,39 @@ def generar_otp(username):
     )
 
     img = qrcode.make(otp_uri)
+
     buffer = BytesIO()
+
     img.save(buffer, format="PNG")
+
     buffer.seek(0)
 
-    return send_file(buffer, mimetype='image/png')
-
-@app.route('/logout')
-def logout():
-    session.clear()
-    flash("Sesión finalizada", "info")
-    return redirect(url_for('login'))
+    return send_file(
+        buffer,
+        mimetype='image/png'
+    )
 
 
 # ============================================================================================================================================
-#                                                               Fin módulo de Autenticación de Usuarios
+#                                                               LOGOUT
+# ============================================================================================================================================
+@app.route('/logout')
+def logout():
+
+    session.clear()
+
+    flash(
+        "Sesión finalizada",
+        "info"
+    )
+
+    return redirect(
+        url_for('login')
+    )
+
+
+# ============================================================================================================================================
+#                                                   Fin módulo de Autenticación
 # ============================================================================================================================================
 
 # ============================================================================================================================================
@@ -5369,7 +5843,6 @@ def generar_password_seguro(longitud=10):
 #                                                               Módulo de Gestión de Usuarios
 # ============================================================================================================================================
 
-# Lista de módulos disponibles para asignar permisos
 MODULES = [
     "Declaración de Aplicabilidad",
     "Gestión de Riesgos",
@@ -5407,10 +5880,12 @@ MODULES = [
     "Nivel de Madurez PCI-DSS",
     "Nivel de madurez SOC 2",
     "Nivel de Madurez Gestión de Inteligencia Artificial",
+    "Modelamiento de Amenazas",
     "Métricas",
     "Reportes",
     "Logs de Auditoría",
 ]
+
 
 # ============================================================
 # DB ALTERNA PARA PERFIL DE USUARIOS
@@ -5616,6 +6091,12 @@ def usuarios():
             nuevo_email = (request.form.get('email') or "").strip().lower()
             nuevo_role = request.form.get('role') or u.role
 
+            nueva_password = (
+                request.form.get('password_secure') or
+                request.form.get('password') or
+                ""
+            )
+
             if not nuevo_username:
                 flash("El usuario no puede quedar vacío.", "warning")
                 return redirect(url_for('usuarios'))
@@ -5646,8 +6127,8 @@ def usuarios():
             u.email = nuevo_email
             u.role = nuevo_role
 
-            if request.form.get('password'):
-                u.set_password(request.form['password'])
+            if nueva_password:
+                u.set_password(nueva_password)
 
             db.session.commit()
 
@@ -5667,7 +6148,7 @@ def usuarios():
             if rol_anterior != u.role:
                 cambios.append(f"rol: '{rol_anterior}' → '{u.role}'")
 
-            if request.form.get('password'):
+            if nueva_password:
                 cambios.append("contraseña actualizada")
 
             detalle_cambios = "; ".join(cambios) if cambios else "sin cambios visibles"
@@ -5763,6 +6244,10 @@ def usuarios():
                            name="nombre_completo"
                            value="{{ perfiles_usuarios.get(u.id, '') }}"
                            class="form-control"
+                           autocomplete="off"
+                           autocorrect="off"
+                           autocapitalize="none"
+                           spellcheck="false"
                            placeholder="Nombre completo">
                   </td>
 
@@ -5770,14 +6255,23 @@ def usuarios():
                     <input form="f{{u.id}}"
                            name="username"
                            value="{{u.username}}"
-                           class="form-control">
+                           class="form-control"
+                           autocomplete="off"
+                           autocorrect="off"
+                           autocapitalize="none"
+                           spellcheck="false">
                   </td>
 
                   <td>
                     <input form="f{{u.id}}"
                            name="email"
+                           type="email"
                            value="{{u.email or ''}}"
-                           class="form-control">
+                           class="form-control"
+                           autocomplete="off"
+                           autocorrect="off"
+                           autocapitalize="none"
+                           spellcheck="false">
                   </td>
 
                   <td>
@@ -5791,9 +6285,20 @@ def usuarios():
 
                   <td>
                     <input form="f{{u.id}}"
-                           name="password"
+                           name="password_secure"
+                           id="password_secure_{{u.id}}"
+                           type="password"
                            placeholder="Nueva contraseña"
-                           class="form-control mb-2">
+                           class="form-control mb-2 user-password-secure"
+                           autocomplete="new-password"
+                           autocorrect="off"
+                           autocapitalize="none"
+                           spellcheck="false"
+                           data-lpignore="true"
+                           data-form-type="other"
+                           readonly
+                           onfocus="this.removeAttribute('readonly');"
+                           onblur="this.setAttribute('readonly','readonly');">
 
                     <div class="d-flex flex-wrap gap-1">
                       {% if current_role in ['admin', 'gestor_accesos'] %}
@@ -5823,7 +6328,13 @@ def usuarios():
                       {% endif %}
                     </div>
 
-                    <form id="f{{u.id}}" method="post" style="display:none;">
+                    <form id="f{{u.id}}"
+                          method="post"
+                          autocomplete="off"
+                          autocorrect="off"
+                          autocapitalize="none"
+                          spellcheck="false"
+                          style="display:none;">
                       <input type="hidden" name="id" value="{{u.id}}">
                     </form>
                   </td>
@@ -5843,7 +6354,11 @@ def usuarios():
           Crear nuevo usuario
         </div>
 
-        <form method="post">
+        <form method="post"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="none"
+              spellcheck="false">
           <input type="hidden" name="accion" value="crear">
 
           <div class="users-create-grid">
@@ -5852,7 +6367,11 @@ def usuarios():
               <label class="form-label">Nombre completo</label>
               <input name="nombre_completo"
                      placeholder="Nombre completo"
-                     class="form-control">
+                     class="form-control"
+                     autocomplete="off"
+                     autocorrect="off"
+                     autocapitalize="none"
+                     spellcheck="false">
             </div>
 
             <div class="users-field">
@@ -5860,6 +6379,10 @@ def usuarios():
               <input name="username"
                      placeholder="Usuario"
                      class="form-control"
+                     autocomplete="off"
+                     autocorrect="off"
+                     autocapitalize="none"
+                     spellcheck="false"
                      required>
             </div>
 
@@ -5869,6 +6392,10 @@ def usuarios():
                      type="email"
                      placeholder="Correo del usuario"
                      class="form-control"
+                     autocomplete="off"
+                     autocorrect="off"
+                     autocapitalize="none"
+                     spellcheck="false"
                      required>
             </div>
 
@@ -5903,6 +6430,18 @@ def usuarios():
         background-position:center;
         background-attachment:fixed;
         background-repeat:no-repeat;
+      }
+
+      input::-ms-reveal,
+      input::-ms-clear{
+        display:none;
+      }
+
+      input[type="password"]::-webkit-credentials-auto-fill-button,
+      input[type="password"]::-webkit-textfield-decoration-container{
+        display:none !important;
+        visibility:hidden;
+        pointer-events:none;
       }
 
       .users-shell{
@@ -6196,13 +6735,48 @@ def usuarios():
         }
       }
     </style>
+
+    <script>
+      document.addEventListener('DOMContentLoaded', function(){
+
+        const passwordFields = document.querySelectorAll('.user-password-secure');
+
+        passwordFields.forEach(function(field){
+
+          field.value = '';
+
+          field.setAttribute('type', 'password');
+          field.setAttribute('autocomplete', 'new-password');
+          field.setAttribute('autocorrect', 'off');
+          field.setAttribute('autocapitalize', 'none');
+          field.setAttribute('spellcheck', 'false');
+          field.setAttribute('data-lpignore', 'true');
+          field.setAttribute('data-form-type', 'other');
+
+          setTimeout(function(){
+            field.value = '';
+          }, 150);
+
+          field.addEventListener('focus', function(){
+            this.removeAttribute('readonly');
+            this.setAttribute('type', 'password');
+            this.setAttribute('autocomplete', 'new-password');
+          });
+
+          field.addEventListener('blur', function(){
+            this.setAttribute('readonly', 'readonly');
+          });
+
+        });
+
+      });
+    </script>
     """,
     usuarios=usuarios,
     current_role=usuario_actual.role,
     perfiles_usuarios=perfiles_usuarios)
 
     return render_template_string(BASE, content=content)
-
 
 
 # =========================
@@ -6542,6 +7116,7 @@ def editar_permisos(user_id):
 
     return render_template_string(BASE, content=content)
 
+
 # =========================
 # Función genérica para verificar permisos
 # =========================
@@ -6549,21 +7124,19 @@ def verificar_permiso(user, module_name):
     if not user:
         return False
 
-    # Admin ve todo
     if user.role == 'admin':
         return True
 
-    # Auditor: acceso amplio excepto módulos restringidos
     if user.role == 'auditor':
         return not auditor_module_blocked(module_name)
 
-    # Resto de usuarios: permisos normales por tabla
     perm = UserPermission.query.filter_by(
         user_id=user.id,
         module_name=module_name
     ).first()
 
     return bool(perm and perm.has_access)
+
 
 # ============================================================
 # REGLAS GLOBALES DEL ROL AUDITOR
@@ -6587,17 +7160,22 @@ AUDITOR_ACTIONS_DENY_LABELS = (
     "Eliminar",
 )
 
+
 def is_auditor(user):
     return bool(user and getattr(user, "role", None) == "auditor")
+
 
 def auditor_module_blocked(module_name: str) -> bool:
     return (module_name or "").strip() in AUDITOR_MODULES_DENY
 
+
 def auditor_can_enter_module(module_name: str) -> bool:
     return not auditor_module_blocked(module_name)
 
+
 def auditor_is_read_only(user) -> bool:
     return is_auditor(user)
+
 
 # ============================================================================================================================================
 #                                                               Fin Modulo de Gestión de Usuarios
@@ -70448,6 +71026,20 @@ def threat_model_dashboard():
           🧩 Ver No Mapeados
         </a>
 
+        {% if not read_only %}
+          <a href="{{ url_for('threat_model_export_navigator', activo=filtro_activo) }}"
+             class="btn btn-outline-primary rounded-pill px-4">
+            ⬇️ Exportar Navigator JSON
+          </a>
+        {% else %}
+          <button type="button"
+                  class="btn btn-secondary rounded-pill px-4"
+                  disabled
+                  title="Auditor: solo lectura. No puede exportar Navigator JSON.">
+            ⬇️ Exportar Navigator JSON
+          </button>
+        {% endif %}
+
         {% if user.role != 'auditor' %}
           <a href="{{ url_for('threat_model_nessus_import') }}"
              class="btn btn-warning rounded-pill px-4">
@@ -70794,7 +71386,20 @@ def threat_model_unmapped_view():
 
     body = """
     <div class="glass-card p-4 mt-2">
-      <div class="section-title">🧩 Hallazgos no mapeados MITRE</div>
+
+      <div class="unmapped-topbar">
+        <div>
+          <div class="section-title mb-1">🧩 Hallazgos no mapeados MITRE</div>
+          <div class="text-muted small">
+            Consulta y gestión de hallazgos técnicos que aún no fueron asociados a tácticas o técnicas MITRE ATT&CK.
+          </div>
+        </div>
+
+        <a href="{{ url_for('threat_model_dashboard') }}"
+           class="btn btn-outline-primary rounded-pill px-4 unmapped-back-btn">
+          ← Volver al Dashboard
+        </a>
+      </div>
 
       <form method="get" class="row g-3 mb-3" id="unmappedFiltroForm">
         <div class="col-md-3">
@@ -70925,6 +71530,32 @@ def threat_model_unmapped_view():
     </div>
 
     <style>
+      .unmapped-topbar{
+        display:flex;
+        justify-content:space-between;
+        align-items:flex-start;
+        gap:14px;
+        flex-wrap:wrap;
+        margin-bottom:18px;
+        padding-bottom:14px;
+        border-bottom:1px solid rgba(15,23,42,.08);
+      }
+
+      .unmapped-back-btn{
+        font-size:.82rem;
+        font-weight:900;
+        min-height:38px;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        white-space:nowrap;
+        box-shadow:0 8px 18px rgba(37,99,235,.12);
+      }
+
+      .unmapped-back-btn:hover{
+        transform:translateY(-1px);
+      }
+
       .unmapped-filter-actions{
         display:flex;
         flex-direction:column;
@@ -70940,6 +71571,14 @@ def threat_model_unmapped_view():
       }
 
       @media (max-width:768px){
+        .unmapped-topbar{
+          align-items:stretch;
+        }
+
+        .unmapped-back-btn{
+          width:100%;
+        }
+
         .unmapped-filter-actions .btn{
           width:100%;
         }
@@ -71029,9 +71668,12 @@ def threat_model_asset_view():
         flash("No tiene permiso para acceder al modelamiento de amenazas.", "danger")
         return redirect(url_for('menu'))
 
+    read_only = True if user.role == 'auditor' else False
+
     activo = (request.args.get('activo') or '').strip()
 
     q = ThreatModelEntry.query.options(selectinload(ThreatModelEntry.tecnicas))
+
     if activo:
         q = q.filter(ThreatModelEntry.activo.ilike(f"%{activo}%"))
 
@@ -71068,13 +71710,23 @@ def threat_model_asset_view():
             ⬅ Volver
           </a>
 
-          <a href="{{ url_for('threat_model_export_navigator') }}{% if activo %}?activo={{ activo|urlencode }}{% endif %}"
-             class="btn btn-success rounded-pill px-4 no-progress"
-             data-no-progress="true"
-             download
-             onclick="if(typeof hideSGSIProgress === 'function'){ hideSGSIProgress(); } if(typeof hideLoader === 'function'){ hideLoader(); }">
-            ⬇ Exportar Navigator JSON
-          </a>
+          {% if not read_only %}
+            <a href="{{ url_for('threat_model_export_navigator') }}{% if activo %}?activo={{ activo|urlencode }}{% endif %}"
+               class="btn btn-success rounded-pill px-4 no-progress"
+               data-no-progress="true"
+               download
+               onclick="if(typeof hideSGSIProgress === 'function'){ hideSGSIProgress(); } if(typeof hideLoader === 'function'){ hideLoader(); }">
+              ⬇ Exportar Navigator JSON
+            </a>
+          {% else %}
+            <button type="button"
+                    class="btn btn-secondary rounded-pill px-4 no-progress"
+                    data-no-progress="true"
+                    disabled
+                    title="Auditor: solo lectura. No puede exportar Navigator JSON.">
+              ⬇ Exportar Navigator JSON
+            </button>
+          {% endif %}
         </div>
       </div>
 
@@ -71206,6 +71858,11 @@ def threat_model_asset_view():
       .mitre-actions .btn{
         font-weight:900;
         box-shadow:0 8px 18px rgba(0,0,0,.10);
+      }
+
+      .mitre-actions button[disabled]{
+        cursor:not-allowed;
+        opacity:.70;
       }
 
       .mitre-summary-grid{
@@ -71470,6 +72127,7 @@ def threat_model_asset_view():
       }
     </style>
     """
+
     return vuln_scan_shell(
         "Matriz MITRE ATT&CK",
         render_template_string(
@@ -71478,13 +72136,15 @@ def threat_model_asset_view():
             matrix=matrix,
             total_tecnicas=total_tecnicas,
             tacticas_con_hallazgos=tacticas_con_hallazgos,
-            score_maximo=score_maximo
+            score_maximo=score_maximo,
+            read_only=read_only,
+            user=user
         )
     )
 
 
 # =====================
-# Export Navigator JSON 
+# Export Navigator JSON
 # =====================
 
 @app.route('/modelamiento_amenazas/navigator.json')
@@ -71493,13 +72153,18 @@ def threat_model_asset_view():
 def threat_model_export_navigator():
     user = User.query.get(session.get('user_id'))
 
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Modelamiento de Amenazas"):
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede exportar Navigator JSON.", "danger")
+        return redirect(url_for('threat_model_dashboard'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Modelamiento de Amenazas"):
         flash("No tiene permiso para exportar la capa Navigator.", "danger")
         return redirect(url_for('menu'))
 
     activo = (request.args.get('activo') or '').strip()
 
     q = ThreatModelEntry.query.options(selectinload(ThreatModelEntry.tecnicas))
+
     if activo:
         q = q.filter(ThreatModelEntry.activo.ilike(f"%{activo}%"))
 
@@ -71512,6 +72177,7 @@ def threat_model_export_navigator():
     bio.seek(0)
 
     safe_name = safe_scan_slug(activo or "activos")
+
     return send_file(
         bio,
         mimetype="application/json",
