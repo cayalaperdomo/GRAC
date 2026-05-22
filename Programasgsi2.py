@@ -70237,6 +70237,55 @@ class ThreatModelUnmapped(db.Model):
     def __repr__(self):
             return f"<ConfigImpactoResidual {self.min}-{self.max} => bajar {self.bajar}>"
 
+class ThreatModelUnmappedClassification(db.Model):
+    __tablename__ = "threat_model_unmapped_classifications"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    unmapped_id = db.Column(
+        db.Integer,
+        db.ForeignKey("threat_model_unmapped.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True
+    )
+
+    owasp_category = db.Column(db.String(120), nullable=True)
+    cwe_id = db.Column(db.String(40), nullable=True)
+    cwe_name = db.Column(db.String(255), nullable=True)
+    capec_id = db.Column(db.String(40), nullable=True)
+    capec_name = db.Column(db.String(255), nullable=True)
+    iso_control = db.Column(db.String(120), nullable=True)
+    iso_control_name = db.Column(db.String(255), nullable=True)
+    nist_function = db.Column(db.String(80), nullable=True)
+    nist_category = db.Column(db.String(120), nullable=True)
+
+    recomendacion = db.Column(db.Text, nullable=True)
+    rationale = db.Column(db.Text, nullable=True)
+    confianza = db.Column(db.Integer, default=50)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    unmapped = db.relationship(
+        "ThreatModelUnmapped",
+        backref=db.backref(
+            "clasificacion_complementaria",
+            uselist=False,
+            cascade="all, delete-orphan"
+        )
+    )
+
+
+def init_threat_model_unmapped_classifications():
+    try:
+        with app.app_context():
+            db.create_all()
+    except Exception as e:
+        print("No fue posible inicializar threat_model_unmapped_classifications:", repr(e))
+
+
+init_threat_model_unmapped_classifications()
+
 
 ATTACK_DOMAIN = "enterprise-attack"
 
@@ -70587,6 +70636,347 @@ MITRE_ATTACK_MAPPING_RULES = [
         "category": "hardening"
     }
 ]
+
+COMPLEMENTARY_CLASSIFICATION_RULES = [
+    {
+        "keywords": [
+            "missing security header",
+            "x-frame-options",
+            "content-security-policy",
+            "x-content-type-options",
+            "strict-transport-security",
+            "hsts",
+            "security header",
+            "cookie without httponly",
+            "cookie without secure",
+            "httponly",
+            "secure flag"
+        ],
+        "patterns": [
+            r"\bmissing\b.*\b(header|security header)\b",
+            r"\bcontent[\s\-]?security[\s\-]?policy\b",
+            r"\bx[\s\-]?frame[\s\-]?options\b",
+            r"\bcookie\b.*\b(httponly|secure)\b"
+        ],
+        "owasp": "A05:2021 - Security Misconfiguration",
+        "cwe_id": "CWE-693",
+        "cwe_name": "Protection Mechanism Failure",
+        "capec_id": "CAPEC-100",
+        "capec_name": "Overflow Buffers / Security Mechanism Abuse",
+        "iso_control": "A.8.9",
+        "iso_control_name": "Gestión de la configuración",
+        "nist_function": "Protect",
+        "nist_category": "PR.PS - Platform Security",
+        "recomendacion": "Definir y aplicar cabeceras de seguridad HTTP, endurecer cookies y validar configuración segura del servicio web.",
+        "confianza": 90
+    },
+    {
+        "keywords": [
+            "directory listing",
+            "directory indexing",
+            "index of /",
+            "directory browsing",
+            "autoindex"
+        ],
+        "patterns": [
+            r"\bindex of\s*/",
+            r"\bdirectory\s+(listing|indexing|browsing)\b"
+        ],
+        "owasp": "A05:2021 - Security Misconfiguration",
+        "cwe_id": "CWE-548",
+        "cwe_name": "Exposure of Information Through Directory Listing",
+        "capec_id": "CAPEC-116",
+        "capec_name": "Excavation",
+        "iso_control": "A.8.9",
+        "iso_control_name": "Gestión de la configuración",
+        "nist_function": "Protect",
+        "nist_category": "PR.PS - Platform Security",
+        "recomendacion": "Deshabilitar el listado de directorios, restringir navegación no autorizada y revisar exposición de archivos sensibles.",
+        "confianza": 95
+    },
+    {
+        "keywords": [
+            "tls 1.0",
+            "tls 1.1",
+            "weak cipher",
+            "weak ciphers",
+            "ssl",
+            "deprecated protocol",
+            "expired certificate",
+            "self-signed certificate",
+            "certificate expired"
+        ],
+        "patterns": [
+            r"\btls\s*1\.[01]\b",
+            r"\bweak\b.*\b(cipher|ssl|tls)\b",
+            r"\b(expired|self signed|self-signed)\b.*\bcertificate\b"
+        ],
+        "owasp": "A02:2021 - Cryptographic Failures",
+        "cwe_id": "CWE-326",
+        "cwe_name": "Inadequate Encryption Strength",
+        "capec_id": "CAPEC-217",
+        "capec_name": "Exploiting Incorrectly Configured SSL/TLS",
+        "iso_control": "A.8.24",
+        "iso_control_name": "Uso de criptografía",
+        "nist_function": "Protect",
+        "nist_category": "PR.DS - Data Security",
+        "recomendacion": "Deshabilitar protocolos obsoletos, eliminar cifrados débiles y renovar certificados inseguros o vencidos.",
+        "confianza": 92
+    },
+    {
+        "keywords": [
+            "information disclosure",
+            "version disclosure",
+            "server leaks version",
+            "x-powered-by",
+            "banner disclosure",
+            "verbose error",
+            "stack trace",
+            "debug enabled",
+            "phpinfo"
+        ],
+        "patterns": [
+            r"\b(version|banner|information)\b.*\b(disclosure|leak)\b",
+            r"\bx[\s\-]?powered[\s\-]?by\b",
+            r"\b(stack trace|debug|phpinfo)\b"
+        ],
+        "owasp": "A05:2021 - Security Misconfiguration",
+        "cwe_id": "CWE-200",
+        "cwe_name": "Exposure of Sensitive Information to an Unauthorized Actor",
+        "capec_id": "CAPEC-118",
+        "capec_name": "Collect and Analyze Information",
+        "iso_control": "A.8.12",
+        "iso_control_name": "Prevención de fuga de datos",
+        "nist_function": "Identify",
+        "nist_category": "ID.RA - Risk Assessment",
+        "recomendacion": "Reducir banners, ocultar versiones, deshabilitar mensajes técnicos detallados y controlar la información expuesta.",
+        "confianza": 88
+    },
+    {
+        "keywords": [
+            "default credentials",
+            "default password",
+            "weak password",
+            "anonymous login",
+            "guest login",
+            "hardcoded credentials",
+            "missing authentication",
+            "authentication bypass"
+        ],
+        "patterns": [
+            r"\bdefault\b.*\b(password|credential|login)\b",
+            r"\b(anonymous|guest)\b.*\b(login|access)\b",
+            r"\bauthentication\b.*\b(bypass|missing|weak)\b"
+        ],
+        "owasp": "A07:2021 - Identification and Authentication Failures",
+        "cwe_id": "CWE-287",
+        "cwe_name": "Improper Authentication",
+        "capec_id": "CAPEC-115",
+        "capec_name": "Authentication Bypass",
+        "iso_control": "A.5.17",
+        "iso_control_name": "Información de autenticación",
+        "nist_function": "Protect",
+        "nist_category": "PR.AA - Identity Management, Authentication and Access Control",
+        "recomendacion": "Eliminar credenciales por defecto, fortalecer autenticación, aplicar MFA y validar controles de acceso.",
+        "confianza": 94
+    },
+    {
+        "keywords": [
+            "sql injection",
+            "sqli",
+            "union select",
+            "blind sql injection"
+        ],
+        "patterns": [
+            r"\bsql\b.*\binjection\b",
+            r"\bunion\s+select\b"
+        ],
+        "owasp": "A03:2021 - Injection",
+        "cwe_id": "CWE-89",
+        "cwe_name": "SQL Injection",
+        "capec_id": "CAPEC-66",
+        "capec_name": "SQL Injection",
+        "iso_control": "A.8.28",
+        "iso_control_name": "Codificación segura",
+        "nist_function": "Protect",
+        "nist_category": "PR.PS - Platform Security",
+        "recomendacion": "Usar consultas parametrizadas, validar entradas, aplicar controles ORM seguros y pruebas de seguridad en desarrollo.",
+        "confianza": 98
+    },
+    {
+        "keywords": [
+            "cross-site scripting",
+            "xss",
+            "stored xss",
+            "reflected xss",
+            "dom xss"
+        ],
+        "patterns": [
+            r"\bxss\b",
+            r"\bcross[\s\-]?site scripting\b"
+        ],
+        "owasp": "A03:2021 - Injection",
+        "cwe_id": "CWE-79",
+        "cwe_name": "Cross-site Scripting",
+        "capec_id": "CAPEC-63",
+        "capec_name": "Cross-Site Scripting",
+        "iso_control": "A.8.28",
+        "iso_control_name": "Codificación segura",
+        "nist_function": "Protect",
+        "nist_category": "PR.PS - Platform Security",
+        "recomendacion": "Validar y codificar salidas, aplicar CSP, sanitizar entradas y proteger formularios frente a scripts maliciosos.",
+        "confianza": 96
+    },
+    {
+        "keywords": [
+            "path traversal",
+            "directory traversal",
+            "../",
+            "local file inclusion",
+            "lfi",
+            "remote file inclusion",
+            "rfi"
+        ],
+        "patterns": [
+            r"\b(path|directory)\b.*\btraversal\b",
+            r"\b(local|remote)\b.*\bfile inclusion\b",
+            r"\.\./"
+        ],
+        "owasp": "A01:2021 - Broken Access Control",
+        "cwe_id": "CWE-22",
+        "cwe_name": "Improper Limitation of a Pathname to a Restricted Directory",
+        "capec_id": "CAPEC-126",
+        "capec_name": "Path Traversal",
+        "iso_control": "A.8.3",
+        "iso_control_name": "Restricción de acceso a la información",
+        "nist_function": "Protect",
+        "nist_category": "PR.AA - Identity Management, Authentication and Access Control",
+        "recomendacion": "Restringir rutas permitidas, validar nombres de archivo, aplicar listas blancas y evitar acceso directo a directorios sensibles.",
+        "confianza": 96
+    },
+    {
+        "keywords": [
+            "remote code execution",
+            "rce",
+            "command injection",
+            "os command injection",
+            "arbitrary command execution"
+        ],
+        "patterns": [
+            r"\bremote\b.*\bcode\b.*\bexecution\b",
+            r"\brce\b",
+            r"\bcommand\b.*\binjection\b"
+        ],
+        "owasp": "A03:2021 - Injection",
+        "cwe_id": "CWE-78",
+        "cwe_name": "OS Command Injection",
+        "capec_id": "CAPEC-88",
+        "capec_name": "OS Command Injection",
+        "iso_control": "A.8.28",
+        "iso_control_name": "Codificación segura",
+        "nist_function": "Protect",
+        "nist_category": "PR.PS - Platform Security",
+        "recomendacion": "Eliminar ejecución directa de comandos, validar entradas, usar APIs seguras y aislar procesos con mínimos privilegios.",
+        "confianza": 98
+    }
+]
+
+
+def clasificar_hallazgo_no_mapeado_complementario(item):
+    haystack = tm_normalize_text(
+        item.titulo,
+        item.descripcion,
+        item.evidencia,
+        item.herramienta,
+        item.severidad
+    )
+
+    mejor = None
+    mejor_score = 0
+    razones = []
+
+    for rule in COMPLEMENTARY_CLASSIFICATION_RULES:
+        score = 0
+        razones_regla = []
+
+        for kw in rule.get("keywords", []):
+            kw_norm = tm_normalize_text(kw)
+            if kw_norm and kw_norm in haystack:
+                score += 12
+                razones_regla.append(f"Palabra clave: {kw}")
+
+        for pat in rule.get("patterns", []):
+            try:
+                if re.search(pat, haystack, re.I):
+                    score += 18
+                    razones_regla.append(f"Patrón: {pat}")
+            except Exception:
+                pass
+
+        if score > mejor_score:
+            mejor_score = score
+            mejor = rule
+            razones = razones_regla
+
+    if not mejor:
+        return {
+            "owasp_category": "Sin clasificación OWASP concluyente",
+            "cwe_id": "N/A",
+            "cwe_name": "No determinado",
+            "capec_id": "N/A",
+            "capec_name": "No determinado",
+            "iso_control": "A.5.7",
+            "iso_control_name": "Inteligencia de amenazas",
+            "nist_function": "Identify",
+            "nist_category": "ID.RA - Risk Assessment",
+            "recomendacion": "Revisar manualmente el hallazgo, validar impacto técnico y definir tratamiento de riesgo.",
+            "rationale": "No se encontró una coincidencia fuerte con las reglas complementarias configuradas.",
+            "confianza": 35
+        }
+
+    confianza = min(100, int(mejor.get("confianza", 50)) + min(10, mejor_score // 10))
+
+    return {
+        "owasp_category": mejor.get("owasp"),
+        "cwe_id": mejor.get("cwe_id"),
+        "cwe_name": mejor.get("cwe_name"),
+        "capec_id": mejor.get("capec_id"),
+        "capec_name": mejor.get("capec_name"),
+        "iso_control": mejor.get("iso_control"),
+        "iso_control_name": mejor.get("iso_control_name"),
+        "nist_function": mejor.get("nist_function"),
+        "nist_category": mejor.get("nist_category"),
+        "recomendacion": mejor.get("recomendacion"),
+        "rationale": "; ".join(razones) if razones else "Coincidencia por contexto técnico del hallazgo.",
+        "confianza": confianza
+    }
+
+
+def guardar_clasificacion_complementaria_unmapped(item):
+    data = clasificar_hallazgo_no_mapeado_complementario(item)
+
+    existente = ThreatModelUnmappedClassification.query.filter_by(
+        unmapped_id=item.id
+    ).first()
+
+    if not existente:
+        existente = ThreatModelUnmappedClassification(unmapped_id=item.id)
+        db.session.add(existente)
+
+    existente.owasp_category = data.get("owasp_category")
+    existente.cwe_id = data.get("cwe_id")
+    existente.cwe_name = data.get("cwe_name")
+    existente.capec_id = data.get("capec_id")
+    existente.capec_name = data.get("capec_name")
+    existente.iso_control = data.get("iso_control")
+    existente.iso_control_name = data.get("iso_control_name")
+    existente.nist_function = data.get("nist_function")
+    existente.nist_category = data.get("nist_category")
+    existente.recomendacion = data.get("recomendacion")
+    existente.rationale = data.get("rationale")
+    existente.confianza = data.get("confianza") or 50
+
+    return existente
 
 def tm_normalize_text(*parts):
     txt = " ".join([(str(p) if p is not None else "") for p in parts]).strip().lower()
@@ -71026,6 +71416,11 @@ def threat_model_dashboard():
           🧩 Ver No Mapeados
         </a>
 
+        <a href="{{ url_for('threat_model_unmapped_complementary_view') }}"
+           class="btn btn-outline-success rounded-pill px-4">
+          🧠 Clasificación Complementaria
+        </a>
+
         {% if not read_only %}
           <a href="{{ url_for('threat_model_export_navigator', activo=filtro_activo) }}"
              class="btn btn-outline-primary rounded-pill px-4">
@@ -71187,7 +71582,6 @@ def threat_model_dashboard():
 
                 <td class="text-center">
                   <div class="tm-actions-wrap">
-
                     {% if not read_only %}
                       <a href="{{ url_for('threat_model_delete', id=it.id) }}"
                          class="btn btn-danger btn-sm rounded-pill px-3"
@@ -71201,7 +71595,6 @@ def threat_model_dashboard():
                         Eliminar
                       </button>
                     {% endif %}
-
                   </div>
                 </td>
               </tr>
@@ -71260,7 +71653,8 @@ def threat_model_dashboard():
 
       @media (max-width:768px){
         .tm-filter-actions .btn,
-        .tm-actions-wrap .btn{
+        .tm-actions-wrap .btn,
+        .threat-main-actions .btn{
           width:100%;
         }
       }
@@ -71295,21 +71689,10 @@ def threat_model_dashboard():
         let mensaje = '¿Está seguro de eliminar los registros filtrados de modelamiento de amenazas?\\n\\n';
         mensaje += 'Total registros a eliminar: ' + total + '\\n';
 
-        if(activo){
-          mensaje += 'Activo contiene: ' + activo + '\\n';
-        }
-
-        if(herramienta){
-          mensaje += 'Herramienta: ' + herramienta + '\\n';
-        }
-
-        if(severidad){
-          mensaje += 'Severidad: ' + severidad + '\\n';
-        }
-
-        if(tecnica){
-          mensaje += 'Técnica MITRE: ' + tecnica + '\\n';
-        }
+        if(activo){ mensaje += 'Activo contiene: ' + activo + '\\n'; }
+        if(herramienta){ mensaje += 'Herramienta: ' + herramienta + '\\n'; }
+        if(severidad){ mensaje += 'Severidad: ' + severidad + '\\n'; }
+        if(tecnica){ mensaje += 'Técnica MITRE: ' + tecnica + '\\n'; }
 
         if(!activo && !herramienta && !severidad && !tecnica){
           mensaje += '\\nADVERTENCIA: No hay filtros aplicados. Se eliminarán TODOS los registros de modelamiento de amenazas.\\n';
@@ -71320,9 +71703,7 @@ def threat_model_dashboard():
 
         if(confirm(mensaje)){
           const form = document.getElementById('threatDeleteFiltradosForm');
-          if(form){
-            form.submit();
-          }
+          if(form){ form.submit(); }
         }
 
         return false;
@@ -71349,6 +71730,10 @@ def threat_model_dashboard():
         )
     )
 
+
+# =================================
+# Vista No Mapeados Mittre & Attack 
+# =================================
 
 @app.route('/modelamiento_amenazas/no_mapeados')
 @login_required
@@ -71395,10 +71780,40 @@ def threat_model_unmapped_view():
           </div>
         </div>
 
-        <a href="{{ url_for('threat_model_dashboard') }}"
-           class="btn btn-outline-primary rounded-pill px-4 unmapped-back-btn">
-          ← Volver al Dashboard
-        </a>
+        <div class="unmapped-extra-actions">
+          {% if not read_only %}
+            <form method="post"
+                  action="{{ url_for('threat_model_unmapped_classify') }}"
+                  class="d-inline">
+              <input type="hidden" name="herramienta" value="{{ filtro_herramienta }}">
+              <input type="hidden" name="severidad" value="{{ filtro_severidad }}">
+              <input type="hidden" name="texto" value="{{ filtro_texto }}">
+
+              <button type="submit"
+                      class="btn btn-success rounded-pill px-4"
+                      onclick="return confirmarClasificacionComplementaria();">
+                🧠 Clasificar No Mapeados
+              </button>
+            </form>
+          {% else %}
+            <button type="button"
+                    class="btn btn-secondary rounded-pill px-4"
+                    disabled
+                    title="Auditor: solo lectura. No puede clasificar hallazgos.">
+              🧠 Clasificar No Mapeados
+            </button>
+          {% endif %}
+
+          <a href="{{ url_for('threat_model_unmapped_complementary_view') }}"
+             class="btn btn-outline-success rounded-pill px-4">
+            Ver Clasificación
+          </a>
+
+          <a href="{{ url_for('threat_model_dashboard') }}"
+             class="btn btn-outline-primary rounded-pill px-4 unmapped-back-btn">
+            ← Volver al Dashboard
+          </a>
+        </div>
       </div>
 
       <form method="get" class="row g-3 mb-3" id="unmappedFiltroForm">
@@ -71541,7 +71956,15 @@ def threat_model_unmapped_view():
         border-bottom:1px solid rgba(15,23,42,.08);
       }
 
-      .unmapped-back-btn{
+      .unmapped-extra-actions{
+        display:flex;
+        flex-wrap:wrap;
+        justify-content:flex-end;
+        gap:8px;
+      }
+
+      .unmapped-extra-actions .btn,
+      .unmapped-extra-actions form .btn{
         font-size:.82rem;
         font-weight:900;
         min-height:38px;
@@ -71575,10 +71998,10 @@ def threat_model_unmapped_view():
           align-items:stretch;
         }
 
-        .unmapped-back-btn{
-          width:100%;
-        }
-
+        .unmapped-extra-actions,
+        .unmapped-extra-actions .btn,
+        .unmapped-extra-actions form,
+        .unmapped-extra-actions form .btn,
         .unmapped-filter-actions .btn{
           width:100%;
         }
@@ -71586,6 +72009,17 @@ def threat_model_unmapped_view():
     </style>
 
     <script>
+      function confirmarClasificacionComplementaria(){
+        if(typeof hideLoader === 'function'){
+          hideLoader();
+        }
+
+        return confirm(
+          '¿Desea clasificar los hallazgos no mapeados con OWASP, CWE, CAPEC, ISO 27001 y NIST CSF?\\n\\n' +
+          'Se tomarán en cuenta los filtros actuales de herramienta, severidad y texto.'
+        );
+      }
+
       function confirmarEliminarUnmapped(){
         if(typeof hideLoader === 'function'){
           hideLoader();
@@ -71612,17 +72046,9 @@ def threat_model_unmapped_view():
         let mensaje = '¿Está seguro de eliminar los hallazgos no mapeados filtrados?\\n\\n';
         mensaje += 'Total registros a eliminar: ' + total + '\\n';
 
-        if(herramienta){
-          mensaje += 'Herramienta: ' + herramienta + '\\n';
-        }
-
-        if(severidad){
-          mensaje += 'Severidad: ' + severidad + '\\n';
-        }
-
-        if(texto){
-          mensaje += 'Texto contiene: ' + texto + '\\n';
-        }
+        if(herramienta){ mensaje += 'Herramienta: ' + herramienta + '\\n'; }
+        if(severidad){ mensaje += 'Severidad: ' + severidad + '\\n'; }
+        if(texto){ mensaje += 'Texto contiene: ' + texto + '\\n'; }
 
         if(!herramienta && !severidad && !texto){
           mensaje += '\\nADVERTENCIA: No hay filtros aplicados. Se eliminarán TODOS los hallazgos no mapeados.\\n';
@@ -71632,9 +72058,7 @@ def threat_model_unmapped_view():
 
         if(confirm(mensaje)){
           const form = document.getElementById('unmappedDeleteFiltradosForm');
-          if(form){
-            form.submit();
-          }
+          if(form){ form.submit(); }
         }
 
         return false;
@@ -72419,6 +72843,567 @@ def threat_model_unmapped_delete_filtrados():
 
     return redirect(url_for('threat_model_unmapped_view'))
 
+@app.route('/modelamiento_amenazas/no_mapeados/clasificar', methods=['POST'])
+@login_required
+def threat_model_unmapped_classify():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede generar clasificaciones complementarias.", "danger")
+        return redirect(url_for('threat_model_unmapped_view'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Modelamiento de Amenazas"):
+        flash("No tiene permiso para clasificar hallazgos no mapeados.", "danger")
+        return redirect(url_for('menu'))
+
+    filtro_herramienta = (request.form.get('herramienta') or '').strip()
+    filtro_severidad = (request.form.get('severidad') or '').strip()
+    filtro_texto = (request.form.get('texto') or '').strip()
+
+    q = ThreatModelUnmapped.query
+
+    if filtro_herramienta:
+        q = q.filter(ThreatModelUnmapped.herramienta == filtro_herramienta)
+
+    if filtro_severidad:
+        q = q.filter(ThreatModelUnmapped.severidad == filtro_severidad)
+
+    if filtro_texto:
+        q = q.filter(
+            db.or_(
+                ThreatModelUnmapped.titulo.ilike(f"%{filtro_texto}%"),
+                ThreatModelUnmapped.descripcion.ilike(f"%{filtro_texto}%"),
+                ThreatModelUnmapped.evidencia.ilike(f"%{filtro_texto}%")
+            )
+        )
+
+    registros = q.order_by(ThreatModelUnmapped.id.desc()).all()
+
+    if not registros:
+        flash("No hay hallazgos no mapeados para clasificar con los filtros aplicados.", "warning")
+        return redirect(url_for(
+            'threat_model_unmapped_view',
+            herramienta=filtro_herramienta,
+            severidad=filtro_severidad,
+            texto=filtro_texto
+        ))
+
+    try:
+        total = 0
+
+        for item in registros:
+            guardar_clasificacion_complementaria_unmapped(item)
+            total += 1
+
+        db.session.commit()
+
+        flash(
+            f"Se generó clasificación complementaria para {total} hallazgo(s) no mapeado(s).",
+            "success"
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f"No fue posible generar la clasificación complementaria: {str(e)}", "danger")
+
+    return redirect(url_for(
+        'threat_model_unmapped_complementary_view',
+        herramienta=filtro_herramienta,
+        severidad=filtro_severidad,
+        texto=filtro_texto
+    ))
+
+
+@app.route('/modelamiento_amenazas/no_mapeados/clasificacion_complementaria')
+@login_required
+def threat_model_unmapped_complementary_view():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Modelamiento de Amenazas"):
+        flash("No tiene permiso para acceder a la clasificación complementaria.", "danger")
+        return redirect(url_for('menu'))
+
+    read_only = True if user.role == 'auditor' else False
+
+    filtro_herramienta = (request.args.get('herramienta') or '').strip()
+    filtro_severidad = (request.args.get('severidad') or '').strip()
+    filtro_texto = (request.args.get('texto') or '').strip()
+
+    q = ThreatModelUnmapped.query.options(
+        selectinload(ThreatModelUnmapped.clasificacion_complementaria)
+    )
+
+    if filtro_herramienta:
+        q = q.filter(ThreatModelUnmapped.herramienta == filtro_herramienta)
+
+    if filtro_severidad:
+        q = q.filter(ThreatModelUnmapped.severidad == filtro_severidad)
+
+    if filtro_texto:
+        q = q.filter(
+            db.or_(
+                ThreatModelUnmapped.titulo.ilike(f"%{filtro_texto}%"),
+                ThreatModelUnmapped.descripcion.ilike(f"%{filtro_texto}%"),
+                ThreatModelUnmapped.evidencia.ilike(f"%{filtro_texto}%")
+            )
+        )
+
+    items = q.order_by(ThreatModelUnmapped.id.desc()).all()
+
+    body = """
+    <div class="glass-card p-4 mt-2">
+
+      <div class="unmapped-topbar">
+        <div>
+          <div class="section-title mb-1">🧩 Clasificación complementaria de No Mapeados MITRE</div>
+          <div class="text-muted small">
+            Clasificación técnica y ejecutiva contra OWASP, CWE, CAPEC, ISO 27001 y NIST CSF 2.0.
+          </div>
+        </div>
+
+        <div class="unmapped-extra-actions">
+          <a href="{{ url_for('threat_model_unmapped_view') }}"
+             class="btn btn-outline-secondary rounded-pill px-4">
+            ← Volver a No Mapeados
+          </a>
+
+          <a href="{{ url_for('threat_model_dashboard') }}"
+             class="btn btn-outline-primary rounded-pill px-4">
+            ← Dashboard
+          </a>
+        </div>
+      </div>
+
+      <form method="get" class="row g-3 mb-3">
+        <div class="col-md-3">
+          <label class="form-label">Herramienta</label>
+          <select name="herramienta" class="form-select">
+            <option value="">-- Todas --</option>
+            {% for op in ['nikto','nessus','nuclei','nmap','testssl','owasp_zap','zap'] %}
+              <option value="{{ op }}" {% if filtro_herramienta == op %}selected{% endif %}>
+                {{ op|upper }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label">Severidad</label>
+          <select name="severidad" class="form-select">
+            <option value="">-- Todas --</option>
+            {% for op in ['Crítica', 'Alta', 'Media', 'Baja'] %}
+              <option value="{{ op }}" {% if filtro_severidad == op %}selected{% endif %}>
+                {{ op }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label">Texto</label>
+          <input type="text"
+                 name="texto"
+                 class="form-control"
+                 value="{{ filtro_texto }}"
+                 placeholder="Buscar palabra o patrón...">
+        </div>
+
+        <div class="col-md-2">
+          <label class="form-label d-block">&nbsp;</label>
+          <div class="unmapped-filter-actions">
+            <button class="btn btn-primary rounded-pill px-3" type="submit">
+              Filtrar
+            </button>
+
+            <a href="{{ url_for('threat_model_unmapped_complementary_view') }}"
+               class="btn btn-outline-secondary rounded-pill px-3">
+              Limpiar
+            </a>
+          </div>
+        </div>
+      </form>
+
+      <div class="soft-table-wrap">
+        <div class="table-responsive px-3 pb-3 pt-3">
+          <table class="table table-hover align-middle soft-table mb-0">
+
+            <colgroup>
+              <col class="col-id">
+              <col class="col-hallazgo">
+              <col class="col-severidad">
+              <col class="col-owasp">
+              <col class="col-cwe">
+              <col class="col-capec">
+              <col class="col-iso">
+              <col class="col-nist">
+              <col class="col-confianza">
+              <col class="col-recomendacion">
+            </colgroup>
+
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Hallazgo</th>
+                <th>Severidad</th>
+                <th>OWASP</th>
+                <th>CWE</th>
+                <th>CAPEC</th>
+                <th>ISO 27001</th>
+                <th>NIST CSF</th>
+                <th>Confianza</th>
+                <th>Recomendación</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {% for it in items %}
+                {% set c = it.clasificacion_complementaria %}
+                <tr>
+                  <td class="text-center fw-bold">{{ it.id }}</td>
+
+                  <td class="small">
+                    <b>{{ it.titulo }}</b>
+                    <div class="text-muted mt-1">{{ it.herramienta|upper }}</div>
+                  </td>
+
+                  <td class="text-center">
+                    {{ badge_severidad_html(it.severidad) }}
+                  </td>
+
+                  <td class="small">
+                    {{ c.owasp_category if c else 'Pendiente' }}
+                  </td>
+
+                  <td class="small">
+                    {% if c %}
+                      <b>{{ c.cwe_id }}</b><br>{{ c.cwe_name }}
+                    {% else %}
+                      Pendiente
+                    {% endif %}
+                  </td>
+
+                  <td class="small">
+                    {% if c %}
+                      <b>{{ c.capec_id }}</b><br>{{ c.capec_name }}
+                    {% else %}
+                      Pendiente
+                    {% endif %}
+                  </td>
+
+                  <td class="small">
+                    {% if c %}
+                      <b>{{ c.iso_control }}</b><br>{{ c.iso_control_name }}
+                    {% else %}
+                      Pendiente
+                    {% endif %}
+                  </td>
+
+                  <td class="small">
+                    {% if c %}
+                      <b>{{ c.nist_function }}</b><br>{{ c.nist_category }}
+                    {% else %}
+                      Pendiente
+                    {% endif %}
+                  </td>
+
+                  <td class="text-center fw-bold">
+                    {{ c.confianza if c else '—' }}{% if c %}%{% endif %}
+                  </td>
+
+                  <td class="small recommend-cell">
+                    {% if c %}
+                      {{ c.recomendacion }}
+                      <details class="mt-2">
+                        <summary>Ver razón</summary>
+                        <div class="text-muted mt-1">{{ c.rationale }}</div>
+                      </details>
+                    {% else %}
+                      <span class="text-muted">Sin clasificar.</span>
+                    {% endif %}
+                  </td>
+                </tr>
+
+              {% else %}
+                <tr>
+                  <td colspan="10" class="text-center text-muted py-4">
+                    No hay hallazgos no mapeados para mostrar.
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <style>
+      body a.btn{
+        visibility:visible;
+      }
+
+      body a.btn[href="#"],
+      body a.btn[href=""],
+      body a.btn[onclick*="matriz"],
+      body a.btn[href*="matriz_mitre"],
+      body a.btn[href*="/modelamiento_amenazas/matriz_mitre"]{
+        display:none !important;
+      }
+
+      .vuln-scan-shell > .text-center > a.btn,
+      .vuln-scan-shell > div.text-center > a.btn,
+      .threat-shell > .text-center > a.btn{
+        display:none !important;
+      }
+
+      .unmapped-topbar{
+        display:flex;
+        justify-content:space-between;
+        align-items:flex-start;
+        gap:14px;
+        flex-wrap:wrap;
+        margin-bottom:18px;
+        padding-bottom:14px;
+        border-bottom:1px solid rgba(15,23,42,.08);
+      }
+
+      .unmapped-extra-actions{
+        display:flex;
+        flex-wrap:wrap;
+        justify-content:flex-end;
+        gap:8px;
+      }
+
+      .unmapped-extra-actions .btn{
+        font-size:.82rem;
+        font-weight:900;
+        min-height:38px;
+        border-radius:999px !important;
+        padding:0 18px !important;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        white-space:nowrap;
+        box-shadow:0 8px 18px rgba(37,99,235,.12);
+        transition:all .18s ease;
+      }
+
+      .unmapped-extra-actions .btn:hover{
+        transform:translateY(-1px);
+      }
+
+      .unmapped-filter-actions{
+        display:flex;
+        flex-direction:column;
+        gap:7px;
+        align-items:stretch;
+      }
+
+      .unmapped-filter-actions .btn{
+        width:100%;
+        min-height:36px;
+        font-size:.76rem;
+        font-weight:900;
+        border-radius:999px !important;
+      }
+
+      .soft-table-wrap{
+        border-radius:18px;
+        overflow:hidden;
+        border:1px solid rgba(15,23,42,.08);
+        background:#ffffff;
+        box-shadow:0 8px 24px rgba(15,23,42,.05);
+      }
+
+      .soft-table{
+        width:100%;
+        min-width:1420px;
+        table-layout:fixed;
+        margin-bottom:0 !important;
+      }
+
+      .col-id{ width:64px; }
+      .col-hallazgo{ width:170px; }
+      .col-severidad{ width:110px; }
+      .col-owasp{ width:170px; }
+      .col-cwe{ width:160px; }
+      .col-capec{ width:160px; }
+      .col-iso{ width:150px; }
+      .col-nist{ width:160px; }
+      .col-confianza{ width:110px; }
+      .col-recomendacion{ width:366px; }
+
+      .soft-table thead th{
+        background:linear-gradient(135deg,#1d4ed8,#2563eb);
+        color:#ffffff;
+        font-weight:900;
+        font-size:.76rem;
+        text-align:center;
+        border:none !important;
+        padding:13px 8px;
+        vertical-align:middle;
+        white-space:normal;
+        line-height:1.15;
+      }
+
+      .soft-table tbody td{
+        vertical-align:top;
+        padding:13px 9px;
+        border-color:#eef2f7 !important;
+        font-size:.80rem;
+        line-height:1.35;
+        overflow-wrap:break-word;
+        word-break:normal;
+      }
+
+      .soft-table tbody tr:hover{
+        background:#f8fbff;
+      }
+
+      .recommend-cell{
+        white-space:normal !important;
+        word-break:normal !important;
+        overflow-wrap:break-word !important;
+        line-height:1.5 !important;
+        color:#334155;
+      }
+
+      .recommend-cell details{
+        margin-top:10px;
+      }
+
+      .recommend-cell summary{
+        font-size:.72rem;
+        font-weight:900;
+      }
+
+      .soft-table .badge{
+        font-size:.68rem;
+        font-weight:900;
+        border-radius:999px;
+        padding:6px 10px;
+        white-space:nowrap;
+      }
+
+      .soft-table details{
+        cursor:pointer;
+      }
+
+      .soft-table summary{
+        font-size:.72rem;
+        font-weight:800;
+        color:#2563eb;
+        outline:none;
+      }
+
+      .soft-table summary:hover{
+        color:#1d4ed8;
+      }
+
+      .form-control,
+      .form-select{
+        border-radius:14px !important;
+        min-height:44px;
+        border:1px solid #dbe4f0;
+        box-shadow:none !important;
+        font-size:.84rem;
+        font-weight:600;
+      }
+
+      .form-control:focus,
+      .form-select:focus{
+        border-color:#3b82f6;
+        box-shadow:0 0 0 .15rem rgba(59,130,246,.12) !important;
+      }
+
+      .section-title{
+        font-size:1.1rem;
+        font-weight:900;
+        color:#1459a6;
+      }
+
+      @media (max-width:992px){
+        .soft-table{
+          min-width:1320px;
+        }
+
+        .col-id{ width:58px; }
+        .col-hallazgo{ width:155px; }
+        .col-severidad{ width:100px; }
+        .col-owasp{ width:150px; }
+        .col-cwe{ width:145px; }
+        .col-capec{ width:145px; }
+        .col-iso{ width:135px; }
+        .col-nist{ width:145px; }
+        .col-confianza{ width:100px; }
+        .col-recomendacion{ width:342px; }
+
+        .soft-table thead th{
+          font-size:.70rem;
+          padding:11px 7px;
+        }
+
+        .soft-table tbody td{
+          font-size:.74rem;
+          padding:10px 7px;
+        }
+      }
+
+      @media (max-width:768px){
+        .unmapped-topbar{
+          flex-direction:column;
+          align-items:stretch;
+        }
+
+        .unmapped-extra-actions{
+          width:100%;
+          flex-direction:column;
+        }
+
+        .unmapped-extra-actions .btn,
+        .unmapped-filter-actions .btn{
+          width:100%;
+        }
+
+        .soft-table-wrap{
+          overflow-x:auto;
+        }
+      }
+    </style>
+
+    <script>
+      document.addEventListener('DOMContentLoaded', function(){
+
+        const elementos = document.querySelectorAll('a, button');
+
+        elementos.forEach(function(el){
+          const texto = (el.innerText || el.textContent || '').trim().toLowerCase();
+
+          if(
+            texto.includes('volver a la matriz') ||
+            texto.includes('⬅ volver a la matriz') ||
+            texto.includes('↩ volver a la matriz')
+          ){
+            el.remove();
+          }
+        });
+
+      });
+    </script>
+    """
+
+    return vuln_scan_shell(
+        "Clasificación complementaria No Mapeados",
+        render_template_string(
+            body,
+            items=items,
+            filtro_herramienta=filtro_herramienta,
+            filtro_severidad=filtro_severidad,
+            filtro_texto=filtro_texto,
+            read_only=read_only,
+            badge_severidad_html=badge_severidad_html
+        )
+    )
 
 # ==========================================================================================================================================
 #                                                       Fin del Módulo de Amenazas
