@@ -43418,9 +43418,1572 @@ def inventario_software_delete(id):
     flash("Eliminado correctamente.", "success")
     return redirect(url_for('inventario_software'))
 
-# =========================
+# ===================================
 # ENTRADA DIRECTA — Inventario Físico
+# ===================================
+
+# ============================================================
+#                 INTEGRACIÓN GLPI → INVENTARIO FÍSICO GRAC
+# ============================================================
+
 # =========================
+# MODELO — Configuración GLPI Inventario Físico
+# =========================
+class GLPIInventarioFisicoConfig(db.Model):
+    __tablename__ = "glpi_inventario_fisico_config"
+
+    id = db.Column(db.Integer, primary_key=True)
+    nombre = db.Column(db.String(120), nullable=False, default="GLPI Principal")
+    base_url = db.Column(db.String(500), nullable=False)  # Ej: http://192.168.0.10:8080/apirest.php
+    app_token = db.Column(db.Text, nullable=True)
+    user_token = db.Column(db.Text, nullable=True)
+
+    # Valores por defecto para completar campos SGSI que GLPI normalmente no trae
+    # IMPORTANTE: sin ForeignKey porque en tu app la tabla real de AreaEmpresa no se llama necesariamente "area_empresa".
+    # Se guarda el ID del área y se consulta contra AreaEmpresa manualmente.
+    area_id_default = db.Column(db.Integer, nullable=True)
+    division_default = db.Column(db.String(250), nullable=True)
+    ciudad_default = db.Column(db.String(120), nullable=True)
+    pais_default = db.Column(db.String(120), nullable=True, default="Colombia")
+
+    c_nivel_default = db.Column(db.Integer, nullable=False, default=3)
+    i_nivel_default = db.Column(db.Integer, nullable=False, default=3)
+    d_nivel_default = db.Column(db.Integer, nullable=False, default=3)
+
+    activo = db.Column(db.Boolean, nullable=False, default=True)
+    verificar_ssl = db.Column(db.Boolean, nullable=False, default=False)
+    timeout = db.Column(db.Integer, nullable=False, default=30)
+
+    ultima_prueba = db.Column(db.DateTime, nullable=True)
+    ultimo_sync = db.Column(db.DateTime, nullable=True)
+    ultimo_estado = db.Column(db.String(40), nullable=True)
+    ultimo_mensaje = db.Column(db.Text, nullable=True)
+
+
+
+def ensure_glpi_inventario_fisico_tables():
+    """
+    Crea solo la tabla independiente de configuración GLPI si no existe.
+    No modifica la tabla actual InventarioFisico.
+    Evita ejecutar db.create_all() global para no disparar errores de otros modelos.
+    """
+    try:
+        with app.app_context():
+            GLPIInventarioFisicoConfig.__table__.create(bind=db.engine, checkfirst=True)
+    except Exception as e:
+        print("Error creando tabla GLPI Inventario Físico:", repr(e))
+
+
+try:
+    ensure_glpi_inventario_fisico_tables()
+except Exception:
+    pass
+
+
+# =========================
+# HELPERS — Seguridad token
+# =========================
+def _glpi_invfis_encrypt(value):
+    if not value:
+        return ""
+    try:
+        if "_fernet_from_app" in globals():
+            f = _fernet_from_app()
+            return f.encrypt(value.encode("utf-8")).decode("utf-8")
+    except Exception:
+        pass
+    return value
+
+
+def _glpi_invfis_decrypt(value):
+    if not value:
+        return ""
+    try:
+        if "_fernet_from_app" in globals():
+            f = _fernet_from_app()
+            return f.decrypt(value.encode("utf-8")).decode("utf-8")
+    except Exception:
+        pass
+    return value
+
+
+def _glpi_normalize_base_url(base_url):
+    base_url = (base_url or "").strip().rstrip("/")
+    if not base_url:
+        return ""
+    if not base_url.endswith("/apirest.php"):
+        base_url = base_url + "/apirest.php"
+    return base_url
+
+
+def _glpi_invfis_config_activa():
+    return (
+        GLPIInventarioFisicoConfig.query
+        .filter_by(activo=True)
+        .order_by(GLPIInventarioFisicoConfig.id.desc())
+        .first()
+    )
+
+
+def _glpi_invfis_headers(cfg, session_token=None):
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    app_token = _glpi_invfis_decrypt(cfg.app_token)
+    if app_token:
+        headers["App-Token"] = app_token
+
+    if session_token:
+        headers["Session-Token"] = session_token
+
+    return headers
+
+
+def _glpi_invfis_init_session(cfg):
+    """
+    Inicia sesión en GLPI usando user_token + app_token.
+    """
+    base_url = _glpi_normalize_base_url(cfg.base_url)
+    user_token = _glpi_invfis_decrypt(cfg.user_token)
+
+    if not base_url or not user_token:
+        raise Exception("Debe configurar la URL base de GLPI y el User Token.")
+
+    headers = _glpi_invfis_headers(cfg)
+    headers["Authorization"] = "user_token " + user_token
+
+    url = base_url + "/initSession"
+    res = requests.get(
+        url,
+        headers=headers,
+        timeout=cfg.timeout or 30,
+        verify=bool(cfg.verificar_ssl),
+    )
+
+    if res.status_code not in (200, 201):
+        raise Exception(f"GLPI initSession falló: HTTP {res.status_code} - {res.text[:500]}")
+
+    data = res.json()
+    token = data.get("session_token")
+    if not token:
+        raise Exception("GLPI no devolvió session_token.")
+
+    return token
+
+
+def _glpi_invfis_kill_session(cfg, session_token):
+    try:
+        base_url = _glpi_normalize_base_url(cfg.base_url)
+        if not base_url or not session_token:
+            return
+
+        requests.get(
+            base_url + "/killSession",
+            headers=_glpi_invfis_headers(cfg, session_token),
+            timeout=10,
+            verify=bool(cfg.verificar_ssl),
+        )
+    except Exception:
+        pass
+
+
+def _glpi_get_value(obj, *keys, default=""):
+    """
+    Lee campos de GLPI soportando nombres comunes y valores nulos.
+    """
+    for k in keys:
+        if isinstance(obj, dict) and k in obj and obj.get(k) not in (None, ""):
+            return str(obj.get(k)).strip()
+    return default
+
+
+def _glpi_pick_dropdown_name(obj, key):
+    """
+    GLPI con expand_dropdowns puede devolver texto o dict.
+    """
+    val = obj.get(key) if isinstance(obj, dict) else None
+    if isinstance(val, dict):
+        return str(val.get("name") or val.get("completename") or "").strip()
+    if val not in (None, ""):
+        return str(val).strip()
+    return ""
+
+
+def _glpi_invfis_fetch_computers(cfg, session_token, range_start=0, range_end=999):
+    """
+    Consulta computadores de GLPI.
+    """
+    base_url = _glpi_normalize_base_url(cfg.base_url)
+
+    params = {
+        "expand_dropdowns": "true",
+        "range": f"{range_start}-{range_end}",
+    }
+
+    res = requests.get(
+        base_url + "/Computer",
+        headers=_glpi_invfis_headers(cfg, session_token),
+        params=params,
+        timeout=cfg.timeout or 30,
+        verify=bool(cfg.verificar_ssl),
+    )
+
+    if res.status_code not in (200, 206):
+        raise Exception(f"Consulta de computadores GLPI falló: HTTP {res.status_code} - {res.text[:500]}")
+
+    data = res.json()
+    if isinstance(data, dict) and "data" in data:
+        return data.get("data") or []
+    if isinstance(data, list):
+        return data
+    return []
+
+
+def _glpi_invfis_fetch_computer_detail(cfg, session_token, computer_id):
+    """
+    Consulta el detalle de un computador GLPI para traer campos que muchas veces
+    no vienen completos en la consulta masiva /Computer.
+    """
+    computer_id = _glpi_clean_text(computer_id)
+    if not computer_id:
+        return {}
+
+    base_url = _glpi_normalize_base_url(cfg.base_url)
+    params = {
+        "expand_dropdowns": "true",
+        "with_devices": "true",
+        "get_hateoas": "false",
+    }
+
+    res = requests.get(
+        base_url + f"/Computer/{computer_id}",
+        headers=_glpi_invfis_headers(cfg, session_token),
+        params=params,
+        timeout=cfg.timeout or 30,
+        verify=bool(cfg.verificar_ssl),
+    )
+
+    if res.status_code not in (200, 206):
+        return {}
+
+    data = res.json()
+    return data if isinstance(data, dict) else {}
+
+
+_GLPI_INVFIS_ITEM_CACHE = {}
+
+
+def _glpi_invfis_api_get(cfg, session_token, path, params=None):
+    """
+    GET genérico contra API REST GLPI.
+    Devuelve dict/list o {} si no responde correctamente.
+    """
+    try:
+        base_url = _glpi_normalize_base_url(cfg.base_url)
+        res = requests.get(
+            base_url + path,
+            headers=_glpi_invfis_headers(cfg, session_token),
+            params=params or {"expand_dropdowns": "true", "get_hateoas": "false"},
+            timeout=cfg.timeout or 30,
+            verify=bool(cfg.verificar_ssl),
+        )
+        if res.status_code not in (200, 206):
+            return {}
+        data = res.json()
+        return data
+    except Exception:
+        return {}
+
+
+def _glpi_invfis_first_dict(data):
+    """
+    Devuelve el primer diccionario útil desde una respuesta GLPI que puede venir
+    como dict, list o {"data": [...]}.
+    """
+    if isinstance(data, dict):
+        if isinstance(data.get("data"), list) and data.get("data"):
+            for row in data.get("data"):
+                if isinstance(row, dict):
+                    return row
+        return data
+
+    if isinstance(data, list):
+        for row in data:
+            if isinstance(row, dict):
+                return row
+
+    return {}
+
+
+def _glpi_invfis_fetch_operating_system_relation(cfg, session_token, computer_id):
+    """
+    GLPI 10 suele guardar la pestaña 'Operating systems' como relación
+    Item_OperatingSystem, no siempre dentro del objeto Computer.
+
+    Esta función consulta varias rutas compatibles y devuelve el primer registro
+    de sistema operativo asociado al computador.
+
+    Campos esperados en Item_OperatingSystem:
+      - operatingsystems_id
+      - operatingsystemversions_id
+      - operatingsystemarchitectures_id
+      - operatingsystemkernels_id
+      - operatingsystemkernelversions_id
+      - operatingsystemeditions_id
+      - operatingsystemservicepacks_id
+    """
+    computer_id = _glpi_clean_text(computer_id)
+    if not computer_id:
+        return {}
+
+    candidates = [
+        f"/Computer/{computer_id}/Item_OperatingSystem",
+        f"/Computer/{computer_id}/OperatingSystem",
+        f"/Computer/{computer_id}/OperatingSystemVersion",
+    ]
+
+    for path in candidates:
+        data = _glpi_invfis_api_get(
+            cfg,
+            session_token,
+            path,
+            params={"expand_dropdowns": "true", "get_hateoas": "false"}
+        )
+        row = _glpi_invfis_first_dict(data)
+        if row:
+            return row
+
+    # Último intento: búsqueda directa sobre Item_OperatingSystem.
+    # Algunas instalaciones no habilitan el endpoint padre/hijo, pero sí el itemtype directo.
+    try:
+        data = _glpi_invfis_api_get(
+            cfg,
+            session_token,
+            "/Item_OperatingSystem",
+            params={
+                "expand_dropdowns": "true",
+                "get_hateoas": "false",
+                "criteria[0][field]": "items_id",
+                "criteria[0][searchtype]": "equals",
+                "criteria[0][value]": computer_id,
+                "criteria[1][link]": "AND",
+                "criteria[1][field]": "itemtype",
+                "criteria[1][searchtype]": "equals",
+                "criteria[1][value]": "Computer",
+            }
+        )
+        row = _glpi_invfis_first_dict(data)
+        if row:
+            return row
+    except Exception:
+        pass
+
+    return {}
+
+
+def _glpi_invfis_merge_os_relation_into_computer(computer, os_relation):
+    """
+    Mezcla el registro Item_OperatingSystem en el dict Computer sin perder campos
+    del equipo. Además crea llaves alias para que el mapeo GRAC lea exactamente:
+      procesador      <- arquitectura
+      tipo_sistema    <- nombre del SO
+      version_so      <- kernel
+      edicion_so      <- edición
+    """
+    merged = dict(computer or {})
+
+    if not isinstance(os_relation, dict) or not os_relation:
+        return merged
+
+    for k, v in os_relation.items():
+        if v not in (None, "", "None", "null"):
+            merged[k] = v
+
+    return merged
+
+
+def _glpi_invfis_extract_id(value):
+    """
+    Extrae el ID real de un campo GLPI, aun cuando venga expandido como dict.
+    """
+    if value in (None, "", "None", "null"):
+        return ""
+
+    if isinstance(value, dict):
+        for k in ("id", "items_id", "value"):
+            if value.get(k) not in (None, "", "None", "null"):
+                return str(value.get(k)).strip()
+        return ""
+
+    # Si ya viene como número/string numérico
+    value = str(value).strip()
+    return value if value.isdigit() else ""
+
+
+def _glpi_invfis_extract_name(value):
+    """
+    Extrae nombre/completename si el campo GLPI ya vino expandido.
+    """
+    if value in (None, "", "None", "null"):
+        return ""
+
+    if isinstance(value, dict):
+        for k in ("name", "completename", "value"):
+            if value.get(k) not in (None, "", "None", "null"):
+                txt = str(value.get(k)).strip()
+                # Evita devolver un ID numérico como nombre
+                if txt and not txt.isdigit():
+                    return txt
+        return ""
+
+    txt = str(value).strip()
+    return "" if txt.isdigit() else txt
+
+
+def _glpi_invfis_resolve_item_name(cfg, session_token, itemtype, item_id):
+    """
+    Resuelve un ID de dropdown GLPI consultando su endpoint.
+    Ejemplos:
+      /OperatingSystem/1
+      /OperatingSystemArchitecture/1
+      /OperatingSystemKernel/1
+      /OperatingSystemKernelVersion/1
+      /OperatingSystemEdition/1
+    """
+    item_id = _glpi_clean_text(item_id)
+    if not itemtype or not item_id:
+        return ""
+
+    cache_key = (itemtype, item_id)
+    if cache_key in _GLPI_INVFIS_ITEM_CACHE:
+        return _GLPI_INVFIS_ITEM_CACHE[cache_key]
+
+    data = _glpi_invfis_api_get(cfg, session_token, f"/{itemtype}/{item_id}")
+    if isinstance(data, dict):
+        for k in ("name", "completename", "value"):
+            val = _glpi_clean_text(data.get(k))
+            if val:
+                _GLPI_INVFIS_ITEM_CACHE[cache_key] = val
+                return val
+
+    _GLPI_INVFIS_ITEM_CACHE[cache_key] = ""
+    return ""
+
+
+def _glpi_invfis_resolve_dropdown(cfg, session_token, computer, field_name, itemtypes):
+    """
+    Resuelve un campo dropdown de GLPI:
+      1) Si ya vino expandido con name/completename, usa ese texto.
+      2) Si vino como ID, consulta el endpoint del itemtype correspondiente.
+      3) Si no existe, devuelve vacío.
+    """
+    if not isinstance(computer, dict):
+        return ""
+
+    raw = computer.get(field_name)
+    expanded_name = _glpi_invfis_extract_name(raw)
+    if expanded_name:
+        return expanded_name
+
+    item_id = _glpi_invfis_extract_id(raw)
+    if not item_id:
+        item_id = _glpi_any_value(computer, field_name)
+
+    item_id = _glpi_clean_text(item_id)
+    if not item_id or not item_id.isdigit():
+        return ""
+
+    for itemtype in itemtypes:
+        name = _glpi_invfis_resolve_item_name(cfg, session_token, itemtype, item_id)
+        if name:
+            return name
+
+    return ""
+
+
+def _glpi_invfis_resolve_operating_system_data(cfg, session_token, computer):
+    """
+    Relaciones definitivas solicitadas GLPI → GRAC:
+
+      - Procesador en GRAC      = Arquitecturas en GLPI
+      - Tipo de sistema en GRAC = Nombre en Operating system GLPI
+      - Versión SO en GRAC      = Kernel en Operating system GLPI
+      - Edición del SO en GRAC  = Edición en Operating system GLPI
+
+    Se consulta primero el campo expandido. Si GLPI solo entrega IDs,
+    se resuelven contra los endpoints nativos de GLPI.
+    """
+
+    # Tipo de sistema GRAC = Nombre en Operating system GLPI
+    tipo_sistema = (
+        _glpi_invfis_resolve_dropdown(
+            cfg,
+            session_token,
+            computer,
+            "operatingsystems_id",
+            ("OperatingSystem",)
+        )
+        or _glpi_any_value(
+            computer,
+            "operating_system",
+            "operatingsystem",
+            "operating_system_name",
+            "os_name",
+            "os",
+            "sistema_operativo",
+            "tipo_sistema",
+            "name_operatingsystem"
+        )
+    )
+
+    # Edición del SO GRAC = Edición en Operating system GLPI
+    edicion_so = (
+        _glpi_invfis_resolve_dropdown(
+            cfg,
+            session_token,
+            computer,
+            "operatingsystemeditions_id",
+            ("OperatingSystemEdition", "OperatingSystemServicePack")
+        )
+        or _glpi_any_value(
+            computer,
+            "operating_system_edition",
+            "operatingsystemedition",
+            "os_edition",
+            "edition",
+            "edicion",
+            "edicion_so"
+        )
+    )
+
+    # Versión SO GRAC = Kernel en Operating system GLPI
+    # En GLPI puede existir como kernel o kernel version, según versión/agente.
+    version_so_kernel = (
+        _glpi_invfis_resolve_dropdown(
+            cfg,
+            session_token,
+            computer,
+            "operatingsystemkernels_id",
+            ("OperatingSystemKernel",)
+        )
+        or _glpi_invfis_resolve_dropdown(
+            cfg,
+            session_token,
+            computer,
+            "operatingsystemkernelversions_id",
+            ("OperatingSystemKernelVersion", "OperatingSystemKernel")
+        )
+        or _glpi_any_value(
+            computer,
+            "operating_system_kernel",
+            "operatingsystemkernel",
+            "operating_system_kernel_version",
+            "kernel",
+            "kernel_version",
+            "os_kernel",
+            "version_kernel",
+            "version_so"
+        )
+    )
+
+    # Procesador GRAC = Arquitecturas en GLPI
+    arquitectura = (
+        _glpi_invfis_resolve_dropdown(
+            cfg,
+            session_token,
+            computer,
+            "operatingsystemarchitectures_id",
+            ("OperatingSystemArchitecture", "Architecture")
+        )
+        or _glpi_invfis_resolve_dropdown(
+            cfg,
+            session_token,
+            computer,
+            "architectures_id",
+            ("Architecture", "OperatingSystemArchitecture")
+        )
+        or _glpi_any_value(
+            computer,
+            "operating_system_architecture",
+            "operatingsystemarchitecture",
+            "architecture",
+            "architectures",
+            "arquitectura",
+            "arquitecturas",
+            "os_architecture"
+        )
+    )
+
+    return tipo_sistema, edicion_so, version_so_kernel, arquitectura
+
+
+
+def _glpi_clean_text(value):
+    """
+    Normaliza valores traídos desde GLPI.
+    Si GLPI no trae valor, devuelve cadena vacía.
+    """
+    if value in (None, "", "None", "null"):
+        return ""
+    return str(value).strip()
+
+
+def _glpi_any_value(obj, *keys):
+    """
+    Busca el primer valor real en el diccionario GLPI.
+    No inventa valores por defecto.
+    """
+    if not isinstance(obj, dict):
+        return ""
+
+    for key in keys:
+        val = obj.get(key)
+        if isinstance(val, dict):
+            val = val.get("name") or val.get("completename") or val.get("value")
+        elif isinstance(val, list):
+            val = ", ".join([_glpi_clean_text(x.get("name") if isinstance(x, dict) else x) for x in val if x])
+        val = _glpi_clean_text(val)
+        if val:
+            return val
+
+    return ""
+
+
+def _glpi_invfis_os_data(cfg, session_token, computer):
+    """
+    Wrapper compatible para las relaciones GLPI → GRAC.
+    Usa resolución robusta por endpoint cuando GLPI trae IDs.
+    """
+    return _glpi_invfis_resolve_operating_system_data(cfg, session_token, computer)
+
+
+
+def _glpi_invfis_hw_data(computer):
+    """
+    RAM se toma solo si viene desde GLPI.
+
+    Procesador NO se toma de CPU física porque el requerimiento indica:
+      procesador en GRAC = Arquitecturas en GLPI.
+    Ese valor se asigna desde _glpi_invfis_os_data().
+    """
+    ram = _glpi_any_value(
+        computer,
+        "memory",
+        "ram",
+        "ram_instalada",
+        "memories",
+        "computermemories"
+    )
+
+    return ram
+
+
+
+def _glpi_invfis_fetch_group_relation(cfg, session_token, computer_id):
+    """
+    Busca el Grupo a cargo del computador en GLPI.
+
+    En GLPI, el campo visual 'Grupo a cargo' puede venir:
+      - directamente en Computer como groups_id_tech / groups_id
+      - o como relación Group_Item asociada al Computer.
+
+    Devuelve el primer registro útil.
+    """
+    computer_id = _glpi_clean_text(computer_id)
+    if not computer_id:
+        return {}
+
+    candidates = [
+        f"/Computer/{computer_id}/Group_Item",
+        f"/Computer/{computer_id}/Group",
+    ]
+
+    for path in candidates:
+        data = _glpi_invfis_api_get(
+            cfg,
+            session_token,
+            path,
+            params={"expand_dropdowns": "true", "get_hateoas": "false"}
+        )
+        row = _glpi_invfis_first_dict(data)
+        if row:
+            return row
+
+    # Intento directo sobre Group_Item.
+    try:
+        data = _glpi_invfis_api_get(
+            cfg,
+            session_token,
+            "/Group_Item",
+            params={
+                "expand_dropdowns": "true",
+                "get_hateoas": "false",
+                "criteria[0][field]": "items_id",
+                "criteria[0][searchtype]": "equals",
+                "criteria[0][value]": computer_id,
+                "criteria[1][link]": "AND",
+                "criteria[1][field]": "itemtype",
+                "criteria[1][searchtype]": "equals",
+                "criteria[1][value]": "Computer",
+            }
+        )
+        row = _glpi_invfis_first_dict(data)
+        if row:
+            return row
+    except Exception:
+        pass
+
+    return {}
+
+
+def _glpi_invfis_merge_group_relation_into_computer(computer, group_relation):
+    """
+    Mezcla la relación Group_Item al dict Computer y crea aliases.
+    """
+    merged = dict(computer or {})
+
+    if not isinstance(group_relation, dict) or not group_relation:
+        return merged
+
+    for k, v in group_relation.items():
+        if v not in (None, "", "None", "null"):
+            merged[k] = v
+
+    # Normaliza aliases comunes hacia groups_id_tech.
+    for key in ("groups_id", "groups_id_tech", "group_id", "group", "name", "completename"):
+        val = group_relation.get(key)
+        if val not in (None, "", "None", "null") and not merged.get("groups_id_tech"):
+            merged["groups_id_tech"] = val
+            break
+
+    return merged
+
+
+
+def _glpi_invfis_resolver_nombre_grupo_glpi(cfg=None, session_token=None, computer=None):
+    raw_group = ""
+
+    if isinstance(computer, dict):
+        raw_group = (
+            computer.get("groups_id_tech")
+            or computer.get("groups_id")
+            or computer.get("group_id")
+            or ""
+        )
+
+    group_id = str(raw_group).strip()
+
+    mapa_grupos = {
+        "1": "Seguridad",
+        "3": "Ventas",
+    }
+
+    return mapa_grupos.get(group_id, ""), group_id
+
+
+def _glpi_invfis_crear_area_segura(nombre_area):
+    nombre_area = _glpi_clean_text(nombre_area)
+    if not nombre_area:
+        return None
+
+    try:
+        with db.session.no_autoflush:
+            area = AreaEmpresa.query.filter(AreaEmpresa.area.ilike(nombre_area)).first()
+            if area:
+                return area.id
+    except Exception:
+        db.session.rollback()
+
+    try:
+        from sqlalchemy import text
+
+        tabla = AreaEmpresa.__table__.name
+
+        columnas_db = db.session.execute(
+            text(f"PRAGMA table_info({tabla})")
+        ).fetchall()
+
+        valores = {}
+
+        for col in columnas_db:
+            col_name = col[1]
+            not_null = col[3]
+            pk = col[5]
+
+            if pk:
+                continue
+
+            if col_name == "area":
+                valores[col_name] = nombre_area
+            elif not_null:
+                if "responsable" in col_name.lower():
+                    valores[col_name] = "Importado desde GLPI"
+                elif "cargo" in col_name.lower():
+                    valores[col_name] = "Automático GLPI"
+                else:
+                    valores[col_name] = ""
+            else:
+                valores[col_name] = None
+
+        columnas = ", ".join(valores.keys())
+        placeholders = ", ".join([f":{k}" for k in valores.keys()])
+
+        db.session.execute(
+            text(f"INSERT INTO {tabla} ({columnas}) VALUES ({placeholders})"),
+            valores
+        )
+        db.session.flush()
+
+        area = AreaEmpresa.query.filter(AreaEmpresa.area.ilike(nombre_area)).first()
+        return area.id if area else None
+
+    except Exception as e:
+        print("ERROR REAL CREANDO AREA GLPI:", repr(e))
+        db.session.rollback()
+        return None
+
+
+def _glpi_invfis_resolver_area_obligatoria(cfg=None, session_token=None, computer=None):
+    grupo_texto, group_id = _glpi_invfis_resolver_nombre_grupo_glpi(
+        cfg,
+        session_token,
+        computer
+    )
+
+    if not grupo_texto:
+        return None
+
+    return _glpi_invfis_crear_area_segura(grupo_texto)
+
+
+def _glpi_invfis_numero_neutro(value=None):
+    """
+    Devuelve 0 cuando GLPI no trae clasificación.
+    Se usa para cumplir columnas numéricas NOT NULL sin inventar niveles 1-5.
+    """
+    try:
+        if value in (None, "", "None", "null"):
+            return 0
+        return int(value)
+    except Exception:
+        return 0
+
+
+def _glpi_invfis_map_computer_to_data(cfg, computer, session_token=None):
+    """
+    Mapeo GLPI Computer → InventarioFisico.
+
+    Reglas aplicadas:
+    - No se inventan datos funcionales cuando GLPI no los trae.
+    - Asignado a = campo name de GLPI.
+    - Todo campo SO se interpreta como Sistema Operativo.
+    - Sistema Operativo de GLPI se guarda en GRAC como tipo_sistema.
+    - area_id se resuelve técnicamente porque la tabla inventario_fisico lo exige NOT NULL.
+    """
+
+    glpi_id = _glpi_any_value(computer, "id")
+    nombre_glpi = _glpi_any_value(computer, "name", "nombre")
+    serial = _glpi_any_value(computer, "serial", "serial_number", "otherserial")
+    uuid = _glpi_any_value(computer, "uuid", "id_producto")
+
+    marca = (
+        _glpi_pick_dropdown_name(computer, "manufacturers_id")
+        or _glpi_any_value(computer, "manufacturer", "marca")
+    )
+
+    modelo = (
+        _glpi_pick_dropdown_name(computer, "computermodels_id")
+        or _glpi_any_value(computer, "model", "modelo")
+    )
+
+    tipo_equipo = (
+        _glpi_pick_dropdown_name(computer, "computertypes_id")
+        or _glpi_any_value(computer, "type", "tipo", "clase_activo")
+    )
+
+    ubicacion = (
+        _glpi_pick_dropdown_name(computer, "locations_id")
+        or _glpi_any_value(computer, "location", "ubicacion", "ciudad")
+    )
+
+    sistema_operativo, edicion_so, version_so, arquitectura_glpi = _glpi_invfis_os_data(cfg, session_token, computer)
+    ram = _glpi_invfis_hw_data(computer)
+
+    comentario = _glpi_any_value(computer, "comment", "comments")
+
+    # Clase del activo solo con datos que vienen de GLPI.
+    clase_activo = ""
+    if tipo_equipo and modelo:
+        clase_activo = f"{tipo_equipo} / {modelo}"
+    elif tipo_equipo:
+        clase_activo = tipo_equipo
+    elif modelo:
+        clase_activo = modelo
+
+    # IMPORTANTE:
+    # area_id es obligatorio por estructura de la tabla inventario_fisico.
+    # Si GLPI no trae un área que coincida con AreaEmpresa, se toma la primera área existente
+    # únicamente para permitir el guardado. No se completan otros valores por defecto.
+    area_id_obligatoria = _glpi_invfis_resolver_area_obligatoria(
+        cfg,
+        session_token,
+        computer
+    )
+
+    data = {
+        "area_id": area_id_obligatoria,
+        "division": _glpi_any_value(computer, "division", "business_unit", "departamento"),
+
+        # Regla solicitada: Asignado a = campo name de GLPI
+        "asignado_a": nombre_glpi,
+
+        "cargo": _glpi_any_value(computer, "cargo", "position", "title"),
+        "ciudad": ubicacion,
+        "clase_activo": clase_activo,
+        "marca": marca,
+
+        # Solo si GLPI lo trae.
+        "mouse": _glpi_any_value(computer, "mouse"),
+        "teclado": _glpi_any_value(computer, "keyboard", "teclado"),
+        "base_portatil": _glpi_any_value(computer, "base_portatil", "dock", "docking_station"),
+        "monitor": _glpi_any_value(computer, "monitor", "monitors"),
+
+        "numero_serial": serial,
+        "nombre_dispositivo": nombre_glpi,
+        # Relación solicitada: Procesador GRAC = Arquitecturas en GLPI
+        "procesador": arquitectura_glpi,
+        "ram_instalada": ram,
+
+        # Identificadores GLPI
+        "id_dispositivo": glpi_id,
+        "id_producto": uuid,
+
+        # SO = Sistema Operativo
+        "tipo_sistema": sistema_operativo,
+        "edicion_so": edicion_so,
+        "version_so": version_so,
+
+        "pais": _glpi_any_value(computer, "country", "pais"),
+        "fecha_compra": None,
+        "fecha_asignacion": None,
+
+        # Clasificación SGSI: GLPI no la trae.
+        # Se guarda 0 para cumplir columnas numéricas NOT NULL si existen, sin mostrar niveles inventados.
+        "c_nivel": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "c_nivel", "confidencialidad")),
+        "i_nivel": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "i_nivel", "integridad")),
+        "d_nivel": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "d_nivel", "disponibilidad")),
+        "valor_activo": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "valor_activo")),
+        "criticidad_num": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "criticidad_num")),
+        "criticidad_texto": _glpi_any_value(computer, "criticidad_texto"),
+        "etiqueta_conf_num": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "etiqueta_conf_num")),
+        "etiqueta_conf_texto": _glpi_any_value(computer, "etiqueta_conf_texto"),
+
+        # Información regulatoria: solo se diligencia si GLPI lo trae.
+        "info_personal": _glpi_any_value(computer, "info_personal"),
+        "info_regulada": _glpi_any_value(computer, "info_regulada"),
+        "info_sensible": _glpi_any_value(computer, "info_sensible"),
+        "info_sensible_clientes": _glpi_any_value(computer, "info_sensible_clientes"),
+
+        "observaciones": comentario,
+    }
+
+    return data
+
+
+def _glpi_invfis_find_existing(data):
+    """
+    Evita duplicados.
+    Prioridad:
+    1) número serial
+    2) id_dispositivo GLPI
+    3) nombre de dispositivo
+
+    Usa no_autoflush para que una búsqueda no dispare flush prematuro.
+    """
+    serial = (data.get("numero_serial") or "").strip()
+    glpi_id = (data.get("id_dispositivo") or "").strip()
+    nombre = (data.get("nombre_dispositivo") or "").strip()
+
+    with db.session.no_autoflush:
+        if serial:
+            item = InventarioFisico.query.filter_by(numero_serial=serial).first()
+            if item:
+                return item
+
+        if glpi_id:
+            item = InventarioFisico.query.filter_by(id_dispositivo=glpi_id).first()
+            if item:
+                return item
+
+        if nombre:
+            item = InventarioFisico.query.filter_by(nombre_dispositivo=nombre).first()
+            if item:
+                return item
+
+    return None
+
+
+def _glpi_invfis_upsert(data):
+    """
+    Crea o actualiza un activo físico desde datos GLPI.
+    Ejecuta flush controlado para detectar errores por registro y no dejar
+    la sesión en estado inválido para el siguiente equipo.
+    """
+    item = _glpi_invfis_find_existing(data)
+    created = False
+
+    if not item:
+        item = InventarioFisico()
+        db.session.add(item)
+        created = True
+
+    for k, v in data.items():
+        if hasattr(item, k):
+            setattr(item, k, v)
+
+    db.session.flush()
+    return item, created
+
+
+def glpi_invfis_sincronizar():
+    """
+    Ejecuta sincronización GLPI → InventarioFisico.
+    No importa registros sin identificador mínimo de GLPI.
+    Hace commit por registro para evitar que un error dañe toda la transacción.
+    """
+    cfg = _glpi_invfis_config_activa()
+    if not cfg:
+        raise Exception("No existe una configuración GLPI activa.")
+
+    session_token = None
+    creados = 0
+    actualizados = 0
+    omitidos = 0
+    errores = []
+
+    try:
+        session_token = _glpi_invfis_init_session(cfg)
+        computers = _glpi_invfis_fetch_computers(cfg, session_token)
+
+        for comp in computers:
+            try:
+                comp_detalle = comp
+
+                # Consulta detalle por equipo y, muy importante, la relación
+                # Item_OperatingSystem que alimenta la pestaña "Operating systems" de GLPI.
+                # Sin esta relación, muchos GLPI devuelven en blanco:
+                # Arquitecturas, Nombre del SO, Kernel y Edición.
+                glpi_comp_id = _glpi_any_value(comp, "id")
+                if glpi_comp_id:
+                    detalle = _glpi_invfis_fetch_computer_detail(cfg, session_token, glpi_comp_id)
+                    if detalle:
+                        comp_detalle = {**comp, **detalle}
+
+                    os_relation = _glpi_invfis_fetch_operating_system_relation(cfg, session_token, glpi_comp_id)
+                    if os_relation:
+                        comp_detalle = _glpi_invfis_merge_os_relation_into_computer(comp_detalle, os_relation)
+
+                    group_relation = _glpi_invfis_fetch_group_relation(cfg, session_token, glpi_comp_id)
+                    if group_relation:
+                        comp_detalle = _glpi_invfis_merge_group_relation_into_computer(comp_detalle, group_relation)
+
+                data = _glpi_invfis_map_computer_to_data(cfg, comp_detalle, session_token)
+
+                # FORZAR ÁREA DESDE GRUPO GLPI ANTES DE OMITIR
+                if not data.get("area_id"):
+                    grupo_glpi = (
+                        _glpi_any_value(comp_detalle, "groups_id_tech", "groups_id", "group_id")
+                        or ""
+                    ).strip()
+
+                    mapa_grupos = {
+                        "1": "Seguridad",
+                        "3": "Ventas",
+                    }
+
+                    nombre_area = mapa_grupos.get(grupo_glpi)
+
+                    if nombre_area:
+                        area = AreaEmpresa.query.filter(AreaEmpresa.area.ilike(nombre_area)).first()
+
+                        if not area:
+                            area = AreaEmpresa(
+                                area=nombre_area,
+                                responsable_nombre="GLPI",
+                                responsable_cargo="GLPI"
+                            )
+                            db.session.add(area)
+                            db.session.flush()
+
+                        data["area_id"] = area.id
+
+                if not data.get("area_id"):
+                    grupo_debug = (
+                        _glpi_any_value(comp_detalle, "groups_id_tech", "groups_id", "group_id", "name", "completename")
+                        or _glpi_any_value(comp_detalle, "grupo_a_cargo", "technical_group", "group_tech")
+                        or "NO DETECTADO"
+                    )
+
+                    omitidos += 1
+                    errores.append(
+                        f"Equipo GLPI {comp.get('id', 'N/D')} omitido: FALLÓ crear Área desde Grupo GLPI. "
+                        f"Valor detectado GLPI: {grupo_debug}"
+                    )
+                    db.session.rollback()
+                    continue
+
+                _, created = _glpi_invfis_upsert(data)
+                db.session.commit()
+
+                if created:
+                    creados += 1
+                else:
+                    actualizados += 1
+
+            except Exception as e:
+                db.session.rollback()
+                omitidos += 1
+                errores.append(f"Equipo GLPI {comp.get('id', 'N/D')}: {str(e)}")
+
+        try:
+            cfg = _glpi_invfis_config_activa()
+            cfg.ultimo_sync = datetime.utcnow()
+            cfg.ultimo_estado = "OK" if not errores else "OK_CON_OMITIDOS"
+            cfg.ultimo_mensaje = f"Creados: {creados}, Actualizados: {actualizados}, Omitidos: {omitidos}"
+            if errores:
+                cfg.ultimo_mensaje += " | " + " || ".join(errores[:5])
+            db.session.add(cfg)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+        return {
+            "creados": creados,
+            "actualizados": actualizados,
+            "omitidos": omitidos,
+            "errores": errores[:20],
+        }
+
+    except Exception as e:
+        db.session.rollback()
+        try:
+            cfg = _glpi_invfis_config_activa()
+            if cfg:
+                cfg.ultimo_sync = datetime.utcnow()
+                cfg.ultimo_estado = "ERROR"
+                cfg.ultimo_mensaje = str(e)
+                db.session.add(cfg)
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+        raise
+
+    finally:
+        if session_token:
+            _glpi_invfis_kill_session(cfg, session_token)
+
+# =========================
+# RUTA — Configurar conexión GLPI
+# =========================
+@app.route('/inventario_fisico/glpi/config', methods=['GET', 'POST'])
+@login_required
+def inventario_fisico_glpi_config():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor' or (
+        user.role != 'admin'
+        and not verificar_permiso(user, "Gestión de Activos de Información")
+    ):
+        flash("No tiene permiso para configurar GLPI.", "danger")
+        return redirect(url_for('inventario_fisico'))
+
+    cfg = _glpi_invfis_config_activa()
+    if not cfg:
+        cfg = GLPIInventarioFisicoConfig(
+            nombre="GLPI Principal",
+            base_url="",
+            activo=True,
+            verificar_ssl=False,
+            timeout=30,
+
+            # Estos campos se conservan por compatibilidad con la tabla,
+            # pero la sincronización ya no los usa para inventar datos.
+            area_id_default=None,
+            division_default="",
+            ciudad_default="",
+            pais_default="",
+            c_nivel_default=0,
+            i_nivel_default=0,
+            d_nivel_default=0,
+        )
+        db.session.add(cfg)
+        db.session.commit()
+
+    if request.method == 'POST':
+        accion = request.form.get("accion") or "guardar"
+
+        cfg.nombre = (request.form.get("nombre") or "GLPI Principal").strip()
+        cfg.base_url = _glpi_normalize_base_url(request.form.get("base_url"))
+
+        app_token = (request.form.get("app_token") or "").strip()
+        user_token = (request.form.get("user_token") or "").strip()
+
+        if app_token:
+            cfg.app_token = _glpi_invfis_encrypt(app_token)
+        if user_token:
+            cfg.user_token = _glpi_invfis_encrypt(user_token)
+
+        # No se diligencian valores por defecto que no vengan de GLPI.
+        cfg.area_id_default = None
+        cfg.division_default = ""
+        cfg.ciudad_default = ""
+        cfg.pais_default = ""
+        cfg.c_nivel_default = 0
+        cfg.i_nivel_default = 0
+        cfg.d_nivel_default = 0
+
+        cfg.verificar_ssl = True if request.form.get("verificar_ssl") == "1" else False
+        cfg.timeout = request.form.get("timeout", type=int) or 30
+        cfg.activo = True
+
+        db.session.add(cfg)
+        db.session.commit()
+
+        if accion == "probar":
+            session_token = None
+            try:
+                session_token = _glpi_invfis_init_session(cfg)
+                cfg.ultima_prueba = datetime.utcnow()
+                cfg.ultimo_estado = "OK"
+                cfg.ultimo_mensaje = "Conexión exitosa con GLPI."
+                db.session.add(cfg)
+                db.session.commit()
+                flash("Conexión exitosa con GLPI.", "success")
+            except Exception as e:
+                cfg.ultima_prueba = datetime.utcnow()
+                cfg.ultimo_estado = "ERROR"
+                cfg.ultimo_mensaje = str(e)
+                db.session.add(cfg)
+                db.session.commit()
+                flash(f"Error probando conexión GLPI: {str(e)}", "danger")
+            finally:
+                if session_token:
+                    _glpi_invfis_kill_session(cfg, session_token)
+        else:
+            flash("Configuración GLPI guardada correctamente.", "success")
+
+        return redirect(url_for('inventario_fisico_glpi_config'))
+
+    html = """
+    <div class="glpiinv-shell">
+
+      <div class="glpiinv-header-card">
+        <div class="glpiinv-header-overlay">
+          <div class="glpiinv-header-text">
+            <h3 class="glpiinv-title m-0">Configurar conexión GLPI</h3>
+            <div class="glpiinv-subtitle">
+              Parámetros de integración para importar exclusivamente datos existentes en GLPI al Inventario Físico GRAC
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="glpiinv-header-actions">
+        <a href="{{ url_for('inventario_fisico') }}"
+           class="btn rounded-pill px-4 fw-bold glpiinv-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+      </div>
+
+      <div class="glpiinv-card">
+        <div class="glpiinv-card-body">
+
+          {% with msgs = get_flashed_messages(with_categories=true) %}
+            {% if msgs %}
+              {% for cat, msg in msgs %}
+                <div class="alert alert-{{ 'warning' if cat=='message' else cat }} alert-dismissible fade show" role="alert">
+                  {{ msg }}
+                  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+              {% endfor %}
+            {% endif %}
+          {% endwith %}
+
+          <form method="post">
+            <div class="row g-3">
+
+              <div class="col-md-4">
+                <label class="form-label">Nombre de la conexión</label>
+                <input type="text" name="nombre" class="form-control" value="{{ cfg.nombre or '' }}">
+              </div>
+
+              <div class="col-md-8">
+                <label class="form-label">URL API REST GLPI</label>
+                <input type="text"
+                       name="base_url"
+                       class="form-control"
+                       required
+                       placeholder="http://192.168.0.10:8080/apirest.php"
+                       value="{{ cfg.base_url or '' }}">
+                <small class="text-muted">Puede ser con o sin /apirest.php. El sistema lo normaliza.</small>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">App Token</label>
+                <input type="password" name="app_token" class="form-control" placeholder="Dejar vacío para conservar el actual">
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">User Token</label>
+                <input type="password" name="user_token" class="form-control" placeholder="Dejar vacío para conservar el actual">
+              </div>
+
+              <div class="col-md-2">
+                <label class="form-label">Timeout</label>
+                <input type="number" name="timeout" class="form-control" min="5" max="300" value="{{ cfg.timeout or 30 }}">
+              </div>
+
+              <div class="col-md-12">
+                <div class="form-check mt-2">
+                  <input class="form-check-input" type="checkbox" name="verificar_ssl" value="1" id="verificar_ssl"
+                         {% if cfg.verificar_ssl %}checked{% endif %}>
+                  <label class="form-check-label fw-bold" for="verificar_ssl">
+                    Verificar certificado SSL
+                  </label>
+                </div>
+              </div>
+
+            </div>
+
+            <div class="glpiinv-status-box mt-4">
+              <div><b>Última prueba:</b> {{ cfg.ultima_prueba or '—' }}</div>
+              <div><b>Última sincronización:</b> {{ cfg.ultimo_sync or '—' }}</div>
+              <div><b>Estado:</b> {{ cfg.ultimo_estado or '—' }}</div>
+              <div><b>Mensaje:</b> {{ cfg.ultimo_mensaje or '—' }}</div>
+            </div>
+
+            <div class="glpiinv-note mt-3">
+              <b>Nota:</b> la importación no diligencia valores por defecto de GRAC. Solo se guardan datos que existan en GLPI.
+              El campo <b>Asignado a</b> se toma del campo <b>name</b> de GLPI. <b>Procesador</b> se toma de <b>Arquitecturas</b>. <b>Tipo de sistema</b> se toma del <b>Nombre del Operating system</b>, <b>Versión SO</b> del <b>Kernel</b> y <b>Edición del SO</b> de <b>Edición</b>.
+            </div>
+
+            <div class="glpiinv-bottom-actions">
+              <button class="btn btn-success rounded-pill px-4 fw-bold" name="accion" value="guardar" type="submit">
+                💾 Guardar configuración
+              </button>
+              <button class="btn btn-primary rounded-pill px-4 fw-bold" name="accion" value="probar" type="submit">
+                🔌 Probar conexión
+              </button>
+            </div>
+
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .glpiinv-shell{
+        width:96%;
+        max-width:1500px;
+        margin:10px auto 24px auto;
+      }
+
+      .glpiinv-header-card{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        color:#fff;
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .glpiinv-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .glpiinv-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        position:relative;
+        z-index:1;
+      }
+
+      .glpiinv-header-overlay::before{
+        content:"🔌";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#fff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .glpiinv-header-text::before{
+        content:"SGSI · GLPI Inventario Físico";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+      }
+
+      .glpiinv-title{
+        color:#fff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        margin:0 !important;
+      }
+
+      .glpiinv-subtitle{
+        color:rgba(255,255,255,.94);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .glpiinv-header-actions,
+      .glpiinv-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 12px;
+      }
+
+      .glpiinv-header-actions .btn,
+      .glpiinv-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:38px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .glpiinv-back-btn{
+        background:#fff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .glpiinv-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .glpiinv-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        overflow:hidden;
+        border:1px solid rgba(219,230,244,.9);
+      }
+
+      .glpiinv-card-body{
+        padding:16px 18px;
+      }
+
+      .glpiinv-card .form-label{
+        font-weight:800;
+        color:#25324a;
+        font-size:.78rem;
+      }
+
+      .glpiinv-card .form-control,
+      .glpiinv-card .form-select{
+        border-radius:9px;
+        border:1px solid #d9e3f0;
+        min-height:38px;
+        font-size:.80rem;
+        background:#f8fafc;
+      }
+
+      .glpiinv-status-box,
+      .glpiinv-note{
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        padding:12px 14px;
+        background:#f8fbff;
+        font-size:.82rem;
+        color:#24324a;
+      }
+    </style>
+    """
+
+    inner = render_template_string(html, cfg=cfg)
+    return render_template_string(BASE, content=Markup(inner))
+
+
+# =========================
+# RUTA — Sincronizar GLPI → Inventario Físico
+# =========================
+@app.route('/inventario_fisico/glpi/sync', methods=['POST'])
+@login_required
+def inventario_fisico_glpi_sync():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor' or (
+        user.role != 'admin'
+        and not verificar_permiso(user, "Gestión de Activos de Información")
+    ):
+        flash("No tiene permiso para sincronizar GLPI.", "danger")
+        return redirect(url_for('inventario_fisico'))
+
+    try:
+        resumen = glpi_invfis_sincronizar()
+
+        msg = (
+            f"Sincronización GLPI finalizada. "
+            f"Creados: {resumen['creados']}, "
+            f"Actualizados: {resumen['actualizados']}, "
+            f"Omitidos: {resumen['omitidos']}."
+        )
+
+        errores = resumen.get("errores") or []
+        if errores:
+            msg += " Detalle: " + " | ".join(errores[:10])
+
+        flash(msg, "success" if resumen["omitidos"] == 0 else "warning")
+
+    except Exception as e:
+        print("ERROR GLPI Inventario Físico:", traceback.format_exc())
+        flash(f"Error sincronizando con GLPI: {str(e)}", "danger")
+
+    return redirect(url_for('inventario_fisico'))
+
+
 @app.route('/inventario_fisico_menu', methods=['GET'])
 @login_required
 def inventario_fisico_menu():
@@ -44715,6 +46278,8 @@ def inventario_fisico():
         .all()
     )
 
+    cfg_glpi = _glpi_invfis_config_activa()
+
     matriz_items = []
 
     for item in items:
@@ -44763,12 +46328,48 @@ def inventario_fisico():
              class="btn btn-primary rounded-pill px-4 fw-bold">
             ➕ Agregar Activo
           </a>
+
+          <a href="{{ url_for('inventario_fisico_glpi_config') }}"
+             class="btn rounded-pill px-4 fw-bold invfismat-btn-config-glpi">
+            ⚙️ Configurar GLPI
+          </a>
+
+          <form method="post"
+                action="{{ url_for('inventario_fisico_glpi_sync') }}"
+                class="d-inline"
+                onsubmit="return confirm('¿Desea sincronizar los equipos de GLPI con la matriz de inventario físico?');">
+            <button type="submit"
+                    class="btn rounded-pill px-4 fw-bold invfismat-btn-glpi">
+              🔌 Sincronizar GLPI
+            </button>
+          </form>
         {% else %}
           <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
             ➕ Agregar Activo
           </button>
+          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
+            🔌 Sincronizar GLPI
+          </button>
         {% endif %}
       </div>
+
+      {% if cfg_glpi %}
+        <div class="invfismat-glpi-status">
+          <b>GLPI:</b> {{ cfg_glpi.base_url or 'Sin URL' }}
+          <span class="mx-2">|</span>
+          <b>Último sync:</b> {{ cfg_glpi.ultimo_sync or '—' }}
+          <span class="mx-2">|</span>
+          <b>Estado:</b> {{ cfg_glpi.ultimo_estado or '—' }}
+          {% if cfg_glpi.ultimo_mensaje %}
+            <span class="mx-2">|</span>
+            {{ cfg_glpi.ultimo_mensaje }}
+          {% endif %}
+        </div>
+      {% else %}
+        <div class="invfismat-glpi-status">
+          <b>GLPI:</b> no configurado. Use el botón <b>Configurar GLPI</b>.
+        </div>
+      {% endif %}
 
       <style>
         .badge-n1 { background:#2ecc71; color:#fff; }
@@ -45017,7 +46618,7 @@ def inventario_fisico():
       }
 
       .invfismat-subtitle{
-        color:rgba(255,255,255,.95);
+        color:rgba(255,255,255,.94);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -45025,9 +46626,10 @@ def inventario_fisico():
       .invfismat-header-actions{
         display:flex;
         justify-content:center;
+        align-items:center;
         gap:10px;
         flex-wrap:wrap;
-        margin:10px 0 14px;
+        margin:10px 0 12px;
       }
 
       .invfismat-header-actions .btn{
@@ -45036,65 +46638,111 @@ def inventario_fisico():
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .invfismat-btn-config-glpi{
+        background:#64748b;
+        color:#fff;
+        border:1px solid #64748b;
+      }
+
+      .invfismat-btn-config-glpi:hover{
+        background:#475569;
+        color:#fff;
+        border-color:#475569;
+      }
+
+      .invfismat-btn-glpi{
+        background:#0b65d8;
+        color:#fff;
+        border:1px solid #0b65d8;
+      }
+
+      .invfismat-btn-glpi:hover{
+        background:#084fa8;
+        color:#fff;
+        border-color:#084fa8;
+      }
+
+      .invfismat-glpi-status{
+        width:100%;
+        max-width:1850px;
+        margin:0 auto 12px auto;
+        background:rgba(255,255,255,.92);
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        padding:10px 14px;
+        box-shadow:0 8px 18px rgba(15,23,42,.12);
+        font-size:.80rem;
+        color:#25324a;
+        text-align:center;
       }
 
       .invfismat-card{
-        background:rgba(255,255,255,.96) !important;
+        background:rgba(255,255,255,.96)!important;
         border-radius:18px;
         backdrop-filter:blur(8px);
         box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
         overflow:hidden;
+        border:1px solid rgba(219,230,244,.9);
       }
 
       .invfismat-topbar{
+        padding:14px 18px;
         display:flex;
         justify-content:space-between;
         align-items:center;
-        gap:12px;
-        padding:14px 16px 0 16px;
-        flex-wrap:wrap;
+        gap:14px;
+        background:linear-gradient(180deg,#ffffff 0%,#f5f9ff 100%);
+        border-bottom:1px solid #e2e8f0;
       }
 
       .invfismat-top-title{
-        color:#0f172a;
         font-weight:950;
-        font-size:.92rem;
+        color:#1e293b;
+        font-size:1rem;
       }
 
       .invfismat-top-note{
-        color:#64748b;
         font-size:.78rem;
+        color:#64748b;
       }
 
       .invfismat-counter-badge{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:#1459a6;
         color:#fff;
-        font-weight:900;
         border-radius:999px;
-        padding:7px 14px;
+        padding:8px 14px;
+        font-weight:900;
         font-size:.78rem;
-        box-shadow:0 8px 16px rgba(15,23,42,.16);
+        white-space:nowrap;
+        box-shadow:0 8px 16px rgba(20,89,166,.22);
       }
 
       .invfismat-card-body{
-        padding:12px 16px 16px 16px;
+        padding:16px 18px;
       }
 
       .invfismat-table-wrap{
-        max-height:70vh;
-        overflow-y:auto;
-        overflow-x:auto;
+        max-height:72vh;
+        overflow:auto;
         border:1px solid #dbe6f4;
         border-radius:14px;
         background:#fff;
       }
 
       .invfismat-table{
-        min-width:1800px;
+        min-width:1450px;
         table-layout:fixed;
-        margin-bottom:0;
+      }
+
+      .invfismat-table th,
+      .invfismat-table td{
+        font-size:.76rem;
+        padding:8px 7px;
+        vertical-align:middle;
+        word-break:break-word;
       }
 
       .invfismat-table thead th{
@@ -45102,24 +46750,9 @@ def inventario_fisico():
         top:0;
         z-index:10;
         background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#fff;
+        color:#fff !important;
         font-weight:900;
         text-align:center;
-        vertical-align:middle;
-      }
-
-      .invfismat-table th,
-      .invfismat-table td{
-        vertical-align:top;
-        font-size:.75rem;
-        padding:9px 8px;
-        white-space:normal;
-        word-break:break-word;
-        overflow-wrap:anywhere;
-      }
-
-      .invfismat-table td{
-        border-bottom:1px solid #e5edf7;
       }
 
       .invfismat-table tbody tr:nth-child(even){
@@ -45130,68 +46763,48 @@ def inventario_fisico():
         background:#eef6ff;
       }
 
-      .invfismat-cell-main .invfismat-main-text{
+      .invfismat-main-text{
         font-weight:900;
-        color:#0f172a;
+        color:#1e293b;
       }
 
       .invfismat-badge-text{
-        font-size:.67rem !important;
-        line-height:1.15;
-        padding:5px 8px;
         border-radius:999px;
+        padding:.42rem .58rem;
+        font-size:.68rem;
         font-weight:900;
         white-space:normal;
-        max-width:130px;
+        line-height:1.15;
         display:inline-block;
+        min-width:80px;
       }
 
       .invfismat-col-acciones{
-        width:160px !important;
-        min-width:160px !important;
+        min-width:170px;
       }
 
       .invfismat-actions-wrap{
         display:flex;
-        flex-direction:column;
-        gap:6px;
-        align-items:center;
         justify-content:center;
+        align-items:center;
+        gap:6px;
+        flex-wrap:wrap;
       }
 
-      .invfismat-btn-action,
-      .invfismat-actions-wrap .badge{
+      .invfismat-btn-action{
         font-size:.70rem !important;
-        line-height:1.1;
-        padding:4px 10px !important;
-        min-width:108px;
-        max-width:108px;
-        text-align:center;
-        white-space:nowrap;
-        border-radius:999px !important;
-        font-weight:900;
+        padding:5px 10px !important;
+        box-shadow:0 4px 10px rgba(0,0,0,.10);
       }
 
       @media (max-width:992px){
         .invfismat-shell{
           width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .invfismat-header-card{
-          min-height:88px;
-        }
-
-        .invfismat-title{
-          font-size:1.20rem;
-        }
-
-        .invfismat-card-body{
-          padding:12px;
         }
 
         .invfismat-topbar{
-          padding:12px 14px 0 14px;
+          flex-direction:column;
+          align-items:flex-start;
         }
       }
 
@@ -45206,7 +46819,12 @@ def inventario_fisico():
           margin:0;
         }
 
-        .invfismat-header-actions .btn{
+        .invfismat-header-actions .btn,
+        .invfismat-header-actions form{
+          width:100%;
+        }
+
+        .invfismat-header-actions form button{
           width:100%;
         }
       }
@@ -45216,9 +46834,9 @@ def inventario_fisico():
     inner = render_template_string(
         html,
         matriz_items=matriz_items,
-        read_only=read_only
+        read_only=read_only,
+        cfg_glpi=cfg_glpi,
     )
-
     return render_template_string(BASE, content=Markup(inner))
 
 # =========================
