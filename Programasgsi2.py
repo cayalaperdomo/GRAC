@@ -5850,6 +5850,12 @@ MODULES = [
     "Planes de acción del SGSI",
     "Listado Maestro de Documentos",
     "Gestión de Activos de Información",
+    "Inventario de Software",
+    "Inventario de Información",
+    "Inventario de Datos Personales",
+    "Inventario Físico",
+    "Tablas de Valoración",
+    "Dueños de Información",
     "Registro de Incidentes",
     "Configuración Parámetros de la Empresa",
     "Gestión de Cambios (RFC)",
@@ -5857,6 +5863,7 @@ MODULES = [
     "Registro de Comunicaciones",
     "Plan de Concientización y Formación",
     "Seguimiento del Plan de Formación",
+    "Campañas de Concientización",
     "Requisitos Legales",
     "Partes Interesadas",
     "Registro de Vulnerabilidades",
@@ -5872,7 +5879,7 @@ MODULES = [
     "Continuidad del Negocio (BCP/DRP)",
     "Revisión de Accesos",
     "Cuestionarios de Proponentes",
-    "Revisión en Listas Restrictivas",
+    "Listas Restrictivas",
     "Security Scorecard de Terceros",
     "Nivel de madurez ISO 27001:2022",
     "Nivel de Madurez NIST CSF V.2.0",
@@ -7136,6 +7143,21 @@ def verificar_permiso(user, module_name):
     ).first()
 
     return bool(perm and perm.has_access)
+
+def verificar_permiso_activos(user, permiso_matriz):
+    if not user:
+        return False
+
+    if user.role == "admin":
+        return True
+
+    if user.role == "auditor":
+        return True
+
+    return (
+        verificar_permiso(user, "Gestión de Activos de Información")
+        or verificar_permiso(user, permiso_matriz)
+    )
 
 
 # ============================================================
@@ -8715,28 +8737,28 @@ MENU_SECTIONS = [
                                 "href": "/inventario_software_menu",
                                 "icon": "bi-cpu",
                                 "btn": "btn-outline-primary",
-                                "module": "Gestión de Activos de Información"
+                                "module": "Inventario de Software"
                             },
                             {
                                 "label": "Inventario de Información",
                                 "href": "/inventario_informacion_menu",
                                 "icon": "bi-file-earmark-text",
                                 "btn": "btn-outline-primary",
-                                "module": "Gestión de Activos de Información"
+                                "module": "Inventario de Información"
                             },
                             {
                                 "label": "Inventario de Datos Personales",
                                 "href": "/inventario_datos_personales_menu",
                                 "icon": "bi-shield-lock",
                                 "btn": "btn-outline-primary",
-                                "module": "Gestión de Activos de Información"
+                                "module": "Inventario de Datos Personales"
                             },
                             {
-                                "label": "Inventario de Físico",
+                                "label": "Inventario Físico",
                                 "href": "/inventario_fisico_menu",
                                 "icon": "bi-pc-display",
                                 "btn": "btn-outline-primary",
-                                "module": "Gestión de Activos de Información"
+                                "module": "Inventario Físico"
                             },
                         ]
                     },
@@ -8745,35 +8767,35 @@ MENU_SECTIONS = [
                         "href": "#",
                         "icon": "bi-bar-chart-line",
                         "btn": "btn-outline-primary",
-                        "module": "Gestión de Activos de Información",
-                        "children": [
+                        "module": "Tablas de Valoración",
+                                            "children": [
                             {
                                 "label": "Confidencialidad",
                                 "href": "/valor_confidencialidad",
                                 "icon": "bi-lock-fill",
                                 "btn": "btn-outline-primary",
-                                "module": "Gestión de Activos de Información"
+                                "module": "Tablas de Valoración"
                             },
                             {
                                 "label": "Integridad",
                                 "href": "/valor_integridad",
                                 "icon": "bi-shield-check",
                                 "btn": "btn-outline-primary",
-                                "module": "Gestión de Activos de Información"
+                                "module": "Tablas de Valoración"
                             },
                             {
                                 "label": "Disponibilidad",
                                 "href": "/valor_disponibilidad",
                                 "icon": "bi-clock-history",
                                 "btn": "btn-outline-primary",
-                                "module": "Gestión de Activos de Información"
+                                "module": "Tablas de Valoración"
                             },
                             {
                                 "label": "Criticidad del Activo",
                                 "href": "/valor_criticidad_activo",
                                 "icon": "bi-exclamation-diamond-fill",
                                 "btn": "btn-outline-primary",
-                                "module": "Gestión de Activos de Información"
+                                "module": "Tablas de Valoración"
                             },
                         ]
                     },
@@ -8782,7 +8804,7 @@ MENU_SECTIONS = [
                         "href": "/duenos_info",
                         "icon": "bi-person-badge",
                         "btn": "btn-outline-primary",
-                        "module": "Gestión de Activos de Información"
+                        "module": "Dueños de Información"
                     },
                 ]
             },
@@ -8835,7 +8857,7 @@ MENU_SECTIONS = [
         "icon": "bi-truck",
         "items": [
             {"label": "Cuestionarios de Proponentes", "href": "/cuestionarios_proveedores", "icon": "bi-ui-checks", "btn": "btn-info text-white", "module": "Cuestionarios de Proponentes"},
-            {"label": "Revisión en Listas Restrictivas", "href": "/listas_restrictivas", "icon": "bi-shield-exclamation", "btn": "btn-danger", "module": "/Listas Restrictivas"},
+            {"label": "Revisión en Listas Restrictivas", "href": "/listas_restrictivas", "icon": "bi-shield-exclamation", "btn": "btn-danger", "module": "Listas Restrictivas"},
             {"label": "Security Scorecard de Terceros", "href": "/proponentes/scorecard", "icon": "bi-shield-check", "btn": "btn-warning text-dark", "module": "Security Scorecard de Terceros"},
             {"label": "Registro de Proveedores", "href": "/proveedores_menu", "icon": "bi-building", "btn": "btn-primary", "module": "Registro de Proveedores"},
         ],
@@ -9200,7 +9222,7 @@ def _sgsi_build_global_menu_html():
                 "paths": ["/inventario_datos_personales_menu", "/inventario_datos_personales"],
                 "endpoints": ["inventario_datos_personales"]
             },
-            "Inventario de Físico": {
+            "Inventario Físico": {
                 "paths": ["/inventario_fisico_menu", "/inventario_fisico"],
                 "endpoints": ["inventario_fisico"]
             },
@@ -37308,7 +37330,7 @@ def duenos_info():
     if user.role == 'auditor':
         read_only = True
     else:
-        if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos"):
+        if user.role != 'admin' and not verificar_permiso_activos(user, "Dueños de Información"):
             flash("No tiene permiso para ver la gestión de activos.", "danger")
             return redirect(url_for('proveedores_menu'))
         read_only = False
@@ -38005,13 +38027,11 @@ def duenos_info():
 @app.route('/duenos_info/delete')
 @login_required
 def duenos_info_delete():
-    user = User.query.get(session.get('user_id'))
-
     if user.role == 'auditor' or (
         user.role != 'admin'
-        and not verificar_permiso(user, "Gestión de Activos de Información")
+        and not verificar_permiso_activos(user, "Dueños de Información")
     ):
-        flash("No tiene permiso para eliminar objetivos.", "danger")
+        flash("No tiene permiso para eliminar dueños de información.", "danger")
         return redirect(url_for('activos_menu'))
     
     rid = request.args.get('id', type=int)
@@ -39417,7 +39437,7 @@ def inventario_informacion():
     if user.role == 'auditor':
         read_only = True
     else:
-        if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
+        if user.role != 'admin' and not verificar_permiso_activos(user, "Inventario de Información"):
             flash("No tiene permiso para ver los activos de información.", "danger")
             return redirect(url_for('menu'))
         read_only = False
@@ -40612,7 +40632,7 @@ def inventario_software_new():
         flash("El rol Auditor no puede agregar registros.", "danger")
         return redirect(url_for('inventario_software'))
 
-    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
+    if user.role != 'admin' and not verificar_permiso_activos(user, "Inventario de Software"):
         flash("No tiene permiso para agregar registros de activos.", "danger")
         return redirect(url_for('inventario_software'))
     
@@ -46266,7 +46286,7 @@ def inventario_fisico():
     if user.role == 'auditor':
         read_only = True
     else:
-        if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
+        if user.role != 'admin' and not verificar_permiso_activos(user, "Inventario Físico"):
             flash("No tiene permiso para ver los activos físicos.", "danger")
             return redirect(url_for('menu'))
         read_only = False
@@ -47493,6 +47513,2025 @@ def inventario_fisico_delete(id):
     flash("Eliminado.", "success")
     return redirect(url_for('inventario_fisico'))
 
+# ====================================
+# Inventario de Datos Personales
+# ====================================
+
+class InventarioDatosPersonales(db.Model):
+    __tablename__ = "inventario_datos_personales"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    responsable_datos = db.Column(db.String(255), nullable=False)
+
+    area_id = db.Column(db.Integer, nullable=True)
+    division_id = db.Column(db.Integer, nullable=True)
+
+    naturaleza_datos = db.Column(db.Text, nullable=False)
+    ubicacion_sistema_datos = db.Column(db.String(255), nullable=False)
+    titular_datos = db.Column(db.String(200), nullable=False)
+    sitio_web_asociado = db.Column(db.Text)
+
+    fuente_datos = db.Column(db.String(255), nullable=False)
+    administrador_sistema = db.Column(db.String(255), nullable=False)
+    alcance_datos = db.Column(db.Text)
+    formato_informacion = db.Column(db.String(150))
+    proposito_uso_datos = db.Column(db.Text, nullable=False)
+
+    pais_almacenamiento = db.Column(db.String(120), nullable=False)
+    pais_acceso = db.Column(db.String(120), nullable=False)
+
+    transferencia_fuera_compania = db.Column(db.String(2), default="No")
+    politica_retencion = db.Column(db.String(255))
+    politica_privacidad = db.Column(db.Text)
+    solicita_consentimiento = db.Column(db.String(2), default="No")
+
+    notas = db.Column(db.Text)
+    recomendacion = db.Column(db.Text)
+    seguridad_quien_tiene_acceso = db.Column(db.String(255), nullable=False)
+    consentimiento_titular_disponible = db.Column(db.String(2), default="No")
+
+    dato_nombre = db.Column(db.String(2), default="No")
+    dato_telefono = db.Column(db.String(2), default="No")
+    dato_direccion = db.Column(db.String(2), default="No")
+    dato_numero_identificacion = db.Column(db.String(2), default="No")
+    dato_fecha_nacimiento = db.Column(db.String(2), default="No")
+    dato_licencia_conduccion = db.Column(db.String(2), default="No")
+    dato_pasaporte_visa = db.Column(db.String(2), default="No")
+    dato_sensible = db.Column(db.String(2), default="No")
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<InventarioDatosPersonales {self.id} - {self.responsable_datos}>"
+
+# =========================
+# ENTRADA DIRECTA — Inventario de Datos Personales
+# =========================
+@app.route('/inventario_datos_personales_menu')
+@login_required
+def inventario_datos_personales_menu():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role not in ('admin', 'auditor') and not verificar_permiso(user, "Gestión de Activos de Información"):
+        flash("No tiene permiso para acceder al módulo de inventario de datos personales.", "danger")
+        return redirect(url_for('activos_menu'))
+
+    return redirect(url_for('inventario_datos_personales'))
+
+
+# =========================
+# Agregar — Inventario de Datos Personales
+# =========================
+@app.route('/inventario_datos_personales/new', methods=['GET', 'POST'])
+@login_required
+def inventario_datos_personales_new():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede agregar registros.", "danger")
+        return redirect(url_for('inventario_datos_personales'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
+        flash("No tiene permiso para agregar registros de datos personales.", "danger")
+        return redirect(url_for('inventario_datos_personales'))
+
+    paises = sorted([c.name for c in pycountry.countries])
+    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
+
+    if request.method == 'POST':
+        area_id = request.form.get('area_id', type=int)
+        division_id = request.form.get('division_id', type=int)
+
+        naturaleza_datos = (request.form.get('naturaleza_datos') or "").strip()
+        ubicacion_sistema_datos = (request.form.get('ubicacion_sistema_datos') or "").strip()
+        titular_datos = (request.form.get('titular_datos') or "").strip()
+        sitio_web_asociado = (request.form.get('sitio_web_asociado') or "").strip()
+
+        fuente_datos = (request.form.get('fuente_datos') or "").strip()
+        administrador_sistema = (request.form.get('administrador_sistema') or "").strip()
+        alcance_datos = (request.form.get('alcance_datos') or "").strip()
+        formato_informacion = (request.form.get('formato_informacion') or "").strip()
+        proposito_uso_datos = (request.form.get('proposito_uso_datos') or "").strip()
+
+        pais_almacenamiento = (request.form.get('pais_almacenamiento') or "").strip()
+        pais_acceso = (request.form.get('pais_acceso') or "").strip()
+        transferencia_fuera_compania = request.form.get('transferencia_fuera_compania') or "No"
+        politica_retencion = (request.form.get('politica_retencion') or "").strip()
+        politica_privacidad = (request.form.get('politica_privacidad') or "").strip()
+        solicita_consentimiento = request.form.get('solicita_consentimiento') or "No"
+
+        notas = (request.form.get('notas') or "").strip()
+        recomendacion = (request.form.get('recomendacion') or "").strip()
+        seguridad_quien_tiene_acceso = (request.form.get('seguridad_quien_tiene_acceso') or "").strip()
+        consentimiento_titular_disponible = request.form.get('consentimiento_titular_disponible') or "No"
+
+        dato_nombre = request.form.get('dato_nombre') or "No"
+        dato_telefono = request.form.get('dato_telefono') or "No"
+        dato_direccion = request.form.get('dato_direccion') or "No"
+        dato_numero_identificacion = request.form.get('dato_numero_identificacion') or "No"
+        dato_fecha_nacimiento = request.form.get('dato_fecha_nacimiento') or "No"
+        dato_licencia_conduccion = request.form.get('dato_licencia_conduccion') or "No"
+        dato_pasaporte_visa = request.form.get('dato_pasaporte_visa') or "No"
+        dato_sensible = request.form.get('dato_sensible') or "No"
+
+        area = AreaEmpresa.query.get(area_id) if area_id else None
+        division = DivisionEmpresa.query.get(division_id) if division_id else None
+
+        responsable_datos = ""
+        if area:
+            responsable_datos = area.area
+        if division:
+            responsable_datos = f"{responsable_datos} / {division.nombre_division}"
+
+        if not (
+            area_id and naturaleza_datos and ubicacion_sistema_datos and
+            titular_datos and fuente_datos and administrador_sistema and
+            proposito_uso_datos and pais_almacenamiento and pais_acceso and
+            seguridad_quien_tiene_acceso
+        ):
+            flash("Complete los campos obligatorios del inventario de datos personales.", "danger")
+            return redirect(url_for('inventario_datos_personales_new'))
+
+        item = InventarioDatosPersonales(
+            responsable_datos=responsable_datos,
+            area_id=area_id,
+            division_id=division_id,
+            naturaleza_datos=naturaleza_datos,
+            ubicacion_sistema_datos=ubicacion_sistema_datos,
+            titular_datos=titular_datos,
+            sitio_web_asociado=sitio_web_asociado,
+            fuente_datos=fuente_datos,
+            administrador_sistema=administrador_sistema,
+            alcance_datos=alcance_datos,
+            formato_informacion=formato_informacion,
+            proposito_uso_datos=proposito_uso_datos,
+            pais_almacenamiento=pais_almacenamiento,
+            pais_acceso=pais_acceso,
+            transferencia_fuera_compania=transferencia_fuera_compania,
+            politica_retencion=politica_retencion,
+            politica_privacidad=politica_privacidad,
+            solicita_consentimiento=solicita_consentimiento,
+            notas=notas,
+            recomendacion=recomendacion,
+            seguridad_quien_tiene_acceso=seguridad_quien_tiene_acceso,
+            consentimiento_titular_disponible=consentimiento_titular_disponible,
+            dato_nombre=dato_nombre,
+            dato_telefono=dato_telefono,
+            dato_direccion=dato_direccion,
+            dato_numero_identificacion=dato_numero_identificacion,
+            dato_fecha_nacimiento=dato_fecha_nacimiento,
+            dato_licencia_conduccion=dato_licencia_conduccion,
+            dato_pasaporte_visa=dato_pasaporte_visa,
+            dato_sensible=dato_sensible
+        )
+        db.session.add(item)
+        db.session.commit()
+
+        flash("Registro de inventario de datos personales creado.", "success")
+        return redirect(url_for('inventario_datos_personales'))
+
+    html = """
+    <div class="invdp-shell">
+
+      <div class="invdp-header-card">
+        <div class="invdp-header-overlay">
+          <div class="invdp-header-text">
+            <h3 class="invdp-title m-0">Registro — Inventario de Datos Personales</h3>
+            <div class="invdp-subtitle">
+              Registro de sistemas, tratamientos, acceso, transferencia y elementos de datos personales
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="invdp-header-actions">
+        <a href="{{ url_for('inventario_datos_personales') }}"
+           class="btn rounded-pill px-4 fw-bold invdp-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+
+        
+      </div>
+
+      <div class="invdp-card">
+        <div class="invdp-card-body">
+          <form method="post">
+            <div class="row g-3">
+
+              <div class="col-md-8">
+                <label class="form-label">Responsable de los datos</label>
+
+                <div class="row g-2">
+                  <div class="col-md-6">
+                    <select name="area_id" id="area_id" class="form-select" required>
+                      <option value="">-- Seleccione Área --</option>
+                      {% for a in areas %}
+                        <option value="{{ a.id }}">{{ a.area }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+
+                  <div class="col-md-6">
+                    <select name="division_id" id="division_id" class="form-select">
+                      <option value="">Todas las divisiones</option>
+                    </select>
+                  </div>
+                </div>
+
+                <small class="text-muted">Seleccione el área y, si aplica, la división responsable de los datos.</small>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Titular de los datos</label>
+                <input type="text" name="titular_datos" class="form-control" required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Ubicación del sistema de datos</label>
+                <input type="text" name="ubicacion_sistema_datos" class="form-control" placeholder="Ej. SAP, CRM, ERP" required>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Naturaleza de los datos</label>
+                <textarea name="naturaleza_datos" class="form-control" rows="2" required></textarea>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Sitio web asociado</label>
+                <textarea name="sitio_web_asociado" class="form-control" rows="2"></textarea>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Fuente de los datos</label>
+                <input type="text" name="fuente_datos" class="form-control" required>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Administrador del sistema</label>
+                <input type="text" name="administrador_sistema" class="form-control" required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Formato de la información</label>
+                <select name="formato_informacion" class="form-select">
+                  <option value="">-- Seleccione --</option>
+                  <option value="Digital">Digital</option>
+                  <option value="Físico">Físico</option>
+                  <option value="Mixto">Mixto</option>
+                </select>
+              </div>
+
+              <div class="col-md-8">
+                <label class="form-label">Alcance de los datos</label>
+                <textarea name="alcance_datos" class="form-control" rows="2"></textarea>
+              </div>
+
+              <div class="col-md-12">
+                <label class="form-label">Propósito y uso de los datos</label>
+                <textarea name="proposito_uso_datos" class="form-control" rows="2" required></textarea>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">¿Dónde se almacenan los datos?</label>
+                <select name="pais_almacenamiento" class="form-select" required>
+                  <option value="">-- Seleccione país --</option>
+                  {% for p in paises %}
+                    <option value="{{ p }}">{{ p }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">¿Dónde se accede a los datos?</label>
+                <select name="pais_acceso" class="form-select" required>
+                  <option value="">-- Seleccione país --</option>
+                  {% for p in paises %}
+                    <option value="{{ p }}">{{ p }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Transferencia de datos fuera de la compañía</label>
+                <select name="transferencia_fuera_compania" class="form-select">
+                  <option value="No">No</option>
+                  <option value="Sí">Sí</option>
+                </select>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Política de retención</label>
+                <input type="text" name="politica_retencion" class="form-control" placeholder="Ubicación de la política y años de retención">
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">¿Política de privacidad?</label>
+                <textarea name="politica_privacidad" class="form-control" rows="2"></textarea>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">¿Se solicita consentimiento?</label>
+                <select name="solicita_consentimiento" class="form-select">
+                  <option value="No">No</option>
+                  <option value="Sí">Sí</option>
+                </select>
+              </div>
+
+              <div class="col-md-8">
+                <label class="form-label">Seguridad — ¿Quién tiene acceso?</label>
+                <input type="text" name="seguridad_quien_tiene_acceso" class="form-control" required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">¿Existe consentimiento disponible del titular?</label>
+                <select name="consentimiento_titular_disponible" class="form-select">
+                  <option value="No">No</option>
+                  <option value="Sí">Sí</option>
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Notas</label>
+                <textarea name="notas" class="form-control" rows="2"></textarea>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Recomendación</label>
+                <textarea name="recomendacion" class="form-control" rows="2"></textarea>
+              </div>
+
+              <div class="col-12 mt-4">
+                <div class="invdp-section-title">Elementos de datos</div>
+              </div>
+
+              {% set yn_fields = [
+                ('dato_nombre', 'Nombre'),
+                ('dato_telefono', 'Teléfono'),
+                ('dato_direccion', 'Dirección'),
+                ('dato_numero_identificacion', 'Número del Documento de Identificación'),
+                ('dato_fecha_nacimiento', 'Fecha de nacimiento'),
+                ('dato_licencia_conduccion', 'Número de licencia de conducción'),
+                ('dato_pasaporte_visa', 'Información de pasaporte / visa'),
+                ('dato_sensible', 'Datos sensibles')
+              ] %}
+
+              {% for field, label in yn_fields %}
+              <div class="col-md-3">
+                <label class="form-label">{{ label }}</label>
+                <select name="{{ field }}" class="form-select">
+                  <option value="No">No</option>
+                  <option value="Sí">Sí</option>
+                </select>
+              </div>
+              {% endfor %}
+
+            </div>
+
+            <div class="invdp-bottom-actions">
+              <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold">
+                Guardar registro
+              </button>
+
+              <a href="{{ url_for('inventario_datos_personales') }}"
+                 class="btn rounded-pill px-4 fw-bold invdp-cancel-btn">
+                Cancelar
+              </a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const areaSel = document.getElementById('area_id');
+      const divSel = document.getElementById('division_id');
+
+      if (!areaSel || !divSel) return;
+
+      areaSel.addEventListener('change', async function () {
+        const areaId = this.value;
+        divSel.innerHTML = '<option value="">Todas las divisiones</option>';
+
+        if (!areaId) return;
+
+        try {
+          const resp = await fetch(`/areas/${areaId}/divisiones_json`);
+          const data = await resp.json();
+
+          (data.divisiones || []).forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d.id;
+            opt.textContent = d.nombre;
+            divSel.appendChild(opt);
+          });
+        } catch (e) {
+          console.error('Error cargando divisiones:', e);
+        }
+      });
+    });
+    </script>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .invdp-shell{
+        width:96%;
+        max-width:1400px;
+        margin:10px auto 24px auto;
+      }
+
+      .invdp-header-card{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .invdp-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .invdp-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent;
+        padding:0;
+        position:relative;
+        z-index:1;
+      }
+
+      .invdp-header-overlay::before{
+        content:"🗂️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .invdp-header-text{
+        max-width:1100px;
+        width:100%;
+      }
+
+      .invdp-header-text::before{
+        content:"SGSI · Inventario de Datos Personales";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#fff;
+      }
+
+      .invdp-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .invdp-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .invdp-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .invdp-header-actions .btn{
+        border-radius:10px !important;
+        min-height:38px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invdp-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invdp-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .invdp-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .invdp-card-body{
+        padding:18px;
+      }
+
+      .invdp-card .form-label{
+        font-weight:800;
+        color:#25324a;
+        margin-bottom:4px;
+        font-size:.78rem;
+      }
+
+      .invdp-card .form-control,
+      .invdp-card .form-select{
+        border-radius:9px;
+        border:1px solid #d9e3f0;
+        min-height:38px;
+        font-size:.80rem;
+        background:#f8fafc;
+      }
+
+      .invdp-card textarea.form-control{
+        min-height:70px;
+        resize:vertical;
+      }
+
+      .invdp-card .form-control:focus,
+      .invdp-card .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
+        background:#fff;
+      }
+
+      .invdp-section-title{
+        font-weight:950;
+        font-size:.88rem;
+        color:#1459a6;
+        padding:9px 12px;
+        border-radius:12px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        margin:10px 0 10px;
+      }
+
+      .invdp-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        margin-top:18px;
+        flex-wrap:wrap;
+      }
+
+      .invdp-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:38px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invdp-cancel-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invdp-cancel-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      @media (max-width:992px){
+        .invdp-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .invdp-header-card{
+          min-height:88px;
+        }
+
+        .invdp-title{
+          font-size:1.20rem;
+        }
+
+        .invdp-card-body{
+          padding:14px;
+        }
+      }
+
+      @media (max-width:768px){
+        .invdp-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .invdp-header-overlay::before{
+          margin:0;
+        }
+
+        .invdp-header-actions .btn,
+        .invdp-bottom-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+
+    return render_template_string(
+        BASE,
+        content=Markup(render_template_string(html, paises=paises, areas=areas))
+    )
+
+
+# =========================
+# Matriz — Inventario de Datos Personales
+# =========================
+@app.route('/inventario_datos_personales', methods=['GET'])
+@login_required
+def inventario_datos_personales():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role not in ('admin', 'auditor') and not verificar_permiso_activos(user, "Inventario de Datos Personales"):
+        flash("No tiene permiso para ver la matriz de datos personales.", "danger")
+        return redirect(url_for('menu'))
+
+    read_only = (user.role == 'auditor')
+
+    items = InventarioDatosPersonales.query.order_by(InventarioDatosPersonales.id.desc()).all()
+
+    html = render_template_string("""
+    <div class="invdpm-shell">
+
+      <div class="invdpm-header-card">
+        <div class="invdpm-header-overlay">
+          <div class="invdpm-header-text">
+            <h3 class="invdpm-title m-0">Matriz — Inventario de Datos Personales</h3>
+            <div class="invdpm-subtitle">
+              Visualización resumida de registros del inventario de datos personales
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="invdpm-header-actions">
+
+        {% if not read_only %}
+          <a href="{{ url_for('inventario_datos_personales_new') }}"
+             class="btn btn-primary rounded-pill px-4 fw-bold">
+            ➕ Agregar Registro
+          </a>
+        {% else %}
+          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
+            ➕ Agregar Registro
+          </button>
+        {% endif %}
+      </div>
+
+      <div class="invdpm-card">
+        <div class="invdpm-topbar">
+          <div>
+            <h5 class="invdpm-top-title mb-1">Resumen de activos de información</h5>
+            <div class="invdpm-top-note">
+              La matriz muestra únicamente los campos esenciales. Para consultar toda la información utilice el botón <strong>Ver detalle</strong>.
+            </div>
+          </div>
+
+          <div class="invdpm-counter-badge">
+            Total registros: {{ items|length }}
+          </div>
+        </div>
+
+        <div class="invdpm-card-body">
+          <div class="invdpm-table-wrap">
+            <div class="table-responsive">
+              <table class="table align-middle mb-0 invdpm-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Responsable</th>
+                    <th>Naturaleza de los datos</th>
+                    <th>Titular</th>
+                    <th>Sistema</th>
+                    <th>Almacenamiento</th>
+                    <th>Acceso</th>
+                    <th class="text-center invdpm-col-acciones">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for it in items %}
+                  <tr>
+                    <td>{{ it.id }}</td>
+                    <td>{{ it.responsable_datos }}</td>
+                    <td>{{ it.naturaleza_datos }}</td>
+                    <td>{{ it.titular_datos }}</td>
+                    <td>{{ it.ubicacion_sistema_datos }}</td>
+                    <td>{{ it.pais_almacenamiento }}</td>
+                    <td>{{ it.pais_acceso }}</td>
+                    <td class="text-center invdpm-col-acciones">
+                      <div class="invdpm-actions-wrap">
+                        <a href="{{ url_for('inventario_datos_personales_detalle', id=it.id) }}"
+                           class="btn btn-info btn-sm text-white rounded-pill invdpm-btn-action">
+                          Ver detalle
+                        </a>
+
+                        {% if not read_only %}
+                          <a href="{{ url_for('inventario_datos_personales_edit', id=it.id) }}"
+                             class="btn btn-primary btn-sm rounded-pill invdpm-btn-action">
+                            Editar
+                          </a>
+
+                          <a href="{{ url_for('inventario_datos_personales_delete', id=it.id) }}"
+                             class="btn btn-danger btn-sm rounded-pill invdpm-btn-action"
+                             onclick="return confirm('¿Eliminar este registro de inventario de datos personales?');">
+                            Eliminar
+                          </a>
+                        {% else %}
+                          <span class="badge bg-secondary">Solo lectura</span>
+                        {% endif %}
+                      </div>
+                    </td>
+                  </tr>
+                  {% else %}
+                  <tr>
+                    <td colspan="8" class="text-center py-4 text-muted">
+                      No hay registros creados.
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .invdpm-shell{
+        width:96%;
+        max-width:1500px;
+        margin:10px auto 24px auto;
+      }
+
+      .invdpm-header-card{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .invdpm-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .invdpm-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent;
+        padding:0;
+        position:relative;
+        z-index:1;
+      }
+
+      .invdpm-header-overlay::before{
+        content:"🗂️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .invdpm-header-text{
+        max-width:1100px;
+        width:100%;
+      }
+
+      .invdpm-header-text::before{
+        content:"SGSI · Matriz de Datos Personales";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#fff;
+      }
+
+      .invdpm-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .invdpm-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .invdpm-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .invdpm-header-actions .btn{
+        border-radius:10px !important;
+        min-height:38px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invdpm-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invdpm-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .invdpm-card{
+        background:rgba(255,255,255,.96);
+        border:none;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .invdpm-topbar{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:12px;
+        padding:14px 16px 0 16px;
+        flex-wrap:wrap;
+      }
+
+      .invdpm-top-title{
+        color:#0f172a;
+        font-weight:950;
+        font-size:.92rem;
+      }
+
+      .invdpm-top-note{
+        color:#64748b;
+        font-size:.78rem;
+      }
+
+      .invdpm-counter-badge{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        color:#fff;
+        font-weight:900;
+        border-radius:999px;
+        padding:7px 14px;
+        font-size:.78rem;
+        box-shadow:0 8px 16px rgba(15,23,42,.16);
+      }
+
+      .invdpm-card-body{
+        padding:12px 16px 16px 16px;
+      }
+
+      .invdpm-table-wrap{
+        max-height:70vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#fff;
+      }
+
+      .invdpm-table{
+        min-width:1300px;
+        table-layout:fixed;
+        margin-bottom:0;
+      }
+
+      .invdpm-table thead th{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff;
+        font-weight:900;
+        text-align:center;
+        vertical-align:middle;
+        white-space:nowrap;
+      }
+
+      .invdpm-table td,
+      .invdpm-table th{
+        vertical-align:middle;
+        font-size:.78rem;
+        padding:9px 8px;
+        white-space:normal;
+        word-break:break-word;
+        overflow-wrap:anywhere;
+      }
+
+      .invdpm-table td{
+        border-bottom:1px solid #e5edf7;
+      }
+
+      .invdpm-table tbody tr:nth-child(even){
+        background:#f8fbff;
+      }
+
+      .invdpm-table tbody tr:hover{
+        background:#eef6ff;
+      }
+
+      .invdpm-col-acciones{
+        min-width:180px;
+        width:180px;
+      }
+
+      .invdpm-actions-wrap{
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+        align-items:center;
+        justify-content:center;
+      }
+
+      .invdpm-btn-action{
+        min-width:105px;
+        max-width:120px;
+        font-size:.70rem !important;
+        padding:4px 12px !important;
+        line-height:1.2;
+        text-align:center;
+        white-space:nowrap;
+        border-radius:999px !important;
+        font-weight:900;
+      }
+
+      @media (max-width:992px){
+        .invdpm-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .invdpm-header-card{
+          min-height:88px;
+        }
+
+        .invdpm-title{
+          font-size:1.20rem;
+        }
+
+        .invdpm-card-body{
+          padding:12px;
+        }
+
+        .invdpm-topbar{
+          padding:12px 14px 0 14px;
+        }
+      }
+
+      @media (max-width:768px){
+        .invdpm-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .invdpm-header-overlay::before{
+          margin:0;
+        }
+
+        .invdpm-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """, items=items, read_only=read_only)
+
+    return render_template_string(BASE, content=Markup(html))
+
+# =========================
+# Detalle — Inventario de Datos Personales
+# =========================
+@app.route('/inventario_datos_personales/detalle/<int:id>', methods=['GET'])
+@login_required
+def inventario_datos_personales_detalle(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role not in ('admin', 'auditor') and not verificar_permiso(user, "Gestión de Activos de Información"):
+        flash("No tiene permiso para ver el detalle de datos personales.", "danger")
+        return redirect(url_for('inventario_datos_personales'))
+
+    read_only = (user.role == 'auditor')
+    item = InventarioDatosPersonales.query.get_or_404(id)
+
+    html = render_template_string("""
+    <div class="invdpd-shell">
+
+      <div class="invdpd-header-card">
+        <div class="invdpd-header-overlay">
+          <div class="invdpd-header-text">
+            <h3 class="invdpd-title m-0">Detalle — Inventario de Datos Personales</h3>
+            <div class="invdpd-subtitle">
+              Consulta completa del registro en modo solo lectura
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="invdpd-header-actions">
+        <a href="{{ url_for('inventario_datos_personales') }}"
+           class="btn rounded-pill px-4 fw-bold invdpd-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+
+
+        {% if not read_only %}
+          <a href="{{ url_for('inventario_datos_personales_edit', id=item.id) }}"
+             class="btn btn-warning rounded-pill px-4 fw-bold">
+            Editar
+          </a>
+        {% endif %}
+      </div>
+
+      <div class="row g-3">
+        <div class="col-lg-6">
+          <div class="invdpd-card h-100">
+            <div class="invdpd-card-title">Información general</div>
+            <div class="invdpd-body">
+              <div><strong>Responsable de los datos:</strong> {{ item.responsable_datos or '-' }}</div>
+              <div><strong>Naturaleza de los datos:</strong> {{ item.naturaleza_datos }}</div>
+              <div><strong>Ubicación del sistema de datos:</strong> {{ item.ubicacion_sistema_datos }}</div>
+              <div><strong>Titular de los datos:</strong> {{ item.titular_datos }}</div>
+              <div><strong>Sitio web asociado:</strong> {{ item.sitio_web_asociado or '-' }}</div>
+              <div><strong>Fuente de los datos:</strong> {{ item.fuente_datos }}</div>
+              <div><strong>Administrador del sistema:</strong> {{ item.administrador_sistema }}</div>
+              <div><strong>Alcance de los datos:</strong> {{ item.alcance_datos or '-' }}</div>
+              <div><strong>Formato de la información:</strong> {{ item.formato_informacion or '-' }}</div>
+              <div><strong>Propósito y uso de los datos:</strong> {{ item.proposito_uso_datos }}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-lg-6">
+          <div class="invdpd-card h-100">
+            <div class="invdpd-card-title">Privacidad y tratamiento</div>
+            <div class="invdpd-body">
+              <div><strong>País de almacenamiento:</strong> {{ item.pais_almacenamiento }}</div>
+              <div><strong>País de acceso:</strong> {{ item.pais_acceso }}</div>
+              <div><strong>Transferencia fuera de la compañía:</strong> {{ item.transferencia_fuera_compania }}</div>
+              <div><strong>Política de retención:</strong> {{ item.politica_retencion or '-' }}</div>
+              <div><strong>Política de privacidad:</strong> {{ item.politica_privacidad or '-' }}</div>
+              <div><strong>¿Se solicita consentimiento?:</strong> {{ item.solicita_consentimiento }}</div>
+              <div><strong>Seguridad — ¿Quién tiene acceso?:</strong> {{ item.seguridad_quien_tiene_acceso }}</div>
+              <div><strong>Consentimiento disponible del titular:</strong> {{ item.consentimiento_titular_disponible }}</div>
+              <div><strong>Notas:</strong> {{ item.notas or '-' }}</div>
+              <div><strong>Recomendación:</strong> {{ item.recomendacion or '-' }}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12">
+          <div class="invdpd-card">
+            <div class="invdpd-card-title">Elementos de datos</div>
+            <div class="invdpd-body">
+              <div class="row g-3">
+                <div class="col-md-3"><strong>Nombre:</strong> {{ item.dato_nombre }}</div>
+                <div class="col-md-3"><strong>Teléfono:</strong> {{ item.dato_telefono }}</div>
+                <div class="col-md-3"><strong>Dirección:</strong> {{ item.dato_direccion }}</div>
+                <div class="col-md-3"><strong>Número identificación:</strong> {{ item.dato_numero_identificacion }}</div>
+                <div class="col-md-3"><strong>Fecha de nacimiento:</strong> {{ item.dato_fecha_nacimiento }}</div>
+                <div class="col-md-3"><strong>Licencia de conducción:</strong> {{ item.dato_licencia_conduccion }}</div>
+                <div class="col-md-3"><strong>Pasaporte / visa:</strong> {{ item.dato_pasaporte_visa }}</div>
+                <div class="col-md-3"><strong>Dato sensible:</strong> {{ item.dato_sensible }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .invdpd-shell{
+        width:96%;
+        max-width:1400px;
+        margin:10px auto 24px auto;
+      }
+
+      /* =========================
+         HEADER SGSI MODERNO
+      ========================= */
+      .invdpd-header-card{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .invdpd-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .invdpd-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        position:relative;
+        z-index:1;
+      }
+
+      .invdpd-header-overlay::before{
+        content:"📄";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.4rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .invdpd-header-text{
+        max-width:1100px;
+        width:100%;
+      }
+
+      .invdpd-header-text::before{
+        content:"SGSI · Detalle de Datos Personales";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#fff;
+      }
+
+      .invdpd-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .invdpd-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      /* =========================
+         BOTONES
+      ========================= */
+      .invdpd-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .invdpd-header-actions .btn{
+        border-radius:10px !important;
+        min-height:38px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invdpd-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invdpd-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      /* =========================
+         CARD DETALLE
+      ========================= */
+      .invdpd-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .invdpd-card-title{
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1);
+        color:#ffffff;
+        font-weight:900;
+        font-size:.90rem;
+        padding:12px 16px;
+        letter-spacing:.3px;
+      }
+
+      .invdpd-body{
+        padding:18px;
+        color:#334155;
+        font-size:.85rem;
+        line-height:1.5;
+      }
+
+      .invdpd-body > div{
+        margin-bottom:10px;
+        padding:10px 12px;
+        background:#f8fbff;
+        border-radius:10px;
+        border:1px solid #e3edf7;
+      }
+
+      /* =========================
+         RESPONSIVE
+      ========================= */
+      @media (max-width:992px){
+        .invdpd-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .invdpd-header-card{
+          min-height:88px;
+        }
+
+        .invdpd-title{
+          font-size:1.20rem;
+        }
+
+        .invdpd-body{
+          padding:14px;
+        }
+      }
+
+      @media (max-width:768px){
+        .invdpd-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .invdpd-header-overlay::before{
+          margin:0;
+        }
+
+        .invdpd-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """, item=item, read_only=read_only)
+
+    return render_template_string(BASE, content=Markup(html))
+
+
+# =========================
+# Editar — Inventario de Datos Personales
+# =========================
+@app.route('/inventario_datos_personales/edit/<int:id>', methods=['GET', 'POST'])
+@login_required
+def inventario_datos_personales_edit(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede editar registros.", "danger")
+        return redirect(url_for('inventario_datos_personales'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
+        flash("No tiene permiso para editar registros de datos personales.", "danger")
+        return redirect(url_for('inventario_datos_personales'))
+
+    item = InventarioDatosPersonales.query.get_or_404(id)
+    paises = sorted([c.name for c in pycountry.countries])
+
+    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
+
+    divisiones = []
+    if item.area_id:
+        divisiones = (
+            DivisionEmpresa.query
+            .filter_by(area_id=item.area_id)
+            .order_by(DivisionEmpresa.nombre_division.asc())
+            .all()
+        )
+
+    if request.method == 'POST':
+        item.area_id = request.form.get('area_id', type=int)
+        item.division_id = request.form.get('division_id', type=int)
+
+        item.naturaleza_datos = (request.form.get('naturaleza_datos') or "").strip()
+        item.ubicacion_sistema_datos = (request.form.get('ubicacion_sistema_datos') or "").strip()
+        item.titular_datos = (request.form.get('titular_datos') or "").strip()
+        item.sitio_web_asociado = (request.form.get('sitio_web_asociado') or "").strip()
+
+        item.fuente_datos = (request.form.get('fuente_datos') or "").strip()
+        item.administrador_sistema = (request.form.get('administrador_sistema') or "").strip()
+        item.alcance_datos = (request.form.get('alcance_datos') or "").strip()
+        item.formato_informacion = (request.form.get('formato_informacion') or "").strip()
+        item.proposito_uso_datos = (request.form.get('proposito_uso_datos') or "").strip()
+
+        item.pais_almacenamiento = (request.form.get('pais_almacenamiento') or "").strip()
+        item.pais_acceso = (request.form.get('pais_acceso') or "").strip()
+        item.transferencia_fuera_compania = request.form.get('transferencia_fuera_compania') or "No"
+        item.politica_retencion = (request.form.get('politica_retencion') or "").strip()
+        item.politica_privacidad = (request.form.get('politica_privacidad') or "").strip()
+        item.solicita_consentimiento = request.form.get('solicita_consentimiento') or "No"
+
+        item.notas = (request.form.get('notas') or "").strip()
+        item.recomendacion = (request.form.get('recomendacion') or "").strip()
+        item.seguridad_quien_tiene_acceso = (request.form.get('seguridad_quien_tiene_acceso') or "").strip()
+        item.consentimiento_titular_disponible = request.form.get('consentimiento_titular_disponible') or "No"
+
+        item.dato_nombre = request.form.get('dato_nombre') or "No"
+        item.dato_telefono = request.form.get('dato_telefono') or "No"
+        item.dato_direccion = request.form.get('dato_direccion') or "No"
+        item.dato_numero_identificacion = request.form.get('dato_numero_identificacion') or "No"
+        item.dato_fecha_nacimiento = request.form.get('dato_fecha_nacimiento') or "No"
+        item.dato_licencia_conduccion = request.form.get('dato_licencia_conduccion') or "No"
+        item.dato_pasaporte_visa = request.form.get('dato_pasaporte_visa') or "No"
+        item.dato_sensible = request.form.get('dato_sensible') or "No"
+
+        area = AreaEmpresa.query.get(item.area_id) if item.area_id else None
+        division = DivisionEmpresa.query.get(item.division_id) if item.division_id else None
+
+        item.responsable_datos = ""
+        if area:
+            item.responsable_datos = area.area
+        if division:
+            item.responsable_datos = f"{item.responsable_datos} / {division.nombre_division}"
+
+        if not (
+            item.area_id and item.naturaleza_datos and item.ubicacion_sistema_datos and
+            item.titular_datos and item.fuente_datos and item.administrador_sistema and
+            item.proposito_uso_datos and item.pais_almacenamiento and item.pais_acceso and
+            item.seguridad_quien_tiene_acceso
+        ):
+            flash("Complete los campos obligatorios del inventario de datos personales.", "danger")
+            return redirect(url_for('inventario_datos_personales_edit', id=item.id))
+
+        db.session.commit()
+        flash("Registro de inventario de datos personales actualizado.", "success")
+        return redirect(url_for('inventario_datos_personales_detalle', id=item.id))
+
+    html = """
+    <div class="invdpe-shell">
+
+      <div class="invdpe-header-card">
+        <div class="invdpe-header-overlay">
+          <div class="invdpe-header-text">
+            <h3 class="invdpe-title m-0">Editar — Inventario de Datos Personales</h3>
+            <div class="invdpe-subtitle">
+              Modificación del registro #{{ item.id }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="invdpe-header-actions">
+        <a href="{{ url_for('inventario_datos_personales') }}"
+           class="btn rounded-pill px-4 fw-bold invdpe-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+
+        <a href="{{ url_for('inventario_datos_personales_detalle', id=item.id) }}"
+           class="btn rounded-pill px-4 fw-bold invdpe-back-btn">
+          🔎 Volver al Detalle
+        </a>
+
+      </div>
+
+      <div class="invdpe-card">
+        <div class="invdpe-card-body">
+          <form method="post">
+            <div class="row g-3">
+
+              <div class="col-md-8">
+                <label class="form-label">Responsable de los datos</label>
+
+                <div class="row g-2">
+                  <div class="col-md-6">
+                    <select name="area_id" id="area_id" class="form-select" required>
+                      <option value="">-- Seleccione Área --</option>
+                      {% for a in areas %}
+                        <option value="{{ a.id }}" {% if item.area_id == a.id %}selected{% endif %}>
+                          {{ a.area }}
+                        </option>
+                      {% endfor %}
+                    </select>
+                  </div>
+
+                  <div class="col-md-6">
+                    <select name="division_id" id="division_id" class="form-select">
+                      <option value="" {% if not item.division_id %}selected{% endif %}>Todas las divisiones</option>
+                      {% for d in divisiones %}
+                        <option value="{{ d.id }}" {% if item.division_id == d.id %}selected{% endif %}>
+                          {{ d.nombre_division }}
+                        </option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                </div>
+
+                <small class="text-muted">Seleccione el área y, si aplica, la división responsable de los datos.</small>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Titular de los datos</label>
+                <input type="text" name="titular_datos" class="form-control" value="{{ item.titular_datos or '' }}" required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Ubicación del sistema de datos</label>
+                <input type="text" name="ubicacion_sistema_datos" class="form-control" value="{{ item.ubicacion_sistema_datos or '' }}" placeholder="Ej. SAP, CRM, ERP" required>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Naturaleza de los datos</label>
+                <textarea name="naturaleza_datos" class="form-control" rows="2" required>{{ item.naturaleza_datos or '' }}</textarea>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Sitio web asociado</label>
+                <textarea name="sitio_web_asociado" class="form-control" rows="2">{{ item.sitio_web_asociado or '' }}</textarea>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Fuente de los datos</label>
+                <input type="text" name="fuente_datos" class="form-control" value="{{ item.fuente_datos or '' }}" required>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Administrador del sistema</label>
+                <input type="text" name="administrador_sistema" class="form-control" value="{{ item.administrador_sistema or '' }}" required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Formato de la información</label>
+                <select name="formato_informacion" class="form-select">
+                  <option value="">-- Seleccione --</option>
+                  <option value="Digital" {% if item.formato_informacion == 'Digital' %}selected{% endif %}>Digital</option>
+                  <option value="Físico" {% if item.formato_informacion == 'Físico' %}selected{% endif %}>Físico</option>
+                  <option value="Mixto" {% if item.formato_informacion == 'Mixto' %}selected{% endif %}>Mixto</option>
+                </select>
+              </div>
+
+              <div class="col-md-8">
+                <label class="form-label">Alcance de los datos</label>
+                <textarea name="alcance_datos" class="form-control" rows="2">{{ item.alcance_datos or '' }}</textarea>
+              </div>
+
+              <div class="col-md-12">
+                <label class="form-label">Propósito y uso de los datos</label>
+                <textarea name="proposito_uso_datos" class="form-control" rows="2" required>{{ item.proposito_uso_datos or '' }}</textarea>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">¿Dónde se almacenan los datos?</label>
+                <select name="pais_almacenamiento" class="form-select" required>
+                  <option value="">-- Seleccione país --</option>
+                  {% for p in paises %}
+                    <option value="{{ p }}" {% if item.pais_almacenamiento == p %}selected{% endif %}>{{ p }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">¿Dónde se accede a los datos?</label>
+                <select name="pais_acceso" class="form-select" required>
+                  <option value="">-- Seleccione país --</option>
+                  {% for p in paises %}
+                    <option value="{{ p }}" {% if item.pais_acceso == p %}selected{% endif %}>{{ p }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Transferencia de datos fuera de la compañía</label>
+                <select name="transferencia_fuera_compania" class="form-select">
+                  <option value="No" {% if item.transferencia_fuera_compania == 'No' %}selected{% endif %}>No</option>
+                  <option value="Sí" {% if item.transferencia_fuera_compania == 'Sí' %}selected{% endif %}>Sí</option>
+                </select>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Política de retención</label>
+                <input type="text" name="politica_retencion" class="form-control" value="{{ item.politica_retencion or '' }}" placeholder="Ubicación de la política y años de retención">
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">¿Política de privacidad?</label>
+                <textarea name="politica_privacidad" class="form-control" rows="2">{{ item.politica_privacidad or '' }}</textarea>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">¿Se solicita consentimiento?</label>
+                <select name="solicita_consentimiento" class="form-select">
+                  <option value="No" {% if item.solicita_consentimiento == 'No' %}selected{% endif %}>No</option>
+                  <option value="Sí" {% if item.solicita_consentimiento == 'Sí' %}selected{% endif %}>Sí</option>
+                </select>
+              </div>
+
+              <div class="col-md-8">
+                <label class="form-label">Seguridad — ¿Quién tiene acceso?</label>
+                <input type="text" name="seguridad_quien_tiene_acceso" class="form-control" value="{{ item.seguridad_quien_tiene_acceso or '' }}" required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">¿Existe consentimiento disponible del titular?</label>
+                <select name="consentimiento_titular_disponible" class="form-select">
+                  <option value="No" {% if item.consentimiento_titular_disponible == 'No' %}selected{% endif %}>No</option>
+                  <option value="Sí" {% if item.consentimiento_titular_disponible == 'Sí' %}selected{% endif %}>Sí</option>
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Notas</label>
+                <textarea name="notas" class="form-control" rows="2">{{ item.notas or '' }}</textarea>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Recomendación</label>
+                <textarea name="recomendacion" class="form-control" rows="2">{{ item.recomendacion or '' }}</textarea>
+              </div>
+
+              <div class="col-12 mt-4">
+                <div class="invdpe-section-title">Elementos de datos</div>
+              </div>
+
+              {% set yn_fields = [
+                ('dato_nombre', 'Nombre'),
+                ('dato_telefono', 'Teléfono'),
+                ('dato_direccion', 'Dirección'),
+                ('dato_numero_identificacion', 'Número del Documento de Identificación'),
+                ('dato_fecha_nacimiento', 'Fecha de nacimiento'),
+                ('dato_licencia_conduccion', 'Número de licencia de conducción'),
+                ('dato_pasaporte_visa', 'Información de pasaporte / visa'),
+                ('dato_sensible', 'Datos sensibles')
+              ] %}
+
+              {% for field, label in yn_fields %}
+              <div class="col-md-3">
+                <label class="form-label">{{ label }}</label>
+                <select name="{{ field }}" class="form-select">
+                  <option value="No" {% if item[field] == 'No' %}selected{% endif %}>No</option>
+                  <option value="Sí" {% if item[field] == 'Sí' %}selected{% endif %}>Sí</option>
+                </select>
+              </div>
+              {% endfor %}
+
+            </div>
+
+            <div class="invdpe-bottom-actions">
+              <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold">
+                Guardar cambios
+              </button>
+
+              <a href="{{ url_for('inventario_datos_personales_detalle', id=item.id) }}"
+                 class="btn rounded-pill px-4 fw-bold invdpe-cancel-btn">
+                Cancelar
+              </a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const areaSel = document.getElementById('area_id');
+      const divSel = document.getElementById('division_id');
+      const divisionActual = "{{ item.division_id or '' }}";
+
+      if (!areaSel || !divSel) return;
+
+      areaSel.addEventListener('change', async function () {
+        const areaId = this.value;
+        divSel.innerHTML = '<option value="">Todas las divisiones</option>';
+
+        if (!areaId) return;
+
+        try {
+          const resp = await fetch(`/areas/${areaId}/divisiones_json`);
+          const data = await resp.json();
+
+          (data.divisiones || []).forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d.id;
+            opt.textContent = d.nombre;
+            if (String(d.id) === String(divisionActual)) {
+              opt.selected = true;
+            }
+            divSel.appendChild(opt);
+          });
+        } catch (e) {
+          console.error('Error cargando divisiones:', e);
+        }
+      });
+    });
+    </script>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .invdpe-shell{
+        width:96%;
+        max-width:1400px;
+        margin:10px auto 24px auto;
+      }
+
+      .invdpe-header-card{
+        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .invdpe-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .invdpe-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent;
+        padding:0;
+        position:relative;
+        z-index:1;
+      }
+
+      .invdpe-header-overlay::before{
+        content:"✏️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#1459a6;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .invdpe-header-text{
+        max-width:1100px;
+        width:100%;
+      }
+
+      .invdpe-header-text::before{
+        content:"SGSI · Edición Datos Personales";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#fff;
+      }
+
+      .invdpe-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .invdpe-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .invdpe-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .invdpe-header-actions .btn{
+        border-radius:10px !important;
+        min-height:38px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invdpe-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invdpe-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .invdpe-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .invdpe-card-body{
+        padding:18px;
+      }
+
+      .invdpe-card .form-label{
+        font-weight:800;
+        color:#25324a;
+        margin-bottom:4px;
+        font-size:.78rem;
+      }
+
+      .invdpe-card .form-control,
+      .invdpe-card .form-select{
+        border-radius:9px;
+        border:1px solid #d9e3f0;
+        min-height:38px;
+        font-size:.80rem;
+        background:#f8fafc;
+      }
+
+      .invdpe-card textarea.form-control{
+        min-height:70px;
+        resize:vertical;
+      }
+
+      .invdpe-card .form-control:focus,
+      .invdpe-card .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
+        background:#fff;
+      }
+
+      .invdpe-section-title{
+        font-weight:950;
+        font-size:.88rem;
+        color:#1459a6;
+        padding:9px 12px;
+        border-radius:12px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        margin:10px 0 10px;
+      }
+
+      .invdpe-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        margin-top:18px;
+        flex-wrap:wrap;
+      }
+
+      .invdpe-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:38px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invdpe-cancel-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invdpe-cancel-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      @media (max-width:992px){
+        .invdpe-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .invdpe-header-card{
+          min-height:88px;
+        }
+
+        .invdpe-title{
+          font-size:1.20rem;
+        }
+
+        .invdpe-card-body{
+          padding:14px;
+        }
+      }
+
+      @media (max-width:768px){
+        .invdpe-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .invdpe-header-overlay::before{
+          margin:0;
+        }
+
+        .invdpe-header-actions .btn,
+        .invdpe-bottom-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+
+    return render_template_string(
+        BASE,
+        content=Markup(render_template_string(
+            html,
+            item=item,
+            paises=paises,
+            areas=areas,
+            divisiones=divisiones
+        ))
+    )
+
+
+# =========================
+# Eliminar — Inventario de Datos Personales
+# =========================
+@app.route('/inventario_datos_personales/delete/<int:id>', methods=['GET'])
+@login_required
+def inventario_datos_personales_delete(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar registros.", "danger")
+        return redirect(url_for('inventario_datos_personales'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
+        flash("No tiene permiso para eliminar registros de datos personales.", "danger")
+        return redirect(url_for('inventario_datos_personales'))
+
+    item = InventarioDatosPersonales.query.get_or_404(id)
+    db.session.delete(item)
+    db.session.commit()
+
+    flash("Registro de inventario de datos personales eliminado.", "success")
+    return redirect(url_for('inventario_datos_personales'))
 
 # =========================
 # Menú Activos Valoración (ESTILO UNIFICADO)
@@ -47500,6 +49539,12 @@ def inventario_fisico_delete(id):
 @app.route('/activos_valoracion')
 @login_required
 def activos_valoracion():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role != 'admin' and not verificar_permiso_activos(user, "Tablas de Valoración"):
+        flash("No tiene permiso para acceder a Tablas de Valoración.", "danger")
+        return redirect(url_for('menu'))
+    
     html = render_template_string("""
     <div class="menu-wrap">
 
@@ -50020,2025 +52065,6 @@ def valor_criticidad_activo_delete():
         flash("Registro no encontrado.", "danger")
     return redirect(url_for('valor_criticidad_activo'))
 
-# ====================================
-# Inventario de Datos Personales
-# ====================================
-
-class InventarioDatosPersonales(db.Model):
-    __tablename__ = "inventario_datos_personales"
-
-    id = db.Column(db.Integer, primary_key=True)
-
-    responsable_datos = db.Column(db.String(255), nullable=False)
-
-    area_id = db.Column(db.Integer, nullable=True)
-    division_id = db.Column(db.Integer, nullable=True)
-
-    naturaleza_datos = db.Column(db.Text, nullable=False)
-    ubicacion_sistema_datos = db.Column(db.String(255), nullable=False)
-    titular_datos = db.Column(db.String(200), nullable=False)
-    sitio_web_asociado = db.Column(db.Text)
-
-    fuente_datos = db.Column(db.String(255), nullable=False)
-    administrador_sistema = db.Column(db.String(255), nullable=False)
-    alcance_datos = db.Column(db.Text)
-    formato_informacion = db.Column(db.String(150))
-    proposito_uso_datos = db.Column(db.Text, nullable=False)
-
-    pais_almacenamiento = db.Column(db.String(120), nullable=False)
-    pais_acceso = db.Column(db.String(120), nullable=False)
-
-    transferencia_fuera_compania = db.Column(db.String(2), default="No")
-    politica_retencion = db.Column(db.String(255))
-    politica_privacidad = db.Column(db.Text)
-    solicita_consentimiento = db.Column(db.String(2), default="No")
-
-    notas = db.Column(db.Text)
-    recomendacion = db.Column(db.Text)
-    seguridad_quien_tiene_acceso = db.Column(db.String(255), nullable=False)
-    consentimiento_titular_disponible = db.Column(db.String(2), default="No")
-
-    dato_nombre = db.Column(db.String(2), default="No")
-    dato_telefono = db.Column(db.String(2), default="No")
-    dato_direccion = db.Column(db.String(2), default="No")
-    dato_numero_identificacion = db.Column(db.String(2), default="No")
-    dato_fecha_nacimiento = db.Column(db.String(2), default="No")
-    dato_licencia_conduccion = db.Column(db.String(2), default="No")
-    dato_pasaporte_visa = db.Column(db.String(2), default="No")
-    dato_sensible = db.Column(db.String(2), default="No")
-
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    def __repr__(self):
-        return f"<InventarioDatosPersonales {self.id} - {self.responsable_datos}>"
-
-# =========================
-# ENTRADA DIRECTA — Inventario de Datos Personales
-# =========================
-@app.route('/inventario_datos_personales_menu')
-@login_required
-def inventario_datos_personales_menu():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role not in ('admin', 'auditor') and not verificar_permiso(user, "Gestión de Activos de Información"):
-        flash("No tiene permiso para acceder al módulo de inventario de datos personales.", "danger")
-        return redirect(url_for('activos_menu'))
-
-    return redirect(url_for('inventario_datos_personales'))
-
-
-# =========================
-# Agregar — Inventario de Datos Personales
-# =========================
-@app.route('/inventario_datos_personales/new', methods=['GET', 'POST'])
-@login_required
-def inventario_datos_personales_new():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede agregar registros.", "danger")
-        return redirect(url_for('inventario_datos_personales'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
-        flash("No tiene permiso para agregar registros de datos personales.", "danger")
-        return redirect(url_for('inventario_datos_personales'))
-
-    paises = sorted([c.name for c in pycountry.countries])
-    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
-
-    if request.method == 'POST':
-        area_id = request.form.get('area_id', type=int)
-        division_id = request.form.get('division_id', type=int)
-
-        naturaleza_datos = (request.form.get('naturaleza_datos') or "").strip()
-        ubicacion_sistema_datos = (request.form.get('ubicacion_sistema_datos') or "").strip()
-        titular_datos = (request.form.get('titular_datos') or "").strip()
-        sitio_web_asociado = (request.form.get('sitio_web_asociado') or "").strip()
-
-        fuente_datos = (request.form.get('fuente_datos') or "").strip()
-        administrador_sistema = (request.form.get('administrador_sistema') or "").strip()
-        alcance_datos = (request.form.get('alcance_datos') or "").strip()
-        formato_informacion = (request.form.get('formato_informacion') or "").strip()
-        proposito_uso_datos = (request.form.get('proposito_uso_datos') or "").strip()
-
-        pais_almacenamiento = (request.form.get('pais_almacenamiento') or "").strip()
-        pais_acceso = (request.form.get('pais_acceso') or "").strip()
-        transferencia_fuera_compania = request.form.get('transferencia_fuera_compania') or "No"
-        politica_retencion = (request.form.get('politica_retencion') or "").strip()
-        politica_privacidad = (request.form.get('politica_privacidad') or "").strip()
-        solicita_consentimiento = request.form.get('solicita_consentimiento') or "No"
-
-        notas = (request.form.get('notas') or "").strip()
-        recomendacion = (request.form.get('recomendacion') or "").strip()
-        seguridad_quien_tiene_acceso = (request.form.get('seguridad_quien_tiene_acceso') or "").strip()
-        consentimiento_titular_disponible = request.form.get('consentimiento_titular_disponible') or "No"
-
-        dato_nombre = request.form.get('dato_nombre') or "No"
-        dato_telefono = request.form.get('dato_telefono') or "No"
-        dato_direccion = request.form.get('dato_direccion') or "No"
-        dato_numero_identificacion = request.form.get('dato_numero_identificacion') or "No"
-        dato_fecha_nacimiento = request.form.get('dato_fecha_nacimiento') or "No"
-        dato_licencia_conduccion = request.form.get('dato_licencia_conduccion') or "No"
-        dato_pasaporte_visa = request.form.get('dato_pasaporte_visa') or "No"
-        dato_sensible = request.form.get('dato_sensible') or "No"
-
-        area = AreaEmpresa.query.get(area_id) if area_id else None
-        division = DivisionEmpresa.query.get(division_id) if division_id else None
-
-        responsable_datos = ""
-        if area:
-            responsable_datos = area.area
-        if division:
-            responsable_datos = f"{responsable_datos} / {division.nombre_division}"
-
-        if not (
-            area_id and naturaleza_datos and ubicacion_sistema_datos and
-            titular_datos and fuente_datos and administrador_sistema and
-            proposito_uso_datos and pais_almacenamiento and pais_acceso and
-            seguridad_quien_tiene_acceso
-        ):
-            flash("Complete los campos obligatorios del inventario de datos personales.", "danger")
-            return redirect(url_for('inventario_datos_personales_new'))
-
-        item = InventarioDatosPersonales(
-            responsable_datos=responsable_datos,
-            area_id=area_id,
-            division_id=division_id,
-            naturaleza_datos=naturaleza_datos,
-            ubicacion_sistema_datos=ubicacion_sistema_datos,
-            titular_datos=titular_datos,
-            sitio_web_asociado=sitio_web_asociado,
-            fuente_datos=fuente_datos,
-            administrador_sistema=administrador_sistema,
-            alcance_datos=alcance_datos,
-            formato_informacion=formato_informacion,
-            proposito_uso_datos=proposito_uso_datos,
-            pais_almacenamiento=pais_almacenamiento,
-            pais_acceso=pais_acceso,
-            transferencia_fuera_compania=transferencia_fuera_compania,
-            politica_retencion=politica_retencion,
-            politica_privacidad=politica_privacidad,
-            solicita_consentimiento=solicita_consentimiento,
-            notas=notas,
-            recomendacion=recomendacion,
-            seguridad_quien_tiene_acceso=seguridad_quien_tiene_acceso,
-            consentimiento_titular_disponible=consentimiento_titular_disponible,
-            dato_nombre=dato_nombre,
-            dato_telefono=dato_telefono,
-            dato_direccion=dato_direccion,
-            dato_numero_identificacion=dato_numero_identificacion,
-            dato_fecha_nacimiento=dato_fecha_nacimiento,
-            dato_licencia_conduccion=dato_licencia_conduccion,
-            dato_pasaporte_visa=dato_pasaporte_visa,
-            dato_sensible=dato_sensible
-        )
-        db.session.add(item)
-        db.session.commit()
-
-        flash("Registro de inventario de datos personales creado.", "success")
-        return redirect(url_for('inventario_datos_personales'))
-
-    html = """
-    <div class="invdp-shell">
-
-      <div class="invdp-header-card">
-        <div class="invdp-header-overlay">
-          <div class="invdp-header-text">
-            <h3 class="invdp-title m-0">Registro — Inventario de Datos Personales</h3>
-            <div class="invdp-subtitle">
-              Registro de sistemas, tratamientos, acceso, transferencia y elementos de datos personales
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="invdp-header-actions">
-        <a href="{{ url_for('inventario_datos_personales') }}"
-           class="btn rounded-pill px-4 fw-bold invdp-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-
-        
-      </div>
-
-      <div class="invdp-card">
-        <div class="invdp-card-body">
-          <form method="post">
-            <div class="row g-3">
-
-              <div class="col-md-8">
-                <label class="form-label">Responsable de los datos</label>
-
-                <div class="row g-2">
-                  <div class="col-md-6">
-                    <select name="area_id" id="area_id" class="form-select" required>
-                      <option value="">-- Seleccione Área --</option>
-                      {% for a in areas %}
-                        <option value="{{ a.id }}">{{ a.area }}</option>
-                      {% endfor %}
-                    </select>
-                  </div>
-
-                  <div class="col-md-6">
-                    <select name="division_id" id="division_id" class="form-select">
-                      <option value="">Todas las divisiones</option>
-                    </select>
-                  </div>
-                </div>
-
-                <small class="text-muted">Seleccione el área y, si aplica, la división responsable de los datos.</small>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Titular de los datos</label>
-                <input type="text" name="titular_datos" class="form-control" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Ubicación del sistema de datos</label>
-                <input type="text" name="ubicacion_sistema_datos" class="form-control" placeholder="Ej. SAP, CRM, ERP" required>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Naturaleza de los datos</label>
-                <textarea name="naturaleza_datos" class="form-control" rows="2" required></textarea>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Sitio web asociado</label>
-                <textarea name="sitio_web_asociado" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Fuente de los datos</label>
-                <input type="text" name="fuente_datos" class="form-control" required>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Administrador del sistema</label>
-                <input type="text" name="administrador_sistema" class="form-control" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Formato de la información</label>
-                <select name="formato_informacion" class="form-select">
-                  <option value="">-- Seleccione --</option>
-                  <option value="Digital">Digital</option>
-                  <option value="Físico">Físico</option>
-                  <option value="Mixto">Mixto</option>
-                </select>
-              </div>
-
-              <div class="col-md-8">
-                <label class="form-label">Alcance de los datos</label>
-                <textarea name="alcance_datos" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Propósito y uso de los datos</label>
-                <textarea name="proposito_uso_datos" class="form-control" rows="2" required></textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">¿Dónde se almacenan los datos?</label>
-                <select name="pais_almacenamiento" class="form-select" required>
-                  <option value="">-- Seleccione país --</option>
-                  {% for p in paises %}
-                    <option value="{{ p }}">{{ p }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">¿Dónde se accede a los datos?</label>
-                <select name="pais_acceso" class="form-select" required>
-                  <option value="">-- Seleccione país --</option>
-                  {% for p in paises %}
-                    <option value="{{ p }}">{{ p }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Transferencia de datos fuera de la compañía</label>
-                <select name="transferencia_fuera_compania" class="form-select">
-                  <option value="No">No</option>
-                  <option value="Sí">Sí</option>
-                </select>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Política de retención</label>
-                <input type="text" name="politica_retencion" class="form-control" placeholder="Ubicación de la política y años de retención">
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">¿Política de privacidad?</label>
-                <textarea name="politica_privacidad" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">¿Se solicita consentimiento?</label>
-                <select name="solicita_consentimiento" class="form-select">
-                  <option value="No">No</option>
-                  <option value="Sí">Sí</option>
-                </select>
-              </div>
-
-              <div class="col-md-8">
-                <label class="form-label">Seguridad — ¿Quién tiene acceso?</label>
-                <input type="text" name="seguridad_quien_tiene_acceso" class="form-control" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">¿Existe consentimiento disponible del titular?</label>
-                <select name="consentimiento_titular_disponible" class="form-select">
-                  <option value="No">No</option>
-                  <option value="Sí">Sí</option>
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Notas</label>
-                <textarea name="notas" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Recomendación</label>
-                <textarea name="recomendacion" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-12 mt-4">
-                <div class="invdp-section-title">Elementos de datos</div>
-              </div>
-
-              {% set yn_fields = [
-                ('dato_nombre', 'Nombre'),
-                ('dato_telefono', 'Teléfono'),
-                ('dato_direccion', 'Dirección'),
-                ('dato_numero_identificacion', 'Número del Documento de Identificación'),
-                ('dato_fecha_nacimiento', 'Fecha de nacimiento'),
-                ('dato_licencia_conduccion', 'Número de licencia de conducción'),
-                ('dato_pasaporte_visa', 'Información de pasaporte / visa'),
-                ('dato_sensible', 'Datos sensibles')
-              ] %}
-
-              {% for field, label in yn_fields %}
-              <div class="col-md-3">
-                <label class="form-label">{{ label }}</label>
-                <select name="{{ field }}" class="form-select">
-                  <option value="No">No</option>
-                  <option value="Sí">Sí</option>
-                </select>
-              </div>
-              {% endfor %}
-
-            </div>
-
-            <div class="invdp-bottom-actions">
-              <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold">
-                Guardar registro
-              </button>
-
-              <a href="{{ url_for('inventario_datos_personales') }}"
-                 class="btn rounded-pill px-4 fw-bold invdp-cancel-btn">
-                Cancelar
-              </a>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-
-    <script>
-    document.addEventListener('DOMContentLoaded', function () {
-      const areaSel = document.getElementById('area_id');
-      const divSel = document.getElementById('division_id');
-
-      if (!areaSel || !divSel) return;
-
-      areaSel.addEventListener('change', async function () {
-        const areaId = this.value;
-        divSel.innerHTML = '<option value="">Todas las divisiones</option>';
-
-        if (!areaId) return;
-
-        try {
-          const resp = await fetch(`/areas/${areaId}/divisiones_json`);
-          const data = await resp.json();
-
-          (data.divisiones || []).forEach(d => {
-            const opt = document.createElement('option');
-            opt.value = d.id;
-            opt.textContent = d.nombre;
-            divSel.appendChild(opt);
-          });
-        } catch (e) {
-          console.error('Error cargando divisiones:', e);
-        }
-      });
-    });
-    </script>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .invdp-shell{
-        width:96%;
-        max-width:1400px;
-        margin:10px auto 24px auto;
-      }
-
-      .invdp-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .invdp-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .invdp-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent;
-        padding:0;
-        position:relative;
-        z-index:1;
-      }
-
-      .invdp-header-overlay::before{
-        content:"🗂️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#1459a6;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .invdp-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .invdp-header-text::before{
-        content:"SGSI · Inventario de Datos Personales";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .invdp-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .invdp-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .invdp-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .invdp-header-actions .btn{
-        border-radius:10px !important;
-        min-height:38px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invdp-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invdp-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .invdp-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .invdp-card-body{
-        padding:18px;
-      }
-
-      .invdp-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .invdp-card .form-control,
-      .invdp-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:38px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .invdp-card textarea.form-control{
-        min-height:70px;
-        resize:vertical;
-      }
-
-      .invdp-card .form-control:focus,
-      .invdp-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#fff;
-      }
-
-      .invdp-section-title{
-        font-weight:950;
-        font-size:.88rem;
-        color:#1459a6;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin:10px 0 10px;
-      }
-
-      .invdp-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:18px;
-        flex-wrap:wrap;
-      }
-
-      .invdp-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:38px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invdp-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invdp-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      @media (max-width:992px){
-        .invdp-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .invdp-header-card{
-          min-height:88px;
-        }
-
-        .invdp-title{
-          font-size:1.20rem;
-        }
-
-        .invdp-card-body{
-          padding:14px;
-        }
-      }
-
-      @media (max-width:768px){
-        .invdp-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .invdp-header-overlay::before{
-          margin:0;
-        }
-
-        .invdp-header-actions .btn,
-        .invdp-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-
-    return render_template_string(
-        BASE,
-        content=Markup(render_template_string(html, paises=paises, areas=areas))
-    )
-
-
-# =========================
-# Matriz — Inventario de Datos Personales
-# =========================
-@app.route('/inventario_datos_personales', methods=['GET'])
-@login_required
-def inventario_datos_personales():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role not in ('admin', 'auditor') and not verificar_permiso(user, "Gestión de Activos de Información"):
-        flash("No tiene permiso para ver la matriz de datos personales.", "danger")
-        return redirect(url_for('menu'))
-
-    read_only = (user.role == 'auditor')
-
-    items = InventarioDatosPersonales.query.order_by(InventarioDatosPersonales.id.desc()).all()
-
-    html = render_template_string("""
-    <div class="invdpm-shell">
-
-      <div class="invdpm-header-card">
-        <div class="invdpm-header-overlay">
-          <div class="invdpm-header-text">
-            <h3 class="invdpm-title m-0">Matriz — Inventario de Datos Personales</h3>
-            <div class="invdpm-subtitle">
-              Visualización resumida de registros del inventario de datos personales
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="invdpm-header-actions">
-
-        {% if not read_only %}
-          <a href="{{ url_for('inventario_datos_personales_new') }}"
-             class="btn btn-primary rounded-pill px-4 fw-bold">
-            ➕ Agregar Registro
-          </a>
-        {% else %}
-          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
-            ➕ Agregar Registro
-          </button>
-        {% endif %}
-      </div>
-
-      <div class="invdpm-card">
-        <div class="invdpm-topbar">
-          <div>
-            <h5 class="invdpm-top-title mb-1">Resumen de activos de información</h5>
-            <div class="invdpm-top-note">
-              La matriz muestra únicamente los campos esenciales. Para consultar toda la información utilice el botón <strong>Ver detalle</strong>.
-            </div>
-          </div>
-
-          <div class="invdpm-counter-badge">
-            Total registros: {{ items|length }}
-          </div>
-        </div>
-
-        <div class="invdpm-card-body">
-          <div class="invdpm-table-wrap">
-            <div class="table-responsive">
-              <table class="table align-middle mb-0 invdpm-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Responsable</th>
-                    <th>Naturaleza de los datos</th>
-                    <th>Titular</th>
-                    <th>Sistema</th>
-                    <th>Almacenamiento</th>
-                    <th>Acceso</th>
-                    <th class="text-center invdpm-col-acciones">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for it in items %}
-                  <tr>
-                    <td>{{ it.id }}</td>
-                    <td>{{ it.responsable_datos }}</td>
-                    <td>{{ it.naturaleza_datos }}</td>
-                    <td>{{ it.titular_datos }}</td>
-                    <td>{{ it.ubicacion_sistema_datos }}</td>
-                    <td>{{ it.pais_almacenamiento }}</td>
-                    <td>{{ it.pais_acceso }}</td>
-                    <td class="text-center invdpm-col-acciones">
-                      <div class="invdpm-actions-wrap">
-                        <a href="{{ url_for('inventario_datos_personales_detalle', id=it.id) }}"
-                           class="btn btn-info btn-sm text-white rounded-pill invdpm-btn-action">
-                          Ver detalle
-                        </a>
-
-                        {% if not read_only %}
-                          <a href="{{ url_for('inventario_datos_personales_edit', id=it.id) }}"
-                             class="btn btn-primary btn-sm rounded-pill invdpm-btn-action">
-                            Editar
-                          </a>
-
-                          <a href="{{ url_for('inventario_datos_personales_delete', id=it.id) }}"
-                             class="btn btn-danger btn-sm rounded-pill invdpm-btn-action"
-                             onclick="return confirm('¿Eliminar este registro de inventario de datos personales?');">
-                            Eliminar
-                          </a>
-                        {% else %}
-                          <span class="badge bg-secondary">Solo lectura</span>
-                        {% endif %}
-                      </div>
-                    </td>
-                  </tr>
-                  {% else %}
-                  <tr>
-                    <td colspan="8" class="text-center py-4 text-muted">
-                      No hay registros creados.
-                    </td>
-                  </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .invdpm-shell{
-        width:96%;
-        max-width:1500px;
-        margin:10px auto 24px auto;
-      }
-
-      .invdpm-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .invdpm-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .invdpm-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent;
-        padding:0;
-        position:relative;
-        z-index:1;
-      }
-
-      .invdpm-header-overlay::before{
-        content:"🗂️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#1459a6;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .invdpm-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .invdpm-header-text::before{
-        content:"SGSI · Matriz de Datos Personales";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .invdpm-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .invdpm-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .invdpm-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .invdpm-header-actions .btn{
-        border-radius:10px !important;
-        min-height:38px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invdpm-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invdpm-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .invdpm-card{
-        background:rgba(255,255,255,.96);
-        border:none;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .invdpm-topbar{
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:12px;
-        padding:14px 16px 0 16px;
-        flex-wrap:wrap;
-      }
-
-      .invdpm-top-title{
-        color:#0f172a;
-        font-weight:950;
-        font-size:.92rem;
-      }
-
-      .invdpm-top-note{
-        color:#64748b;
-        font-size:.78rem;
-      }
-
-      .invdpm-counter-badge{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
-        color:#fff;
-        font-weight:900;
-        border-radius:999px;
-        padding:7px 14px;
-        font-size:.78rem;
-        box-shadow:0 8px 16px rgba(15,23,42,.16);
-      }
-
-      .invdpm-card-body{
-        padding:12px 16px 16px 16px;
-      }
-
-      .invdpm-table-wrap{
-        max-height:70vh;
-        overflow-y:auto;
-        overflow-x:auto;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:#fff;
-      }
-
-      .invdpm-table{
-        min-width:1300px;
-        table-layout:fixed;
-        margin-bottom:0;
-      }
-
-      .invdpm-table thead th{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#ffffff;
-        font-weight:900;
-        text-align:center;
-        vertical-align:middle;
-        white-space:nowrap;
-      }
-
-      .invdpm-table td,
-      .invdpm-table th{
-        vertical-align:middle;
-        font-size:.78rem;
-        padding:9px 8px;
-        white-space:normal;
-        word-break:break-word;
-        overflow-wrap:anywhere;
-      }
-
-      .invdpm-table td{
-        border-bottom:1px solid #e5edf7;
-      }
-
-      .invdpm-table tbody tr:nth-child(even){
-        background:#f8fbff;
-      }
-
-      .invdpm-table tbody tr:hover{
-        background:#eef6ff;
-      }
-
-      .invdpm-col-acciones{
-        min-width:180px;
-        width:180px;
-      }
-
-      .invdpm-actions-wrap{
-        display:flex;
-        flex-direction:column;
-        gap:6px;
-        align-items:center;
-        justify-content:center;
-      }
-
-      .invdpm-btn-action{
-        min-width:105px;
-        max-width:120px;
-        font-size:.70rem !important;
-        padding:4px 12px !important;
-        line-height:1.2;
-        text-align:center;
-        white-space:nowrap;
-        border-radius:999px !important;
-        font-weight:900;
-      }
-
-      @media (max-width:992px){
-        .invdpm-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .invdpm-header-card{
-          min-height:88px;
-        }
-
-        .invdpm-title{
-          font-size:1.20rem;
-        }
-
-        .invdpm-card-body{
-          padding:12px;
-        }
-
-        .invdpm-topbar{
-          padding:12px 14px 0 14px;
-        }
-      }
-
-      @media (max-width:768px){
-        .invdpm-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .invdpm-header-overlay::before{
-          margin:0;
-        }
-
-        .invdpm-header-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """, items=items, read_only=read_only)
-
-    return render_template_string(BASE, content=Markup(html))
-
-# =========================
-# Detalle — Inventario de Datos Personales
-# =========================
-@app.route('/inventario_datos_personales/detalle/<int:id>', methods=['GET'])
-@login_required
-def inventario_datos_personales_detalle(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role not in ('admin', 'auditor') and not verificar_permiso(user, "Gestión de Activos de Información"):
-        flash("No tiene permiso para ver el detalle de datos personales.", "danger")
-        return redirect(url_for('inventario_datos_personales'))
-
-    read_only = (user.role == 'auditor')
-    item = InventarioDatosPersonales.query.get_or_404(id)
-
-    html = render_template_string("""
-    <div class="invdpd-shell">
-
-      <div class="invdpd-header-card">
-        <div class="invdpd-header-overlay">
-          <div class="invdpd-header-text">
-            <h3 class="invdpd-title m-0">Detalle — Inventario de Datos Personales</h3>
-            <div class="invdpd-subtitle">
-              Consulta completa del registro en modo solo lectura
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="invdpd-header-actions">
-        <a href="{{ url_for('inventario_datos_personales') }}"
-           class="btn rounded-pill px-4 fw-bold invdpd-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-
-
-        {% if not read_only %}
-          <a href="{{ url_for('inventario_datos_personales_edit', id=item.id) }}"
-             class="btn btn-warning rounded-pill px-4 fw-bold">
-            Editar
-          </a>
-        {% endif %}
-      </div>
-
-      <div class="row g-3">
-        <div class="col-lg-6">
-          <div class="invdpd-card h-100">
-            <div class="invdpd-card-title">Información general</div>
-            <div class="invdpd-body">
-              <div><strong>Responsable de los datos:</strong> {{ item.responsable_datos or '-' }}</div>
-              <div><strong>Naturaleza de los datos:</strong> {{ item.naturaleza_datos }}</div>
-              <div><strong>Ubicación del sistema de datos:</strong> {{ item.ubicacion_sistema_datos }}</div>
-              <div><strong>Titular de los datos:</strong> {{ item.titular_datos }}</div>
-              <div><strong>Sitio web asociado:</strong> {{ item.sitio_web_asociado or '-' }}</div>
-              <div><strong>Fuente de los datos:</strong> {{ item.fuente_datos }}</div>
-              <div><strong>Administrador del sistema:</strong> {{ item.administrador_sistema }}</div>
-              <div><strong>Alcance de los datos:</strong> {{ item.alcance_datos or '-' }}</div>
-              <div><strong>Formato de la información:</strong> {{ item.formato_informacion or '-' }}</div>
-              <div><strong>Propósito y uso de los datos:</strong> {{ item.proposito_uso_datos }}</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="col-lg-6">
-          <div class="invdpd-card h-100">
-            <div class="invdpd-card-title">Privacidad y tratamiento</div>
-            <div class="invdpd-body">
-              <div><strong>País de almacenamiento:</strong> {{ item.pais_almacenamiento }}</div>
-              <div><strong>País de acceso:</strong> {{ item.pais_acceso }}</div>
-              <div><strong>Transferencia fuera de la compañía:</strong> {{ item.transferencia_fuera_compania }}</div>
-              <div><strong>Política de retención:</strong> {{ item.politica_retencion or '-' }}</div>
-              <div><strong>Política de privacidad:</strong> {{ item.politica_privacidad or '-' }}</div>
-              <div><strong>¿Se solicita consentimiento?:</strong> {{ item.solicita_consentimiento }}</div>
-              <div><strong>Seguridad — ¿Quién tiene acceso?:</strong> {{ item.seguridad_quien_tiene_acceso }}</div>
-              <div><strong>Consentimiento disponible del titular:</strong> {{ item.consentimiento_titular_disponible }}</div>
-              <div><strong>Notas:</strong> {{ item.notas or '-' }}</div>
-              <div><strong>Recomendación:</strong> {{ item.recomendacion or '-' }}</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="col-12">
-          <div class="invdpd-card">
-            <div class="invdpd-card-title">Elementos de datos</div>
-            <div class="invdpd-body">
-              <div class="row g-3">
-                <div class="col-md-3"><strong>Nombre:</strong> {{ item.dato_nombre }}</div>
-                <div class="col-md-3"><strong>Teléfono:</strong> {{ item.dato_telefono }}</div>
-                <div class="col-md-3"><strong>Dirección:</strong> {{ item.dato_direccion }}</div>
-                <div class="col-md-3"><strong>Número identificación:</strong> {{ item.dato_numero_identificacion }}</div>
-                <div class="col-md-3"><strong>Fecha de nacimiento:</strong> {{ item.dato_fecha_nacimiento }}</div>
-                <div class="col-md-3"><strong>Licencia de conducción:</strong> {{ item.dato_licencia_conduccion }}</div>
-                <div class="col-md-3"><strong>Pasaporte / visa:</strong> {{ item.dato_pasaporte_visa }}</div>
-                <div class="col-md-3"><strong>Dato sensible:</strong> {{ item.dato_sensible }}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .invdpd-shell{
-        width:96%;
-        max-width:1400px;
-        margin:10px auto 24px auto;
-      }
-
-      /* =========================
-         HEADER SGSI MODERNO
-      ========================= */
-      .invdpd-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .invdpd-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .invdpd-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-      }
-
-      .invdpd-header-overlay::before{
-        content:"📄";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#1459a6;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .invdpd-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .invdpd-header-text::before{
-        content:"SGSI · Detalle de Datos Personales";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .invdpd-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .invdpd-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      /* =========================
-         BOTONES
-      ========================= */
-      .invdpd-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .invdpd-header-actions .btn{
-        border-radius:10px !important;
-        min-height:38px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invdpd-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invdpd-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      /* =========================
-         CARD DETALLE
-      ========================= */
-      .invdpd-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .invdpd-card-title{
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1);
-        color:#ffffff;
-        font-weight:900;
-        font-size:.90rem;
-        padding:12px 16px;
-        letter-spacing:.3px;
-      }
-
-      .invdpd-body{
-        padding:18px;
-        color:#334155;
-        font-size:.85rem;
-        line-height:1.5;
-      }
-
-      .invdpd-body > div{
-        margin-bottom:10px;
-        padding:10px 12px;
-        background:#f8fbff;
-        border-radius:10px;
-        border:1px solid #e3edf7;
-      }
-
-      /* =========================
-         RESPONSIVE
-      ========================= */
-      @media (max-width:992px){
-        .invdpd-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .invdpd-header-card{
-          min-height:88px;
-        }
-
-        .invdpd-title{
-          font-size:1.20rem;
-        }
-
-        .invdpd-body{
-          padding:14px;
-        }
-      }
-
-      @media (max-width:768px){
-        .invdpd-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .invdpd-header-overlay::before{
-          margin:0;
-        }
-
-        .invdpd-header-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """, item=item, read_only=read_only)
-
-    return render_template_string(BASE, content=Markup(html))
-
-
-# =========================
-# Editar — Inventario de Datos Personales
-# =========================
-@app.route('/inventario_datos_personales/edit/<int:id>', methods=['GET', 'POST'])
-@login_required
-def inventario_datos_personales_edit(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede editar registros.", "danger")
-        return redirect(url_for('inventario_datos_personales'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
-        flash("No tiene permiso para editar registros de datos personales.", "danger")
-        return redirect(url_for('inventario_datos_personales'))
-
-    item = InventarioDatosPersonales.query.get_or_404(id)
-    paises = sorted([c.name for c in pycountry.countries])
-
-    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
-
-    divisiones = []
-    if item.area_id:
-        divisiones = (
-            DivisionEmpresa.query
-            .filter_by(area_id=item.area_id)
-            .order_by(DivisionEmpresa.nombre_division.asc())
-            .all()
-        )
-
-    if request.method == 'POST':
-        item.area_id = request.form.get('area_id', type=int)
-        item.division_id = request.form.get('division_id', type=int)
-
-        item.naturaleza_datos = (request.form.get('naturaleza_datos') or "").strip()
-        item.ubicacion_sistema_datos = (request.form.get('ubicacion_sistema_datos') or "").strip()
-        item.titular_datos = (request.form.get('titular_datos') or "").strip()
-        item.sitio_web_asociado = (request.form.get('sitio_web_asociado') or "").strip()
-
-        item.fuente_datos = (request.form.get('fuente_datos') or "").strip()
-        item.administrador_sistema = (request.form.get('administrador_sistema') or "").strip()
-        item.alcance_datos = (request.form.get('alcance_datos') or "").strip()
-        item.formato_informacion = (request.form.get('formato_informacion') or "").strip()
-        item.proposito_uso_datos = (request.form.get('proposito_uso_datos') or "").strip()
-
-        item.pais_almacenamiento = (request.form.get('pais_almacenamiento') or "").strip()
-        item.pais_acceso = (request.form.get('pais_acceso') or "").strip()
-        item.transferencia_fuera_compania = request.form.get('transferencia_fuera_compania') or "No"
-        item.politica_retencion = (request.form.get('politica_retencion') or "").strip()
-        item.politica_privacidad = (request.form.get('politica_privacidad') or "").strip()
-        item.solicita_consentimiento = request.form.get('solicita_consentimiento') or "No"
-
-        item.notas = (request.form.get('notas') or "").strip()
-        item.recomendacion = (request.form.get('recomendacion') or "").strip()
-        item.seguridad_quien_tiene_acceso = (request.form.get('seguridad_quien_tiene_acceso') or "").strip()
-        item.consentimiento_titular_disponible = request.form.get('consentimiento_titular_disponible') or "No"
-
-        item.dato_nombre = request.form.get('dato_nombre') or "No"
-        item.dato_telefono = request.form.get('dato_telefono') or "No"
-        item.dato_direccion = request.form.get('dato_direccion') or "No"
-        item.dato_numero_identificacion = request.form.get('dato_numero_identificacion') or "No"
-        item.dato_fecha_nacimiento = request.form.get('dato_fecha_nacimiento') or "No"
-        item.dato_licencia_conduccion = request.form.get('dato_licencia_conduccion') or "No"
-        item.dato_pasaporte_visa = request.form.get('dato_pasaporte_visa') or "No"
-        item.dato_sensible = request.form.get('dato_sensible') or "No"
-
-        area = AreaEmpresa.query.get(item.area_id) if item.area_id else None
-        division = DivisionEmpresa.query.get(item.division_id) if item.division_id else None
-
-        item.responsable_datos = ""
-        if area:
-            item.responsable_datos = area.area
-        if division:
-            item.responsable_datos = f"{item.responsable_datos} / {division.nombre_division}"
-
-        if not (
-            item.area_id and item.naturaleza_datos and item.ubicacion_sistema_datos and
-            item.titular_datos and item.fuente_datos and item.administrador_sistema and
-            item.proposito_uso_datos and item.pais_almacenamiento and item.pais_acceso and
-            item.seguridad_quien_tiene_acceso
-        ):
-            flash("Complete los campos obligatorios del inventario de datos personales.", "danger")
-            return redirect(url_for('inventario_datos_personales_edit', id=item.id))
-
-        db.session.commit()
-        flash("Registro de inventario de datos personales actualizado.", "success")
-        return redirect(url_for('inventario_datos_personales_detalle', id=item.id))
-
-    html = """
-    <div class="invdpe-shell">
-
-      <div class="invdpe-header-card">
-        <div class="invdpe-header-overlay">
-          <div class="invdpe-header-text">
-            <h3 class="invdpe-title m-0">Editar — Inventario de Datos Personales</h3>
-            <div class="invdpe-subtitle">
-              Modificación del registro #{{ item.id }}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="invdpe-header-actions">
-        <a href="{{ url_for('inventario_datos_personales') }}"
-           class="btn rounded-pill px-4 fw-bold invdpe-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-
-        <a href="{{ url_for('inventario_datos_personales_detalle', id=item.id) }}"
-           class="btn rounded-pill px-4 fw-bold invdpe-back-btn">
-          🔎 Volver al Detalle
-        </a>
-
-      </div>
-
-      <div class="invdpe-card">
-        <div class="invdpe-card-body">
-          <form method="post">
-            <div class="row g-3">
-
-              <div class="col-md-8">
-                <label class="form-label">Responsable de los datos</label>
-
-                <div class="row g-2">
-                  <div class="col-md-6">
-                    <select name="area_id" id="area_id" class="form-select" required>
-                      <option value="">-- Seleccione Área --</option>
-                      {% for a in areas %}
-                        <option value="{{ a.id }}" {% if item.area_id == a.id %}selected{% endif %}>
-                          {{ a.area }}
-                        </option>
-                      {% endfor %}
-                    </select>
-                  </div>
-
-                  <div class="col-md-6">
-                    <select name="division_id" id="division_id" class="form-select">
-                      <option value="" {% if not item.division_id %}selected{% endif %}>Todas las divisiones</option>
-                      {% for d in divisiones %}
-                        <option value="{{ d.id }}" {% if item.division_id == d.id %}selected{% endif %}>
-                          {{ d.nombre_division }}
-                        </option>
-                      {% endfor %}
-                    </select>
-                  </div>
-                </div>
-
-                <small class="text-muted">Seleccione el área y, si aplica, la división responsable de los datos.</small>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Titular de los datos</label>
-                <input type="text" name="titular_datos" class="form-control" value="{{ item.titular_datos or '' }}" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Ubicación del sistema de datos</label>
-                <input type="text" name="ubicacion_sistema_datos" class="form-control" value="{{ item.ubicacion_sistema_datos or '' }}" placeholder="Ej. SAP, CRM, ERP" required>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Naturaleza de los datos</label>
-                <textarea name="naturaleza_datos" class="form-control" rows="2" required>{{ item.naturaleza_datos or '' }}</textarea>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Sitio web asociado</label>
-                <textarea name="sitio_web_asociado" class="form-control" rows="2">{{ item.sitio_web_asociado or '' }}</textarea>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Fuente de los datos</label>
-                <input type="text" name="fuente_datos" class="form-control" value="{{ item.fuente_datos or '' }}" required>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Administrador del sistema</label>
-                <input type="text" name="administrador_sistema" class="form-control" value="{{ item.administrador_sistema or '' }}" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Formato de la información</label>
-                <select name="formato_informacion" class="form-select">
-                  <option value="">-- Seleccione --</option>
-                  <option value="Digital" {% if item.formato_informacion == 'Digital' %}selected{% endif %}>Digital</option>
-                  <option value="Físico" {% if item.formato_informacion == 'Físico' %}selected{% endif %}>Físico</option>
-                  <option value="Mixto" {% if item.formato_informacion == 'Mixto' %}selected{% endif %}>Mixto</option>
-                </select>
-              </div>
-
-              <div class="col-md-8">
-                <label class="form-label">Alcance de los datos</label>
-                <textarea name="alcance_datos" class="form-control" rows="2">{{ item.alcance_datos or '' }}</textarea>
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Propósito y uso de los datos</label>
-                <textarea name="proposito_uso_datos" class="form-control" rows="2" required>{{ item.proposito_uso_datos or '' }}</textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">¿Dónde se almacenan los datos?</label>
-                <select name="pais_almacenamiento" class="form-select" required>
-                  <option value="">-- Seleccione país --</option>
-                  {% for p in paises %}
-                    <option value="{{ p }}" {% if item.pais_almacenamiento == p %}selected{% endif %}>{{ p }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">¿Dónde se accede a los datos?</label>
-                <select name="pais_acceso" class="form-select" required>
-                  <option value="">-- Seleccione país --</option>
-                  {% for p in paises %}
-                    <option value="{{ p }}" {% if item.pais_acceso == p %}selected{% endif %}>{{ p }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Transferencia de datos fuera de la compañía</label>
-                <select name="transferencia_fuera_compania" class="form-select">
-                  <option value="No" {% if item.transferencia_fuera_compania == 'No' %}selected{% endif %}>No</option>
-                  <option value="Sí" {% if item.transferencia_fuera_compania == 'Sí' %}selected{% endif %}>Sí</option>
-                </select>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Política de retención</label>
-                <input type="text" name="politica_retencion" class="form-control" value="{{ item.politica_retencion or '' }}" placeholder="Ubicación de la política y años de retención">
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">¿Política de privacidad?</label>
-                <textarea name="politica_privacidad" class="form-control" rows="2">{{ item.politica_privacidad or '' }}</textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">¿Se solicita consentimiento?</label>
-                <select name="solicita_consentimiento" class="form-select">
-                  <option value="No" {% if item.solicita_consentimiento == 'No' %}selected{% endif %}>No</option>
-                  <option value="Sí" {% if item.solicita_consentimiento == 'Sí' %}selected{% endif %}>Sí</option>
-                </select>
-              </div>
-
-              <div class="col-md-8">
-                <label class="form-label">Seguridad — ¿Quién tiene acceso?</label>
-                <input type="text" name="seguridad_quien_tiene_acceso" class="form-control" value="{{ item.seguridad_quien_tiene_acceso or '' }}" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">¿Existe consentimiento disponible del titular?</label>
-                <select name="consentimiento_titular_disponible" class="form-select">
-                  <option value="No" {% if item.consentimiento_titular_disponible == 'No' %}selected{% endif %}>No</option>
-                  <option value="Sí" {% if item.consentimiento_titular_disponible == 'Sí' %}selected{% endif %}>Sí</option>
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Notas</label>
-                <textarea name="notas" class="form-control" rows="2">{{ item.notas or '' }}</textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Recomendación</label>
-                <textarea name="recomendacion" class="form-control" rows="2">{{ item.recomendacion or '' }}</textarea>
-              </div>
-
-              <div class="col-12 mt-4">
-                <div class="invdpe-section-title">Elementos de datos</div>
-              </div>
-
-              {% set yn_fields = [
-                ('dato_nombre', 'Nombre'),
-                ('dato_telefono', 'Teléfono'),
-                ('dato_direccion', 'Dirección'),
-                ('dato_numero_identificacion', 'Número del Documento de Identificación'),
-                ('dato_fecha_nacimiento', 'Fecha de nacimiento'),
-                ('dato_licencia_conduccion', 'Número de licencia de conducción'),
-                ('dato_pasaporte_visa', 'Información de pasaporte / visa'),
-                ('dato_sensible', 'Datos sensibles')
-              ] %}
-
-              {% for field, label in yn_fields %}
-              <div class="col-md-3">
-                <label class="form-label">{{ label }}</label>
-                <select name="{{ field }}" class="form-select">
-                  <option value="No" {% if item[field] == 'No' %}selected{% endif %}>No</option>
-                  <option value="Sí" {% if item[field] == 'Sí' %}selected{% endif %}>Sí</option>
-                </select>
-              </div>
-              {% endfor %}
-
-            </div>
-
-            <div class="invdpe-bottom-actions">
-              <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold">
-                Guardar cambios
-              </button>
-
-              <a href="{{ url_for('inventario_datos_personales_detalle', id=item.id) }}"
-                 class="btn rounded-pill px-4 fw-bold invdpe-cancel-btn">
-                Cancelar
-              </a>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-
-    <script>
-    document.addEventListener('DOMContentLoaded', function () {
-      const areaSel = document.getElementById('area_id');
-      const divSel = document.getElementById('division_id');
-      const divisionActual = "{{ item.division_id or '' }}";
-
-      if (!areaSel || !divSel) return;
-
-      areaSel.addEventListener('change', async function () {
-        const areaId = this.value;
-        divSel.innerHTML = '<option value="">Todas las divisiones</option>';
-
-        if (!areaId) return;
-
-        try {
-          const resp = await fetch(`/areas/${areaId}/divisiones_json`);
-          const data = await resp.json();
-
-          (data.divisiones || []).forEach(d => {
-            const opt = document.createElement('option');
-            opt.value = d.id;
-            opt.textContent = d.nombre;
-            if (String(d.id) === String(divisionActual)) {
-              opt.selected = true;
-            }
-            divSel.appendChild(opt);
-          });
-        } catch (e) {
-          console.error('Error cargando divisiones:', e);
-        }
-      });
-    });
-    </script>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .invdpe-shell{
-        width:96%;
-        max-width:1400px;
-        margin:10px auto 24px auto;
-      }
-
-      .invdpe-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .invdpe-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .invdpe-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent;
-        padding:0;
-        position:relative;
-        z-index:1;
-      }
-
-      .invdpe-header-overlay::before{
-        content:"✏️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#1459a6;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .invdpe-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .invdpe-header-text::before{
-        content:"SGSI · Edición Datos Personales";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .invdpe-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .invdpe-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .invdpe-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .invdpe-header-actions .btn{
-        border-radius:10px !important;
-        min-height:38px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invdpe-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invdpe-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .invdpe-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .invdpe-card-body{
-        padding:18px;
-      }
-
-      .invdpe-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .invdpe-card .form-control,
-      .invdpe-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:38px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .invdpe-card textarea.form-control{
-        min-height:70px;
-        resize:vertical;
-      }
-
-      .invdpe-card .form-control:focus,
-      .invdpe-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#fff;
-      }
-
-      .invdpe-section-title{
-        font-weight:950;
-        font-size:.88rem;
-        color:#1459a6;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin:10px 0 10px;
-      }
-
-      .invdpe-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:18px;
-        flex-wrap:wrap;
-      }
-
-      .invdpe-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:38px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invdpe-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invdpe-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      @media (max-width:992px){
-        .invdpe-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .invdpe-header-card{
-          min-height:88px;
-        }
-
-        .invdpe-title{
-          font-size:1.20rem;
-        }
-
-        .invdpe-card-body{
-          padding:14px;
-        }
-      }
-
-      @media (max-width:768px){
-        .invdpe-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .invdpe-header-overlay::before{
-          margin:0;
-        }
-
-        .invdpe-header-actions .btn,
-        .invdpe-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-
-    return render_template_string(
-        BASE,
-        content=Markup(render_template_string(
-            html,
-            item=item,
-            paises=paises,
-            areas=areas,
-            divisiones=divisiones
-        ))
-    )
-
-
-# =========================
-# Eliminar — Inventario de Datos Personales
-# =========================
-@app.route('/inventario_datos_personales/delete/<int:id>', methods=['GET'])
-@login_required
-def inventario_datos_personales_delete(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede eliminar registros.", "danger")
-        return redirect(url_for('inventario_datos_personales'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
-        flash("No tiene permiso para eliminar registros de datos personales.", "danger")
-        return redirect(url_for('inventario_datos_personales'))
-
-    item = InventarioDatosPersonales.query.get_or_404(id)
-    db.session.delete(item)
-    db.session.commit()
-
-    flash("Registro de inventario de datos personales eliminado.", "success")
-    return redirect(url_for('inventario_datos_personales'))
 
 
 # ============================================================================================================================================
