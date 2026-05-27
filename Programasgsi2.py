@@ -18776,12 +18776,28 @@ def mapa_calor():
       <div class="heat-card">
         <div class="heat-card-body">
           <div class="heat-table-wrap">
+
             <table id="heatmap" class="heatmap-table">
+
+              <colgroup>
+                <col class="col-axis">
+                <col class="col-prob">
+                {% for imp in impacto_niveles %}
+                  <col class="col-impact">
+                {% endfor %}
+              </colgroup>
+
               <thead>
                 <tr>
-                  <th>Prob \\ Impacto</th>
+                  <th class="heat-corner-fill" colspan="2" rowspan="2"></th>
+                  <th class="heat-axis-impacto" colspan="{{ impacto_niveles|length }}">
+                    IMPACTO
+                  </th>
+                </tr>
+
+                <tr>
                   {% for imp in impacto_niveles %}
-                    <th>{{ imp }}</th>
+                    <th class="heat-impact-header">{{ imp }}</th>
                   {% endfor %}
                 </tr>
               </thead>
@@ -18789,7 +18805,14 @@ def mapa_calor():
               <tbody>
                 {% for prob in niveles %}
                 <tr>
-                  <th>{{ prob }}</th>
+                  {% if loop.first %}
+                    <th class="heat-axis-probabilidad" rowspan="{{ niveles|length }}">
+                      <span>PROBABILIDAD</span>
+                    </th>
+                  {% endif %}
+
+                  <th class="heat-prob-header">{{ prob }}</th>
+
                   {% for imp in impacto_niveles %}
                     <td class="cell"
                         data-prob="{{ prob }}"
@@ -18800,7 +18823,9 @@ def mapa_calor():
                 </tr>
                 {% endfor %}
               </tbody>
+
             </table>
+
           </div>
         </div>
       </div>
@@ -18845,8 +18870,7 @@ def mapa_calor():
       }
 
       .heat-header-card{
-        background:
-          linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
+        background:linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -18959,7 +18983,7 @@ def mapa_calor():
         background:#fff;
         border-radius:14px;
         border:1px solid #dbe6f4;
-        padding:10px;
+        padding:12px;
         overflow:auto;
       }
 
@@ -18967,11 +18991,23 @@ def mapa_calor():
         margin:auto;
         border-collapse:separate;
         border-spacing:4px;
+        table-layout:fixed;
+      }
+
+      .heatmap-table col.col-axis{
+        width:64px;
+      }
+
+      .heatmap-table col.col-prob{
+        width:140px;
+      }
+
+      .heatmap-table col.col-impact{
+        width:140px;
       }
 
       .heatmap-table th,
       .heatmap-table td{
-        width:140px;
         height:95px;
         border-radius:10px;
         text-align:center;
@@ -18984,10 +19020,64 @@ def mapa_calor():
         color:#1f2937;
       }
 
+      .heat-corner-fill{
+        background:linear-gradient(135deg,#2f6fb6 0%,#3f86d6 55%,#5aa3ea 100%) !important;
+        color:#fff !important;
+        border-radius:12px !important;
+        box-shadow:0 8px 18px rgba(47,111,182,.24);
+        border:none !important;
+        height:95px !important;
+      }
+
+      .heat-axis-impacto{
+        height:42px !important;
+        background:linear-gradient(135deg,#2f6fb6,#3f86d6,#5aa3ea) !important;
+        color:#fff !important;
+        font-size:.98rem !important;
+        letter-spacing:.08em;
+        text-transform:uppercase;
+        border-radius:12px !important;
+        box-shadow:0 8px 18px rgba(47,111,182,.24);
+      }
+
+      .heat-axis-probabilidad{
+        width:64px !important;
+        min-width:64px !important;
+        max-width:64px !important;
+        background:linear-gradient(180deg,#2f6fb6,#3f86d6,#5aa3ea) !important;
+        color:#fff !important;
+        border-radius:14px !important;
+        box-shadow:0 8px 18px rgba(47,111,182,.24);
+      }
+
+      .heat-axis-probabilidad span{
+        writing-mode:vertical-rl;
+        transform:rotate(180deg);
+        display:inline-block;
+        letter-spacing:.08em;
+        text-transform:uppercase;
+        font-size:.82rem;
+      }
+
+      .heat-impact-header{
+        background:#eaf3ff !important;
+        color:#1f2937 !important;
+        font-weight:950 !important;
+        line-height:1.25;
+      }
+
+      .heat-prob-header{
+        background:#eaf3ff !important;
+        color:#1f2937 !important;
+        font-weight:950 !important;
+        line-height:1.25;
+      }
+
       .heatmap-table td.cell{
         cursor:pointer;
         font-weight:800;
         transition:.2s;
+        background:#fff;
       }
 
       .heatmap-table td.cell:hover{
@@ -18995,11 +19085,11 @@ def mapa_calor():
         box-shadow:0 6px 14px rgba(0,0,0,.2);
       }
 
-      .nivel1{background:#2ecc71;color:#fff;}
-      .nivel2{background:#f1c40f;color:#111;}
-      .nivel3{background:#ff69b4;color:#111;}
-      .nivel4{background:#e74c3c;color:#fff;}
-      .nivel5{background:#8e44ad;color:#fff;}
+      .nivel1{background:#2ecc71 !important;color:#fff;}
+      .nivel2{background:#f1c40f !important;color:#111;}
+      .nivel3{background:#ff69b4 !important;color:#111;}
+      .nivel4{background:#e74c3c !important;color:#fff;}
+      .nivel5{background:#8e44ad !important;color:#fff;}
 
       .heat-legend-card{
         background:#fff;
@@ -19038,20 +19128,22 @@ def mapa_calor():
         position:fixed;
         inset:0;
         background:rgba(0,0,0,.55);
-        z-index:9999;
+        z-index:99999;
         padding:20px;
+        align-items:center;
+        justify-content:center;
       }
 
       .modal .box{
         position:relative;
         background:#fff;
-        max-width:760px;
-        margin:7vh auto;
+        width:min(760px,92vw);
         padding:18px;
         border-radius:16px;
         box-shadow:0 20px 50px rgba(0,0,0,.3);
         max-height:78vh;
         overflow:auto;
+        margin:0 auto;
       }
 
       .modal h3{
@@ -19117,10 +19209,24 @@ def mapa_calor():
           font-size:1.2rem;
         }
 
+        .heatmap-table col.col-axis{
+          width:56px;
+        }
+
+        .heatmap-table col.col-prob,
+        .heatmap-table col.col-impact{
+          width:110px;
+        }
+
         .heatmap-table th,
         .heatmap-table td{
-          width:110px;
           height:85px;
+        }
+
+        .heat-axis-probabilidad{
+          width:56px !important;
+          min-width:56px !important;
+          max-width:56px !important;
         }
       }
     </style>
@@ -19226,7 +19332,7 @@ def mapa_calor():
           list.appendChild(li);
         });
 
-        modal.style.display = 'block';
+        modal.style.display = 'flex';
       }
 
       function cerrarModal(){
