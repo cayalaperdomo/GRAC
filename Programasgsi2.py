@@ -5888,6 +5888,7 @@ MODULES = [
     "Nivel de madurez SOC 2",
     "Nivel de Madurez Gestión de Inteligencia Artificial",
     "Modelamiento de Amenazas",
+    "Cumplimiento Continuo",
     "Métricas",
     "Reportes",
     "Logs de Auditoría",
@@ -8980,6 +8981,75 @@ MENU_SECTIONS = [
              {"label": "Reportes", "href": "/reportes", "icon": "bi-printer-fill", "btn": "btn-outline-danger", "module": "Reportes"},
          ],
      },
+    {
+    "title": "Cumplimiento Continuo",
+            "icon": "bi-shield-lock",
+            "items": [
+                {
+                    "label": "Dashboard",
+                    "href": "/cumplimiento_continuo",
+                    "icon": "bi-speedometer2",
+                    "btn": "btn-primary",
+                    "module": "Cumplimiento Continuo"
+                },
+                {
+                    "label": "Conexión Wazuh",
+                    "href": "/cumplimiento_continuo/wazuh",
+                    "icon": "bi-plug",
+                    "btn": "btn-primary",
+                    "module": "Cumplimiento Continuo"
+                },
+                {
+                    "label": "Sincronización",
+                    "href": "/cumplimiento_continuo/sincronizacion",
+                    "icon": "bi-arrow-repeat",
+                    "btn": "btn-warning",
+                    "module": "Cumplimiento Continuo"
+                },
+                {
+                    "label": "ISO 27001",
+                    "href": "/cumplimiento_continuo/estandar/ISO27001",
+                    "icon": "bi-shield-check",
+                    "btn": "btn-primary",
+                    "module": "Cumplimiento Continuo"
+                },
+                {
+                    "label": "SOC 2",
+                    "href": "/cumplimiento_continuo/estandar/SOC2",
+                    "icon": "bi-patch-check",
+                    "btn": "btn-primary",
+                    "module": "Cumplimiento Continuo"
+                },
+                {
+                    "label": "PCI-DSS",
+                    "href": "/cumplimiento_continuo/estandar/PCIDSS",
+                    "icon": "bi-credit-card-2-front",
+                    "btn": "btn-primary",
+                    "module": "Cumplimiento Continuo"
+                },
+                {
+                    "label": "NIST CSF 2.0",
+                    "href": "/cumplimiento_continuo/estandar/NISTCSF",
+                    "icon": "bi-diagram-3",
+                    "btn": "btn-primary",
+                    "module": "Cumplimiento Continuo"
+                },
+                {
+                    "label": "Evidencias",
+                    "href": "/cumplimiento_continuo/evidencias",
+                    "icon": "bi-folder-check",
+                    "btn": "btn-success",
+                    "module": "Cumplimiento Continuo"
+                },
+                {
+                    "label": "Planes de Acción",
+                    "href": "/cumplimiento_continuo/planes",
+                    "icon": "bi-list-check",
+                    "btn": "btn-danger",
+                    "module": "Cumplimiento Continuo"
+                },
+            ],
+    },
 
     {
         "title": "Administración",
@@ -69411,7 +69481,7 @@ def vulnerabilidad_edit(id):
 
       <!-- BOTÓN VOLVER -->
       <div class="vulnedit-header-actions">
-        <a href="{{ url_for('vulnerabilidades_matriz') }}"
+        <a href="{{ url_for('vuln_scan_runs') }}"
            class="btn rounded-pill px-5 fw-bold vulnedit-back-btn">
           ⬅ Volver a la Matriz
         </a>
@@ -171685,6 +171755,1727 @@ def bcp_pdf():
 
 # ============================================================================================================================================
 #                                      FIN MÓDULO CONTINUIDAD DEL NEGOCIO (BCP/DRP)
+# ============================================================================================================================================
+
+
+# ============================================================================================================================================
+#                                           MÓDULO CUMPLIMIENTO CONTINUO - WAZUH + GRAC
+# ============================================================================================================================================
+
+
+
+CONT_COMP_MODULE_NAME = "Cumplimiento Continuo"
+
+
+# ============================================================
+# MODELOS
+# ============================================================
+
+class WazuhConfig(db.Model):
+    __tablename__ = "wazuh_config"
+
+    id = db.Column(db.Integer, primary_key=True)
+    api_url = db.Column(db.String(500), nullable=False, default="https://localhost:55000")
+    username = db.Column(db.String(120), nullable=False, default="wazuh-wui")
+    password = db.Column(db.Text, nullable=True)
+    token = db.Column(db.Text, nullable=True)
+    verify_ssl = db.Column(db.Boolean, nullable=False, default=False)
+    last_status = db.Column(db.String(50), nullable=True)
+    last_message = db.Column(db.Text, nullable=True)
+    last_test_at = db.Column(db.DateTime, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WazuhAgent(db.Model):
+    __tablename__ = "wazuh_agents"
+
+    id = db.Column(db.Integer, primary_key=True)
+    wazuh_id = db.Column(db.String(80), unique=True, index=True)
+    name = db.Column(db.String(255), nullable=True)
+    ip = db.Column(db.String(100), nullable=True)
+    os_name = db.Column(db.String(255), nullable=True)
+    os_version = db.Column(db.String(255), nullable=True)
+    status = db.Column(db.String(80), nullable=True)
+    last_keep_alive = db.Column(db.String(80), nullable=True)
+    raw_json = db.Column(db.Text, nullable=True)
+    synced_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class WazuhAlert(db.Model):
+    __tablename__ = "wazuh_alerts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    alert_id = db.Column(db.String(255), unique=True, index=True)
+    timestamp = db.Column(db.String(80), nullable=True)
+    agent_id = db.Column(db.String(80), nullable=True)
+    agent_name = db.Column(db.String(255), nullable=True)
+    rule_id = db.Column(db.String(80), nullable=True)
+    rule_level = db.Column(db.Integer, default=0)
+    rule_description = db.Column(db.Text, nullable=True)
+    mitre_ids = db.Column(db.Text, nullable=True)
+    groups = db.Column(db.Text, nullable=True)
+    severity = db.Column(db.String(50), nullable=True)
+    raw_json = db.Column(db.Text, nullable=True)
+    synced_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class WazuhVulnerability(db.Model):
+    __tablename__ = "wazuh_vulnerabilities"
+
+    id = db.Column(db.Integer, primary_key=True)
+    unique_key = db.Column(db.String(500), unique=True, index=True)
+    agent_id = db.Column(db.String(80), nullable=True)
+    agent_name = db.Column(db.String(255), nullable=True)
+    cve = db.Column(db.String(80), nullable=True)
+    package_name = db.Column(db.String(255), nullable=True)
+    package_version = db.Column(db.String(255), nullable=True)
+    severity = db.Column(db.String(50), nullable=True)
+    cvss = db.Column(db.Float, nullable=True)
+    title = db.Column(db.Text, nullable=True)
+    condition = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(50), nullable=True, default="Abierta")
+    raw_json = db.Column(db.Text, nullable=True)
+    synced_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class WazuhSCAResult(db.Model):
+    __tablename__ = "wazuh_sca_results"
+
+    id = db.Column(db.Integer, primary_key=True)
+    unique_key = db.Column(db.String(500), unique=True, index=True)
+    agent_id = db.Column(db.String(80), nullable=True)
+    agent_name = db.Column(db.String(255), nullable=True)
+    policy_id = db.Column(db.String(120), nullable=True)
+    policy_name = db.Column(db.String(255), nullable=True)
+    check_id = db.Column(db.String(120), nullable=True)
+    title = db.Column(db.Text, nullable=True)
+    result = db.Column(db.String(50), nullable=True)
+    compliance = db.Column(db.Text, nullable=True)
+    raw_json = db.Column(db.Text, nullable=True)
+    synced_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class WazuhFimEvent(db.Model):
+    __tablename__ = "wazuh_fim_events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    unique_key = db.Column(db.String(500), unique=True, index=True)
+    timestamp = db.Column(db.String(80), nullable=True)
+    agent_id = db.Column(db.String(80), nullable=True)
+    agent_name = db.Column(db.String(255), nullable=True)
+    file_path = db.Column(db.Text, nullable=True)
+    action = db.Column(db.String(100), nullable=True)
+    severity = db.Column(db.String(50), nullable=True)
+    raw_json = db.Column(db.Text, nullable=True)
+    synced_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class WazuhMitreEvent(db.Model):
+    __tablename__ = "wazuh_mitre_events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    unique_key = db.Column(db.String(500), unique=True, index=True)
+    timestamp = db.Column(db.String(80), nullable=True)
+    agent_id = db.Column(db.String(80), nullable=True)
+    agent_name = db.Column(db.String(255), nullable=True)
+    tactic = db.Column(db.String(255), nullable=True)
+    technique = db.Column(db.String(255), nullable=True)
+    technique_id = db.Column(db.String(80), nullable=True)
+    rule_level = db.Column(db.Integer, default=0)
+    description = db.Column(db.Text, nullable=True)
+    raw_json = db.Column(db.Text, nullable=True)
+    synced_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class ContinuousControl(db.Model):
+    __tablename__ = "continuous_controls"
+
+    id = db.Column(db.Integer, primary_key=True)
+    standard = db.Column(db.String(50), nullable=False, index=True)
+    control_code = db.Column(db.String(100), nullable=False, index=True)
+    control_name = db.Column(db.Text, nullable=False)
+    source_type = db.Column(db.String(50), nullable=False)  # vulnerability, alert, fim, sca, mitre, agent
+    rule_key = db.Column(db.String(255), nullable=True)
+    status = db.Column(db.String(50), nullable=False, default="No evaluado")
+    score = db.Column(db.Float, nullable=False, default=0)
+    evidence_count = db.Column(db.Integer, nullable=False, default=0)
+    evidence_summary = db.Column(db.Text, nullable=True)
+    last_evaluated_at = db.Column(db.DateTime, nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint("standard", "control_code", "source_type", name="uq_cont_control_map"),
+    )
+
+
+class ContinuousEvidence(db.Model):
+    __tablename__ = "continuous_evidences"
+
+    id = db.Column(db.Integer, primary_key=True)
+    standard = db.Column(db.String(50), nullable=False, index=True)
+    control_code = db.Column(db.String(100), nullable=False, index=True)
+    control_name = db.Column(db.Text, nullable=True)
+    source = db.Column(db.String(100), nullable=False, default="Wazuh")
+    source_type = db.Column(db.String(50), nullable=True)
+    event_ref = db.Column(db.String(500), nullable=True)
+    asset = db.Column(db.String(255), nullable=True)
+    severity = db.Column(db.String(50), nullable=True)
+    description = db.Column(db.Text, nullable=True)
+    evidence_date = db.Column(db.DateTime, default=datetime.utcnow)
+    raw_json = db.Column(db.Text, nullable=True)
+
+
+class ContinuousComplianceSyncLog(db.Model):
+    __tablename__ = "continuous_compliance_sync_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    started_at = db.Column(db.DateTime, default=datetime.utcnow)
+    finished_at = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(50), nullable=False, default="En proceso")
+    message = db.Column(db.Text, nullable=True)
+    agents_count = db.Column(db.Integer, default=0)
+    vulnerabilities_count = db.Column(db.Integer, default=0)
+    alerts_count = db.Column(db.Integer, default=0)
+    fim_count = db.Column(db.Integer, default=0)
+    sca_count = db.Column(db.Integer, default=0)
+    mitre_count = db.Column(db.Integer, default=0)
+
+
+class ContinuousActionPlan(db.Model):
+    __tablename__ = "continuous_action_plans"
+
+    id = db.Column(db.Integer, primary_key=True)
+    origin = db.Column(db.String(100), nullable=False, default="Wazuh")
+    standard = db.Column(db.String(50), nullable=True)
+    control_code = db.Column(db.String(100), nullable=True)
+    title = db.Column(db.String(500), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    asset = db.Column(db.String(255), nullable=True)
+    severity = db.Column(db.String(50), nullable=True)
+    action_type = db.Column(db.String(100), nullable=True)  # Remediación / Incidente / Hallazgo
+    responsible = db.Column(db.String(255), nullable=True)
+    due_date = db.Column(db.String(20), nullable=True)
+    status = db.Column(db.String(50), nullable=False, default="Abierto")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    source_ref = db.Column(db.String(500), nullable=True)
+    raw_json = db.Column(db.Text, nullable=True)
+
+
+# ============================================================
+# MAPEO BASE WAZUH -> ESTÁNDARES
+# ============================================================
+
+CONTINUOUS_CONTROL_LIBRARY = [
+    # ISO 27001:2022
+    ("ISO27001", "A.8.1", "Dispositivos endpoint de usuario", "agent", "agent_active"),
+    ("ISO27001", "A.8.7", "Protección contra malware", "alert", "malware"),
+    ("ISO27001", "A.8.8", "Gestión de vulnerabilidades técnicas", "vulnerability", "critical_high_vulns"),
+    ("ISO27001", "A.8.9", "Gestión de configuración", "sca", "failed_sca"),
+    ("ISO27001", "A.8.15", "Logging", "alert", "security_events"),
+    ("ISO27001", "A.8.16", "Actividades de monitoreo", "alert", "security_events"),
+    ("ISO27001", "A.8.19", "Instalación de software en sistemas operacionales", "fim", "fim_changes"),
+
+    # SOC 2
+    ("SOC2", "CC6", "Controles de acceso lógico", "alert", "auth_access"),
+    ("SOC2", "CC7", "Monitoreo, detección y respuesta", "alert", "security_events"),
+    ("SOC2", "CC8", "Gestión de cambios", "fim", "fim_changes"),
+    ("SOC2", "CC9", "Gestión de riesgos", "vulnerability", "critical_high_vulns"),
+
+    # PCI-DSS 4.0
+    ("PCIDSS", "REQ-5", "Proteger sistemas contra malware", "alert", "malware"),
+    ("PCIDSS", "REQ-6", "Desarrollar y mantener sistemas seguros", "vulnerability", "critical_high_vulns"),
+    ("PCIDSS", "REQ-10", "Registrar y monitorear accesos", "alert", "security_events"),
+    ("PCIDSS", "REQ-11", "Probar regularmente la seguridad", "sca", "failed_sca"),
+    ("PCIDSS", "REQ-12", "Mantener programa de seguridad", "agent", "agent_active"),
+
+    # NIST CSF 2.0
+    ("NISTCSF", "GV.RM", "Estrategia de gestión de riesgos", "vulnerability", "critical_high_vulns"),
+    ("NISTCSF", "ID.AM", "Gestión de activos", "agent", "agent_active"),
+    ("NISTCSF", "PR.PS", "Seguridad de plataforma", "sca", "failed_sca"),
+    ("NISTCSF", "DE.CM", "Monitoreo continuo", "alert", "security_events"),
+    ("NISTCSF", "RS.AN", "Análisis de incidentes", "mitre", "mitre_events"),
+]
+
+
+def cont_comp_current_user():
+    return User.query.get(session.get("user_id"))
+
+
+def cont_comp_can_read(user):
+    if not user:
+        return False
+    if user.role in ("admin", "auditor"):
+        return True
+    return verificar_permiso(user, CONT_COMP_MODULE_NAME)
+
+
+def cont_comp_can_write(user):
+    if not user:
+        return False
+    if user.role == "auditor":
+        return False
+    if user.role == "admin":
+        return True
+    return verificar_permiso(user, CONT_COMP_MODULE_NAME)
+
+
+def cont_comp_require_read():
+    user = cont_comp_current_user()
+    if not cont_comp_can_read(user):
+        flash("No tiene permiso para acceder a Cumplimiento Continuo.", "danger")
+        return None, redirect(url_for("menu"))
+    return user, None
+
+
+def cont_comp_require_write():
+    user = cont_comp_current_user()
+    if user and user.role == "auditor":
+        flash("El rol Auditor solo puede consultar este módulo.", "warning")
+        return None, redirect(url_for("cont_comp_dashboard"))
+    if not cont_comp_can_write(user):
+        flash("No tiene permiso para modificar Cumplimiento Continuo.", "danger")
+        return None, redirect(url_for("menu"))
+    return user, None
+
+
+def cont_comp_now():
+    return datetime.utcnow()
+
+
+def cont_comp_status_badge(status):
+    s = (status or "No evaluado").strip()
+    cls = {
+        "Cumple": "success",
+        "Parcial": "warning",
+        "No cumple": "danger",
+        "No evaluado": "secondary",
+    }.get(s, "secondary")
+    return f'<span class="badge bg-{cls}">{s}</span>'
+
+
+def cont_comp_severity(value):
+    v = (value or "").strip().lower()
+    if v in ("critical", "critico", "crítico"):
+        return "Crítica"
+    if v in ("high", "alto", "alta"):
+        return "Alta"
+    if v in ("medium", "medio", "media"):
+        return "Media"
+    if v in ("low", "bajo", "baja"):
+        return "Baja"
+    return value or "N/A"
+
+
+def cont_comp_get_config():
+    cfg = WazuhConfig.query.first()
+    if not cfg:
+        cfg = WazuhConfig(api_url="https://localhost:55000", username="wazuh-wui", verify_ssl=False)
+        db.session.add(cfg)
+        db.session.commit()
+    return cfg
+
+
+def cont_comp_wazuh_headers(cfg):
+    if cfg.token:
+        return {"Authorization": f"Bearer {cfg.token}"}
+    return {}
+
+
+def cont_comp_wazuh_authenticate(cfg):
+    api_url = (cfg.api_url or "").rstrip("/")
+    if not api_url:
+        raise RuntimeError("URL API Wazuh no configurada.")
+
+    resp = requests.get(
+        f"{api_url}/security/user/authenticate",
+        auth=(cfg.username or "", cfg.password or ""),
+        verify=bool(cfg.verify_ssl),
+        timeout=20
+    )
+    resp.raise_for_status()
+    data = resp.json() or {}
+    token = data.get("data", {}).get("token") or data.get("token")
+    if not token:
+        raise RuntimeError(f"Wazuh no devolvió token. Respuesta: {str(data)[:500]}")
+    cfg.token = token
+    cfg.last_status = "Online"
+    cfg.last_message = "Conexión exitosa."
+    cfg.last_test_at = cont_comp_now()
+    db.session.commit()
+    return token
+
+
+def cont_comp_wazuh_get(cfg, path, params=None):
+    api_url = (cfg.api_url or "").rstrip("/")
+    if not cfg.token:
+        cont_comp_wazuh_authenticate(cfg)
+
+    resp = requests.get(
+        f"{api_url}{path}",
+        headers=cont_comp_wazuh_headers(cfg),
+        params=params or {},
+        verify=bool(cfg.verify_ssl),
+        timeout=40
+    )
+
+    if resp.status_code == 401:
+        cont_comp_wazuh_authenticate(cfg)
+        resp = requests.get(
+            f"{api_url}{path}",
+            headers=cont_comp_wazuh_headers(cfg),
+            params=params or {},
+            verify=bool(cfg.verify_ssl),
+            timeout=40
+        )
+
+    resp.raise_for_status()
+    return resp.json() or {}
+
+
+def cont_comp_extract_items(data):
+    if not isinstance(data, dict):
+        return []
+    d = data.get("data", data)
+    if isinstance(d, dict):
+        for key in ("affected_items", "items", "alerts", "results"):
+            if isinstance(d.get(key), list):
+                return d.get(key)
+    if isinstance(d, list):
+        return d
+    return []
+
+
+def cont_comp_seed_controls():
+    for standard, code, name, source_type, rule_key in CONTINUOUS_CONTROL_LIBRARY:
+        existing = ContinuousControl.query.filter_by(
+            standard=standard,
+            control_code=code,
+            source_type=source_type
+        ).first()
+        if not existing:
+            db.session.add(ContinuousControl(
+                standard=standard,
+                control_code=code,
+                control_name=name,
+                source_type=source_type,
+                rule_key=rule_key,
+                status="No evaluado",
+                score=0
+            ))
+    db.session.commit()
+
+
+def init_continuous_compliance_db():
+    with app.app_context():
+        db.create_all()
+        cont_comp_seed_controls()
+
+
+# Llamado automático al iniciar
+try:
+    init_continuous_compliance_db()
+except Exception as e:
+    print("No se pudo inicializar Cumplimiento Continuo:", repr(e))
+
+
+def cont_comp_apply_control_evaluation():
+    controls = ContinuousControl.query.all()
+
+    counts = {
+        "agents_active": WazuhAgent.query.filter(WazuhAgent.status.ilike("%active%")).count(),
+        "agents_total": WazuhAgent.query.count(),
+        "vuln_critical_high": WazuhVulnerability.query.filter(
+            WazuhVulnerability.severity.in_(["Critical", "High", "Crítica", "Alta", "critical", "high"])
+        ).count(),
+        "alerts_high": WazuhAlert.query.filter(WazuhAlert.rule_level >= 10).count(),
+        "fim_events": WazuhFimEvent.query.count(),
+        "sca_failed": WazuhSCAResult.query.filter(WazuhSCAResult.result.ilike("%fail%")).count(),
+        "mitre_events": WazuhMitreEvent.query.count(),
+    }
+
+    for c in controls:
+        score = 0
+        status = "No evaluado"
+        evidence_count = 0
+        summary = ""
+
+        if c.source_type == "agent":
+            total = counts["agents_total"]
+            active = counts["agents_active"]
+
+            evidence_count = total
+            summary = f"{active}/{total} agentes activos"
+
+            if total == 0:
+                status = "No evaluado"
+                score = 0
+            elif active == total:
+                status = "Cumple"
+                score = 100
+            elif active > 0:
+                status = "Parcial"
+                score = round((active / total) * 100, 2)
+            else:
+                status = "No cumple"
+                score = 0
+
+        elif c.source_type == "vulnerability":
+            evidence_count = counts["vuln_critical_high"]
+            summary = f"{evidence_count} vulnerabilidades críticas/altas"
+
+            if evidence_count == 0:
+                status = "Cumple"
+                score = 100
+            elif evidence_count <= 5:
+                status = "Parcial"
+                score = 70
+            else:
+                status = "No cumple"
+                score = 30
+
+        elif c.source_type == "alert":
+            evidence_count = counts["alerts_high"]
+            summary = f"{evidence_count} alertas de severidad alta o crítica"
+
+            if evidence_count == 0:
+                status = "Cumple"
+                score = 100
+            elif evidence_count <= 10:
+                status = "Parcial"
+                score = 70
+            else:
+                status = "No cumple"
+                score = 30
+
+        elif c.source_type == "sca":
+            failed = counts["sca_failed"]
+            total_checks = WazuhSCAResult.query.count()
+            passed = max(total_checks - failed, 0)
+
+            evidence_count = failed
+            summary = f"{passed}/{total_checks} verificaciones SCA cumplen"
+
+            if total_checks == 0:
+                status = "No evaluado"
+                score = 0
+            elif failed == 0:
+                status = "Cumple"
+                score = 100
+            elif failed <= 10:
+                status = "Parcial"
+                score = 65
+            else:
+                status = "No cumple"
+                score = 30
+
+        elif c.source_type == "fim":
+            evidence_count = counts["fim_events"]
+            summary = f"{evidence_count} eventos de integridad detectados"
+
+            if evidence_count == 0:
+                status = "No evaluado"
+                score = 0
+            else:
+                status = "Parcial"
+                score = 75
+
+        elif c.source_type == "mitre":
+            evidence_count = counts["mitre_events"]
+            summary = f"{evidence_count} técnicas MITRE detectadas"
+
+            if evidence_count == 0:
+                status = "No evaluado"
+                score = 0
+            elif evidence_count <= 10:
+                status = "Parcial"
+                score = 70
+            else:
+                status = "No cumple"
+                score = 40
+
+        c.status = status
+        c.score = score
+        c.evidence_count = evidence_count
+        c.evidence_summary = summary
+        c.last_evaluated_at = cont_comp_now()
+
+    db.session.commit()
+
+
+def cont_comp_create_evidence(standard, code, name, source_type, ref, asset, severity, description, raw):
+    exists = ContinuousEvidence.query.filter_by(
+        standard=standard,
+        control_code=code,
+        event_ref=str(ref)
+    ).first()
+    if exists:
+        return
+
+    db.session.add(ContinuousEvidence(
+        standard=standard,
+        control_code=code,
+        control_name=name,
+        source="Wazuh",
+        source_type=source_type,
+        event_ref=str(ref),
+        asset=asset,
+        severity=severity,
+        description=description,
+        raw_json=json.dumps(raw, ensure_ascii=False)[:100000] if raw is not None else None
+    ))
+
+
+def cont_comp_generate_evidences_and_actions():
+    # Limpieza simple para evitar duplicados excesivos: no borra histórico.
+    mappings = ContinuousControl.query.all()
+
+    # Vulnerabilidades críticas/altas -> evidencias + planes de remediación
+    vulns = WazuhVulnerability.query.filter(
+        WazuhVulnerability.severity.in_(["Critical", "High", "Crítica", "Alta", "critical", "high"])
+    ).limit(200).all()
+
+    for v in vulns:
+        related = [m for m in mappings if m.source_type == "vulnerability"]
+        for m in related:
+            cont_comp_create_evidence(
+                m.standard, m.control_code, m.control_name, "Vulnerabilidad",
+                v.unique_key, v.agent_name, cont_comp_severity(v.severity),
+                f"{v.cve or 'CVE'} - {v.title or v.package_name or 'Vulnerabilidad detectada'}",
+                {"cve": v.cve, "package": v.package_name, "cvss": v.cvss}
+            )
+
+        plan_exists = ContinuousActionPlan.query.filter_by(source_ref=v.unique_key, action_type="Remediación").first()
+        if not plan_exists:
+            db.session.add(ContinuousActionPlan(
+                origin="Wazuh",
+                standard="ISO27001",
+                control_code="A.8.8",
+                title=f"Remediar vulnerabilidad {v.cve or v.package_name or v.unique_key}",
+                description=v.title or v.condition or "Vulnerabilidad detectada por Wazuh.",
+                asset=v.agent_name,
+                severity=cont_comp_severity(v.severity),
+                action_type="Remediación",
+                status="Abierto",
+                source_ref=v.unique_key,
+                raw_json=v.raw_json
+            ))
+
+    # Alertas críticas/altas -> incidentes
+    alerts = WazuhAlert.query.filter(WazuhAlert.rule_level >= 12).limit(200).all()
+    for a in alerts:
+        related = [m for m in mappings if m.source_type == "alert"]
+        for m in related:
+            cont_comp_create_evidence(
+                m.standard, m.control_code, m.control_name, "Alerta",
+                a.alert_id, a.agent_name, cont_comp_severity(a.severity),
+                a.rule_description or "Alerta de seguridad Wazuh",
+                {"rule_id": a.rule_id, "level": a.rule_level, "mitre": a.mitre_ids}
+            )
+
+        plan_exists = ContinuousActionPlan.query.filter_by(source_ref=a.alert_id, action_type="Incidente").first()
+        if not plan_exists:
+            db.session.add(ContinuousActionPlan(
+                origin="Wazuh",
+                standard="ISO27001",
+                control_code="A.5.24",
+                title=f"Gestionar alerta crítica Wazuh nivel {a.rule_level}",
+                description=a.rule_description or "Alerta crítica generada por Wazuh.",
+                asset=a.agent_name,
+                severity="Crítica" if (a.rule_level or 0) >= 12 else "Alta",
+                action_type="Incidente",
+                status="Abierto",
+                source_ref=a.alert_id,
+                raw_json=a.raw_json
+            ))
+
+    # SCA fallido -> hallazgos
+    scas = WazuhSCAResult.query.filter(WazuhSCAResult.result.ilike("%fail%")).limit(200).all()
+    for s in scas:
+        related = [m for m in mappings if m.source_type == "sca"]
+        for m in related:
+            cont_comp_create_evidence(
+                m.standard, m.control_code, m.control_name, "SCA",
+                s.unique_key, s.agent_name, "Media",
+                s.title or "Control de configuración fallido",
+                {"policy": s.policy_name, "check_id": s.check_id, "result": s.result}
+            )
+
+        plan_exists = ContinuousActionPlan.query.filter_by(source_ref=s.unique_key, action_type="Hallazgo").first()
+        if not plan_exists:
+            db.session.add(ContinuousActionPlan(
+                origin="Wazuh",
+                standard="ISO27001",
+                control_code="A.8.9",
+                title=f"Corregir configuración insegura: {s.check_id or s.policy_name}",
+                description=s.title or "Control SCA fallido detectado por Wazuh.",
+                asset=s.agent_name,
+                severity="Media",
+                action_type="Hallazgo",
+                status="Abierto",
+                source_ref=s.unique_key,
+                raw_json=s.raw_json
+            ))
+
+    db.session.commit()
+
+
+def cont_comp_sync_agents(cfg):
+    data = cont_comp_wazuh_get(cfg, "/agents", {"limit": 500})
+    items = cont_comp_extract_items(data)
+    count = 0
+    for it in items:
+        wid = str(it.get("id") or it.get("agent_id") or "")
+        if not wid:
+            continue
+        row = WazuhAgent.query.filter_by(wazuh_id=wid).first() or WazuhAgent(wazuh_id=wid)
+        row.name = it.get("name")
+        row.ip = it.get("ip")
+        osinfo = it.get("os") or {}
+        row.os_name = osinfo.get("name")
+        row.os_version = osinfo.get("version")
+        row.status = it.get("status")
+        row.last_keep_alive = it.get("lastKeepAlive") or it.get("last_keep_alive")
+        row.raw_json = json.dumps(it, ensure_ascii=False)
+        row.synced_at = cont_comp_now()
+        db.session.add(row)
+        count += 1
+    db.session.commit()
+    return count
+
+
+def cont_comp_sync_vulnerabilities(cfg):
+    # Wazuh puede variar endpoint por versión. Se intentan endpoints comunes.
+    agents = WazuhAgent.query.all()
+    count = 0
+    for ag in agents:
+        possible_paths = [
+            f"/vulnerability/{ag.wazuh_id}",
+            f"/vulnerability/{ag.wazuh_id}/inventory",
+            f"/agents/{ag.wazuh_id}/vulnerability"
+        ]
+        items = []
+        for path in possible_paths:
+            try:
+                data = cont_comp_wazuh_get(cfg, path, {"limit": 500})
+                items = cont_comp_extract_items(data)
+                if items:
+                    break
+            except Exception:
+                continue
+
+        for it in items:
+            cve = it.get("cve") or it.get("cve_id") or it.get("name")
+            pkg = it.get("package", {}).get("name") if isinstance(it.get("package"), dict) else it.get("package_name")
+            unique = f"{ag.wazuh_id}:{cve}:{pkg}:{it.get('version') or it.get('package_version')}"
+            row = WazuhVulnerability.query.filter_by(unique_key=unique).first() or WazuhVulnerability(unique_key=unique)
+            row.agent_id = ag.wazuh_id
+            row.agent_name = ag.name
+            row.cve = cve
+            row.package_name = pkg
+            row.package_version = it.get("version") or it.get("package_version")
+            row.severity = it.get("severity") or it.get("cvss", {}).get("severity") if isinstance(it.get("cvss"), dict) else it.get("severity")
+            try:
+                row.cvss = float(it.get("cvss3_score") or it.get("cvss2_score") or it.get("score") or 0)
+            except Exception:
+                row.cvss = None
+            row.title = it.get("title") or it.get("description")
+            row.condition = it.get("condition")
+            row.raw_json = json.dumps(it, ensure_ascii=False)
+            row.synced_at = cont_comp_now()
+            db.session.add(row)
+            count += 1
+    db.session.commit()
+    return count
+
+
+def cont_comp_sync_alerts(cfg):
+    # El API del manager no siempre expone alertas históricas; se intenta endpoint común.
+    possible_paths = ["/security/events", "/alerts", "/events"]
+    items = []
+    for path in possible_paths:
+        try:
+            data = cont_comp_wazuh_get(cfg, path, {"limit": 500, "sort": "-timestamp"})
+            items = cont_comp_extract_items(data)
+            if items:
+                break
+        except Exception:
+            continue
+
+    count = 0
+    for it in items:
+        alert_id = str(it.get("id") or it.get("_id") or it.get("timestamp") or uuid.uuid4().hex)
+        agent = it.get("agent") or {}
+        rule = it.get("rule") or {}
+        mitre = rule.get("mitre") or {}
+        level = int(rule.get("level") or it.get("rule_level") or 0)
+        row = WazuhAlert.query.filter_by(alert_id=alert_id).first() or WazuhAlert(alert_id=alert_id)
+        row.timestamp = it.get("timestamp")
+        row.agent_id = agent.get("id")
+        row.agent_name = agent.get("name")
+        row.rule_id = str(rule.get("id") or "")
+        row.rule_level = level
+        row.rule_description = rule.get("description") or it.get("description")
+        row.mitre_ids = json.dumps(mitre.get("id") or mitre, ensure_ascii=False)
+        row.groups = json.dumps(rule.get("groups") or [], ensure_ascii=False)
+        row.severity = "Crítica" if level >= 12 else ("Alta" if level >= 10 else ("Media" if level >= 6 else "Baja"))
+        row.raw_json = json.dumps(it, ensure_ascii=False)
+        row.synced_at = cont_comp_now()
+        db.session.add(row)
+        count += 1
+    db.session.commit()
+    return count
+
+
+def cont_comp_sync_sca(cfg):
+    agents = WazuhAgent.query.all()
+    count = 0
+    for ag in agents:
+        try:
+            data = cont_comp_wazuh_get(cfg, f"/sca/{ag.wazuh_id}", {"limit": 500})
+            policies = cont_comp_extract_items(data)
+        except Exception:
+            policies = []
+
+        for p in policies:
+            policy_id = p.get("policy_id") or p.get("id")
+            policy_name = p.get("name") or p.get("policy_name")
+            try:
+                checks_data = cont_comp_wazuh_get(cfg, f"/sca/{ag.wazuh_id}/checks/{policy_id}", {"limit": 500})
+                checks = cont_comp_extract_items(checks_data)
+            except Exception:
+                checks = []
+
+            for chk in checks:
+                check_id = str(chk.get("id") or chk.get("check_id") or uuid.uuid4().hex)
+                unique = f"{ag.wazuh_id}:{policy_id}:{check_id}"
+                row = WazuhSCAResult.query.filter_by(unique_key=unique).first() or WazuhSCAResult(unique_key=unique)
+                row.agent_id = ag.wazuh_id
+                row.agent_name = ag.name
+                row.policy_id = str(policy_id or "")
+                row.policy_name = policy_name
+                row.check_id = check_id
+                row.title = chk.get("title") or chk.get("description")
+                row.result = chk.get("result") or chk.get("status")
+                row.compliance = json.dumps(chk.get("compliance") or [], ensure_ascii=False)
+                row.raw_json = json.dumps(chk, ensure_ascii=False)
+                row.synced_at = cont_comp_now()
+                db.session.add(row)
+                count += 1
+    db.session.commit()
+    return count
+
+
+def cont_comp_sync_fim_and_mitre_from_alerts():
+    fim_count = 0
+    mitre_count = 0
+    alerts = WazuhAlert.query.order_by(WazuhAlert.id.desc()).limit(500).all()
+
+    for a in alerts:
+        raw = {}
+        try:
+            raw = json.loads(a.raw_json or "{}")
+        except Exception:
+            raw = {}
+
+        syscheck = raw.get("syscheck") or raw.get("data", {}).get("syscheck")
+        if syscheck:
+            path = syscheck.get("path") or syscheck.get("file")
+            action = syscheck.get("event") or syscheck.get("action")
+            unique = f"{a.alert_id}:fim:{path}:{action}"
+            row = WazuhFimEvent.query.filter_by(unique_key=unique).first() or WazuhFimEvent(unique_key=unique)
+            row.timestamp = a.timestamp
+            row.agent_id = a.agent_id
+            row.agent_name = a.agent_name
+            row.file_path = path
+            row.action = action
+            row.severity = a.severity
+            row.raw_json = a.raw_json
+            row.synced_at = cont_comp_now()
+            db.session.add(row)
+            fim_count += 1
+
+        try:
+            mitre_ids = json.loads(a.mitre_ids or "[]")
+        except Exception:
+            mitre_ids = []
+        if mitre_ids:
+            if isinstance(mitre_ids, dict):
+                techniques = mitre_ids.get("id") or []
+                tactics = mitre_ids.get("tactic") or []
+            else:
+                techniques = mitre_ids
+                tactics = []
+
+            if not isinstance(techniques, list):
+                techniques = [techniques]
+
+            for tid in techniques:
+                unique = f"{a.alert_id}:mitre:{tid}"
+                row = WazuhMitreEvent.query.filter_by(unique_key=unique).first() or WazuhMitreEvent(unique_key=unique)
+                row.timestamp = a.timestamp
+                row.agent_id = a.agent_id
+                row.agent_name = a.agent_name
+                row.tactic = ", ".join(tactics) if isinstance(tactics, list) else str(tactics or "")
+                row.technique_id = str(tid)
+                row.technique = str(tid)
+                row.rule_level = a.rule_level
+                row.description = a.rule_description
+                row.raw_json = a.raw_json
+                row.synced_at = cont_comp_now()
+                db.session.add(row)
+                mitre_count += 1
+
+    db.session.commit()
+    return fim_count, mitre_count
+
+
+def cont_comp_full_sync():
+    cfg = cont_comp_get_config()
+    log = ContinuousComplianceSyncLog(status="En proceso", message="Sincronización iniciada.")
+    db.session.add(log)
+    db.session.commit()
+
+    try:
+        agents = cont_comp_sync_agents(cfg)
+        vulns = cont_comp_sync_vulnerabilities(cfg)
+        alerts = cont_comp_sync_alerts(cfg)
+        sca = cont_comp_sync_sca(cfg)
+        fim, mitre = cont_comp_sync_fim_and_mitre_from_alerts()
+
+        cont_comp_apply_control_evaluation()
+        cont_comp_generate_evidences_and_actions()
+
+        log.status = "Exitoso"
+        log.message = "Sincronización finalizada correctamente."
+        log.finished_at = cont_comp_now()
+        log.agents_count = agents
+        log.vulnerabilities_count = vulns
+        log.alerts_count = alerts
+        log.sca_count = sca
+        log.fim_count = fim
+        log.mitre_count = mitre
+        db.session.commit()
+
+        try:
+            registrar_log(session.get("username", "Sistema"), "Sincronización de Cumplimiento Continuo ejecutada.")
+        except Exception:
+            pass
+
+        return log
+    except Exception as e:
+        traceback.print_exc()
+        log.status = "Error"
+        log.message = str(e)
+        log.finished_at = cont_comp_now()
+        db.session.commit()
+        raise
+
+
+# ============================================================
+# UI BASE DEL MÓDULO
+# ============================================================
+
+CONT_COMP_CSS = """
+<style>
+  body{
+    background-image:url('/static/img/ccsgsi.jpg');
+    background-size:cover;
+    background-position:center;
+    background-attachment:fixed;
+    background-repeat:no-repeat;
+  }
+
+  .cc-shell{
+    width:96%;
+    max-width:1650px;
+    margin:10px auto 24px auto;
+  }
+
+  /* =========================
+     HERO SGSI COMPACTO
+  ========================== */
+  .cc-hero{
+    background:
+      linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
+    border-radius:18px;
+    padding:16px 24px;
+    min-height:94px;
+    display:flex;
+    align-items:center;
+    justify-content:flex-start;
+    box-shadow:0 12px 24px rgba(15,23,42,.24);
+    color:#ffffff;
+    position:relative;
+    overflow:hidden;
+    margin-bottom:10px;
+  }
+
+  .cc-hero::before{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:
+      radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
+      repeating-linear-gradient(
+        135deg,
+        rgba(255,255,255,.05) 0px,
+        rgba(255,255,255,.05) 1px,
+        transparent 1px,
+        transparent 15px
+      );
+    pointer-events:none;
+  }
+
+  .cc-hero::after{
+    content:"🛡️";
+    width:54px;
+    height:54px;
+    min-width:54px;
+    border-radius:14px;
+    background:rgba(255,255,255,.96);
+    color:#1459a6;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:1.55rem;
+    box-shadow:0 8px 18px rgba(0,0,0,.20);
+    margin-right:14px;
+    position:relative;
+    z-index:1;
+    order:-1;
+  }
+
+  .cc-hero h2{
+    color:#ffffff !important;
+    font-weight:950;
+    font-size:1.36rem;
+    line-height:1.08;
+    margin:0;
+    position:relative;
+    z-index:1;
+  }
+
+  .cc-hero p{
+    margin:5px 0 0 0;
+    color:rgba(255,255,255,.90);
+    font-size:.82rem;
+    font-weight:600;
+    position:relative;
+    z-index:1;
+  }
+
+  .cc-hero .cc-hero-text::before{
+    content:"SGSI · Cumplimiento Continuo";
+    display:inline-block;
+    background:rgba(255,255,255,.18);
+    border:1px solid rgba(255,255,255,.30);
+    border-radius:999px;
+    padding:3px 10px;
+    font-size:.66rem;
+    font-weight:800;
+    letter-spacing:.35px;
+    margin-bottom:4px;
+  }
+
+  /* =========================
+     BOTONERA SUPERIOR
+  ========================== */
+  .cc-nav{
+    background:rgba(255,255,255,.94);
+    border:1px solid rgba(219,230,244,.95);
+    border-radius:16px;
+    padding:10px;
+    box-shadow:0 8px 20px rgba(15,23,42,.14);
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+    margin:10px 0 14px 0;
+  }
+
+  .cc-nav a{
+    border-radius:999px !important;
+    font-weight:850 !important;
+    font-size:.78rem !important;
+    padding:7px 13px !important;
+    box-shadow:0 4px 10px rgba(15,23,42,.08);
+  }
+
+  .cc-nav .btn-primary{
+    background:linear-gradient(135deg,#0b3a6e 0%,#1459a6 55%,#2c7be5 100%) !important;
+    border-color:#1459a6 !important;
+  }
+
+  /* =========================
+     TARJETAS Y KPIS
+  ========================== */
+  .cc-card{
+    background:rgba(255,255,255,.97);
+    border:1px solid rgba(219,230,244,.98);
+    border-radius:18px;
+    box-shadow:0 12px 26px rgba(15,23,42,.16);
+    padding:16px;
+    margin-bottom:14px;
+    overflow:hidden;
+  }
+
+  .cc-card h5,
+  .cc-section-title{
+    color:#0b3a6e;
+    font-weight:950;
+    font-size:1.02rem;
+    margin:0 0 10px 0;
+  }
+
+  .cc-card .cc-muted,
+  .cc-muted{
+    color:#64748b;
+    font-size:.84rem;
+    font-weight:600;
+  }
+
+  .cc-kpi{
+    min-height:98px;
+    padding:14px 12px;
+    display:flex;
+    align-items:center;
+    justify-content:flex-start;
+    gap:10px;
+    background:rgba(255,255,255,.96);
+    border:1px solid rgba(219,230,244,.95);
+    border-radius:18px;
+    box-shadow:0 10px 22px rgba(15,23,42,.14);
+    overflow:hidden;
+    transition:all .20s ease;
+  }
+
+  .cc-kpi:hover{
+    transform:translateY(-3px);
+    box-shadow:0 16px 30px rgba(15,23,42,.18);
+  }
+
+  .cc-kpi .icon{
+    width:46px;
+    height:46px;
+    min-width:46px;
+    flex:0 0 46px;
+    border-radius:50%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:linear-gradient(135deg,#1459a6,#2c7be5);
+    color:#ffffff;
+    font-size:1.22rem;
+    box-shadow:0 8px 16px rgba(20,89,166,.25);
+  }
+
+  .cc-kpi .num{
+    font-size:1.55rem;
+    font-weight:950;
+    color:#1459a6;
+    line-height:1;
+  }
+
+  .cc-kpi .lbl{
+    margin-top:4px;
+    font-size:.76rem;
+    color:#64748b;
+    font-weight:850;
+    line-height:1.15;
+  }
+
+  /* =========================
+     TABLAS
+  ========================== */
+  .cc-table{
+    background:#ffffff;
+    border-collapse:separate !important;
+    border-spacing:0;
+    border:1px solid #d8e3f3;
+    border-radius:14px;
+    overflow:hidden;
+    font-size:.82rem;
+  }
+
+  .cc-table thead th{
+    background:linear-gradient(180deg,#eaf3ff 0%,#dcecff 100%) !important;
+    color:#0b3a6e !important;
+    font-weight:950 !important;
+    text-align:center;
+    vertical-align:middle;
+    border-color:#c9daef !important;
+    padding:10px 8px;
+    white-space:nowrap;
+  }
+
+  .cc-table tbody td{
+    vertical-align:middle;
+    border-color:#e3edf8 !important;
+    padding:8px 9px;
+    color:#334155;
+  }
+
+  .cc-table tbody tr:hover{
+    background:#f5f9ff;
+  }
+
+  .table-responsive{
+    border-radius:14px;
+  }
+
+  .cc-pill{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:5px 10px;
+    border-radius:999px;
+    font-size:.72rem;
+    font-weight:900;
+    background:#eaf3ff;
+    color:#1459a6;
+    border:1px solid #cbdff7;
+  }
+
+  .cc-form label{
+    font-weight:900;
+    color:#334155;
+    font-size:.82rem;
+    margin-bottom:4px;
+  }
+
+  .cc-form .form-control,
+  .cc-form .form-select,
+  .cc-card .form-control,
+  .cc-card .form-select{
+    border-radius:12px;
+    border:1px solid #cbd8ea;
+    font-size:.86rem;
+    padding:9px 11px;
+  }
+
+  .cc-card .btn{
+    border-radius:999px !important;
+    font-weight:850 !important;
+    padding-left:16px !important;
+    padding-right:16px !important;
+  }
+
+  .cc-table .btn{
+    font-size:.74rem !important;
+    padding:5px 11px !important;
+  }
+
+  .badge{
+    border-radius:999px;
+    padding:6px 10px;
+    font-weight:850;
+  }
+
+  .cc-empty{
+    text-align:center;
+    color:#64748b;
+    padding:34px 12px;
+    font-weight:750;
+  }
+
+  @media (max-width:768px){
+    .cc-shell{
+      width:98%;
+    }
+
+    .cc-hero{
+      justify-content:center;
+      text-align:center;
+      flex-direction:column;
+      gap:10px;
+      padding:16px 14px;
+    }
+
+    .cc-hero::after{
+      margin-right:0;
+    }
+
+    .cc-hero h2{
+      font-size:1.12rem;
+    }
+
+    .cc-hero p{
+      font-size:.72rem;
+    }
+
+    .cc-nav a,
+    .cc-card .btn{
+      width:100%;
+    }
+  }
+</style>
+"""
+
+def cont_comp_nav(active="dashboard"):
+    items = [
+        ("dashboard", "bi-speedometer2", "Dashboard", "cont_comp_dashboard"),
+        ("wazuh", "bi-plug", "Conexión Wazuh", "cont_comp_wazuh_config"),
+        ("sync", "bi-arrow-repeat", "Sincronización", "cont_comp_sync_view"),
+        ("ISO27001", "bi-shield-check", "ISO 27001", "cont_comp_standard"),
+        ("SOC2", "bi-patch-check", "SOC 2", "cont_comp_standard"),
+        ("PCIDSS", "bi-credit-card-2-front", "PCI-DSS", "cont_comp_standard"),
+        ("NISTCSF", "bi-diagram-3", "NIST CSF 2.0", "cont_comp_standard"),
+        ("evidences", "bi-folder-check", "Evidencias", "cont_comp_evidences"),
+        ("plans", "bi-list-check", "Planes de Acción", "cont_comp_action_plans"),
+    ]
+    html = ['<div class="cc-nav">']
+    for key, icon, label, endpoint in items:
+        cls = "btn-primary" if key == active else "btn-outline-primary"
+        if endpoint == "cont_comp_standard":
+            href = url_for(endpoint, standard=key)
+        else:
+            href = url_for(endpoint)
+        html.append(f'<a class="btn {cls} btn-sm" href="{href}"><i class="bi {icon}"></i> {label}</a>')
+    html.append("</div>")
+    return Markup("".join(html))
+
+
+def cont_comp_render(content, active="dashboard", title="Cumplimiento Continuo", subtitle="Monitoreo continuo de controles con Wazuh."):
+    shell = f"""
+    {CONT_COMP_CSS}
+    <div class="cc-shell">
+      <div class="cc-hero">
+        <div class="cc-hero-text">
+          <h2>{title}</h2>
+          <p>{subtitle}</p>
+        </div>
+      </div>
+      {cont_comp_nav(active)}
+      {content}
+    </div>
+    """
+    return render_template_string(BASE, content=Markup(shell))
+
+
+# ============================================================
+# RUTAS
+# ============================================================
+
+@app.route("/cumplimiento_continuo")
+@login_required
+def cont_comp_dashboard():
+    user, resp = cont_comp_require_read()
+    if resp:
+        return resp
+
+    cont_comp_seed_controls()
+    cont_comp_apply_control_evaluation()
+
+    cfg = WazuhConfig.query.first()
+    total_controls = ContinuousControl.query.count()
+    cumple = ContinuousControl.query.filter_by(status="Cumple").count()
+    parcial = ContinuousControl.query.filter_by(status="Parcial").count()
+    no_cumple = ContinuousControl.query.filter_by(status="No cumple").count()
+    no_eval = ContinuousControl.query.filter_by(status="No evaluado").count()
+
+    agents = WazuhAgent.query.count()
+    vulns = WazuhVulnerability.query.count()
+    alerts = WazuhAlert.query.count()
+    evidences = ContinuousEvidence.query.count()
+    plans = ContinuousActionPlan.query.filter(ContinuousActionPlan.status != "Cerrado").count()
+    last_sync = ContinuousComplianceSyncLog.query.order_by(ContinuousComplianceSyncLog.id.desc()).first()
+
+    standards = db.session.query(
+        ContinuousControl.standard,
+        func.count(ContinuousControl.id),
+        func.avg(ContinuousControl.score)
+    ).group_by(ContinuousControl.standard).all()
+
+    content = render_template_string("""
+    <div class="row g-3">
+      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-hdd-network"></i></div><div><div class="num">{{ agents }}</div><div class="lbl">Agentes Wazuh</div></div></div></div>
+      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-bug"></i></div><div><div class="num">{{ vulns }}</div><div class="lbl">Vulnerabilidades</div></div></div></div>
+      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-bell"></i></div><div><div class="num">{{ alerts }}</div><div class="lbl">Alertas</div></div></div></div>
+      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-clipboard-check"></i></div><div><div class="num">{{ evidences }}</div><div class="lbl">Evidencias</div></div></div></div>
+    </div>
+
+    <div class="row g-3 mt-1">
+      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-check2-circle"></i></div><div><div class="num">{{ cumple }}</div><div class="lbl">Cumple</div></div></div></div>
+      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-exclamation-triangle"></i></div><div><div class="num">{{ parcial }}</div><div class="lbl">Parcial</div></div></div></div>
+      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-x-octagon"></i></div><div><div class="num">{{ no_cumple }}</div><div class="lbl">No cumple</div></div></div></div>
+      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-list-task"></i></div><div><div class="num">{{ plans }}</div><div class="lbl">Planes abiertos</div></div></div></div>
+    </div>
+
+    <div class="cc-card mt-3">
+      <h5 class="cc-section-title">Estado por estándar</h5>
+      <div class="table-responsive">
+        <table class="table cc-table table-hover align-middle">
+          <thead><tr><th>Estándar</th><th>Controles</th><th>Score promedio</th><th>Acción</th></tr></thead>
+          <tbody>
+          {% for s, total, avg in standards %}
+            <tr>
+              <td><span class="cc-pill">{{ s }}</span></td>
+              <td>{{ total }}</td>
+              <td><strong>{{ "%.1f"|format(avg or 0) }}%</strong></td>
+              <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('cont_comp_standard', standard=s) }}">Ver detalle</a></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="cc-card">
+      <h5 class="cc-section-title">Estado de conexión</h5>
+      <p class="mb-1"><strong>Wazuh:</strong> {{ cfg.last_status if cfg else "No configurado" }}</p>
+      <p class="mb-1"><strong>Último mensaje:</strong> {{ cfg.last_message if cfg else "—" }}</p>
+      <p class="mb-1"><strong>Última sincronización:</strong> {{ last_sync.finished_at if last_sync else "Sin sincronización" }}</p>
+      <div class="mt-3">
+        <a class="btn btn-primary" href="{{ url_for('cont_comp_wazuh_config') }}">Configurar Wazuh</a>
+        <a class="btn btn-warning" href="{{ url_for('cont_comp_sync_view') }}">Sincronizar</a>
+      </div>
+    </div>
+    """, cfg=cfg, agents=agents, vulns=vulns, alerts=alerts, evidences=evidences, plans=plans,
+       total_controls=total_controls, cumple=cumple, parcial=parcial, no_cumple=no_cumple, no_eval=no_eval,
+       standards=standards, last_sync=last_sync)
+
+    return cont_comp_render(content, "dashboard")
+
+
+@app.route("/cumplimiento_continuo/wazuh", methods=["GET", "POST"])
+@login_required
+def cont_comp_wazuh_config():
+    user, resp = cont_comp_require_write()
+    if resp:
+        return resp
+
+    cfg = cont_comp_get_config()
+
+    if request.method == "POST":
+        cfg.api_url = (request.form.get("api_url") or "").strip().rstrip("/")
+        cfg.username = (request.form.get("username") or "").strip()
+        new_password = request.form.get("password") or ""
+        if new_password.strip():
+            cfg.password = new_password.strip()
+            cfg.token = None
+        cfg.verify_ssl = bool(request.form.get("verify_ssl"))
+        db.session.commit()
+
+        if request.form.get("action") == "test":
+            try:
+                cont_comp_wazuh_authenticate(cfg)
+                flash("Conexión Wazuh validada correctamente.", "success")
+            except Exception as e:
+                cfg.last_status = "Offline"
+                cfg.last_message = str(e)
+                cfg.last_test_at = cont_comp_now()
+                db.session.commit()
+                flash(f"No fue posible conectar con Wazuh: {e}", "danger")
+        else:
+            flash("Configuración Wazuh guardada.", "success")
+
+        return redirect(url_for("cont_comp_wazuh_config"))
+
+    content = render_template_string("""
+    <div class="cc-card">
+      <h5 class="cc-section-title">Conexión Wazuh API</h5>
+      <form method="POST" class="cc-form">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label>URL API</label>
+            <input class="form-control" name="api_url" value="{{ cfg.api_url }}" placeholder="https://localhost:55000">
+          </div>
+          <div class="col-md-3">
+            <label>Usuario</label>
+            <input class="form-control" name="username" value="{{ cfg.username }}" placeholder="wazuh-wui">
+          </div>
+          <div class="col-md-3">
+            <label>Contraseña / Token</label>
+            <input class="form-control" name="password" type="password" placeholder="Dejar vacío para conservar">
+          </div>
+          <div class="col-md-12">
+            <div class="form-check mt-2">
+              <input class="form-check-input" type="checkbox" name="verify_ssl" id="verify_ssl" {% if cfg.verify_ssl %}checked{% endif %}>
+              <label class="form-check-label" for="verify_ssl">Verificar certificado SSL</label>
+            </div>
+            <small class="cc-muted">Para laboratorio Docker local normalmente se deja desactivado.</small>
+          </div>
+        </div>
+        <div class="mt-4 d-flex gap-2 flex-wrap">
+          <button class="btn btn-primary" name="action" value="save">Guardar</button>
+          <button class="btn btn-success" name="action" value="test">Validar conexión</button>
+          <a class="btn btn-outline-secondary" href="{{ url_for('cont_comp_dashboard') }}">Volver</a>
+        </div>
+      </form>
+    </div>
+
+    <div class="cc-card">
+      <h5 class="cc-section-title">Estado</h5>
+      <p><strong>Estado:</strong> {{ cfg.last_status or "Sin validar" }}</p>
+      <p><strong>Mensaje:</strong> {{ cfg.last_message or "—" }}</p>
+      <p><strong>Última prueba:</strong> {{ cfg.last_test_at or "—" }}</p>
+    </div>
+    """, cfg=cfg)
+
+    return cont_comp_render(content, "wazuh", "Conexión Wazuh", "Configure la API REST para extraer agentes, alertas, vulnerabilidades, FIM, SCA y MITRE.")
+
+
+@app.route("/cumplimiento_continuo/sincronizacion", methods=["GET", "POST"])
+@login_required
+def cont_comp_sync_view():
+    user, resp = cont_comp_require_write()
+    if resp:
+        return resp
+
+    if request.method == "POST":
+        try:
+            log = cont_comp_full_sync()
+            flash("Sincronización ejecutada correctamente.", "success")
+        except Exception as e:
+            flash(f"Error ejecutando sincronización: {e}", "danger")
+        return redirect(url_for("cont_comp_sync_view"))
+
+    logs = ContinuousComplianceSyncLog.query.order_by(ContinuousComplianceSyncLog.id.desc()).limit(20).all()
+
+    content = render_template_string("""
+    <div class="cc-card">
+      <h5 class="cc-section-title">Sincronizar datos desde Wazuh</h5>
+      <p class="cc-muted">Extrae agentes, vulnerabilidades, alertas, SCA y eventos MITRE/FIM disponibles. Luego recalcula el cumplimiento y genera evidencias y planes de acción.</p>
+      <form method="POST">
+        <button class="btn btn-warning" data-progress-text="Sincronizando datos desde Wazuh...">
+          <i class="bi bi-arrow-repeat"></i> Ejecutar sincronización
+        </button>
+      </form>
+    </div>
+
+    <div class="cc-card">
+      <h5 class="cc-section-title">Historial de sincronización</h5>
+      <div class="table-responsive">
+        <table class="table cc-table">
+          <thead><tr><th>Inicio</th><th>Fin</th><th>Estado</th><th>Agentes</th><th>Vulns</th><th>Alertas</th><th>SCA</th><th>FIM</th><th>MITRE</th><th>Mensaje</th></tr></thead>
+          <tbody>
+          {% for l in logs %}
+            <tr>
+              <td>{{ l.started_at }}</td><td>{{ l.finished_at or "—" }}</td><td>{{ l.status }}</td>
+              <td>{{ l.agents_count }}</td><td>{{ l.vulnerabilities_count }}</td><td>{{ l.alerts_count }}</td>
+              <td>{{ l.sca_count }}</td><td>{{ l.fim_count }}</td><td>{{ l.mitre_count }}</td><td>{{ l.message }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    """, logs=logs)
+
+    return cont_comp_render(content, "sync", "Sincronización", "Actualice la información técnica recolectada desde Wazuh.")
+
+
+@app.route("/cumplimiento_continuo/estandar/<standard>")
+@login_required
+def cont_comp_standard(standard):
+    user, resp = cont_comp_require_read()
+    if resp:
+        return resp
+
+    standard = (standard or "").strip().upper()
+    controls = ContinuousControl.query.filter_by(standard=standard).order_by(ContinuousControl.control_code.asc()).all()
+    evid_count = db.session.query(
+        ContinuousEvidence.control_code,
+        func.count(ContinuousEvidence.id)
+    ).filter_by(standard=standard).group_by(ContinuousEvidence.control_code).all()
+    evid_map = {k: v for k, v in evid_count}
+
+    titles = {
+        "ISO27001": "ISO 27001",
+        "SOC2": "SOC 2",
+        "PCIDSS": "PCI-DSS",
+        "NISTCSF": "NIST CSF 2.0"
+    }
+
+    content = render_template_string("""
+    <div class="cc-card">
+      <h5 class="cc-section-title">Controles evaluados — {{ title }}</h5>
+      <div class="table-responsive">
+        <table class="table cc-table table-hover">
+          <thead>
+            <tr>
+              <th>Control</th>
+              <th>Nombre</th>
+              <th>Fuente</th>
+              <th>Estado</th>
+              <th>Score</th>
+              <th>Resumen Evidencia</th>
+              <th>Evidencias</th>
+              <th>Última evaluación</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for c in controls %}
+            <tr>
+              <td><strong>{{ c.control_code }}</strong></td>
+              <td>{{ c.control_name }}</td>
+              <td><span class="cc-pill">{{ c.source_type }}</span></td>
+              <td>{{ status_badge(c.status)|safe }}</td>
+               <td><strong>{{ "%.1f"|format(c.score or 0) }}%</strong></td>
+               <td>
+                 <small>{{ c.evidence_summary or "-" }}</small>
+               </td>
+              <td>
+              <a href="{{ url_for('cont_comp_evidences', standard=c.standard, control_code=c.control_code) }}">
+                {{ evid_map.get(c.control_code, 0) }}
+              </a>
+            </td>              <td>{{ c.last_evaluated_at or "—" }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    """, controls=controls, title=titles.get(standard, standard), evid_map=evid_map, status_badge=cont_comp_status_badge)
+
+    return cont_comp_render(content, standard, titles.get(standard, standard), "Estado de cumplimiento calculado con evidencias recolectadas desde Wazuh.")
+
+
+@app.route("/cumplimiento_continuo/evidencias")
+@login_required
+def cont_comp_evidences():
+    user, resp = cont_comp_require_read()
+    if resp:
+        return resp
+
+    standard = (request.args.get("standard") or "").strip().upper()
+    control_code = (request.args.get("control_code") or "").strip()
+
+    q = ContinuousEvidence.query
+    if standard:
+        q = q.filter_by(standard=standard)
+    if control_code:
+        q = q.filter_by(control_code=control_code)
+    evidences = q.order_by(ContinuousEvidence.id.desc()).limit(500).all()
+
+    content = render_template_string("""
+    <div class="cc-card">
+      <h5 class="cc-section-title">Evidencias automáticas</h5>
+      <form class="row g-2 mb-3">
+        <div class="col-md-3"><input class="form-control" name="standard" placeholder="ISO27001 / SOC2 / PCIDSS / NISTCSF" value="{{ standard }}"></div>
+        <div class="col-md-3"><input class="form-control" name="control_code" placeholder="Control" value="{{ control_code }}"></div>
+        <div class="col-md-2"><button class="btn btn-primary w-100">Filtrar</button></div>
+        <div class="col-md-2"><a class="btn btn-outline-secondary w-100" href="{{ url_for('cont_comp_evidences') }}">Limpiar</a></div>
+      </form>
+
+      <div class="table-responsive">
+        <table class="table cc-table table-hover">
+          <thead><tr><th>Fecha</th><th>Estándar</th><th>Control</th><th>Fuente</th><th>Activo</th><th>Severidad</th><th>Descripción</th></tr></thead>
+          <tbody>
+          {% for e in evidences %}
+            <tr>
+              <td>{{ e.evidence_date }}</td>
+              <td>{{ e.standard }}</td>
+              <td><strong>{{ e.control_code }}</strong></td>
+              <td>{{ e.source_type }}</td>
+              <td>{{ e.asset or "—" }}</td>
+              <td>{{ e.severity or "—" }}</td>
+              <td>{{ e.description }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    """, evidences=evidences, standard=standard, control_code=control_code)
+
+    return cont_comp_render(content, "evidences", "Evidencias", "Evidencias técnicas asociadas a controles de cumplimiento.")
+
+
+@app.route("/cumplimiento_continuo/planes")
+@login_required
+def cont_comp_action_plans():
+    user, resp = cont_comp_require_read()
+    if resp:
+        return resp
+
+    status = (request.args.get("status") or "").strip()
+    q = ContinuousActionPlan.query
+    if status:
+        q = q.filter_by(status=status)
+    plans = q.order_by(ContinuousActionPlan.id.desc()).limit(500).all()
+
+    content = render_template_string("""
+    <div class="cc-card">
+      <h5 class="cc-section-title">Planes de Acción generados</h5>
+      <div class="table-responsive">
+        <table class="table cc-table table-hover">
+          <thead><tr><th>Fecha</th><th>Tipo</th><th>Estándar</th><th>Control</th><th>Título</th><th>Activo</th><th>Severidad</th><th>Estado</th><th>Acción</th></tr></thead>
+          <tbody>
+          {% for p in plans %}
+            <tr>
+              <td>{{ p.created_at }}</td>
+              <td>{{ p.action_type }}</td>
+              <td>{{ p.standard or "—" }}</td>
+              <td>{{ p.control_code or "—" }}</td>
+              <td>{{ p.title }}</td>
+              <td>{{ p.asset or "—" }}</td>
+              <td>{{ p.severity or "—" }}</td>
+              <td><span class="badge bg-info">{{ p.status }}</span></td>
+              <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('cont_comp_action_plan_edit', plan_id=p.id) }}">Gestionar</a></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    """, plans=plans)
+
+    return cont_comp_render(content, "plans", "Planes de Acción", "Remediaciones, incidentes y hallazgos derivados de Wazuh.")
+
+
+@app.route("/cumplimiento_continuo/planes/<int:plan_id>", methods=["GET", "POST"])
+@login_required
+def cont_comp_action_plan_edit(plan_id):
+    user, resp = cont_comp_require_write()
+    if resp:
+        return resp
+
+    plan = ContinuousActionPlan.query.get_or_404(plan_id)
+
+    if request.method == "POST":
+        plan.responsible = (request.form.get("responsible") or "").strip()
+        plan.due_date = (request.form.get("due_date") or "").strip()
+        plan.status = (request.form.get("status") or "Abierto").strip()
+        plan.description = (request.form.get("description") or "").strip()
+        db.session.commit()
+        flash("Plan de acción actualizado.", "success")
+        return redirect(url_for("cont_comp_action_plans"))
+
+    content = render_template_string("""
+    <div class="cc-card">
+      <h5 class="cc-section-title">Gestionar Plan de Acción</h5>
+      <form method="POST" class="cc-form">
+        <div class="mb-3">
+          <label>Título</label>
+          <input class="form-control" value="{{ plan.title }}" disabled>
+        </div>
+        <div class="mb-3">
+          <label>Descripción</label>
+          <textarea class="form-control" name="description" rows="5">{{ plan.description or "" }}</textarea>
+        </div>
+        <div class="row g-3">
+          <div class="col-md-4"><label>Responsable</label><input class="form-control" name="responsible" value="{{ plan.responsible or '' }}"></div>
+          <div class="col-md-4"><label>Fecha objetivo</label><input class="form-control" type="date" name="due_date" value="{{ plan.due_date or '' }}"></div>
+          <div class="col-md-4"><label>Estado</label>
+            <select class="form-select" name="status">
+              {% for s in ["Abierto","En proceso","Cerrado","Cancelado"] %}
+                <option value="{{ s }}" {% if plan.status == s %}selected{% endif %}>{{ s }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="mt-4 d-flex gap-2">
+          <button class="btn btn-primary">Guardar</button>
+          <a class="btn btn-outline-secondary" href="{{ url_for('cont_comp_action_plans') }}">Volver</a>
+        </div>
+      </form>
+    </div>
+    """, plan=plan)
+
+    return cont_comp_render(content, "plans", "Gestionar Plan de Acción", "Actualice responsable, fecha objetivo, estado y descripción.")
+
+# ============================================================================================================================================
+#                                            FIN MÓDULO CUMPLIMIENTO CONTINUO - WAZUH + GRAC
 # ============================================================================================================================================
 
 
