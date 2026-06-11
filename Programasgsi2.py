@@ -171960,6 +171960,61 @@ class ContinuousActionPlan(db.Model):
     source_ref = db.Column(db.String(500), nullable=True)
     raw_json = db.Column(db.Text, nullable=True)
 
+class WazuhComplianceControl(db.Model):
+    __tablename__ = "wazuh_compliance_controls"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    standard = db.Column(db.String(50), nullable=False, index=True)
+    control_code = db.Column(db.String(100), nullable=False, index=True)
+    control_name = db.Column(db.Text, nullable=True)
+
+    alert_id = db.Column(db.String(255), nullable=True, index=True)
+    agent_id = db.Column(db.String(80), nullable=True)
+    agent_name = db.Column(db.String(255), nullable=True)
+
+    rule_id = db.Column(db.String(80), nullable=True)
+    rule_level = db.Column(db.Integer, default=0)
+    rule_description = db.Column(db.Text, nullable=True)
+
+    status = db.Column(db.String(50), nullable=False, default="Needs review")
+    severity = db.Column(db.String(50), nullable=True)
+
+    raw_json = db.Column(db.Text, nullable=True)
+    synced_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("standard", "control_code", "alert_id", name="uq_wazuh_compliance_control_alert"),
+    )
+
+class ContinuousManualEvidence(db.Model):
+    __tablename__ = "continuous_manual_evidences"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    standard = db.Column(db.String(50), nullable=False, index=True)
+    control_code = db.Column(db.String(100), nullable=False, index=True)
+    control_name = db.Column(db.Text, nullable=True)
+
+    evaluation_type = db.Column(db.String(50), nullable=False, default="MANUAL")
+    proposed_status = db.Column(db.String(50), nullable=False, default="No evaluado")
+    approval_status = db.Column(db.String(50), nullable=False, default="Pendiente")
+
+    title = db.Column(db.String(500), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+
+    file_name = db.Column(db.String(500), nullable=True)
+    file_path = db.Column(db.String(1000), nullable=True)
+
+    uploaded_by = db.Column(db.String(255), nullable=True)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    reviewed_by = db.Column(db.String(255), nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    review_comment = db.Column(db.Text, nullable=True)
+
+    valid_until = db.Column(db.String(20), nullable=True)
+
 
 # ============================================================
 # MAPEO BASE WAZUH -> ESTÁNDARES
@@ -172050,6 +172105,37 @@ def cont_comp_status_badge(status):
         "No cumple": "danger",
         "No evaluado": "secondary",
     }.get(s, "secondary")
+    return f'<span class="badge bg-{cls}">{s}</span>'
+
+# ============================================================
+# BADGES ACTUALIZADOS
+# ============================================================
+
+def cont_comp_status_badge(status):
+    s = (status or "No monitoreado").strip()
+
+    cls = {
+        "Cumple": "success",
+        "Parcial": "warning",
+        "No cumple": "danger",
+        "No monitoreado": "secondary",
+        "No evaluado": "secondary",
+    }.get(s, "secondary")
+
+    label = "No monitoreado" if s == "No evaluado" else s
+
+    return f'<span class="badge bg-{cls}">{label}</span>'
+
+
+def cont_comp_approval_badge(status):
+    s = (status or "Pendiente").strip()
+
+    cls = {
+        "Pendiente": "warning",
+        "Aprobado": "success",
+        "Rechazado": "danger",
+    }.get(s, "secondary")
+
     return f'<span class="badge bg-{cls}">{s}</span>'
 
 
@@ -172489,26 +172575,35 @@ def cont_comp_sync_vulnerabilities(cfg):
 
 
 def cont_comp_sync_alerts(cfg):
-    # El API del manager no siempre expone alertas históricas; se intenta endpoint común.
     possible_paths = ["/security/events", "/alerts", "/events"]
+
     items = []
+
     for path in possible_paths:
         try:
-            data = cont_comp_wazuh_get(cfg, path, {"limit": 500, "sort": "-timestamp"})
+            data = cont_comp_wazuh_get(cfg, path, {"limit": 1000, "sort": "-timestamp"})
             items = cont_comp_extract_items(data)
+
             if items:
                 break
+
         except Exception:
             continue
 
     count = 0
+    compliance_count = 0
+
     for it in items:
         alert_id = str(it.get("id") or it.get("_id") or it.get("timestamp") or uuid.uuid4().hex)
+
         agent = it.get("agent") or {}
         rule = it.get("rule") or {}
         mitre = rule.get("mitre") or {}
+
         level = int(rule.get("level") or it.get("rule_level") or 0)
+
         row = WazuhAlert.query.filter_by(alert_id=alert_id).first() or WazuhAlert(alert_id=alert_id)
+
         row.timestamp = it.get("timestamp")
         row.agent_id = agent.get("id")
         row.agent_name = agent.get("name")
@@ -172517,18 +172612,30 @@ def cont_comp_sync_alerts(cfg):
         row.rule_description = rule.get("description") or it.get("description")
         row.mitre_ids = json.dumps(mitre.get("id") or mitre, ensure_ascii=False)
         row.groups = json.dumps(rule.get("groups") or [], ensure_ascii=False)
-        row.severity = "Crítica" if level >= 12 else ("Alta" if level >= 10 else ("Media" if level >= 6 else "Baja"))
+        row.severity = "Crítica" if level >= 12 else ("Alta" if level >= 7 else ("Media" if level >= 3 else "Baja"))
         row.raw_json = json.dumps(it, ensure_ascii=False)
         row.synced_at = cont_comp_now()
+
         db.session.add(row)
+
+        compliance_count += cont_comp_save_compliance_controls_from_alert(
+            alert_id=alert_id,
+            agent=agent,
+            rule=rule,
+            raw=it
+        )
+
         count += 1
+
     db.session.commit()
+
     return count
 
 
 def cont_comp_sync_sca(cfg):
     agents = WazuhAgent.query.all()
     count = 0
+
     for ag in agents:
         try:
             data = cont_comp_wazuh_get(cfg, f"/sca/{ag.wazuh_id}", {"limit": 500})
@@ -172539,8 +172646,13 @@ def cont_comp_sync_sca(cfg):
         for p in policies:
             policy_id = p.get("policy_id") or p.get("id")
             policy_name = p.get("name") or p.get("policy_name")
+
             try:
-                checks_data = cont_comp_wazuh_get(cfg, f"/sca/{ag.wazuh_id}/checks/{policy_id}", {"limit": 500})
+                checks_data = cont_comp_wazuh_get(
+                    cfg,
+                    f"/sca/{ag.wazuh_id}/checks/{policy_id}",
+                    {"limit": 1000}
+                )
                 checks = cont_comp_extract_items(checks_data)
             except Exception:
                 checks = []
@@ -172548,6 +172660,11 @@ def cont_comp_sync_sca(cfg):
             for chk in checks:
                 check_id = str(chk.get("id") or chk.get("check_id") or uuid.uuid4().hex)
                 unique = f"{ag.wazuh_id}:{policy_id}:{check_id}"
+
+                result = chk.get("result") or chk.get("status") or ""
+                status, score, severity = cont_comp_source_status("sca", result=result)
+                level = 8 if status == "No cumple" else (1 if status == "Cumple" else 0)
+
                 row = WazuhSCAResult.query.filter_by(unique_key=unique).first() or WazuhSCAResult(unique_key=unique)
                 row.agent_id = ag.wazuh_id
                 row.agent_name = ag.name
@@ -172555,14 +172672,174 @@ def cont_comp_sync_sca(cfg):
                 row.policy_name = policy_name
                 row.check_id = check_id
                 row.title = chk.get("title") or chk.get("description")
-                row.result = chk.get("result") or chk.get("status")
+                row.result = result
                 row.compliance = json.dumps(chk.get("compliance") or [], ensure_ascii=False)
                 row.raw_json = json.dumps(chk, ensure_ascii=False)
                 row.synced_at = cont_comp_now()
+
                 db.session.add(row)
                 count += 1
+
+                compliance_items = chk.get("compliance") or []
+
+                if isinstance(compliance_items, dict):
+                    compliance_items = [compliance_items]
+
+                if not isinstance(compliance_items, list):
+                    compliance_items = []
+
+                for comp in compliance_items:
+                    standard = None
+                    control_codes = []
+
+                    if isinstance(comp, dict):
+                        key = (comp.get("key") or comp.get("standard") or "").lower()
+                        value = comp.get("value") or comp.get("control") or comp.get("id")
+
+                        if "pci" in key:
+                            standard = "PCIDSS"
+                        elif "soc" in key or "tsc" in key:
+                            standard = "SOC2"
+                        elif "iso" in key:
+                            standard = "ISO27001"
+                        elif "nist" in key:
+                            standard = "NISTCSF"
+
+                        control_codes = cont_comp_split_control_codes(value)
+
+                    else:
+                        text = str(comp).strip()
+                        text_lower = text.lower()
+
+                        if "pci" in text_lower:
+                            standard = "PCIDSS"
+                        elif "soc" in text_lower or "tsc" in text_lower:
+                            standard = "SOC2"
+                        elif "iso" in text_lower:
+                            standard = "ISO27001"
+                        elif "nist" in text_lower:
+                            standard = "NISTCSF"
+
+                        if ":" in text:
+                            values = text.split(":", 1)[1]
+                        else:
+                            values = text
+
+                        control_codes = cont_comp_split_control_codes(values)
+
+                    if not standard or not control_codes:
+                        continue
+
+                    for control_code in control_codes:
+                        alert_ref = f"SCA:{unique}:{standard}:{control_code}"
+
+                        existing = WazuhComplianceControl.query.filter_by(
+                            standard=standard,
+                            control_code=control_code,
+                            alert_id=alert_ref
+                        ).first()
+
+                        if existing:
+                            existing.status = status
+                            existing.severity = severity
+                            existing.rule_level = level
+                            existing.rule_description = row.title or "Resultado SCA Wazuh"
+                            existing.agent_id = ag.wazuh_id
+                            existing.agent_name = ag.name
+                            existing.raw_json = row.raw_json
+                            existing.synced_at = cont_comp_now()
+                            continue
+
+                        db.session.add(WazuhComplianceControl(
+                            standard=standard,
+                            control_code=control_code,
+                            control_name=row.title or control_code,
+                            alert_id=alert_ref,
+                            agent_id=ag.wazuh_id,
+                            agent_name=ag.name,
+                            rule_id=f"SCA-{check_id}",
+                            rule_level=level,
+                            rule_description=row.title or "Resultado SCA Wazuh",
+                            status=status,
+                            severity=severity,
+                            raw_json=row.raw_json,
+                            synced_at=cont_comp_now()
+                        ))
+
     db.session.commit()
     return count
+
+def cont_comp_build_standard_catalog(standard):
+    standard = (standard or "").strip().upper()
+    rows = {}
+    
+    def add(code, name, parent=None):
+        code = cont_comp_normalize_code(code)
+        if not code:
+            return
+        if code not in rows:
+            rows[code] = {
+                "detail_code": code,
+                "parent_code": parent or cont_comp_parent_for_detail(standard, code),
+                "name": name or code,
+            }
+
+    if standard == "PCIDSS":
+        preguntas = PciMadurezPregunta.query.filter_by(activo=True).order_by(
+            PciMadurezPregunta.orden.asc(),
+            PciMadurezPregunta.id.asc()
+        ).all()
+
+        for p in preguntas:
+            code = p.seccion_codigo or p.pregunta_codigo
+            name = p.seccion_nombre or p.bloque_nombre or p.pregunta
+            add(code, name)
+
+    elif standard == "SOC2":
+        preguntas = Soc2MadurezPregunta.query.filter_by(activo=True).order_by(
+            Soc2MadurezPregunta.orden.asc(),
+            Soc2MadurezPregunta.id.asc()
+        ).all()
+
+        for p in preguntas:
+            code = p.seccion_codigo or p.pregunta_codigo or p.bloque_codigo
+            name = p.seccion_nombre or p.bloque_nombre or p.pregunta
+            add(code, name)
+
+    elif standard == "NISTCSF":
+        preguntas = NistMadurezPregunta.query.filter_by(activo=True).order_by(
+            NistMadurezPregunta.orden.asc(),
+            NistMadurezPregunta.id.asc()
+        ).all()
+
+        for p in preguntas:
+            code = p.categoria_codigo or p.funcion_codigo
+            name = p.categoria or p.funcion
+            add(code, name)
+
+    elif standard == "ISO27001":
+        preguntas = MadurezPregunta.query.order_by(
+            MadurezPregunta.sheet.asc(),
+            MadurezPregunta.orden.asc(),
+            MadurezPregunta.id.asc()
+        ).all()
+
+        for p in preguntas:
+            if getattr(p, "tipo", "q") != "q":
+                continue
+
+            if (p.sheet or "").upper() == "ANEXO A":
+                code = f"A.{(p.control or '').strip()}" if p.control else ""
+                name = p.control_desc or p.tema or p.pregunta
+            else:
+                seccion = p.seccion or ""
+                m = re.search(r"(\d+\.\d+)", seccion)
+                code = m.group(1) if m else ""
+                name = p.seccion or p.pregunta
+
+            add(code, name)
+
+    return rows
 
 
 def cont_comp_sync_fim_and_mitre_from_alerts():
@@ -172672,6 +172949,166 @@ def cont_comp_full_sync():
 
 
 # ============================================================
+# HELPERS - EVIDENCIA MANUAL + AUTOMÁTICA
+# ============================================================
+
+def cont_comp_upload_folder():
+    folder = os.path.join(app.root_path, "static", "uploads", "cumplimiento_continuo")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
+def cont_comp_public_file_path(filename):
+    if not filename:
+        return None
+    return f"uploads/cumplimiento_continuo/{filename}"
+
+
+def cont_comp_manual_status_from_evidences(manual_evidences):
+    approved = [
+        e for e in manual_evidences
+        if (e.approval_status or "").strip() == "Aprobado"
+    ]
+
+    pending = [
+        e for e in manual_evidences
+        if (e.approval_status or "").strip() == "Pendiente"
+    ]
+
+    rejected = [
+        e for e in manual_evidences
+        if (e.approval_status or "").strip() == "Rechazado"
+    ]
+
+    if approved:
+        latest = sorted(
+            approved,
+            key=lambda x: x.reviewed_at or x.uploaded_at or datetime.min,
+            reverse=True
+        )[0]
+
+        status = latest.proposed_status or "No evaluado"
+
+        score_map = {
+            "Cumple": 100,
+            "Parcial": 60,
+            "No cumple": 0,
+            "No aplica": None,
+            "No evaluado": 0,
+        }
+
+        score = score_map.get(status, 0)
+
+        return {
+            "has_manual": True,
+            "status": status,
+            "score": score,
+            "summary": f"Evidencia manual aprobada por auditor. {latest.title}",
+            "source": "Manual aprobada",
+            "count": len(approved),
+            "last_date": latest.reviewed_at or latest.uploaded_at,
+        }
+
+    if pending:
+        latest = sorted(
+            pending,
+            key=lambda x: x.uploaded_at or datetime.min,
+            reverse=True
+        )[0]
+
+        return {
+            "has_manual": True,
+            "status": "No evaluado",
+            "score": 0,
+            "summary": f"Evidencia manual cargada pendiente de aprobación. {latest.title}",
+            "source": "Manual pendiente",
+            "count": len(pending),
+            "last_date": latest.uploaded_at,
+        }
+
+    if rejected:
+        latest = sorted(
+            rejected,
+            key=lambda x: x.reviewed_at or x.uploaded_at or datetime.min,
+            reverse=True
+        )[0]
+
+        return {
+            "has_manual": True,
+            "status": "No evaluado",
+            "score": 0,
+            "summary": f"Evidencia manual rechazada. {latest.review_comment or latest.title}",
+            "source": "Manual rechazada",
+            "count": len(rejected),
+            "last_date": latest.reviewed_at or latest.uploaded_at,
+        }
+
+    return {
+        "has_manual": False,
+        "status": "No evaluado",
+        "score": 0,
+        "summary": "No hay evidencia manual cargada para este punto.",
+        "source": "Sin evidencia manual",
+        "count": 0,
+        "last_date": None,
+    }
+
+
+def cont_comp_final_status_hybrid(wazuh_evidences, manual_evidences):
+    wazuh_status, wazuh_score, wazuh_summary = cont_comp_final_status_from_evidences(wazuh_evidences)
+    manual = cont_comp_manual_status_from_evidences(manual_evidences)
+
+    dates = [e.synced_at for e in wazuh_evidences if e.synced_at]
+    if manual.get("last_date"):
+        dates.append(manual["last_date"])
+
+    last_date = max(dates, default=None)
+
+    if wazuh_status in ("No cumple", "Parcial", "Cumple"):
+        return {
+            "status": wazuh_status,
+            "score": wazuh_score,
+            "summary": wazuh_summary,
+            "source_type": "Automática Wazuh",
+            "evidence_count": len(wazuh_evidences) + manual["count"],
+            "last_evaluated_at": last_date,
+            "evaluation_type": "AUTOMATIC" if wazuh_status in ("No cumple", "Cumple") else "HYBRID",
+        }
+
+    if wazuh_status == "No aplica":
+        return {
+            "status": "No aplica",
+            "score": None,
+            "summary": wazuh_summary,
+            "source_type": "Excluido",
+            "evidence_count": len(wazuh_evidences),
+            "last_evaluated_at": last_date,
+            "evaluation_type": "EXCLUDED",
+        }
+
+    if manual["has_manual"]:
+        return {
+            "status": manual["status"],
+            "score": manual["score"],
+            "summary": manual["summary"],
+            "source_type": manual["source"],
+            "evidence_count": manual["count"],
+            "last_evaluated_at": manual["last_date"],
+            "evaluation_type": "MANUAL",
+        }
+
+    return {
+        "status": "No evaluado",
+        "score": 0,
+        "summary": "Pendiente de evidencia automática o documental.",
+        "source_type": "Pendiente evidencia",
+        "evidence_count": 0,
+        "last_evaluated_at": None,
+        "evaluation_type": "PENDING",
+    }
+
+
+# ============================================================
 # UI BASE DEL MÓDULO
 # ============================================================
 
@@ -172691,12 +173128,8 @@ CONT_COMP_CSS = """
     margin:10px auto 24px auto;
   }
 
-  /* =========================
-     HERO SGSI COMPACTO
-  ========================== */
   .cc-hero{
-    background:
-      linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
+    background:linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
     border-radius:18px;
     padding:16px 24px;
     min-height:94px;
@@ -172707,7 +173140,7 @@ CONT_COMP_CSS = """
     color:#ffffff;
     position:relative;
     overflow:hidden;
-    margin-bottom:10px;
+    margin-bottom:18px;
   }
 
   .cc-hero::before{
@@ -172716,13 +173149,7 @@ CONT_COMP_CSS = """
     inset:0;
     background:
       radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
-      repeating-linear-gradient(
-        135deg,
-        rgba(255,255,255,.05) 0px,
-        rgba(255,255,255,.05) 1px,
-        transparent 1px,
-        transparent 15px
-      );
+      repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 15px);
     pointer-events:none;
   }
 
@@ -172777,37 +173204,20 @@ CONT_COMP_CSS = """
     margin-bottom:4px;
   }
 
-  /* =========================
-     BOTONERA SUPERIOR
-  ========================== */
-  .cc-nav{
-    background:rgba(255,255,255,.94);
-    border:1px solid rgba(219,230,244,.95);
-    border-radius:16px;
-    padding:10px;
-    box-shadow:0 8px 20px rgba(15,23,42,.14);
-    display:flex;
-    gap:8px;
-    flex-wrap:wrap;
-    margin:10px 0 14px 0;
+  .cc-nav,
+  div.cc-nav,
+  .cc-shell > .cc-nav{
+    display:none !important;
+    visibility:hidden !important;
+    height:0 !important;
+    min-height:0 !important;
+    max-height:0 !important;
+    padding:0 !important;
+    margin:0 !important;
+    border:0 !important;
+    overflow:hidden !important;
   }
 
-  .cc-nav a{
-    border-radius:999px !important;
-    font-weight:850 !important;
-    font-size:.78rem !important;
-    padding:7px 13px !important;
-    box-shadow:0 4px 10px rgba(15,23,42,.08);
-  }
-
-  .cc-nav .btn-primary{
-    background:linear-gradient(135deg,#0b3a6e 0%,#1459a6 55%,#2c7be5 100%) !important;
-    border-color:#1459a6 !important;
-  }
-
-  /* =========================
-     TARJETAS Y KPIS
-  ========================== */
   .cc-card{
     background:rgba(255,255,255,.97);
     border:1px solid rgba(219,230,244,.98);
@@ -172818,7 +173228,6 @@ CONT_COMP_CSS = """
     overflow:hidden;
   }
 
-  .cc-card h5,
   .cc-section-title{
     color:#0b3a6e;
     font-weight:950;
@@ -172826,7 +173235,6 @@ CONT_COMP_CSS = """
     margin:0 0 10px 0;
   }
 
-  .cc-card .cc-muted,
   .cc-muted{
     color:#64748b;
     font-size:.84rem;
@@ -172838,26 +173246,17 @@ CONT_COMP_CSS = """
     padding:14px 12px;
     display:flex;
     align-items:center;
-    justify-content:flex-start;
     gap:10px;
     background:rgba(255,255,255,.96);
     border:1px solid rgba(219,230,244,.95);
     border-radius:18px;
     box-shadow:0 10px 22px rgba(15,23,42,.14);
-    overflow:hidden;
-    transition:all .20s ease;
-  }
-
-  .cc-kpi:hover{
-    transform:translateY(-3px);
-    box-shadow:0 16px 30px rgba(15,23,42,.18);
   }
 
   .cc-kpi .icon{
     width:46px;
     height:46px;
     min-width:46px;
-    flex:0 0 46px;
     border-radius:50%;
     display:flex;
     align-items:center;
@@ -172865,7 +173264,6 @@ CONT_COMP_CSS = """
     background:linear-gradient(135deg,#1459a6,#2c7be5);
     color:#ffffff;
     font-size:1.22rem;
-    box-shadow:0 8px 16px rgba(20,89,166,.25);
   }
 
   .cc-kpi .num{
@@ -172883,9 +173281,6 @@ CONT_COMP_CSS = """
     line-height:1.15;
   }
 
-  /* =========================
-     TABLAS
-  ========================== */
   .cc-table{
     background:#ffffff;
     border-collapse:separate !important;
@@ -172914,14 +173309,6 @@ CONT_COMP_CSS = """
     color:#334155;
   }
 
-  .cc-table tbody tr:hover{
-    background:#f5f9ff;
-  }
-
-  .table-responsive{
-    border-radius:14px;
-  }
-
   .cc-pill{
     display:inline-flex;
     align-items:center;
@@ -172943,7 +173330,6 @@ CONT_COMP_CSS = """
   }
 
   .cc-form .form-control,
-  .cc-form .form-select,
   .cc-card .form-control,
   .cc-card .form-select{
     border-radius:12px;
@@ -172959,11 +173345,6 @@ CONT_COMP_CSS = """
     padding-right:16px !important;
   }
 
-  .cc-table .btn{
-    font-size:.74rem !important;
-    padding:5px 11px !important;
-  }
-
   .badge{
     border-radius:999px;
     padding:6px 10px;
@@ -172976,67 +173357,52 @@ CONT_COMP_CSS = """
     padding:34px 12px;
     font-weight:750;
   }
-
-  @media (max-width:768px){
-    .cc-shell{
-      width:98%;
-    }
-
-    .cc-hero{
-      justify-content:center;
-      text-align:center;
-      flex-direction:column;
-      gap:10px;
-      padding:16px 14px;
-    }
-
-    .cc-hero::after{
-      margin-right:0;
-    }
-
-    .cc-hero h2{
-      font-size:1.12rem;
-    }
-
-    .cc-hero p{
-      font-size:.72rem;
-    }
-
-    .cc-nav a,
-    .cc-card .btn{
-      width:100%;
-    }
-  }
 </style>
 """
 
+
 def cont_comp_nav(active="dashboard"):
-    items = [
-        ("dashboard", "bi-speedometer2", "Dashboard", "cont_comp_dashboard"),
-        ("wazuh", "bi-plug", "Conexión Wazuh", "cont_comp_wazuh_config"),
-        ("sync", "bi-arrow-repeat", "Sincronización", "cont_comp_sync_view"),
-        ("ISO27001", "bi-shield-check", "ISO 27001", "cont_comp_standard"),
-        ("SOC2", "bi-patch-check", "SOC 2", "cont_comp_standard"),
-        ("PCIDSS", "bi-credit-card-2-front", "PCI-DSS", "cont_comp_standard"),
-        ("NISTCSF", "bi-diagram-3", "NIST CSF 2.0", "cont_comp_standard"),
-        ("evidences", "bi-folder-check", "Evidencias", "cont_comp_evidences"),
-        ("plans", "bi-list-check", "Planes de Acción", "cont_comp_action_plans"),
-    ]
-    html = ['<div class="cc-nav">']
-    for key, icon, label, endpoint in items:
-        cls = "btn-primary" if key == active else "btn-outline-primary"
-        if endpoint == "cont_comp_standard":
-            href = url_for(endpoint, standard=key)
-        else:
-            href = url_for(endpoint)
-        html.append(f'<a class="btn {cls} btn-sm" href="{href}"><i class="bi {icon}"></i> {label}</a>')
-    html.append("</div>")
-    return Markup("".join(html))
+    return Markup("")
 
 
-def cont_comp_render(content, active="dashboard", title="Cumplimiento Continuo", subtitle="Monitoreo continuo de controles con Wazuh."):
+def cont_comp_render(
+    content,
+    active="dashboard",
+    title="Cumplimiento Continuo",
+    subtitle="Monitoreo continuo de controles con Wazuh."
+):
     shell = f"""
     {CONT_COMP_CSS}
+
+    <script>
+      function removeCumplimientoTopNav() {{
+        document.querySelectorAll(".cc-nav").forEach(function(el) {{
+          el.remove();
+        }});
+
+        document.querySelectorAll(".cc-shell a[href*='/cumplimiento_continuo']").forEach(function(link) {{
+          let box = link.closest("div");
+
+          while (box && box.classList && !box.classList.contains("cc-shell")) {{
+            let links = box.querySelectorAll("a[href*='/cumplimiento_continuo']").length;
+            let tables = box.querySelectorAll("table").length;
+            let forms = box.querySelectorAll("form").length;
+
+            if (links >= 5 && tables === 0 && forms === 0) {{
+              box.remove();
+              return;
+            }}
+
+            box = box.parentElement;
+          }}
+        }});
+      }}
+
+      document.addEventListener("DOMContentLoaded", removeCumplimientoTopNav);
+      setTimeout(removeCumplimientoTopNav, 300);
+      setTimeout(removeCumplimientoTopNav, 1000);
+    </script>
+
     <div class="cc-shell">
       <div class="cc-hero">
         <div class="cc-hero-text">
@@ -173044,16 +173410,458 @@ def cont_comp_render(content, active="dashboard", title="Cumplimiento Continuo",
           <p>{subtitle}</p>
         </div>
       </div>
-      {cont_comp_nav(active)}
+
       {content}
     </div>
     """
-    return render_template_string(BASE, content=Markup(shell))
+
+    return render_template_string(
+        BASE,
+        content=Markup(shell)
+    )
+
+# ============================================================
+# ANÁLISIS WAZUH -> ESTÁNDARES
+# ============================================================
+
+def cont_comp_normalize_code(code):
+    code = (code or "").strip().upper()
+    code = code.replace("PCI_DSS", "")
+    code = code.replace("PCI-DSS", "")
+    code = code.replace("REQ.", "REQ-")
+    code = code.replace("REQ ", "REQ-")
+    code = code.replace("REQUERIMIENTO ", "REQ-")
+    code = code.replace("REQUIREMENT ", "REQ-")
+    code = code.strip(" :-")
+    return code
+
+
+def cont_comp_split_control_codes(value):
+    if not value:
+        return []
+
+    if isinstance(value, list):
+        raw = value
+    elif isinstance(value, tuple):
+        raw = list(value)
+    else:
+        raw = str(value).replace(";", ",").split(",")
+
+    codes = []
+
+    for item in raw:
+        text = str(item).strip()
+
+        if not text:
+            continue
+
+        text = text.replace("[", "").replace("]", "")
+        text = text.replace("'", "").replace('"', "")
+
+        if "," in text:
+            for sub in text.split(","):
+                sub = cont_comp_normalize_code(sub)
+                if sub:
+                    codes.append(sub)
+        else:
+            text = cont_comp_normalize_code(text)
+            if text:
+                codes.append(text)
+
+    clean = []
+    seen = set()
+
+    for c in codes:
+        if c and c not in seen:
+            clean.append(c)
+            seen.add(c)
+
+    return clean
+
+def cont_comp_parent_for_detail(standard, detail_code):
+    standard = (standard or "").strip().upper()
+    code = cont_comp_normalize_code(detail_code)
+
+    if not code:
+        return ""
+
+    if standard == "PCIDSS":
+        m = re.match(r"^(\d+)(?:\.|$)", code)
+        if m:
+            return f"REQ-{m.group(1)}"
+        return code
+
+    if standard == "SOC2":
+        m = re.match(r"^(CC\d+)", code)
+        if m:
+            return m.group(1)
+        return code
+
+    if standard == "NISTCSF":
+        m = re.match(r"^([A-Z]{2}\.[A-Z]{2})", code)
+        if m:
+            return m.group(1)
+        return code
+
+    if standard == "ISO27001":
+        if code.startswith("A."):
+            return code
+        return code
+
+    return code
+
+def cont_comp_source_status(source_type, result=None, level=0, severity=None):
+    source_type = (source_type or "").lower()
+    result = (result or "").strip().lower()
+    severity = (severity or "").strip().lower()
+    level = int(level or 0)
+
+    if source_type == "sca":
+        if result in ("failed", "fail", "failure"):
+            return "No cumple", 0, "Alta"
+
+        if result in ("passed", "pass", "success", "ok"):
+            return "Cumple", 100, "Baja"
+
+        if result in ("not applicable", "not_applicable", "n/a", "na", "not applicable."):
+            return "No aplica", None, "N/A"
+
+        if result in ("not run", "not_run", "unknown", "none", "", "pending"):
+            return "No evaluado", 0, "N/A"
+
+        return "No evaluado", 0, "N/A"
+
+    if source_type == "vulnerability":
+        if severity in ("critical", "crítica", "critica", "high", "alta", "alto"):
+            return "No cumple", 0, "Alta"
+
+        if severity in ("medium", "media", "medio"):
+            return "Parcial", 60, "Media"
+
+        if severity in ("low", "baja", "bajo"):
+            return "Parcial", 80, "Baja"
+
+        return "No evaluado", 0, "N/A"
+
+    if source_type == "alert":
+        if level >= 12:
+            return "No cumple", 0, "Crítica"
+
+        if level >= 7:
+            return "Parcial", 60, "Alta"
+
+        if level >= 3:
+            return "Parcial", 80, "Media"
+
+        return "Cumple", 100, "Baja"
+
+    if source_type == "fim":
+        if level >= 12:
+            return "No cumple", 0, "Crítica"
+
+        if level >= 7:
+            return "Parcial", 60, "Alta"
+
+        return "Parcial", 75, "Media"
+
+    if source_type == "mitre":
+        if level >= 12:
+            return "No cumple", 0, "Crítica"
+
+        if level >= 7:
+            return "Parcial", 60, "Alta"
+
+        return "Parcial", 75, "Media"
+
+    return "No evaluado", 0, "N/A"
+
+
+def cont_comp_final_status_from_evidences(evidences):
+    if not evidences:
+        return "No monitoreado", 0, "No existe evidencia técnica automática desde Wazuh para este punto."
+
+    visibles = [e for e in evidences if e.status != "No aplica"]
+
+    if not visibles:
+        return "No aplica", None, "Punto excluido técnicamente por Wazuh."
+
+    fail = [e for e in visibles if e.status == "No cumple"]
+    partial = [e for e in visibles if e.status == "Parcial"]
+    ok = [e for e in visibles if e.status == "Cumple"]
+
+    if fail:
+        return "No cumple", 0, f"{len(fail)} hallazgo(s) técnico(s) detectado(s) por Wazuh."
+
+    if partial:
+        return "Parcial", 60, f"{len(partial)} evento(s) requieren revisión técnica."
+
+    if ok:
+        return "Cumple", 100, f"{len(ok)} evidencia(s) técnica(s) soportan cumplimiento."
+
+    return "No monitoreado", 0, "Wazuh no entregó evidencia concluyente para este punto."
+
+
+def cont_comp_get_control_eval_map(standard):
+    """
+    Devuelve mapas para buscar evaluación por control.
+    """
+    standard = (standard or "").strip().upper()
+
+    controls = ContinuousControl.query.filter_by(standard=standard).all()
+
+    exact = {}
+    normalized = {}
+
+    for c in controls:
+        code = cont_comp_normalize_code(c.control_code)
+        exact[c.control_code] = c
+        normalized[code] = c
+
+    return exact, normalized
+
+
+def cont_comp_control_to_detail_status(control_obj):
+    if not control_obj:
+        return {
+            "status": "No evaluado",
+            "score": 0,
+            "source_type": "-",
+            "summary": "No existe mapeo automático Wazuh para este punto específico.",
+            "evidence_count": 0,
+            "last_evaluated_at": None,
+        }
+
+    return {
+        "status": control_obj.status or "No evaluado",
+        "score": float(control_obj.score or 0),
+        "source_type": control_obj.source_type or "-",
+        "summary": control_obj.evidence_summary or "Sin resumen de evidencia.",
+        "evidence_count": int(control_obj.evidence_count or 0),
+        "last_evaluated_at": control_obj.last_evaluated_at,
+    }
+
+
+def cont_comp_build_standard_detail_rows(standard):
+    standard = (standard or "").strip().upper()
+
+    catalog = cont_comp_build_standard_catalog(standard)
+
+    evidences = WazuhComplianceControl.query.filter_by(
+        standard=standard
+    ).order_by(
+        WazuhComplianceControl.rule_level.desc(),
+        WazuhComplianceControl.synced_at.desc()
+    ).all()
+
+    evidence_by_code = {}
+
+    for e in evidences:
+        if e.status == "No aplica":
+            continue
+
+        code = cont_comp_normalize_code(e.control_code)
+        if not code:
+            continue
+
+        evidence_by_code.setdefault(code, []).append(e)
+
+        if code not in catalog:
+            catalog[code] = {
+                "detail_code": code,
+                "parent_code": cont_comp_parent_for_detail(standard, code),
+                "name": e.control_name or f"Control detectado por Wazuh: {code}",
+            }
+
+    rows = []
+
+    for code, item in catalog.items():
+        evs = evidence_by_code.get(code, [])
+
+        status, score, summary = cont_comp_final_status_from_evidences(evs)
+
+        if status == "No aplica":
+            continue
+
+        sources = sorted(set([
+            "SCA" if (e.rule_id or "").startswith("SCA-") else "Alerta"
+            for e in evs
+        ]))
+
+        last_seen = max([e.synced_at for e in evs if e.synced_at], default=None)
+
+        rows.append({
+            "detail_code": code,
+            "parent_code": item.get("parent_code"),
+            "name": item.get("name"),
+            "source_type": ", ".join(sources) if sources else "Sin fuente automática",
+            "status": status,
+            "score": score,
+            "summary": summary,
+            "evidence_count": len(evs),
+            "last_evaluated_at": last_seen,
+            "evaluation_type": "AUTOMATIC" if evs else "NOT_MONITORED",
+        })
+
+    priority = {
+        "No cumple": 1,
+        "Parcial": 2,
+        "Cumple": 3,
+        "No monitoreado": 4,
+    }
+
+    rows.sort(key=lambda r: (
+        priority.get(r["status"], 9),
+        r["detail_code"]
+    ))
+
+    return rows
+
+
+def cont_comp_group_detail_rows(rows):
+    grouped = {}
+
+    for r in rows:
+        key = r.get("detail_code") or r.get("parent_code") or "SIN-CODIGO"
+
+        if key not in grouped:
+            grouped[key] = {
+                "detail_code": key,
+                "parent_code": r.get("parent_code"),
+                "name": r.get("name"),
+                "source_type": r.get("source_type"),
+                "status": r.get("status"),
+                "score": r.get("score"),
+                "summary": r.get("summary"),
+                "evidence_count": r.get("evidence_count"),
+                "last_evaluated_at": r.get("last_evaluated_at"),
+                "questions": [],
+            }
+
+        question_text = r.get("question") or ""
+        question_code = r.get("question_code") or ""
+
+        if question_text:
+            grouped[key]["questions"].append({
+                "code": question_code,
+                "text": question_text,
+            })
+
+    return list(grouped.values())
+
+def cont_comp_extract_compliance_tags(rule):
+    rule = rule or {}
+    compliance = []
+
+    mappings = {
+        "pci_dss": "PCIDSS",
+        "pci": "PCIDSS",
+        "tsc": "SOC2",
+        "soc2": "SOC2",
+        "iso_27001": "ISO27001",
+        "iso27001": "ISO27001",
+        "nist": "NISTCSF",
+        "nist_csf": "NISTCSF",
+        "nist_800_53": "NIST80053",
+    }
+
+    for wazuh_key, standard in mappings.items():
+        values = rule.get(wazuh_key)
+
+        if not values:
+            continue
+
+        codes = cont_comp_split_control_codes(values)
+
+        for code in codes:
+            compliance.append({
+                "standard": standard,
+                "control_code": code,
+                "control_name": code
+            })
+
+    return compliance
+
+
+def cont_comp_status_from_wazuh_level(level):
+    level = int(level or 0)
+
+    if level >= 8:
+        return "No cumple", "Alta"
+
+    if level >= 3:
+        return "Parcial", "Media"
+
+    return "Cumple", "Baja"
+
+
+def cont_comp_save_compliance_controls_from_alert(alert_id, agent, rule, raw):
+    compliance_tags = cont_comp_extract_compliance_tags(rule)
+
+    if not compliance_tags:
+        return 0
+
+    saved = 0
+    level = int(rule.get("level") or 0)
+    status, score, severity = cont_comp_source_status("alert", level=level)
+
+    for tag in compliance_tags:
+        standard = tag["standard"]
+        control_code = tag["control_code"]
+
+        existing = WazuhComplianceControl.query.filter_by(
+            standard=standard,
+            control_code=control_code,
+            alert_id=str(alert_id)
+        ).first()
+
+        if existing:
+            existing.status = status
+            existing.severity = severity
+            existing.rule_level = level
+            existing.rule_description = rule.get("description")
+            existing.raw_json = json.dumps(raw, ensure_ascii=False)
+            existing.synced_at = cont_comp_now()
+            continue
+
+        db.session.add(WazuhComplianceControl(
+            standard=standard,
+            control_code=control_code,
+            control_name=tag.get("control_name") or control_code,
+            alert_id=str(alert_id),
+            agent_id=(agent or {}).get("id"),
+            agent_name=(agent or {}).get("name"),
+            rule_id=str(rule.get("id") or ""),
+            rule_level=level,
+            rule_description=rule.get("description"),
+            status=status,
+            severity=severity,
+            raw_json=json.dumps(raw, ensure_ascii=False),
+            synced_at=cont_comp_now()
+        ))
+
+        saved += 1
+
+    return saved
 
 
 # ============================================================
 # RUTAS
 # ============================================================
+
+
+@app.route("/cumplimiento_continuo/evidencia_manual/<standard>/<control_code>", methods=["GET", "POST"])
+@login_required
+def cont_comp_manual_evidence(standard, control_code):
+    flash("Cumplimiento Continuo es un módulo 100% automático. Use los módulos normativos de GRAC para evidencia documental.", "warning")
+    return redirect(url_for("cont_comp_standard", standard=standard))
+
+@app.route("/cumplimiento_continuo/evidencia_manual/revisar/<int:evidence_id>/<decision>")
+@login_required
+def cont_comp_review_manual_evidence(evidence_id, decision):
+    flash("La revisión manual de evidencias no aplica en Cumplimiento Continuo.", "warning")
+    return redirect(url_for("cont_comp_dashboard"))
+
+
 
 @app.route("/cumplimiento_continuo")
 @login_required
@@ -173062,56 +173870,133 @@ def cont_comp_dashboard():
     if resp:
         return resp
 
-    cont_comp_seed_controls()
-    cont_comp_apply_control_evaluation()
-
     cfg = WazuhConfig.query.first()
-    total_controls = ContinuousControl.query.count()
-    cumple = ContinuousControl.query.filter_by(status="Cumple").count()
-    parcial = ContinuousControl.query.filter_by(status="Parcial").count()
-    no_cumple = ContinuousControl.query.filter_by(status="No cumple").count()
-    no_eval = ContinuousControl.query.filter_by(status="No evaluado").count()
 
-    agents = WazuhAgent.query.count()
-    vulns = WazuhVulnerability.query.count()
-    alerts = WazuhAlert.query.count()
-    evidences = ContinuousEvidence.query.count()
-    plans = ContinuousActionPlan.query.filter(ContinuousActionPlan.status != "Cerrado").count()
-    last_sync = ContinuousComplianceSyncLog.query.order_by(ContinuousComplianceSyncLog.id.desc()).first()
+    last_sync = ContinuousComplianceSyncLog.query.order_by(
+        ContinuousComplianceSyncLog.id.desc()
+    ).first()
 
-    standards = db.session.query(
-        ContinuousControl.standard,
-        func.count(ContinuousControl.id),
-        func.avg(ContinuousControl.score)
-    ).group_by(ContinuousControl.standard).all()
+    standards_keys = ["ISO27001", "SOC2", "PCIDSS", "NISTCSF"]
+
+    standards = []
+
+    total_cumple = 0
+    total_parcial = 0
+    total_no_cumple = 0
+    total_no_monitoreado = 0
+    total_evaluados = 0
+    total_controles = 0
+
+    for std in standards_keys:
+        rows = cont_comp_build_standard_detail_rows(std)
+
+        controles = len(rows)
+        cumple = len([r for r in rows if r["status"] == "Cumple"])
+        parcial = len([r for r in rows if r["status"] == "Parcial"])
+        no_cumple = len([r for r in rows if r["status"] == "No cumple"])
+        no_monitoreado = len([r for r in rows if r["status"] == "No monitoreado"])
+
+        evaluados = cumple + parcial + no_cumple
+
+        cobertura = round((evaluados / controles) * 100, 1) if controles else 0
+        score = round(((cumple + (parcial * 0.5)) / evaluados) * 100, 1) if evaluados else 0
+
+        standards.append({
+            "code": std,
+            "name": {
+                "ISO27001": "ISO 27001",
+                "SOC2": "SOC 2",
+                "PCIDSS": "PCI-DSS",
+                "NISTCSF": "NIST CSF 2.0"
+            }.get(std, std),
+            "controles": controles,
+            "evaluados": evaluados,
+            "cumple": cumple,
+            "parcial": parcial,
+            "no_cumple": no_cumple,
+            "no_monitoreado": no_monitoreado,
+            "cobertura": cobertura,
+            "score": score
+        })
+
+        total_cumple += cumple
+        total_parcial += parcial
+        total_no_cumple += no_cumple
+        total_no_monitoreado += no_monitoreado
+        total_evaluados += evaluados
+        total_controles += controles
+
+    cobertura_global = round((total_evaluados / total_controles) * 100, 1) if total_controles else 0
 
     content = render_template_string("""
     <div class="row g-3">
-      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-hdd-network"></i></div><div><div class="num">{{ agents }}</div><div class="lbl">Agentes Wazuh</div></div></div></div>
-      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-bug"></i></div><div><div class="num">{{ vulns }}</div><div class="lbl">Vulnerabilidades</div></div></div></div>
-      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-bell"></i></div><div><div class="num">{{ alerts }}</div><div class="lbl">Alertas</div></div></div></div>
-      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-clipboard-check"></i></div><div><div class="num">{{ evidences }}</div><div class="lbl">Evidencias</div></div></div></div>
-    </div>
+      <div class="col-md-3">
+        <div class="cc-kpi">
+          <div class="icon"><i class="bi bi-check2-circle"></i></div>
+          <div><div class="num">{{ total_cumple }}</div><div class="lbl">Cumple</div></div>
+        </div>
+      </div>
 
-    <div class="row g-3 mt-1">
-      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-check2-circle"></i></div><div><div class="num">{{ cumple }}</div><div class="lbl">Cumple</div></div></div></div>
-      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-exclamation-triangle"></i></div><div><div class="num">{{ parcial }}</div><div class="lbl">Parcial</div></div></div></div>
-      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-x-octagon"></i></div><div><div class="num">{{ no_cumple }}</div><div class="lbl">No cumple</div></div></div></div>
-      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-list-task"></i></div><div><div class="num">{{ plans }}</div><div class="lbl">Planes abiertos</div></div></div></div>
+      <div class="col-md-3">
+        <div class="cc-kpi">
+          <div class="icon"><i class="bi bi-x-octagon"></i></div>
+          <div><div class="num">{{ total_no_cumple }}</div><div class="lbl">Hallazgos técnicos</div></div>
+        </div>
+      </div>
+
+      <div class="col-md-3">
+        <div class="cc-kpi">
+          <div class="icon"><i class="bi bi-broadcast"></i></div>
+          <div><div class="num">{{ cobertura_global }}%</div><div class="lbl">Cobertura automática</div></div>
+        </div>
+      </div>
+
+      <div class="col-md-3">
+        <div class="cc-kpi">
+          <div class="icon"><i class="bi bi-slash-circle"></i></div>
+          <div><div class="num">{{ total_no_monitoreado }}</div><div class="lbl">No monitoreado</div></div>
+        </div>
+      </div>
     </div>
 
     <div class="cc-card mt-3">
-      <h5 class="cc-section-title">Estado por estándar</h5>
+      <h5 class="cc-section-title">Estado automático por estándar</h5>
+
       <div class="table-responsive">
         <table class="table cc-table table-hover align-middle">
-          <thead><tr><th>Estándar</th><th>Controles</th><th>Score promedio</th><th>Acción</th></tr></thead>
-          <tbody>
-          {% for s, total, avg in standards %}
+          <thead>
             <tr>
-              <td><span class="cc-pill">{{ s }}</span></td>
-              <td>{{ total }}</td>
-              <td><strong>{{ "%.1f"|format(avg or 0) }}%</strong></td>
-              <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('cont_comp_standard', standard=s) }}">Ver detalle</a></td>
+              <th>Estándar</th>
+              <th>Total puntos</th>
+              <th>Evaluados por Wazuh</th>
+              <th>Cumple</th>
+              <th>Parcial</th>
+              <th>No cumple</th>
+              <th>No monitoreado</th>
+              <th>Cobertura</th>
+              <th>Score técnico</th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+
+          <tbody>
+          {% for s in standards %}
+            <tr>
+              <td><span class="cc-pill">{{ s.name }}</span></td>
+              <td><strong>{{ s.controles }}</strong></td>
+              <td><strong>{{ s.evaluados }}</strong></td>
+              <td class="text-success fw-bold">{{ s.cumple }}</td>
+              <td class="text-warning fw-bold">{{ s.parcial }}</td>
+              <td class="text-danger fw-bold">{{ s.no_cumple }}</td>
+              <td class="text-secondary fw-bold">{{ s.no_monitoreado }}</td>
+              <td><strong>{{ "%.1f"|format(s.cobertura or 0) }}%</strong></td>
+              <td><strong>{{ "%.1f"|format(s.score or 0) }}%</strong></td>
+              <td>
+                <a class="btn btn-sm btn-outline-primary"
+                   href="{{ url_for('cont_comp_standard', standard=s.code) }}">
+                  Ver detalle
+                </a>
+              </td>
             </tr>
           {% endfor %}
           </tbody>
@@ -173124,16 +174009,23 @@ def cont_comp_dashboard():
       <p class="mb-1"><strong>Wazuh:</strong> {{ cfg.last_status if cfg else "No configurado" }}</p>
       <p class="mb-1"><strong>Último mensaje:</strong> {{ cfg.last_message if cfg else "—" }}</p>
       <p class="mb-1"><strong>Última sincronización:</strong> {{ last_sync.finished_at if last_sync else "Sin sincronización" }}</p>
-      <div class="mt-3">
-        <a class="btn btn-primary" href="{{ url_for('cont_comp_wazuh_config') }}">Configurar Wazuh</a>
-        <a class="btn btn-warning" href="{{ url_for('cont_comp_sync_view') }}">Sincronizar</a>
-      </div>
     </div>
-    """, cfg=cfg, agents=agents, vulns=vulns, alerts=alerts, evidences=evidences, plans=plans,
-       total_controls=total_controls, cumple=cumple, parcial=parcial, no_cumple=no_cumple, no_eval=no_eval,
-       standards=standards, last_sync=last_sync)
+    """,
+    cfg=cfg,
+    standards=standards,
+    total_cumple=total_cumple,
+    total_parcial=total_parcial,
+    total_no_cumple=total_no_cumple,
+    total_no_monitoreado=total_no_monitoreado,
+    cobertura_global=cobertura_global,
+    last_sync=last_sync)
 
-    return cont_comp_render(content, "dashboard")
+    return cont_comp_render(
+        content,
+        "dashboard",
+        "Cumplimiento Continuo",
+        "Monitoreo automático basado únicamente en evidencias técnicas Wazuh."
+    )
 
 
 @app.route("/cumplimiento_continuo/wazuh", methods=["GET", "POST"])
@@ -173264,6 +174156,7 @@ def cont_comp_sync_view():
     return cont_comp_render(content, "sync", "Sincronización", "Actualice la información técnica recolectada desde Wazuh.")
 
 
+
 @app.route("/cumplimiento_continuo/estandar/<standard>")
 @login_required
 def cont_comp_standard(standard):
@@ -173272,12 +174165,6 @@ def cont_comp_standard(standard):
         return resp
 
     standard = (standard or "").strip().upper()
-    controls = ContinuousControl.query.filter_by(standard=standard).order_by(ContinuousControl.control_code.asc()).all()
-    evid_count = db.session.query(
-        ContinuousEvidence.control_code,
-        func.count(ContinuousEvidence.id)
-    ).filter_by(standard=standard).group_by(ContinuousEvidence.control_code).all()
-    evid_map = {k: v for k, v in evid_count}
 
     titles = {
         "ISO27001": "ISO 27001",
@@ -173286,48 +174173,139 @@ def cont_comp_standard(standard):
         "NISTCSF": "NIST CSF 2.0"
     }
 
+    rows_all = cont_comp_build_standard_detail_rows(standard)
+
+    no_cumple = [r for r in rows_all if r["status"] == "No cumple"]
+    parcial = [r for r in rows_all if r["status"] == "Parcial"]
+    cumple = [r for r in rows_all if r["status"] == "Cumple"]
+    no_monitoreado = [r for r in rows_all if r["status"] == "No monitoreado"]
+
+    # SOLO se muestran controles con evidencia automática Wazuh
+    rows = no_cumple + parcial + cumple
+
+    evaluados = len(rows)
+    total = len(rows_all)
+    cobertura = round((evaluados / total) * 100, 1) if total else 0
+    score = round(((len(cumple) + (len(parcial) * 0.5)) / evaluados) * 100, 1) if evaluados else 0
+
     content = render_template_string("""
-    <div class="cc-card">
-      <h5 class="cc-section-title">Controles evaluados — {{ title }}</h5>
+    <div class="row g-3">
+      <div class="col-md-3">
+        <div class="cc-kpi">
+          <div class="icon"><i class="bi bi-x-octagon"></i></div>
+          <div>
+            <div class="num">{{ no_cumple|length }}</div>
+            <div class="lbl">No cumple</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-3">
+        <div class="cc-kpi">
+          <div class="icon"><i class="bi bi-exclamation-triangle"></i></div>
+          <div>
+            <div class="num">{{ parcial|length }}</div>
+            <div class="lbl">Parcial</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-3">
+        <div class="cc-kpi">
+          <div class="icon"><i class="bi bi-check-circle"></i></div>
+          <div>
+            <div class="num">{{ cumple|length }}</div>
+            <div class="lbl">Cumple</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-3">
+        <div class="cc-kpi">
+          <div class="icon"><i class="bi bi-broadcast"></i></div>
+          <div>
+            <div class="num">{{ cobertura }}%</div>
+            <div class="lbl">Cobertura Wazuh</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cc-card mt-3">
+      <h5 class="cc-section-title">{{ title }} — Evaluación automática Wazuh</h5>
+
+      <p class="cc-muted mb-3">
+        Se muestran únicamente puntos con evidencia técnica automática.
+        Puntos no monitoreados ocultos: <strong>{{ no_monitoreado|length }}</strong>.
+        Score técnico sobre puntos evaluados: <strong>{{ score }}%</strong>.
+      </p>
+
       <div class="table-responsive">
-        <table class="table cc-table table-hover">
+        <table class="table cc-table table-hover align-middle">
           <thead>
             <tr>
-              <th>Control</th>
-              <th>Nombre</th>
-              <th>Fuente</th>
+              <th>Punto norma</th>
+              <th>Descripción</th>
               <th>Estado</th>
-              <th>Score</th>
-              <th>Resumen Evidencia</th>
+              <th>Análisis técnico</th>
               <th>Evidencias</th>
+              <th>Fuente</th>
               <th>Última evaluación</th>
+              <th>Acción</th>
             </tr>
           </thead>
+
           <tbody>
-          {% for c in controls %}
+          {% for r in rows %}
             <tr>
-              <td><strong>{{ c.control_code }}</strong></td>
-              <td>{{ c.control_name }}</td>
-              <td><span class="cc-pill">{{ c.source_type }}</span></td>
-              <td>{{ status_badge(c.status)|safe }}</td>
-               <td><strong>{{ "%.1f"|format(c.score or 0) }}%</strong></td>
-               <td>
-                 <small>{{ c.evidence_summary or "-" }}</small>
-               </td>
               <td>
-              <a href="{{ url_for('cont_comp_evidences', standard=c.standard, control_code=c.control_code) }}">
-                {{ evid_map.get(c.control_code, 0) }}
-              </a>
-            </td>              <td>{{ c.last_evaluated_at or "—" }}</td>
+                <strong>{{ r.detail_code }}</strong><br>
+                <small>{{ r.parent_code or "—" }}</small>
+              </td>
+
+              <td>{{ r.name or "—" }}</td>
+              <td>{{ status_badge(r.status)|safe }}</td>
+              <td><small>{{ r.summary }}</small></td>
+              <td><strong>{{ r.evidence_count }}</strong></td>
+              <td><span class="cc-pill">{{ r.source_type }}</span></td>
+              <td>{{ r.last_evaluated_at or "—" }}</td>
+
+              <td>
+                <a class="btn btn-sm btn-outline-primary"
+                   href="{{ url_for('cont_comp_evidences', standard=standard, control_code=r.detail_code) }}">
+                  Ver evidencia
+                </a>
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="8" class="cc-empty">
+                No hay evidencias automáticas Wazuh para este estándar.
+              </td>
             </tr>
           {% endfor %}
           </tbody>
         </table>
       </div>
     </div>
-    """, controls=controls, title=titles.get(standard, standard), evid_map=evid_map, status_badge=cont_comp_status_badge)
+    """,
+    rows=rows,
+    no_cumple=no_cumple,
+    parcial=parcial,
+    cumple=cumple,
+    no_monitoreado=no_monitoreado,
+    standard=standard,
+    title=titles.get(standard, standard),
+    cobertura=cobertura,
+    score=score,
+    status_badge=cont_comp_status_badge)
 
-    return cont_comp_render(content, standard, titles.get(standard, standard), "Estado de cumplimiento calculado con evidencias recolectadas desde Wazuh.")
+    return cont_comp_render(
+        content,
+        standard,
+        titles.get(standard, standard),
+        "Evaluación técnica automática. Solo se muestran controles con evidencia Wazuh."
+    )
 
 
 @app.route("/cumplimiento_continuo/evidencias")
@@ -173338,47 +174316,107 @@ def cont_comp_evidences():
         return resp
 
     standard = (request.args.get("standard") or "").strip().upper()
-    control_code = (request.args.get("control_code") or "").strip()
+    control_code = cont_comp_normalize_code(request.args.get("control_code") or "")
 
-    q = ContinuousEvidence.query
+    q = WazuhComplianceControl.query
+
     if standard:
         q = q.filter_by(standard=standard)
+
     if control_code:
-        q = q.filter_by(control_code=control_code)
-    evidences = q.order_by(ContinuousEvidence.id.desc()).limit(500).all()
+        q = q.filter(
+            func.upper(WazuhComplianceControl.control_code) == control_code
+        )
+
+    q = q.filter(
+        db.or_(
+            WazuhComplianceControl.status.is_(None),
+            WazuhComplianceControl.status != "No aplica"
+        )
+    )
+
+    evidences = q.order_by(
+        WazuhComplianceControl.rule_level.desc(),
+        WazuhComplianceControl.synced_at.desc()
+    ).limit(1000).all()
 
     content = render_template_string("""
     <div class="cc-card">
-      <h5 class="cc-section-title">Evidencias automáticas</h5>
+      <h5 class="cc-section-title">Evidencias automáticas Wazuh</h5>
+
+      <p class="cc-muted mb-3">
+        Esta vista muestra únicamente evidencias técnicas automáticas.
+        No se muestran registros No aplica ni evidencias manuales.
+      </p>
+
       <form class="row g-2 mb-3">
-        <div class="col-md-3"><input class="form-control" name="standard" placeholder="ISO27001 / SOC2 / PCIDSS / NISTCSF" value="{{ standard }}"></div>
-        <div class="col-md-3"><input class="form-control" name="control_code" placeholder="Control" value="{{ control_code }}"></div>
-        <div class="col-md-2"><button class="btn btn-primary w-100">Filtrar</button></div>
-        <div class="col-md-2"><a class="btn btn-outline-secondary w-100" href="{{ url_for('cont_comp_evidences') }}">Limpiar</a></div>
+        <div class="col-md-3">
+          <input class="form-control" name="standard" placeholder="PCIDSS / SOC2 / ISO27001 / NISTCSF" value="{{ standard }}">
+        </div>
+
+        <div class="col-md-3">
+          <input class="form-control" name="control_code" placeholder="1.2.5 / 10.2 / A.8.8 / GV.OC" value="{{ control_code }}">
+        </div>
+
+        <div class="col-md-2">
+          <button class="btn btn-primary w-100">Filtrar</button>
+        </div>
+
+        <div class="col-md-2">
+          <a class="btn btn-outline-secondary w-100" href="{{ url_for('cont_comp_evidences') }}">Limpiar</a>
+        </div>
       </form>
 
       <div class="table-responsive">
         <table class="table cc-table table-hover">
-          <thead><tr><th>Fecha</th><th>Estándar</th><th>Control</th><th>Fuente</th><th>Activo</th><th>Severidad</th><th>Descripción</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Estándar</th>
+              <th>Punto norma</th>
+              <th>Estado</th>
+              <th>Activo</th>
+              <th>Regla / Check</th>
+              <th>Nivel</th>
+              <th>Severidad</th>
+              <th>Descripción técnica Wazuh</th>
+            </tr>
+          </thead>
+
           <tbody>
           {% for e in evidences %}
             <tr>
-              <td>{{ e.evidence_date }}</td>
+              <td>{{ e.synced_at }}</td>
               <td>{{ e.standard }}</td>
               <td><strong>{{ e.control_code }}</strong></td>
-              <td>{{ e.source_type }}</td>
-              <td>{{ e.asset or "—" }}</td>
+              <td>{{ status_badge(e.status)|safe }}</td>
+              <td>{{ e.agent_name or "—" }}</td>
+              <td>{{ e.rule_id or "—" }}</td>
+              <td>{{ e.rule_level }}</td>
               <td>{{ e.severity or "—" }}</td>
-              <td>{{ e.description }}</td>
+              <td>{{ e.rule_description or e.control_name or "—" }}</td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="9" class="cc-empty">No hay evidencias automáticas visibles para este filtro.</td>
             </tr>
           {% endfor %}
           </tbody>
         </table>
       </div>
     </div>
-    """, evidences=evidences, standard=standard, control_code=control_code)
+    """,
+    evidences=evidences,
+    standard=standard,
+    control_code=control_code,
+    status_badge=cont_comp_status_badge)
 
-    return cont_comp_render(content, "evidences", "Evidencias", "Evidencias técnicas asociadas a controles de cumplimiento.")
+    return cont_comp_render(
+        content,
+        "evidences",
+        "Evidencias Automáticas",
+        "Evidencias técnicas recolectadas desde Wazuh."
+    )
 
 
 @app.route("/cumplimiento_continuo/planes")
