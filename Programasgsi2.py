@@ -466,6 +466,271 @@ SGSI_PROGRESS_GLOBAL = """
     font-size: .82rem;
     color: #6c7a89;
 }
+
+    /* =========================================================
+       AJUSTE FINAL UI ARKYNTECH-GRAC
+       - Header más delgado
+       - Logo pegado a la izquierda
+       - Perfil compacto
+       - Menú lateral más fino y letras más pequeñas
+       ========================================================= */
+    .sgsi-topbar{
+      min-height:58px !important;
+      height:58px !important;
+    }
+    .sgsi-topbar-inner{
+      min-height:58px !important;
+      height:58px !important;
+      padding-left:0 !important;
+      padding-right:24px !important;
+    }
+    .sgsi-brand{
+      margin-left:0 !important;
+      padding-left:0 !important;
+      min-width:380px !important;
+      height:58px !important;
+      display:flex !important;
+      justify-content:flex-start !important;
+    }
+    .sgsi-logo{
+      height:56px !important;
+      max-width:380px !important;
+      object-fit:contain !important;
+      object-position:left center !important;
+      margin-left:0 !important;
+    }
+    .sgsi-user-link{
+      padding:4px 10px 4px 5px !important;
+      border-radius:999px !important;
+      font-size:.72rem !important;
+      min-height:30px !important;
+    }
+    .sgsi-user-photo{
+      width:26px !important;
+      height:26px !important;
+    }
+    .sgsi-user-name{
+      font-size:.72rem !important;
+      max-width:118px !important;
+      font-weight:600 !important;
+      line-height:1 !important;
+    }
+
+    /* =========================================================
+       COMPACTACIÓN GLOBAL DE TÍTULOS DE TODOS LOS MÓDULOS
+       Aplica a cualquier pantalla/módulo que use h1, hero, header,
+       banner, card de título o contenedor principal.
+       ========================================================= */
+
+    /* Títulos principales globales */
+    h1,
+    .h1,
+    .page-title,
+    .module-title,
+    .hero-title,
+    .main-title,
+    .titulo-modulo,
+    .titulo-principal,
+    .sgsi-page-title,
+    .sgsi-module-title,
+    .app-title,
+    .content-title,
+    .section-title-main,
+    .module-header-title,
+    .card-title-main,
+    .dashboard-title,
+    .view-title {
+      font-size:1.58rem !important;
+      line-height:1.12 !important;
+      margin-bottom:.28rem !important;
+      letter-spacing:-.02em !important;
+    }
+
+    /* Títulos dentro de banners/headers de módulos */
+    .hero-card h1,
+    .module-hero h1,
+    .page-hero h1,
+    .sgsi-hero h1,
+    .sgsi-module-hero h1,
+    .module-header h1,
+    .page-header h1,
+    .header-card h1,
+    .title-card h1,
+    .banner h1,
+    .banner-title,
+    .riesgos-hero h1,
+    .riesgos-header h1,
+    .dashboard-header h1,
+    .dashboard-hero h1,
+    .bcp-hero h1,
+    .cc-hero h1,
+    .madurez-hero h1,
+    .vulnerabilidades-hero h1,
+    .incidentes-hero h1 {
+      font-size:1.48rem !important;
+      line-height:1.10 !important;
+      margin:0 0 .20rem 0 !important;
+    }
+
+    /* Subtítulos/descripciones de encabezado */
+    .hero-card p,
+    .module-hero p,
+    .page-hero p,
+    .sgsi-hero p,
+    .sgsi-module-hero p,
+    .module-header p,
+    .page-header p,
+    .header-card p,
+    .title-card p,
+    .banner p,
+    .subtitle,
+    .page-subtitle,
+    .module-subtitle,
+    .hero-subtitle,
+    .sgsi-page-subtitle,
+    .sgsi-module-subtitle,
+    .text-subtitle {
+      font-size:.82rem !important;
+      line-height:1.22 !important;
+      margin-bottom:0 !important;
+    }
+
+    /* Banners/headers más bajos para ganar espacio vertical */
+    .hero-card,
+    .module-hero,
+    .page-hero,
+    .sgsi-hero,
+    .sgsi-module-hero,
+    .module-header,
+    .page-header,
+    .header-card,
+    .title-card,
+    .banner,
+    .dashboard-header,
+    .dashboard-hero,
+    .riesgos-hero,
+    .riesgos-header,
+    .bcp-hero,
+    .cc-hero,
+    .madurez-hero,
+    .vulnerabilidades-hero,
+    .incidentes-hero {
+      min-height:76px !important;
+      padding:12px 22px !important;
+      margin-bottom:12px !important;
+      border-radius:18px !important;
+    }
+
+    /* Iconos decorativos dentro de encabezados */
+    .hero-card .icon-box,
+    .module-hero .icon-box,
+    .page-hero .icon-box,
+    .sgsi-hero .icon-box,
+    .module-header .icon-box,
+    .page-header .icon-box,
+    .title-card .icon-box,
+    .header-card .icon-box,
+    .banner .icon-box,
+    .hero-icon,
+    .module-icon,
+    .page-icon,
+    .title-icon {
+      width:48px !important;
+      height:48px !important;
+      min-width:48px !important;
+      border-radius:14px !important;
+      font-size:1.25rem !important;
+    }
+
+    /* Badges superiores tipo “SGSI · Módulo” */
+    .hero-card .badge,
+    .module-hero .badge,
+    .page-hero .badge,
+    .sgsi-hero .badge,
+    .module-header .badge,
+    .page-header .badge,
+    .header-card .badge,
+    .title-card .badge,
+    .banner .badge,
+    .module-badge,
+    .page-badge,
+    .hero-badge {
+      font-size:.68rem !important;
+      padding:.26rem .62rem !important;
+      line-height:1 !important;
+    }
+
+    /* Menú lateral con letras más pequeñas y compacto */
+    .sgsi-sidebar,
+    .sgsi-sidebar *,
+    .sidebar,
+    .sidebar *,
+    .sidebar-menu,
+    .sidebar-menu *,
+    .sgsi-menu,
+    .sgsi-menu * {
+      font-size:.82rem !important;
+    }
+
+    .sgsi-sidebar a,
+    .sidebar a,
+    .sidebar-menu a,
+    .sgsi-menu a,
+    .sgsi-sidebar .nav-link,
+    .sidebar .nav-link,
+    .sidebar-menu .nav-link,
+    .sgsi-menu .nav-link {
+      font-size:.82rem !important;
+      line-height:1.12 !important;
+      padding-top:8px !important;
+      padding-bottom:8px !important;
+    }
+
+    /* Tarjetas KPI/resumen más compactas */
+    .stat-card,
+    .summary-card,
+    .kpi-card,
+    .metric-card,
+    .dashboard-card-sm,
+    .resumen-card {
+      min-height:58px !important;
+      padding:10px 14px !important;
+    }
+
+    .stat-card h2,
+    .summary-card h2,
+    .kpi-card h2,
+    .metric-card h2,
+    .resumen-card h2,
+    .stat-value,
+    .kpi-value,
+    .metric-value {
+      font-size:1.28rem !important;
+      line-height:1.05 !important;
+      margin-bottom:0 !important;
+    }
+
+    .stat-card .label,
+    .summary-card .label,
+    .kpi-card .label,
+    .metric-card .label,
+    .resumen-card .label,
+    .stat-label,
+    .kpi-label,
+    .metric-label {
+      font-size:.76rem !important;
+      line-height:1.05 !important;
+    }
+
+    /* Espaciado general para aprovechar más pantalla */
+    .sgsi-content,
+    .sgsi-main,
+    .main-content,
+    .page-content,
+    .content-wrapper {
+      padding-top:12px !important;
+    }
+
 </style>
 
 <div id="sgsiProgressOverlay">
@@ -5560,7 +5825,7 @@ def perfil():
       .perfil-btn-main,
       .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -5697,7 +5962,7 @@ def perfil():
         }
 
         .perfil-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
 
         .perfil-card .card-body{
@@ -6701,7 +6966,7 @@ def usuarios():
         }
 
         .users-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
           line-height:1.12;
         }
 
@@ -7002,7 +7267,7 @@ def editar_permisos(user_id):
       .perm-cancel-btn,
       .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -7084,12 +7349,12 @@ def editar_permisos(user_id):
         }
 
         .perm-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
 
         .perm-card-body,
         .perm-card .card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -7558,7 +7823,7 @@ def logs_auditoria():
         }
 
         .logs-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
           line-height:1.12;
         }
 
@@ -8498,105 +8763,206 @@ BASE = """
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <title>SGSI</title>
+  <title>Arkyntech GRAC</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
 
   <style>
-    body { background: #f8f9fa; }
+    :root{
+      --arky-blue:#0b3a6e;
+      --arky-blue-2:#1459a6;
+      --arky-blue-3:#2c7be5;
+      --arky-blue-4:#6bb7ff;
+      --arky-soft:#edf6ff;
+      --arky-soft-2:#dff0ff;
+      --arky-border:#cfe5ff;
+      --arky-text:#17375f;
+      --arky-muted:#5f7f9e;
+      --arky-purple:#5b1bb5;
+      --arky-topbar-h:58px;
+    }
 
-    .sgsi-topbar {
-      position: relative;
-      min-height: 82px;
-      background-image:
-        linear-gradient(rgba(7, 38, 89, .58), rgba(7, 38, 89, .58)),
+    html, body{ min-height:100%; }
+
+    body{
+      margin:0;
+      color:var(--arky-text);
+      padding-top:var(--arky-topbar-h);
+      background:
+        linear-gradient(135deg, rgba(236,248,255,.94) 0%, rgba(226,242,255,.88) 42%, rgba(238,232,255,.78) 100%),
+        radial-gradient(circle at 86% 24%, rgba(91,27,181,.18) 0, rgba(91,27,181,.18) 17%, transparent 18%),
+        radial-gradient(circle at 6% 88%, rgba(44,123,229,.17) 0, rgba(44,123,229,.17) 22%, transparent 23%),
         url('/static/img/ccsgsi.jpg');
-      background-size: cover;
-      background-position: center;
-      box-shadow: 0 10px 26px rgba(0,0,0,.18);
-      border-bottom-left-radius: 18px;
-      border-bottom-right-radius: 18px;
-      overflow: visible;
+      background-size:cover;
+      background-position:center;
+      background-attachment:fixed;
+      background-repeat:no-repeat;
     }
 
-    .sgsi-topbar-inner {
-      min-height: 82px;
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      padding: 6px 18px;
+    body::before{
+      content:"";
+      position:fixed;
+      inset:var(--arky-topbar-h) 0 0 0;
+      pointer-events:none;
+      z-index:-1;
+      background:
+        radial-gradient(circle at 96% 22%, rgba(91,27,181,.14), transparent 24%),
+        radial-gradient(circle at 2% 76%, rgba(44,123,229,.12), transparent 26%);
     }
 
-    .sgsi-left {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      flex: 1 1 auto;
+    .sgsi-topbar{
+      position:fixed;
+      top:0;
+      left:0;
+      right:0;
+      min-height:var(--arky-topbar-h);
+      background:rgba(255,255,255,.93);
+      backdrop-filter:blur(18px);
+      -webkit-backdrop-filter:blur(18px);
+      border-bottom:1px solid rgba(207,229,255,.95);
+      box-shadow:0 12px 30px rgba(20,89,166,.10);
+      z-index:999997;
+      overflow:visible;
     }
 
-    .sgsi-logo {
-      height: 90px;
-      position: relative;
-      top: -2px; /* 🔥 ajuste final */
-      filter: drop-shadow(0 6px 12px rgba(0,0,0,.35));
+    .sgsi-topbar-inner{
+      min-height:var(--arky-topbar-h);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      padding:0 10px 0 0;
+      overflow:visible;
     }
 
-    .sgsi-title {
-      margin: 0;
-      color: #fff;
-      font-weight: 800;
-      font-size: clamp(1rem, 1.7vw, 1.55rem);
-      text-shadow: 0 3px 10px rgba(0,0,0,.35);
+    .sgsi-brand{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      min-width:220px;
+      text-decoration:none;
+      overflow:visible;
+      margin-left:-15px;
     }
 
-    .sgsi-user-link {
-      display: flex;
-      align-items: center;
-      color: #fff !important;
-      background: rgba(255,255,255,.12);
-      border-radius: 999px;
-      padding: 6px 12px 6px 8px;
+    .sgsi-logo{
+      height:220px;
+      width:auto;
+      max-width:none;
+      object-fit:contain;
+      object-position:left center;
+      filter:drop-shadow(0 10px 20px rgba(11,58,110,.22));
+      margin-top:8px;
+      margin-bottom:8px;
     }
 
-    .sgsi-user-photo {
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      border: 2px solid rgba(255,255,255,.65);
+    .sgsi-title{ display:none !important; }
+    .sgsi-main-nav{ display:none !important; }
+
+    .sgsi-user-area{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:max-content;
+      position:relative;
+      z-index:5;
     }
 
-    .sgsi-user-name {
-      margin-left: 8px;
-      font-size: .9rem;
-      font-weight: 600;
+    .sgsi-pill-login{
+      border:1px solid var(--arky-border);
+      background:#ffffff;
+      color:var(--arky-blue) !important;
+      border-radius:999px;
+      padding:10px 18px;
+      font-weight:850;
+      text-decoration:none;
+      box-shadow:0 8px 18px rgba(20,89,166,.08);
     }
 
-    .container.py-4 {
-      max-width: 100% !important;
-      padding: 10px !important;
+    .sgsi-user-link{
+      display:flex;
+      align-items:center;
+      color:#fff !important;
+      background:linear-gradient(135deg, var(--arky-blue) 0%, var(--arky-blue-2) 46%, var(--arky-purple) 100%);
+      border-radius:999px;
+      padding:5px 12px 5px 6px;
+      text-decoration:none;
+      box-shadow:0 12px 26px rgba(20,89,166,.24);
+      border:1px solid rgba(255,255,255,.38);
     }
 
-    /* Responsive */
-    @media (max-width: 991px){
-      .sgsi-logo {
-        height: 72px;
-        top: -1px;
+    .sgsi-user-photo{
+      width:32px;
+      height:32px;
+      object-fit:cover;
+      border-radius:50%;
+      border:2px solid rgba(255,255,255,.82);
+      background:#fff;
+    }
+
+    .sgsi-user-name{
+      margin-left:7px;
+      font-size:.78rem;
+      font-weight:850;
+      max-width:150px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+
+    .container.py-4{
+      max-width:100% !important;
+      padding:0 !important;
+    }
+
+    .dropdown-menu{
+      border:1px solid var(--arky-border);
+      border-radius:16px;
+      box-shadow:0 18px 36px rgba(20,89,166,.16);
+      overflow:hidden;
+    }
+
+    @media(max-width:1100px){
+      .sgsi-topbar-inner{
+        padding:0 10px;
+      }
+
+      .sgsi-logo{
+        height:150px;
+        max-width:none;
+      }
+
+      .sgsi-brand{
+        min-width:auto;
+        margin-left:-10px;
       }
     }
 
-    @media (max-width: 575px){
-      .sgsi-logo {
-        height: 62px;
-        top: 0px;
+    @media(max-width:575px){
+      :root{
+        --arky-topbar-h:74px;
+      }
+
+      .sgsi-logo{
+        height:100px;
+        max-width:none;
+      }
+
+      .sgsi-brand{
+        margin-left:-8px;
+      }
+
+      .sgsi-user-name{
+        display:none;
+      }
+
+      .sgsi-user-link{
+        padding:6px;
       }
     }
-
   </style>
 </head>
-
-<!-- =========================
-     POPUP GLOBAL (FLASH → SWEETALERT)
-     ========================= -->
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
@@ -8604,9 +8970,7 @@ BASE = """
   {% if messages %}
     <script>
       document.addEventListener("DOMContentLoaded", function () {
-
         {% for category, message in messages %}
-
           Swal.fire({
             title: {{ (
               'Acceso denegado'
@@ -8617,9 +8981,7 @@ BASE = """
               if category == 'warning'
               else 'Información'
             ) | tojson }},
-
             text: {{ message | tojson }},
-
             icon: {{ (
               'error'
               if category == 'danger'
@@ -8629,15 +8991,12 @@ BASE = """
               if category == 'warning'
               else 'info'
             ) | tojson }},
-
             confirmButtonText: "Aceptar",
-            confirmButtonColor: "#3f86d6",
+            confirmButtonColor: "#1459a6",
             backdrop: true,
             allowOutsideClick: false
           });
-
         {% endfor %}
-
       });
     </script>
   {% endif %}
@@ -8648,28 +9007,24 @@ BASE = """
 <header class="sgsi-topbar">
   <div class="container-fluid sgsi-topbar-inner">
 
-    <div class="sgsi-left">
-      <img src="{{ url_for('static', filename='img/Arkynthec.png') }}" class="sgsi-logo">
-
-      <h1 class="sgsi-title">
-        Administración del Sistema de Gestión de Seguridad de la Información - (SGSI)
-      </h1>
-    </div>
+    <a class="sgsi-brand" href="{{ url_for('menu') }}" title="Arkyntech GRAC">
+      <img src="{{ url_for('static', filename='img/Arkynthec.png') }}" class="sgsi-logo" alt="Arkyntech GRAC">
+    </a>
 
     {% if current_user %}
-    <div class="dropdown">
-      <a class="sgsi-user-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
+    <div class="sgsi-user-area dropdown">
+      <a class="sgsi-user-link dropdown-toggle" href="#" data-bs-toggle="dropdown" aria-expanded="false">
         <img src="{{ url_for('static', filename='uploads/profiles/' ~ current_user.photo_filename)
                      if current_user.photo_filename
                      else url_for('static', filename='img/default_user.png') }}"
-             class="sgsi-user-photo">
+             class="sgsi-user-photo" alt="Perfil">
         <span class="sgsi-user-name">{{ current_user.username }}</span>
       </a>
 
       <ul class="dropdown-menu dropdown-menu-end">
         <li><a class="dropdown-item" href="{{ url_for('perfil') }}">👤 Ver perfil</a></li>
         <li><hr class="dropdown-divider"></li>
-        <li><a class="dropdown-item text-danger" href="{{ url_for('logout') }}">🚪 Cerrar Sesión</a></li>
+        <li><a class="dropdown-item text-danger" href="{{ url_for('logout') }}">🚪 Cerrar sesión</a></li>
       </ul>
     </div>
     {% endif %}
@@ -9679,16 +10034,7 @@ def _sgsi_build_global_menu_html():
 
           <div class="sgsi-menu-fixed-shell">
 
-            <!-- CABECERA FIJA -->
-            <div class="sgsi-menu-fixed-header">
-              <div class="sgsi-menu-fixed-icon">☰</div>
-              <div>
-                <div class="sgsi-menu-fixed-title">Menú principal</div>
-                <div class="sgsi-menu-fixed-subtitle">Acceso a módulos</div>
-              </div>
-            </div>
-
-            <!-- SOLO ESTA ZONA SE MUEVE -->
+            <!-- Menú sin cabecera: estilo lateral limpio -->
             <div class="sgsi-menu-scroll-only" id="sgsiGlobalMenuScroll">
 
               <div class="sgsi-global-menu-list">
@@ -9753,14 +10099,23 @@ def _sgsi_build_global_menu_html():
         <style>
           :root{
             --sgsi-menu-w:235px;
-            --sgsi-menu-left:8px;
-            --sgsi-topbar-h:108px;
-            --sgsi-content-left:250px;
+            --sgsi-menu-left:0px;
+            --sgsi-topbar-h:58px;
+            --sgsi-content-left:235px;
           }
 
           body{
             padding-left:0 !important;
             padding-top:var(--sgsi-topbar-h) !important;
+            background:
+              linear-gradient(135deg, rgba(236,248,255,.94) 0%, rgba(226,242,255,.88) 42%, rgba(238,232,255,.78) 100%),
+              radial-gradient(circle at 86% 24%, rgba(91,27,181,.16) 0, rgba(91,27,181,.16) 17%, transparent 18%),
+              radial-gradient(circle at 6% 88%, rgba(44,123,229,.17) 0, rgba(44,123,229,.17) 22%, transparent 23%),
+              url('/static/img/ccsgsi.jpg') !important;
+            background-size:cover !important;
+            background-position:center !important;
+            background-attachment:fixed !important;
+            background-repeat:no-repeat !important;
           }
 
           .sgsi-topbar{
@@ -9777,7 +10132,7 @@ def _sgsi_build_global_menu_html():
             margin-left:var(--sgsi-content-left) !important;
             width:calc(100% - var(--sgsi-content-left)) !important;
             max-width:calc(100% - var(--sgsi-content-left)) !important;
-            padding:8px 8px 10px 6px !important;
+            padding:8px 10px 10px 8px !important;
           }
 
           #sgsiGlobalMenu{
@@ -9789,10 +10144,10 @@ def _sgsi_build_global_menu_html():
           .sgsi-global-menu-wrap{
             position:fixed !important;
             left:var(--sgsi-menu-left) !important;
-            top:calc(var(--sgsi-topbar-h) + 6px) !important;
+            top:var(--sgsi-topbar-h) !important;
             width:var(--sgsi-menu-w) !important;
-            height:calc(100vh - var(--sgsi-topbar-h) - 14px) !important;
-            max-height:calc(100vh - var(--sgsi-topbar-h) - 14px) !important;
+            height:calc(100vh - var(--sgsi-topbar-h)) !important;
+            max-height:calc(100vh - var(--sgsi-topbar-h)) !important;
             overflow:visible !important;
             z-index:999998 !important;
             transition:transform .22s ease;
@@ -9804,11 +10159,11 @@ def _sgsi_build_global_menu_html():
             display:flex !important;
             flex-direction:column !important;
             overflow:hidden !important;
-            background:linear-gradient(180deg,#2f6fb6 0%,#1f4e8c 100%) !important;
-            border:1px solid rgba(255,255,255,.25) !important;
-            border-radius:16px !important;
-            box-shadow:0 10px 25px rgba(0,0,0,.25) !important;
-            padding:8px !important;
+            background:linear-gradient(180deg,rgba(247,251,255,.96) 0%,rgba(231,244,255,.94) 48%,rgba(219,237,255,.92) 100%) !important;
+            border:1px solid #cfe5ff !important;
+            border-radius:0 20px 20px 0 !important;
+            box-shadow:10px 0 30px rgba(28,91,160,.18), inset -1px 0 rgba(255,255,255,.65) !important;
+            padding:10px 8px 10px 8px !important;
           }
 
           .sgsi-menu-fixed-header{
@@ -9819,8 +10174,8 @@ def _sgsi_build_global_menu_html():
             display:flex !important;
             align-items:center !important;
             gap:9px !important;
-            padding:8px 8px 10px 8px !important;
-            margin:0 0 8px 0 !important;
+            padding:6px 7px 7px 7px !important;
+            margin:0 0 6px 0 !important;
             border-bottom:1px solid rgba(255,255,255,.28) !important;
             background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5) !important;
             border-radius:12px !important;
@@ -9830,9 +10185,9 @@ def _sgsi_build_global_menu_html():
           }
 
           .sgsi-menu-fixed-icon{
-            width:34px !important;
-            height:34px !important;
-            min-width:34px !important;
+            width:30px !important;
+            height:30px !important;
+            min-width:30px !important;
             border-radius:10px !important;
             display:flex !important;
             align-items:center !important;
@@ -9840,7 +10195,7 @@ def _sgsi_build_global_menu_html():
             background:#ffffff !important;
             color:#1459a6 !important;
             font-weight:900 !important;
-            font-size:1rem !important;
+            font-size:.88rem !important;
             box-shadow:0 6px 12px rgba(0,0,0,.18) !important;
           }
 
@@ -9853,7 +10208,7 @@ def _sgsi_build_global_menu_html():
 
           .sgsi-menu-fixed-subtitle{
             color:rgba(255,255,255,.92) !important;
-            font-size:.70rem !important;
+            font-size:.64rem !important;
             font-weight:700 !important;
             line-height:1.1 !important;
             margin-top:2px !important;
@@ -9873,34 +10228,34 @@ def _sgsi_build_global_menu_html():
           }
 
           .sgsi-menu-scroll-only::-webkit-scrollbar-track{
-            background:rgba(255,255,255,.14);
+            background:#e0efff;
             border-radius:999px;
           }
 
           .sgsi-menu-scroll-only::-webkit-scrollbar-thumb{
-            background:rgba(255,255,255,.55);
+            background:#6aa7e8;
             border-radius:999px;
           }
 
           .sgsi-menu-scroll-only::-webkit-scrollbar-thumb:hover{
-            background:rgba(255,255,255,.78);
+            background:#2c7be5;
           }
 
           .sgsi-global-menu-list{
             display:flex !important;
             flex-direction:column !important;
-            gap:6px !important;
+            gap:5px !important;
             padding-bottom:12px !important;
           }
 
           .sgsi-global-menu-arrow{
             position:absolute;
-            right:-15px;
+            right:-18px;
             top:22px;
             width:22px;
-            height:56px;
+            height:42px;
             border-radius:0 999px 999px 0;
-            background:#0b3a6e;
+            background:linear-gradient(135deg,#0b5cab,#2c7be5);
             color:#ffffff;
             display:flex;
             align-items:center;
@@ -9943,23 +10298,23 @@ def _sgsi_build_global_menu_html():
             width:100%;
             display:flex !important;
             align-items:center !important;
-            gap:7px !important;
-            border:1px solid #d2d8df !important;
-            border-radius:11px !important;
-            background:#ffffff !important;
-            color:#334155 !important;
-            padding:8px 9px !important;
-            font-size:.76rem !important;
+            gap:5px !important;
+            border:1px solid transparent !important;
+            border-radius:14px !important;
+            background:transparent !important;
+            color:#3b4b63 !important;
+            padding:7px 8px !important;
+            font-size:.72rem !important;
             font-weight:800 !important;
             text-align:left !important;
             white-space:normal !important;
             line-height:1.12 !important;
-            min-height:40px !important;
+            min-height:37px !important;
             text-decoration:none !important;
           }
 
           .sgsi-global-panel-control-btn{
-            background:linear-gradient(135deg,#0b3a6e 0%,#1459a6 55%,#2c7be5 100%) !important;
+            background:linear-gradient(135deg,#0b5cab 0%,#2c7be5 55%,#6bb7ff 100%) !important;
             color:#ffffff !important;
             border:1px solid rgba(255,255,255,.35) !important;
             box-shadow:0 8px 18px rgba(0,0,0,.22) !important;
@@ -9989,9 +10344,9 @@ def _sgsi_build_global_menu_html():
             margin:6px 0 0 0 !important;
             padding:5px 0 5px 7px !important;
             width:100% !important;
-            background:rgba(255,255,255,.14) !important;
-            border:1px solid rgba(255,255,255,.22) !important;
-            border-radius:11px !important;
+            background:rgba(237,246,255,.78) !important;
+            border:1px solid transparent !important;
+            border-radius:14px !important;
           }
 
           .sgsi-global-panel.sgsi-open{
@@ -10001,29 +10356,29 @@ def _sgsi_build_global_menu_html():
           .sgsi-global-subpanel{
             margin-left:4px !important;
             padding-left:7px !important;
-            border-left:2px solid rgba(255,255,255,.35) !important;
-            background:rgba(255,255,255,.10) !important;
+            border-left:2px solid #97c9ff !important;
+            background:rgba(246,251,255,.78) !important;
           }
 
           .sgsi-global-item{
             display:flex !important;
             align-items:center !important;
-            gap:7px !important;
+            gap:5px !important;
             padding:7px 8px !important;
             border-radius:9px !important;
-            font-size:.74rem !important;
+            font-size:.68rem !important;
             font-weight:700 !important;
-            color:#ffffff !important;
+            color:#1e5b94 !important;
             text-decoration:none !important;
             margin:3px 3px !important;
-            background:rgba(255,255,255,.12) !important;
-            border:1px solid rgba(255,255,255,.12) !important;
+            background:rgba(255,255,255,.55) !important;
+            border:1px solid rgba(207,229,255,.85) !important;
           }
 
           .sgsi-global-item:hover,
           .sgsi-global-item.sgsi-active{
-            background:#ffffff !important;
-            color:#1f2937 !important;
+            background:linear-gradient(135deg,#dff0ff,#ffffff) !important;
+            color:#0b5cab !important;
           }
 
           .sgsi-global-item i{
@@ -10046,6 +10401,54 @@ def _sgsi_build_global_menu_html():
             }
           }
         </style>
+        <style id="sgsi-final-compact-blue-overrides">
+          :root{
+            --sgsi-menu-w:235px !important;
+            --sgsi-topbar-h:58px !important;
+            --sgsi-content-left:235px !important;
+          }
+          .sgsi-menu-fixed-shell{
+            padding:8px 7px !important;
+            border-radius:0 16px 16px 0 !important;
+          }
+          .sgsi-menu-fixed-header{
+            height:46px !important;
+            min-height:46px !important;
+            max-height:46px !important;
+            padding:6px 7px !important;
+            margin-bottom:6px !important;
+            border-radius:11px !important;
+          }
+          .sgsi-menu-fixed-icon{
+            width:28px !important;
+            height:28px !important;
+            min-width:28px !important;
+            border-radius:9px !important;
+            font-size:.78rem !important;
+          }
+          .sgsi-menu-fixed-title{font-size:.76rem !important;}
+          .sgsi-menu-fixed-subtitle{font-size:.60rem !important;}
+          .sgsi-global-root-toggle{
+            font-size:.70rem !important;
+            min-height:35px !important;
+            padding:6px 8px !important;
+            border-radius:11px !important;
+            gap:6px !important;
+          }
+          .sgsi-global-item,
+          .sgsi-global-node-toggle{
+            font-size:.66rem !important;
+            padding:6px 7px !important;
+            border-radius:10px !important;
+            gap:6px !important;
+          }
+          .sgsi-global-panel{
+            margin-top:4px !important;
+            padding:4px 0 4px 6px !important;
+            border-radius:12px !important;
+          }
+        </style>
+
 
         <script>
           (function(){
@@ -10251,7 +10654,7 @@ def menu():
 
       <div class="sgsi-layout">
 
-        <!-- MENÚ PRINCIPAL COMPLETO -->
+        <!-- MENÚ LATERAL COMPLETO -->
         <aside id="sgsiLocalMenu" class="sgsi-leftnav-wrap">
 
           <div id="sgsiLocalMenuToggle" class="sgsi-leftnav-arrow">
@@ -10259,16 +10662,6 @@ def menu():
           </div>
 
           <div class="sgsi-leftnav-card">
-
-            <div class="sgsi-leftnav-header">
-              <div class="sgsi-leftnav-header-icon">
-                <i class="bi bi-list-ul"></i>
-              </div>
-              <div>
-                <div class="sgsi-leftnav-title">Menú principal</div>
-                <div class="sgsi-leftnav-subtitle">Acceso a módulos</div>
-              </div>
-            </div>
 
             <div class="sgsi-leftnav-list">
 
@@ -10427,37 +10820,25 @@ def menu():
 
     <style>
       :root{
-        --sgsi-topbar-fixed-h:118px;
-      }
-
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-        padding-top:var(--sgsi-topbar-fixed-h) !important;
-      }
-
-      .sgsi-topbar{
-        position:fixed !important;
-        top:0 !important;
-        left:0 !important;
-        right:0 !important;
-        width:100% !important;
-        z-index:9999 !important;
-        margin:0 !important;
+        --sgsi-sidebar-w:245px;
+        --sgsi-card:#ffffff;
+        --sgsi-purple:#0b5cab;
+        --sgsi-purple-2:#2c7be5;
+        --sgsi-lav:#edf6ff;
+        --sgsi-lav-2:#dff0ff;
+        --sgsi-border:#d7e9ff;
+        --sgsi-text:#174a7c;
+        --sgsi-muted:#5f7f9e;
       }
 
       .soa-shell{
-        width:97%;
-        max-width:1820px;
-        margin:8px auto 30px auto;
+        width:100%;
+        margin:0 0 34px 0;
       }
 
       .sgsi-layout{
         display:grid;
-        grid-template-columns:265px minmax(0,1fr);
+        grid-template-columns:var(--sgsi-sidebar-w) minmax(0,1fr);
         gap:16px;
         align-items:start;
         transition:all .22s ease;
@@ -10465,66 +10846,69 @@ def menu():
 
       .sgsi-leftnav-wrap{
         position:sticky;
-        top:calc(var(--sgsi-topbar-fixed-h) + 8px);
+        top:var(--arky-topbar-h, 86px);
         align-self:start;
         z-index:30;
       }
 
       .sgsi-leftnav-card{
-        background:linear-gradient(180deg,#2f6fb6 0%,#1f4e8c 100%);
-        border:1px solid rgba(255,255,255,.25);
-        border-radius:16px;
-        box-shadow:0 10px 25px rgba(0,0,0,.25);
-        padding:10px;
-        max-height:calc(100vh - var(--sgsi-topbar-fixed-h) - 20px) !important;
+        background:linear-gradient(180deg,rgba(247,251,255,.96) 0%,rgba(231,244,255,.94) 48%,rgba(219,237,255,.92) 100%);
+        border:1px solid var(--sgsi-border);
+        border-radius:0 18px 18px 0;
+        box-shadow:10px 0 30px rgba(28,91,160,.18), inset -1px 0 rgba(255,255,255,.65);
+        padding:8px 7px;
+        max-height:calc(100vh - var(--arky-topbar-h, 86px)) !important;
         overflow-y:auto !important;
         overflow-x:hidden !important;
+        backdrop-filter:blur(14px);
+        -webkit-backdrop-filter:blur(14px);
       }
 
-      .sgsi-leftnav-card::-webkit-scrollbar{ width:6px; }
-      .sgsi-leftnav-card::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.42); border-radius:999px; }
-      .sgsi-leftnav-card::-webkit-scrollbar-track{ background:rgba(255,255,255,.10); border-radius:999px; }
+      .sgsi-leftnav-card::-webkit-scrollbar{ width:7px; }
+      .sgsi-leftnav-card::-webkit-scrollbar-thumb{ background:#d8c7ef; border-radius:999px; }
+      .sgsi-leftnav-card::-webkit-scrollbar-track{ background:#f8f4ff; border-radius:999px; }
 
       .sgsi-leftnav-header{
         display:flex;
         align-items:center;
-        gap:8px;
-        padding:7px 6px 9px 6px;
-        border-bottom:1px solid rgba(255,255,255,.28);
-        margin-bottom:8px;
-        background:linear-gradient(180deg,#2f6fb6 0%,#2864aa 100%);
+        gap:10px;
+        padding:10px 10px 14px;
+        border-bottom:1px solid var(--sgsi-border);
+        margin-bottom:12px;
       }
 
       .sgsi-leftnav-header-icon{
-        width:34px;
-        height:34px;
-        border-radius:10px;
+        width:40px;
+        height:40px;
+        border-radius:14px;
         display:flex;
         align-items:center;
         justify-content:center;
-        background:#d5dbe2;
-        color:#44515f;
+        background:linear-gradient(135deg,var(--sgsi-purple),var(--sgsi-purple-2));
+        color:#fff;
+        box-shadow:0 10px 22px rgba(75,11,130,.22);
         flex:0 0 auto;
       }
 
       .sgsi-leftnav-title{
-        font-size:.88rem;
-        font-weight:900;
-        color:#ffffff !important;
+        font-size:.94rem;
+        font-weight:950;
+        color:var(--sgsi-text);
         line-height:1.1;
       }
 
       .sgsi-leftnav-subtitle{
-        margin-top:2px;
-        font-size:.70rem;
-        color:#ffffff !important;
+        margin-top:3px;
+        font-size:.72rem;
+        color:var(--sgsi-muted);
+        font-weight:750;
         line-height:1.2;
       }
 
       .sgsi-leftnav-list{
         display:flex;
         flex-direction:column;
-        gap:6px;
+        gap:7px;
       }
 
       .sgsi-leftnav-link{
@@ -10533,31 +10917,33 @@ def menu():
         align-items:center;
         justify-content:flex-start;
         gap:7px;
-        border:1px solid #d2d8df !important;
-        border-radius:11px !important;
-        background:#ffffff !important;
-        color:#334155 !important;
+        border:1px solid transparent !important;
+        border-radius:14px !important;
+        background:transparent !important;
+        color:#4a3b5b !important;
         padding:8px 9px !important;
-        font-size:.76rem !important;
-        font-weight:800 !important;
+        font-size:.72rem !important;
+        font-weight:850 !important;
         white-space:normal !important;
         text-align:left;
-        line-height:1.12 !important;
-        min-height:40px !important;
+        line-height:1.15 !important;
+        min-height:36px !important;
         text-decoration:none !important;
+        transition:all .18s ease;
       }
 
       .sgsi-leftnav-link:hover,
       .sgsi-leftnav-link.sgsi-active{
-        background:#f3f6f8 !important;
-        color:#1f2937 !important;
+        background:var(--sgsi-lav) !important;
+        color:var(--sgsi-purple) !important;
+        border-color:var(--sgsi-border) !important;
       }
 
       .sgsi-panel-control-btn{
-        background:linear-gradient(135deg,#0b3a6e 0%,#1459a6 55%,#2c7be5 100%) !important;
+        background:linear-gradient(135deg,var(--sgsi-purple) 0%,#2c7be5 58%,#6bb7ff 100%) !important;
         color:#ffffff !important;
-        border:1px solid rgba(255,255,255,.35) !important;
-        box-shadow:0 8px 18px rgba(0,0,0,.22) !important;
+        border:1px solid rgba(255,255,255,.40) !important;
+        box-shadow:0 12px 26px rgba(75,11,130,.24) !important;
       }
 
       .sgsi-root-toggle::after,
@@ -10565,7 +10951,8 @@ def menu():
         content:"⌄";
         margin-left:auto;
         font-size:13px;
-        font-weight:900;
+        font-weight:950;
+        transition:transform .18s ease;
       }
 
       .sgsi-root-toggle.sgsi-active::after,
@@ -10577,67 +10964,67 @@ def menu():
         display:none;
         list-style:none;
         margin:6px 0 0 0 !important;
-        padding:5px 0 5px 7px !important;
-        background:rgba(255,255,255,.14) !important;
-        border:1px solid rgba(255,255,255,.22) !important;
-        border-radius:11px !important;
+        padding:6px 0 6px 9px !important;
+        background:var(--sgsi-lav) !important;
+        border:1px solid var(--sgsi-border) !important;
+        border-radius:15px !important;
         overflow:visible !important;
       }
 
-      .sgsi-panel.sgsi-open{
-        display:block !important;
-      }
+      .sgsi-panel.sgsi-open{ display:block !important; }
 
       .sgsi-subpanel{
-        margin-left:4px !important;
-        padding-left:7px !important;
-        border-left:2px solid rgba(255,255,255,.35) !important;
+        margin-left:5px !important;
+        padding-left:8px !important;
+        border-left:2px solid #dcc9f5 !important;
       }
 
       .sgsi-dropdown-item{
         display:flex;
         align-items:center;
-        gap:7px;
-        padding:7px 8px;
-        border-radius:9px;
-        font-size:.74rem;
-        font-weight:700;
-        color:#ffffff !important;
+        gap:6px;
+        padding:6px 7px;
+        border-radius:12px;
+        font-size:.68rem;
+        font-weight:800;
+        color:#4b3a5d !important;
         white-space:normal;
-        line-height:1.15;
+        line-height:1.16;
         text-decoration:none;
-        margin:3px 3px;
-        background:rgba(255,255,255,.12);
-        border:1px solid rgba(255,255,255,.12);
+        margin:3px 4px;
+        background:rgba(255,255,255,.54);
+        border:1px solid rgba(234,223,247,.70);
+        transition:all .18s ease;
       }
 
       .sgsi-dropdown-item:hover,
       .sgsi-dropdown-item.sgsi-active{
         background:#ffffff !important;
-        color:#1f2937 !important;
+        color:var(--sgsi-purple) !important;
+        box-shadow:0 8px 16px rgba(43,0,79,.08);
       }
 
       .sgsi-leftnav-arrow{
         position:absolute;
-        right:-15px;
-        top:18px;
-        width:22px;
-        height:56px;
-        border-radius:0 999px 999px 0;
-        background:#0b3a6e;
+        right:-13px;
+        top:22px;
+        width:26px;
+        height:58px;
+        border-radius:999px;
+        background:linear-gradient(135deg,var(--sgsi-purple),#2c7be5);
         color:#ffffff;
         display:flex;
         align-items:center;
         justify-content:center;
         cursor:pointer;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        border:1px solid rgba(255,255,255,.45);
+        box-shadow:0 10px 22px rgba(43,0,79,.22);
+        border:2px solid #fff;
         z-index:20;
       }
 
       .sgsi-arrow-icon{
         font-size:26px;
-        font-weight:900;
+        font-weight:950;
         line-height:1;
         position:relative;
         top:-1px;
@@ -10651,213 +11038,122 @@ def menu():
       body.sgsi-menu-collapsed .sgsi-leftnav-card{
         opacity:0;
         pointer-events:none;
-        transform:translateX(-270px);
+        transform:translateX(-245px);
       }
 
       body.sgsi-menu-collapsed .sgsi-leftnav-arrow{
-        right:-38px;
-        border-radius:999px;
+        right:-44px;
       }
 
-      body.sgsi-menu-collapsed .sgsi-arrow-icon{
-        transform:rotate(180deg);
-      }
+      body.sgsi-menu-collapsed .sgsi-arrow-icon{ transform:rotate(180deg); }
 
-      .sgsi-dashboard-zone{
-        min-width:0;
-        overflow:hidden;
-      }
+      .sgsi-dashboard-zone{ min-width:0; overflow:hidden; }
 
       .sgsi-stats-grid{
         width:100%;
-        max-width:1120px;
+        max-width:1160px;
         margin:0 auto 20px auto;
         display:grid;
         grid-template-columns:repeat(4, minmax(0, 1fr));
         justify-content:center;
         align-items:stretch;
-        gap:12px;
+        gap:14px;
       }
 
       .sgsi-stat-card{
         width:100%;
         min-width:0;
-        min-height:98px;
-        padding:14px 12px;
+        min-height:104px;
+        padding:16px 14px;
         display:flex;
         align-items:center;
         justify-content:center;
-        gap:10px;
-        background:rgba(255,255,255,.96);
-        border:1px solid rgba(219,230,244,.95);
-        border-radius:18px;
-        box-shadow:0 10px 22px rgba(15,23,42,.14);
+        gap:12px;
+        background:rgba(255,255,255,.94);
+        border:1px solid var(--sgsi-border);
+        border-radius:22px;
+        box-shadow:0 18px 34px rgba(43,0,79,.10);
         text-align:center;
         overflow:hidden;
         transition:all .20s ease;
       }
 
-      .sgsi-stat-card:hover{
-        transform:translateY(-3px);
-        box-shadow:0 16px 30px rgba(15,23,42,.18);
-      }
+      .sgsi-stat-card:hover{ transform:translateY(-3px); box-shadow:0 24px 42px rgba(43,0,79,.14); }
 
       .sgsi-stat-icon{
-        width:46px;
-        height:46px;
-        min-width:46px;
-        flex:0 0 46px;
-        border-radius:50%;
+        width:48px;
+        height:48px;
+        min-width:48px;
+        flex:0 0 48px;
+        border-radius:16px;
         display:flex;
         align-items:center;
         justify-content:center;
-        font-size:1.15rem;
+        font-size:1.18rem;
       }
 
-      .sgsi-stat-icon.blue{background:#e8f0ff;color:#2f6ff2;}
-      .sgsi-stat-icon.orange{background:#fff1df;color:#f97316;}
-      .sgsi-stat-icon.green{background:#e6f7ee;color:#16a34a;}
-      .sgsi-stat-icon.purple{background:#ede9fe;color:#7c3aed;}
+      .sgsi-stat-icon.blue{background:#eef4ff;color:#2f6ff2;}
+      .sgsi-stat-icon.orange{background:#fff3e8;color:#f97316;}
+      .sgsi-stat-icon.green{background:#ecfdf3;color:#16a34a;}
+      .sgsi-stat-icon.purple{background:#f2eaff;color:#7c3aed;}
+      .blue-text{color:#2f6ff2 !important;} .orange-text{color:#f97316 !important;} .green-text{color:#16a34a !important;} .purple-text{color:#7c3aed !important;}
 
-      .blue-text{color:#2f6ff2 !important;}
-      .orange-text{color:#f97316 !important;}
-      .green-text{color:#16a34a !important;}
-      .purple-text{color:#7c3aed !important;}
+      .sgsi-stat-text{ min-width:0; flex:1 1 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; overflow:hidden; }
+      .sgsi-stat-title{ width:100%; font-size:.72rem; font-weight:950; color:#2d203c; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .sgsi-stat-value{ width:100%; margin-top:3px; font-size:1.25rem; line-height:1.05; font-weight:950; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .sgsi-stat-link{ width:100%; margin-top:5px; color:var(--sgsi-muted); font-size:.65rem; font-weight:850; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
-      .sgsi-stat-text{
-        min-width:0;
-        flex:1 1 auto;
-        display:flex;
-        flex-direction:column;
-        align-items:center;
-        justify-content:center;
-        text-align:center;
-        overflow:hidden;
-      }
-
-      .sgsi-stat-title{
-        width:100%;
-        font-size:.70rem;
-        font-weight:900;
-        color:#1f2937;
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-      }
-
-      .sgsi-stat-value{
-        width:100%;
-        margin-top:2px;
-        font-size:1.20rem;
-        line-height:1.05;
-        font-weight:950;
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-      }
-
-      .sgsi-stat-link{
-        width:100%;
-        margin-top:4px;
-        color:#64748b;
-        font-size:.64rem;
-        font-weight:800;
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-      }
-
-      .sgsi-dashboard-grid{
-        display:grid;
-        grid-template-columns:repeat(12,minmax(0,1fr));
-        gap:18px;
-      }
-
-      .sgsi-chart-card{
-        grid-column:span 4;
-        background:rgba(255,255,255,.96);
-        border-radius:18px;
-        box-shadow:0 12px 28px rgba(0,0,0,.16);
-        min-height:360px;
-        overflow:hidden;
-      }
-
-      .sgsi-chart-head{
-        padding:15px 18px 9px 18px;
-        display:flex;
-        justify-content:space-between;
-        gap:10px;
-        border-bottom:1px solid rgba(15,23,42,.06);
-        background:#fff;
-      }
-
-      .sgsi-chart-head h3{
-        margin:0;
-        font-size:.92rem;
-        font-weight:950;
-      }
-
-      .sgsi-chart-head span{
-        font-size:.70rem;
-        font-weight:850;
-      }
-
-      .sgsi-chart-body{
-        min-height:295px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        padding:10px 14px 16px;
-      }
-
-      .sgsi-chart-img{
-        width:100%;
-        height:295px;
-        object-fit:contain;
-      }
+      .sgsi-dashboard-grid{ display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:18px; }
+      .sgsi-chart-card{ grid-column:span 4; background:rgba(255,255,255,.94); border:1px solid var(--sgsi-border); border-radius:24px; box-shadow:0 18px 34px rgba(43,0,79,.11); min-height:360px; overflow:hidden; }
+      .sgsi-chart-head{ padding:16px 18px 10px 18px; display:flex; justify-content:space-between; gap:10px; border-bottom:1px solid var(--sgsi-border); background:linear-gradient(180deg,#fff 0%,#fbf8ff 100%); }
+      .sgsi-chart-head h3{ margin:0; font-size:.92rem; font-weight:950; color:#2d203c; }
+      .sgsi-chart-head span{ font-size:.72rem; font-weight:900; color:var(--sgsi-purple-2); }
+      .sgsi-chart-body{ min-height:295px; display:flex; align-items:center; justify-content:center; padding:10px 14px 16px; }
+      .sgsi-chart-img{ width:100%; height:295px; object-fit:contain; }
 
       @media(max-width:1200px){
-        .sgsi-layout{
-          grid-template-columns:1fr;
-        }
-
-        .sgsi-leftnav-wrap{
-          position:relative;
-          top:auto;
-        }
-
-        .sgsi-leftnav-card{
-          max-height:520px !important;
-          overflow-y:auto !important;
-          overflow-x:hidden !important;
-        }
-
-        .sgsi-stats-grid{
-          max-width:720px;
-          grid-template-columns:repeat(2, minmax(260px, 1fr));
-          gap:14px;
-        }
-
-        .sgsi-chart-card{
-          grid-column:span 6;
-        }
+        .sgsi-layout{ grid-template-columns:1fr; }
+        .sgsi-leftnav-wrap{ position:relative; top:auto; }
+        .sgsi-leftnav-card{ max-height:560px !important; }
+        .sgsi-stats-grid{ max-width:740px; grid-template-columns:repeat(2, minmax(260px, 1fr)); gap:14px; }
+        .sgsi-chart-card{ grid-column:span 6; }
       }
 
       @media(max-width:991px){
-        :root{
-          --sgsi-topbar-fixed-h:96px;
-        }
-
-        .sgsi-stats-grid{
-          max-width:340px;
-          grid-template-columns:minmax(260px, 320px);
-        }
-
-        .sgsi-chart-card{
-          grid-column:span 12;
-        }
+        .sgsi-stats-grid{ max-width:340px; grid-template-columns:minmax(260px, 320px); }
+        .sgsi-chart-card{ grid-column:span 12; }
       }
-    </style>
+    
+      /* Compactar menú local de Centro de Control */
+      .sgsi-leftnav-card{
+        padding:8px 7px !important;
+        border-radius:0 16px 16px 0 !important;
+      }
+      .sgsi-leftnav-link{
+        font-size:.70rem !important;
+        min-height:35px !important;
+        padding:7px 8px !important;
+        border-radius:11px !important;
+        gap:6px !important;
+      }
+      .sgsi-dropdown-item{
+        font-size:.66rem !important;
+        padding:6px 7px !important;
+        border-radius:10px !important;
+        gap:6px !important;
+      }
+      .sgsi-panel{
+        margin-top:4px !important;
+        padding:4px 0 4px 6px !important;
+        border-radius:12px !important;
+      }
+      .sgsi-leftnav-arrow{
+        top:16px !important;
+        width:22px !important;
+        height:50px !important;
+      }
+
+</style>
 
     <script>
       function sgsiTogglePanel(trigger){
@@ -11332,7 +11628,7 @@ def areas_area():
         }
 
         .areas-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
 
         .areas-card .card-body{
@@ -11811,7 +12107,7 @@ def areas_division():
         }
 
         .divisiones-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
 
         .divisiones-card .card-body{
@@ -12214,7 +12510,7 @@ def config_email():
         }
 
         .smtp-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
       }
 
@@ -12571,7 +12867,7 @@ def empresa_logo():
         }}
 
         .logo-subtitle {{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
 
         .logo-card .card-body {{
@@ -13154,7 +13450,7 @@ def admin_openrouter_key():
         }}
 
         .openrouter-subtitle {{
-          font-size:.76rem;
+          font-size:.68rem;
           line-height:1.12;
         }}
 
@@ -16845,7 +17141,7 @@ def agregar_riesgo():
           ========================== */
           .riskform-section-title{
             font-weight:950;
-            font-size:.88rem;
+            font-size:.78rem;
             color:#1459a6;
             padding:9px 12px;
             border-radius:12px;
@@ -16911,7 +17207,7 @@ def agregar_riesgo():
 
           .riskform-bottom-actions .btn{
             border-radius:10px !important;
-            min-height:38px;
+            min-height:32px;
             padding:8px 24px !important;
             font-size:.82rem;
             font-weight:900;
@@ -16968,7 +17264,7 @@ def agregar_riesgo():
             }
 
             .riskform-card-body{
-              padding:14px;
+              padding:8px 7px;
             }
 
             .riskform-section-title{
@@ -17309,7 +17605,7 @@ def configurar_probabilidad_residual():
       }
 
       .prob-table-card-body{
-        padding:14px;
+        padding:8px 7px;
       }
 
       .prob-table-wrap{
@@ -17390,7 +17686,7 @@ def configurar_probabilidad_residual():
 
       .prob-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 24px !important;
         font-size:.82rem;
         font-weight:900;
@@ -17790,7 +18086,7 @@ def configurar_impacto_residual():
       }
 
       .imp-table-card-body{
-        padding:14px;
+        padding:8px 7px;
       }
 
       .imp-table-wrap{
@@ -17861,7 +18157,7 @@ def configurar_impacto_residual():
 
       .imp-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 24px !important;
         font-size:.82rem;
         font-weight:900;
@@ -18235,7 +18531,7 @@ def configurar_tipos_riesgo():
 
       .tipo-form-card-body,
       .tipo-table-card-body{
-        padding:14px;
+        padding:8px 7px;
       }
 
       .tipo-form-card .form-label{
@@ -18334,7 +18630,7 @@ def configurar_tipos_riesgo():
 
       .tipo-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 24px !important;
         font-size:.82rem;
         font-weight:900;
@@ -19046,7 +19342,7 @@ def mapa_calor():
       }
 
       .heat-card-body{
-        padding:14px;
+        padding:8px 7px;
       }
 
       .heat-table-wrap{
@@ -19168,7 +19464,7 @@ def mapa_calor():
       }
 
       .heat-legend-body{
-        padding:14px;
+        padding:8px 7px;
         text-align:center;
       }
 
@@ -19183,7 +19479,7 @@ def mapa_calor():
         display:flex;
         justify-content:center;
         flex-wrap:wrap;
-        gap:8px;
+        gap:6px;
       }
 
       .legend span{
@@ -19847,7 +20143,7 @@ def riesgo_detalle(riesgo_id):
           ========================== */
           .riskform-section-title{
             font-weight:950;
-            font-size:.88rem;
+            font-size:.78rem;
             color:#1459a6;
             padding:9px 12px;
             border-radius:12px;
@@ -19910,7 +20206,7 @@ def riesgo_detalle(riesgo_id):
 
           .riskform-bottom-actions .btn{
             border-radius:10px !important;
-            min-height:38px;
+            min-height:32px;
             padding:8px 24px !important;
             font-size:.82rem;
             font-weight:900;
@@ -19975,7 +20271,7 @@ def riesgo_detalle(riesgo_id):
             }
 
             .riskform-card-body{
-              padding:14px;
+              padding:8px 7px;
             }
           }
 
@@ -21173,7 +21469,7 @@ def editar_riesgo(id):
       ========================== */
       .riskedit-section-title{{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -21226,7 +21522,7 @@ def editar_riesgo(id):
 
       .riskedit-bottom-actions .btn{{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 24px !important;
         font-size:.82rem;
         font-weight:900;
@@ -21269,7 +21565,7 @@ def editar_riesgo(id):
 
         .riskedit-subtitle{{ font-size:.74rem; }}
 
-        .riskedit-card-body{{ padding:14px; }}
+        .riskedit-card-body{{ padding:8px 7px; }}
       }}
 
       @media (max-width:768px){{
@@ -21849,7 +22145,7 @@ def objetivos_new():
 
       .objform-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -21942,7 +22238,7 @@ def objetivos_new():
 
       .objform-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 24px !important;
         font-size:.82rem;
         font-weight:900;
@@ -21998,7 +22294,7 @@ def objetivos_new():
         }
 
         .objform-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -22310,7 +22606,7 @@ def objetivos_matriz():
 
       .obj-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -22412,7 +22708,7 @@ def objetivos_matriz():
         text-align:center;
         vertical-align:middle;
         padding:11px 9px;
-        font-size:.76rem;
+        font-size:.68rem;
         border-right:1px solid rgba(255,255,255,.28);
       }
 
@@ -22426,7 +22722,7 @@ def objetivos_matriz():
 
       .obj-matriz td{
         vertical-align:top;
-        font-size:.76rem;
+        font-size:.68rem;
         padding:9px 8px;
         color:#1f2937;
         border-right:1px solid #dce6f3;
@@ -22874,7 +23170,7 @@ def objetivos_detalle(id):
 
       .objd-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -22918,7 +23214,7 @@ def objetivos_detalle(id):
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 8px 18px rgba(15,23,42,.08);
       }
 
@@ -22928,7 +23224,7 @@ def objetivos_detalle(id):
 
       .objd-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -23003,7 +23299,7 @@ def objetivos_detalle(id):
         }
 
         .objd-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .objd-section{
@@ -23331,7 +23627,7 @@ def objetivos_edit(id):
 
       .objform-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -23426,7 +23722,7 @@ def objetivos_edit(id):
 
       .objform-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 24px !important;
         font-size:.82rem;
         font-weight:900;
@@ -23482,7 +23778,7 @@ def objetivos_edit(id):
         }
 
         .objform-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -23918,7 +24214,7 @@ def parte_interesada_new():
 
       .partesnew-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -24058,7 +24354,7 @@ def parte_interesada_new():
         display:flex;
         align-items:center;
         justify-content:space-between;
-        gap:9px;
+        gap:7px;
         background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
         border:1px solid #dbe6f4;
         border-radius:14px;
@@ -24069,14 +24365,14 @@ def parte_interesada_new():
       .partesnew-file-left{
         display:flex;
         align-items:center;
-        gap:9px;
+        gap:7px;
         min-width:0;
       }
 
       .partesnew-file-pdf{
-        width:38px;
-        height:38px;
-        min-width:38px;
+        width:32px;
+        height:32px;
+        min-width:32px;
         border-radius:11px;
         background:linear-gradient(135deg,#dc2626,#ef4444);
         color:#fff;
@@ -24136,7 +24432,7 @@ def parte_interesada_new():
 
       .partesnew-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 24px !important;
         font-size:.82rem;
         font-weight:900;
@@ -24192,7 +24488,7 @@ def parte_interesada_new():
         }
 
         .partesnew-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -24797,7 +25093,7 @@ def partes_interesadas_matriz():
 
       .pi-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -24898,13 +25194,13 @@ def partes_interesadas_matriz():
         text-align:center;
         vertical-align:middle;
         padding:11px 9px;
-        font-size:.76rem;
+        font-size:.68rem;
         border-right:1px solid rgba(255,255,255,.28);
       }
 
       .pi-matriz td{
         vertical-align:top;
-        font-size:.76rem;
+        font-size:.68rem;
         padding:9px 8px;
         color:#1f2937;
         border-right:1px solid #dce6f3;
@@ -25259,7 +25555,7 @@ def parte_interesada_detalle(id):
 
       .pid-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -25297,7 +25593,7 @@ def parte_interesada_detalle(id):
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 8px 18px rgba(15,23,42,.08);
       }
 
@@ -25307,7 +25603,7 @@ def parte_interesada_detalle(id):
 
       .pid-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -25369,14 +25665,14 @@ def parte_interesada_detalle(id):
       .pid-ev-left{
         display:flex;
         align-items:center;
-        gap:9px;
+        gap:7px;
         min-width:0;
       }
 
       .pid-ev-icon{
-        width:38px;
-        height:38px;
-        min-width:38px;
+        width:32px;
+        height:32px;
+        min-width:32px;
         border-radius:11px;
         background:linear-gradient(135deg,#dc2626,#ef4444);
         color:#fff;
@@ -25415,7 +25711,7 @@ def parte_interesada_detalle(id):
         background:rgba(255,255,255,.75);
         border:1px dashed #cfd8e3;
         border-radius:14px;
-        padding:14px;
+        padding:8px 7px;
         text-align:center;
         color:#64748b;
         font-size:.80rem;
@@ -25441,7 +25737,7 @@ def parte_interesada_detalle(id):
         }
 
         .pid-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .pid-section{
@@ -25945,7 +26241,7 @@ def parte_interesada_edit(id):
       .partesedit-upload-box,
       .partesedit-current-box{
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         border:1px solid #dbe6f4;
         background:#fff;
       }
@@ -26029,7 +26325,7 @@ def parte_interesada_edit(id):
         }
 
         .partesedit-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -26425,7 +26721,7 @@ def contexto_interno_new():
 
       .ctxint-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -26513,7 +26809,7 @@ def contexto_interno_new():
 
       .ctxint-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 24px !important;
         font-size:.82rem;
         font-weight:900;
@@ -26566,7 +26862,7 @@ def contexto_interno_new():
         }
 
         .ctxint-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -26865,7 +27161,7 @@ def contexto_interno_matriz():
 
       .ctxintmat-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -26958,7 +27254,7 @@ def contexto_interno_matriz():
         white-space:normal;
         word-break:break-word;
         vertical-align:top;
-        font-size:.76rem;
+        font-size:.68rem;
         padding:9px 8px;
       }
 
@@ -27373,7 +27669,7 @@ def contexto_interno_detalle(id):
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 8px 18px rgba(15,23,42,.08);
       }
 
@@ -27383,7 +27679,7 @@ def contexto_interno_detalle(id):
 
       .ctxintd-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -27444,7 +27740,7 @@ def contexto_interno_detalle(id):
         }
 
         .ctxintd-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .ctxintd-section{
@@ -27729,7 +28025,7 @@ def contexto_interno_edit(id):
 
       .ctxinted-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -27817,7 +28113,7 @@ def contexto_interno_edit(id):
 
       .ctxinted-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 24px !important;
         font-size:.82rem;
         font-weight:900;
@@ -27870,7 +28166,7 @@ def contexto_interno_edit(id):
         }
 
         .ctxinted-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -28215,7 +28511,7 @@ def contexto_externo_new():
 
       .ctxext-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -28302,7 +28598,7 @@ def contexto_externo_new():
 
       .ctxext-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 24px !important;
         font-size:.82rem;
         font-weight:900;
@@ -28353,7 +28649,7 @@ def contexto_externo_new():
         }
 
         .ctxext-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -28643,7 +28939,7 @@ def contexto_externo_matriz():
 
       .ctxextmat-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -28736,7 +29032,7 @@ def contexto_externo_matriz():
         white-space:normal;
         word-break:break-word;
         vertical-align:top;
-        font-size:.76rem;
+        font-size:.68rem;
         padding:9px 8px;
       }
 
@@ -29118,7 +29414,7 @@ def contexto_externo_detalle(id):
 
       .ctxextd-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -29156,7 +29452,7 @@ def contexto_externo_detalle(id):
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 8px 18px rgba(15,23,42,.08);
       }
 
@@ -29166,7 +29462,7 @@ def contexto_externo_detalle(id):
 
       .ctxextd-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -29222,7 +29518,7 @@ def contexto_externo_detalle(id):
         }
 
         .ctxextd-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .ctxextd-section{
@@ -29501,7 +29797,7 @@ def contexto_externo_edit(id):
 
       .ctxexed-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -29587,7 +29883,7 @@ def contexto_externo_edit(id):
 
       .ctxexed-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 24px !important;
         font-size:.82rem;
         font-weight:900;
@@ -29638,7 +29934,7 @@ def contexto_externo_edit(id):
         }
 
         .ctxexed-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -30037,7 +30333,7 @@ def dofa_new():
 
       .dofa-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -30152,7 +30448,7 @@ def dofa_new():
 
       .dofa-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 24px !important;
         font-size:.82rem;
         font-weight:900;
@@ -30200,7 +30496,7 @@ def dofa_new():
         }
 
         .dofa-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -30478,7 +30774,7 @@ def dofa_list():
 
       .dofalist-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -30895,7 +31191,7 @@ def dofa_view(dofa_id):
 
       .dofaview-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -31019,7 +31315,7 @@ def dofa_view(dofa_id):
         }
 
         .dofaview-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -31327,7 +31623,7 @@ def dofa_edit(dofa_id):
 
       .dofaedit-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -31453,7 +31749,7 @@ def dofa_edit(dofa_id):
 
       .dofaedit-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 24px !important;
         font-size:.82rem;
         font-weight:900;
@@ -31501,7 +31797,7 @@ def dofa_edit(dofa_id):
         }
 
         .dofaedit-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -31880,7 +32176,7 @@ def docs_tipos_config():
 
       .doccfg-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -32425,7 +32721,7 @@ def docs_new():
 
       .docsadd-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -32496,7 +32792,7 @@ def docs_new():
 
       .docsadd-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 24px !important;
         font-size:.82rem;
         font-weight:900;
@@ -32531,7 +32827,7 @@ def docs_new():
         }
 
         .docsadd-form-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -32998,7 +33294,7 @@ def docs_matriz():
 
       .docmat-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -33135,7 +33431,7 @@ def docs_matriz():
       .docmat-table th,
       .docmat-table td{
         vertical-align:top;
-        font-size:.76rem;
+        font-size:.68rem;
         padding:9px 8px;
         white-space:normal;
         word-break:break-word;
@@ -33184,7 +33480,7 @@ def docs_matriz():
         min-width:110px;
         max-width:125px;
         padding:4px 12px !important;
-        font-size:.70rem !important;
+        font-size:.64rem !important;
         line-height:1.2;
         text-align:center;
         white-space:nowrap;
@@ -33656,7 +33952,7 @@ def docs_detalle(id):
 
       .docdet-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -33694,7 +33990,7 @@ def docs_detalle(id):
         background:#fff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 8px 18px rgba(15,23,42,.08);
       }
 
@@ -33704,7 +34000,7 @@ def docs_detalle(id):
 
       .docdet-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -33729,7 +34025,7 @@ def docs_detalle(id):
       }
 
       .docdet-field-status{
-        min-height:64px;
+        min-height:44px;
         max-width:220px;
         margin:0 auto;
         padding:10px 12px;
@@ -33803,14 +34099,14 @@ def docs_detalle(id):
       .docdet-file-left{
         display:flex;
         align-items:center;
-        gap:9px;
+        gap:7px;
         min-width:0;
       }
 
       .docdet-file-icon{
-        width:38px;
-        height:38px;
-        min-width:38px;
+        width:32px;
+        height:32px;
+        min-width:32px;
         border-radius:11px;
         background:linear-gradient(135deg,#1d4ed8,#60a5fa);
         color:#fff;
@@ -33855,7 +34151,7 @@ def docs_detalle(id):
         background:rgba(255,255,255,.75);
         border:1px dashed #cfd8e3;
         border-radius:14px;
-        padding:14px;
+        padding:8px 7px;
         text-align:center;
         color:#64748b;
         font-size:.80rem;
@@ -33876,7 +34172,7 @@ def docs_detalle(id):
         }
 
         .docdet-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .docdet-section{
@@ -34278,7 +34574,7 @@ def docs_edit(id):
 
       .docsedit-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -34365,7 +34661,7 @@ def docs_edit(id):
 
       .docsedit-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 24px !important;
         font-size:.82rem;
         font-weight:900;
@@ -34403,7 +34699,7 @@ def docs_edit(id):
         }
 
         .docsedit-form-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -34747,7 +35043,7 @@ def comunicaciones_new(reg_id=None):
 
       .com-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -34826,7 +35122,7 @@ def comunicaciones_new(reg_id=None):
 
       .com-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 24px !important;
         font-size:.82rem;
         font-weight:900;
@@ -34874,7 +35170,7 @@ def comunicaciones_new(reg_id=None):
         }
 
         .com-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -35164,7 +35460,7 @@ def comunicaciones_matriz():
 
       .com-matrix-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -35303,7 +35599,7 @@ def comunicaciones_matriz():
         min-width:105px;
         max-width:120px;
         padding:4px 12px !important;
-        font-size:.70rem !important;
+        font-size:.64rem !important;
         font-weight:900;
         border-radius:999px !important;
       }
@@ -35635,7 +35931,7 @@ def comunicaciones_detalle(id):
 
       .comdet-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -35673,7 +35969,7 @@ def comunicaciones_detalle(id):
         background:#fff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 8px 18px rgba(15,23,42,.08);
       }
 
@@ -35683,7 +35979,7 @@ def comunicaciones_detalle(id):
 
       .comdet-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -35738,7 +36034,7 @@ def comunicaciones_detalle(id):
         }
 
         .comdet-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .comdet-section{
@@ -36096,7 +36392,7 @@ def requisito_legal_new():
 
       .reqadd-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -36137,7 +36433,7 @@ def requisito_legal_new():
       ========================== */
       .reqadd-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -36160,7 +36456,7 @@ def requisito_legal_new():
       .reqadd-card .form-select{
         border-radius:10px;
         border:1px solid #cfd8e3;
-        min-height:38px;
+        min-height:32px;
         font-size:.82rem;
         background:#f8fbff;
       }
@@ -36189,7 +36485,7 @@ def requisito_legal_new():
 
       .reqadd-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -36226,7 +36522,7 @@ def requisito_legal_new():
         }
 
         .reqadd-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -36487,7 +36783,7 @@ def req_legal_matriz():
 
       .req-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -36623,7 +36919,7 @@ def req_legal_matriz():
       .req-btn-action{
         min-width:105px;
         max-width:120px;
-        font-size:.70rem !important;
+        font-size:.64rem !important;
         padding:4px 12px !important;
         line-height:1.2;
         text-align:center;
@@ -36947,7 +37243,7 @@ def req_legal_detalle(id):
 
       .reqdet-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -36985,7 +37281,7 @@ def req_legal_detalle(id):
         background:#fff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 8px 18px rgba(15,23,42,.08);
       }
 
@@ -36995,7 +37291,7 @@ def req_legal_detalle(id):
 
       .reqdet-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -37059,7 +37355,7 @@ def req_legal_detalle(id):
         }
 
         .reqdet-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .reqdet-section{
@@ -37334,7 +37630,7 @@ def requisito_legal_edit(id):
 
       .reqedit-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -37437,7 +37733,7 @@ def requisito_legal_edit(id):
         }
 
         .reqedit-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -37996,7 +38292,7 @@ def duenos_info():
 
       .duenos-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -38071,7 +38367,7 @@ def duenos_info():
 
       .duenos-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -38168,7 +38464,7 @@ def duenos_info():
         }
 
         .duenos-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -38825,7 +39121,7 @@ def inventario_informacion_new():
 
       .invinfo-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -38897,7 +39193,7 @@ def inventario_informacion_new():
 
       .invinfo-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -38931,7 +39227,7 @@ def inventario_informacion_new():
         }
 
         .invinfo-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -39458,7 +39754,7 @@ def inventario_informacion_edit(id):
 
       .invinfoedit-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -39533,7 +39829,7 @@ def inventario_informacion_edit(id):
 
       .invinfoedit-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -39568,7 +39864,7 @@ def inventario_informacion_edit(id):
         }
 
         .invinfoedit-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -39922,7 +40218,7 @@ def inventario_informacion():
 
       .invinfomat-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -40002,7 +40298,7 @@ def inventario_informacion():
       .invinfomat-table th,
       .invinfomat-table td{
         vertical-align:top;
-        font-size:.76rem;
+        font-size:.68rem;
         padding:9px 8px;
         white-space:normal;
         word-break:break-word;
@@ -40052,7 +40348,7 @@ def inventario_informacion():
 
       .invinfomat-btn-action,
       .invinfomat-actions-wrap .badge{
-        font-size:.70rem !important;
+        font-size:.64rem !important;
         line-height:1.1;
         padding:4px 10px !important;
         min-width:108px;
@@ -40505,7 +40801,7 @@ def inventario_informacion_detalle(id):
 
       .invinfodet-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -40595,7 +40891,7 @@ def inventario_informacion_detalle(id):
 
       .invinfodet-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -40639,7 +40935,7 @@ def inventario_informacion_detalle(id):
         }
 
         .invinfodet-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .invinfodet-badge{
@@ -41211,7 +41507,7 @@ def inventario_software_new():
 
       .invsoft-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -41260,7 +41556,7 @@ def inventario_software_new():
       .invsoft-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -41288,7 +41584,7 @@ def inventario_software_new():
 
       .invsoft-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -41378,7 +41674,7 @@ def inventario_software_new():
         }
 
         .invsoft-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -41919,7 +42215,7 @@ def inventario_software_edit(id):
 
       .invsoftedit-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -41962,7 +42258,7 @@ def inventario_software_edit(id):
       .invsoftedit-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -41995,7 +42291,7 @@ def inventario_software_edit(id):
         background:#f8fbff;
         border:1px solid #dbeafe;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
       }
 
       .invsoftedit-section-title{
@@ -42015,7 +42311,7 @@ def inventario_software_edit(id):
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         display:flex;
         align-items:center;
         gap:12px;
@@ -42069,7 +42365,7 @@ def inventario_software_edit(id):
         background:#fff;
         border:1px dashed #9ec5fe;
         border-radius:14px;
-        padding:14px;
+        padding:8px 7px;
         color:#64748b;
         font-size:.82rem;
         font-weight:700;
@@ -42085,7 +42381,7 @@ def inventario_software_edit(id):
 
       .invsoftedit-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -42119,7 +42415,7 @@ def inventario_software_edit(id):
         }
 
         .invsoftedit-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -42575,7 +42871,7 @@ def inventario_software():
 
       .invsoftmat-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -42654,7 +42950,7 @@ def inventario_software():
       .invsoftmat-table th,
       .invsoftmat-table td{
         vertical-align:top;
-        font-size:.76rem;
+        font-size:.68rem;
         padding:9px 8px;
         white-space:normal;
         word-break:break-word;
@@ -42704,7 +43000,7 @@ def inventario_software():
 
       .invsoftmat-btn-action,
       .invsoftmat-actions-wrap .badge{
-        font-size:.70rem !important;
+        font-size:.64rem !important;
         line-height:1.1;
         padding:4px 10px !important;
         min-width:108px;
@@ -43061,7 +43357,7 @@ def inventario_software_detalle(id):
 
       .invsoftdet-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -43096,7 +43392,7 @@ def inventario_software_detalle(id):
         background:linear-gradient(180deg,#f8fafc,#ffffff);
         border:1px solid #e2e8f0;
         border-radius:14px;
-        padding:14px;
+        padding:8px 7px;
         height:100%;
         box-shadow:0 4px 10px rgba(0,0,0,.05);
       }
@@ -43132,7 +43428,7 @@ def inventario_software_detalle(id):
         background:#f8fbff;
         border:1px solid #dbeafe;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
       }
 
       .invsoftdet-section-title{
@@ -43152,7 +43448,7 @@ def inventario_software_detalle(id):
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         display:flex;
         align-items:center;
         gap:12px;
@@ -43206,7 +43502,7 @@ def inventario_software_detalle(id):
         background:#fff;
         border:1px dashed #9ec5fe;
         border-radius:14px;
-        padding:14px;
+        padding:8px 7px;
         color:#64748b;
         font-size:.82rem;
         font-weight:700;
@@ -43222,7 +43518,7 @@ def inventario_software_detalle(id):
 
       .invsoftdet-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -43250,7 +43546,7 @@ def inventario_software_detalle(id):
         }
 
         .invsoftdet-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .invsoftdet-badge{
@@ -45079,7 +45375,7 @@ def inventario_fisico_glpi_config():
       .glpiinv-header-actions .btn,
       .glpiinv-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -45121,7 +45417,7 @@ def inventario_fisico_glpi_config():
       .glpiinv-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -45690,7 +45986,7 @@ def inventario_fisico_new():
 
       .invfis-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -45733,7 +46029,7 @@ def inventario_fisico_new():
       .invfis-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -45760,7 +46056,7 @@ def inventario_fisico_new():
 
       .invfis-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -45794,7 +46090,7 @@ def inventario_fisico_new():
         }
 
         .invfis-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -46305,7 +46601,7 @@ def inventario_fisico_edit(id):
 
       .invfisedit-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -46354,7 +46650,7 @@ def inventario_fisico_edit(id):
       .invfisedit-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -46384,7 +46680,7 @@ def inventario_fisico_edit(id):
 
       .invfisedit-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -46417,7 +46713,7 @@ def inventario_fisico_edit(id):
         }
 
         .invfisedit-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -46830,7 +47126,7 @@ def inventario_fisico():
 
       .invfismat-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -46935,7 +47231,7 @@ def inventario_fisico():
 
       .invfismat-table th,
       .invfismat-table td{
-        font-size:.76rem;
+        font-size:.68rem;
         padding:8px 7px;
         vertical-align:middle;
         word-break:break-word;
@@ -46988,7 +47284,7 @@ def inventario_fisico():
       }
 
       .invfismat-btn-action{
-        font-size:.70rem !important;
+        font-size:.64rem !important;
         padding:5px 10px !important;
         box-shadow:0 4px 10px rgba(0,0,0,.10);
       }
@@ -47518,7 +47814,7 @@ def inventario_fisico_detalle(id):
 
       .invfisdet-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -47554,7 +47850,7 @@ def inventario_fisico_detalle(id):
         background:linear-gradient(180deg,#f8fafc,#ffffff);
         border:1px solid #e2e8f0;
         border-radius:14px;
-        padding:14px;
+        padding:8px 7px;
         height:100%;
         box-shadow:0 4px 10px rgba(0,0,0,.05);
       }
@@ -47595,7 +47891,7 @@ def inventario_fisico_detalle(id):
 
       .invfisdet-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -47623,7 +47919,7 @@ def inventario_fisico_detalle(id):
         }
 
         .invfisdet-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .invfisdet-badge{
@@ -48218,7 +48514,7 @@ def inventario_datos_personales_new():
 
       .invdp-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -48261,7 +48557,7 @@ def inventario_datos_personales_new():
       .invdp-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -48280,7 +48576,7 @@ def inventario_datos_personales_new():
 
       .invdp-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -48299,7 +48595,7 @@ def inventario_datos_personales_new():
 
       .invdp-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -48333,7 +48629,7 @@ def inventario_datos_personales_new():
         }
 
         .invdp-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -48593,7 +48889,7 @@ def inventario_datos_personales():
 
       .invdpm-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -48721,7 +49017,7 @@ def inventario_datos_personales():
       .invdpm-btn-action{
         min-width:105px;
         max-width:120px;
-        font-size:.70rem !important;
+        font-size:.64rem !important;
         padding:4px 12px !important;
         line-height:1.2;
         text-align:center;
@@ -48985,7 +49281,7 @@ def inventario_datos_personales_detalle(id):
 
       .invdpd-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -49058,7 +49354,7 @@ def inventario_datos_personales_detalle(id):
         }
 
         .invdpd-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -49536,7 +49832,7 @@ def inventario_datos_personales_edit(id):
 
       .invdpe-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -49579,7 +49875,7 @@ def inventario_datos_personales_edit(id):
       .invdpe-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -49598,7 +49894,7 @@ def inventario_datos_personales_edit(id):
 
       .invdpe-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -49617,7 +49913,7 @@ def inventario_datos_personales_edit(id):
 
       .invdpe-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -49651,7 +49947,7 @@ def inventario_datos_personales_edit(id):
         }
 
         .invdpe-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -50368,7 +50664,7 @@ def valor_confidencialidad():
 
       .valconf-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -50411,7 +50707,7 @@ def valor_confidencialidad():
       .valconf-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -50438,7 +50734,7 @@ def valor_confidencialidad():
 
       .valconf-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -50537,7 +50833,7 @@ def valor_confidencialidad():
         }
 
         .valconf-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -50978,7 +51274,7 @@ def valor_integridad():
 
     .valint-header-actions .btn{
       border-radius:10px !important;
-      min-height:38px;
+      min-height:32px;
       padding:8px 22px !important;
       font-size:.82rem;
       font-weight:900;
@@ -51026,7 +51322,7 @@ def valor_integridad():
     .valint-card .form-select{
       border-radius:9px;
       border:1px solid #d9e3f0;
-      min-height:38px;
+      min-height:32px;
       font-size:.80rem;
       background:#f8fafc;
     }
@@ -51055,7 +51351,7 @@ def valor_integridad():
 
     .valint-bottom-actions .btn{
       border-radius:10px !important;
-      min-height:38px;
+      min-height:32px;
       padding:8px 22px !important;
       font-size:.82rem;
       font-weight:900;
@@ -51544,7 +51840,7 @@ def valor_disponibilidad():
 
       .valdisp-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -51586,7 +51882,7 @@ def valor_disponibilidad():
       .valdisp-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -51612,7 +51908,7 @@ def valor_disponibilidad():
 
       .valdisp-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -51699,7 +51995,7 @@ def valor_disponibilidad():
         }
 
         .valdisp-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -52045,7 +52341,7 @@ def valor_criticidad_activo():
 
       .valcrit-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -52092,7 +52388,7 @@ def valor_criticidad_activo():
       .valcrit-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -52162,7 +52458,7 @@ def valor_criticidad_activo():
 
       .valcrit-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -52193,7 +52489,7 @@ def valor_criticidad_activo():
         }
 
         .valcrit-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -52524,7 +52820,7 @@ def accesos_estados():
 
       .accestado-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -52571,7 +52867,7 @@ def accesos_estados():
       .accestado-card .form-control{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -52640,7 +52936,7 @@ def accesos_estados():
         }
 
         .accestado-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -52981,7 +53277,7 @@ def accesos_new():
 
       .accesoadd-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -53024,7 +53320,7 @@ def accesos_new():
       .accesoadd-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -53051,7 +53347,7 @@ def accesos_new():
 
       .accesoadd-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -53085,7 +53381,7 @@ def accesos_new():
         }
 
         .accesoadd-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -53531,7 +53827,7 @@ def accesos_matriz():
 
       .accesomat-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -53709,7 +54005,7 @@ def accesos_matriz():
         min-width:110px;
         max-width:125px;
         padding:4px 12px !important;
-        font-size:.70rem !important;
+        font-size:.64rem !important;
         line-height:1.2;
         text-align:center;
         white-space:nowrap;
@@ -54112,7 +54408,7 @@ def accesos_detalle(id):
 
       .accdet-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -54149,7 +54445,7 @@ def accesos_detalle(id):
         background:#fff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 8px 18px rgba(15,23,42,.08);
       }
 
@@ -54159,7 +54455,7 @@ def accesos_detalle(id):
 
       .accdet-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -54215,14 +54511,14 @@ def accesos_detalle(id):
       .accdet-file-left{
         display:flex;
         align-items:center;
-        gap:9px;
+        gap:7px;
         min-width:0;
       }
 
       .accdet-file-icon{
-        width:38px;
-        height:38px;
-        min-width:38px;
+        width:32px;
+        height:32px;
+        min-width:32px;
         border-radius:11px;
         background:linear-gradient(135deg,#1d4ed8,#60a5fa);
         color:#fff;
@@ -54261,7 +54557,7 @@ def accesos_detalle(id):
       .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -54288,7 +54584,7 @@ def accesos_detalle(id):
         }
 
         .accdet-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .accdet-section{
@@ -54735,7 +55031,7 @@ def accesos_edit(id):
 
       .accesoedit-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -54793,7 +55089,7 @@ def accesos_edit(id):
       .accesoedit-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -54872,7 +55168,7 @@ def accesos_edit(id):
         }
 
         .accesoedit-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -55138,7 +55434,7 @@ def accesos_evidencia_view(evi_id):
       }
 
       .accevi-card-body{
-        padding:14px;
+        padding:8px 7px;
       }
 
       .accevi-pdf-container{
@@ -55519,7 +55815,7 @@ def revision_accesos_new():
 
       .revadd-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -55562,7 +55858,7 @@ def revision_accesos_new():
       .revadd-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -55589,7 +55885,7 @@ def revision_accesos_new():
 
       .revadd-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -55623,7 +55919,7 @@ def revision_accesos_new():
         }
 
         .revadd-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -55990,7 +56286,7 @@ def revision_accesos_matriz():
 
       .revmat-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -56168,7 +56464,7 @@ def revision_accesos_matriz():
         min-width:110px;
         max-width:125px;
         padding:4px 12px !important;
-        font-size:.70rem !important;
+        font-size:.64rem !important;
         line-height:1.2;
         text-align:center;
         white-space:nowrap;
@@ -56496,7 +56792,7 @@ def revision_accesos_detalle(id):
 
       .revdet-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -56533,7 +56829,7 @@ def revision_accesos_detalle(id):
         background:#fff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 8px 18px rgba(15,23,42,.08);
       }
 
@@ -56543,7 +56839,7 @@ def revision_accesos_detalle(id):
 
       .revdet-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -56603,7 +56899,7 @@ def revision_accesos_detalle(id):
       .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -56638,7 +56934,7 @@ def revision_accesos_detalle(id):
         }
 
         .revdet-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .revdet-section{
@@ -56927,7 +57223,7 @@ def revision_accesos_edit(id):
 
       .revedit-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -56961,7 +57257,7 @@ def revision_accesos_edit(id):
 
       .revedit-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -56981,7 +57277,7 @@ def revision_accesos_edit(id):
       .revedit-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -57016,7 +57312,7 @@ def revision_accesos_edit(id):
 
       .revedit-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -57063,7 +57359,7 @@ def revision_accesos_edit(id):
         }
 
         .revedit-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -58159,7 +58455,7 @@ def rfc_new():
 
       .rfcadd-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -58202,7 +58498,7 @@ def rfc_new():
       .rfcadd-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -58221,7 +58517,7 @@ def rfc_new():
 
       .rfcadd-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -58259,7 +58555,7 @@ def rfc_new():
 
       .rfcadd-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -58306,7 +58602,7 @@ def rfc_new():
         }
 
         .rfcadd-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -58879,7 +59175,7 @@ def rfc_aprobar_seguridad(id):
       .rfcsec-header-actions .btn,
       .rfcsec-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -58940,7 +59236,7 @@ def rfc_aprobar_seguridad(id):
 
       .rfcsec-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -58960,7 +59256,7 @@ def rfc_aprobar_seguridad(id):
       .rfcsec-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -59015,7 +59311,7 @@ def rfc_aprobar_seguridad(id):
         }
 
         .rfcsec-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .rfcsec-status-box{
@@ -59464,7 +59760,7 @@ def rfc_matriz():
 
       .rfcmat-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -59646,7 +59942,7 @@ def rfc_matriz():
         min-width:115px;
         max-width:135px;
         padding:4px 12px !important;
-        font-size:.70rem !important;
+        font-size:.64rem !important;
         line-height:1.2;
         text-align:center;
         white-space:nowrap;
@@ -60871,7 +61167,7 @@ def rfc_edit(id):
 
       .rfcedit-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -60914,7 +61210,7 @@ def rfc_edit(id):
       .rfcedit-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -60933,7 +61229,7 @@ def rfc_edit(id):
 
       .rfcedit-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -60971,7 +61267,7 @@ def rfc_edit(id):
 
       .rfcedit-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -61018,7 +61314,7 @@ def rfc_edit(id):
         }
 
         .rfcedit-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -61276,7 +61572,7 @@ def rfc_evidencia_view(evi_id):
       }
 
       .rfcevi-card-body{
-        padding:14px;
+        padding:8px 7px;
       }
 
       .rfcevi-pdf-container{
@@ -62030,7 +62326,7 @@ def rfc_view(id):
 
       .rfcdet-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -62067,7 +62363,7 @@ def rfc_view(id):
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 8px 18px rgba(15,23,42,.08);
       }
 
@@ -62077,7 +62373,7 @@ def rfc_view(id):
 
       .rfcdet-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -62238,14 +62534,14 @@ def rfc_view(id):
       .rfcdet-file-left{
         display:flex;
         align-items:center;
-        gap:9px;
+        gap:7px;
         min-width:0;
       }
 
       .rfcdet-file-icon{
-        width:38px;
-        height:38px;
-        min-width:38px;
+        width:32px;
+        height:32px;
+        min-width:32px;
         border-radius:11px;
         background:linear-gradient(135deg,#1d4ed8,#60a5fa);
         color:#fff;
@@ -62301,7 +62597,7 @@ def rfc_view(id):
       .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -62328,7 +62624,7 @@ def rfc_view(id):
         }
 
         .rfcdet-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .rfcdet-section{
@@ -62907,7 +63203,7 @@ def incidentes_nuevo():
 
       .incadd-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -62950,7 +63246,7 @@ def incidentes_nuevo():
       .incadd-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -62969,7 +63265,7 @@ def incidentes_nuevo():
 
       .incadd-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -62989,7 +63285,7 @@ def incidentes_nuevo():
 
       .incadd-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -63023,7 +63319,7 @@ def incidentes_nuevo():
         }
 
         .incadd-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -63487,7 +63783,7 @@ def incidentes_matriz():
 
       .incmat-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -63657,7 +63953,7 @@ def incidentes_matriz():
         min-width:110px;
         max-width:125px;
         padding:4px 12px !important;
-        font-size:.70rem !important;
+        font-size:.64rem !important;
         line-height:1.2;
         text-align:center;
         white-space:nowrap;
@@ -64009,7 +64305,7 @@ def incidentes_detalle(id):
 
       .incview-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -64049,7 +64345,7 @@ def incidentes_detalle(id):
       ========================= */
       .incview-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -64098,7 +64394,7 @@ def incidentes_detalle(id):
 
       .incview-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -64135,7 +64431,7 @@ def incidentes_detalle(id):
         }
 
         .incview-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -64656,7 +64952,7 @@ def incidentes_editar(id):
 
       .incedit-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -64699,7 +64995,7 @@ def incidentes_editar(id):
       .incedit-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -64718,7 +65014,7 @@ def incidentes_editar(id):
 
       .incedit-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -64737,7 +65033,7 @@ def incidentes_editar(id):
 
       .incedit-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -64771,7 +65067,7 @@ def incidentes_editar(id):
         }
 
         .incedit-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -67090,7 +67386,7 @@ def vuln_scan_shell(title, body_html):
       .volver-center .btn,
       .toolbar-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -67131,7 +67427,7 @@ def vuln_scan_shell(title, body_html):
 
       .section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -67271,7 +67567,7 @@ def vuln_scan_shell(title, body_html):
         display:flex;
         align-items:center;
         justify-content:center;
-        font-size:.76rem;
+        font-size:.68rem;
         font-weight:900;
       }
 
@@ -67813,7 +68109,7 @@ def vulnerabilidad_new():
 
       .vulnadd-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -67862,7 +68158,7 @@ def vulnerabilidad_new():
       .vulnadd-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -67883,7 +68179,7 @@ def vulnerabilidad_new():
       ========================= */
       .vulnadd-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -67905,7 +68201,7 @@ def vulnerabilidad_new():
 
       .vulnadd-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -67942,7 +68238,7 @@ def vulnerabilidad_new():
         }
 
         .vulnadd-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -68409,7 +68705,7 @@ def vulnerabilidades_matriz():
       .volver-center .btn,
       .top-actions-wrap .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -68554,9 +68850,9 @@ def vulnerabilidades_matriz():
 
       .vuln-filter-actions .btn{
         width:100%;
-        min-height:38px;
+        min-height:32px;
         padding:7px 12px !important;
-        font-size:.76rem;
+        font-size:.68rem;
         font-weight:900;
         box-shadow:0 8px 16px rgba(15,23,42,.12);
       }
@@ -68679,7 +68975,7 @@ def vulnerabilidades_matriz():
         }
 
         .vulnmx-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -69232,7 +69528,7 @@ def vulnerabilidad_detalle(id):
         background:#ffffff;
         border:1px solid #e2ebf5;
         border-radius:14px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 4px 12px rgba(15,23,42,.06);
         overflow:hidden;
       }
@@ -69311,7 +69607,7 @@ def vulnerabilidad_detalle(id):
         background:#f8fbff;
         border:1px dashed #cfd8e3;
         border-radius:12px;
-        padding:14px;
+        padding:8px 7px;
         text-align:center;
         font-size:.82rem;
         color:#64748b;
@@ -69741,7 +70037,7 @@ def vulnerabilidad_edit(id):
 
       .vulnedit-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -69775,7 +70071,7 @@ def vulnerabilidad_edit(id):
 
       .vulnedit-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -69795,7 +70091,7 @@ def vulnerabilidad_edit(id):
       .vulnedit-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -69859,7 +70155,7 @@ def vulnerabilidad_edit(id):
 
       .vulnedit-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -69905,7 +70201,7 @@ def vulnerabilidad_edit(id):
         }
 
         .vulnedit-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -70668,12 +70964,12 @@ def vulnerabilidad_evidencia_view(evi_id):
         }
 
         .vulevi-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
           line-height:1.12;
         }
 
         .vulevi-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .vulevi-viewer-wrap{
@@ -73443,7 +73739,7 @@ def threat_model_dashboard():
       .tm-filter-actions .btn{
         width:100%;
         min-height:36px;
-        font-size:.76rem;
+        font-size:.68rem;
         font-weight:900;
       }
 
@@ -73780,14 +74076,14 @@ def threat_model_unmapped_view():
         display:flex;
         flex-wrap:wrap;
         justify-content:flex-end;
-        gap:8px;
+        gap:6px;
       }
 
       .unmapped-extra-actions .btn,
       .unmapped-extra-actions form .btn{
         font-size:.82rem;
         font-weight:900;
-        min-height:38px;
+        min-height:32px;
         display:inline-flex;
         align-items:center;
         justify-content:center;
@@ -73809,7 +74105,7 @@ def threat_model_unmapped_view():
       .unmapped-filter-actions .btn{
         width:100%;
         min-height:36px;
-        font-size:.76rem;
+        font-size:.68rem;
         font-weight:900;
       }
 
@@ -74096,7 +74392,7 @@ def threat_model_asset_view():
         display:flex;
         flex-wrap:wrap;
         justify-content:flex-end;
-        gap:8px;
+        gap:6px;
       }
 
       .mitre-actions .btn{
@@ -74198,7 +74494,7 @@ def threat_model_asset_view():
         grid-template-columns:repeat(14, minmax(245px, 1fr));
         gap:12px;
         min-width:3520px;
-        padding:14px;
+        padding:8px 7px;
       }
 
       .mitre-tactic-col{
@@ -74221,7 +74517,7 @@ def threat_model_asset_view():
         display:flex;
         align-items:center;
         justify-content:space-between;
-        gap:8px;
+        gap:6px;
         padding:12px 12px;
         background:linear-gradient(135deg,#243b53 0%,#304f72 100%);
         color:#fff;
@@ -74272,7 +74568,7 @@ def threat_model_asset_view():
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        font-size:.76rem;
+        font-size:.68rem;
         font-weight:950;
         color:#1d4f8f;
         background:#eaf3ff;
@@ -74991,13 +75287,13 @@ def threat_model_unmapped_complementary_view():
         display:flex;
         flex-wrap:wrap;
         justify-content:flex-end;
-        gap:8px;
+        gap:6px;
       }
 
       .unmapped-extra-actions .btn{
         font-size:.82rem;
         font-weight:900;
-        min-height:38px;
+        min-height:32px;
         border-radius:999px !important;
         padding:0 18px !important;
         display:flex;
@@ -75022,7 +75318,7 @@ def threat_model_unmapped_complementary_view():
       .unmapped-filter-actions .btn{
         width:100%;
         min-height:36px;
-        font-size:.76rem;
+        font-size:.68rem;
         font-weight:900;
         border-radius:999px !important;
       }
@@ -75057,7 +75353,7 @@ def threat_model_unmapped_complementary_view():
         background:linear-gradient(135deg,#1d4ed8,#2563eb);
         color:#ffffff;
         font-weight:900;
-        font-size:.76rem;
+        font-size:.68rem;
         text-align:center;
         border:none !important;
         padding:13px 8px;
@@ -75974,7 +76270,7 @@ def plan_remediacion_new():
 
       .remadd-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -76017,7 +76313,7 @@ def plan_remediacion_new():
       .remadd-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -76036,7 +76332,7 @@ def plan_remediacion_new():
 
       .remadd-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -76055,7 +76351,7 @@ def plan_remediacion_new():
 
       .remadd-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -76089,7 +76385,7 @@ def plan_remediacion_new():
         }
 
         .remadd-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -76506,7 +76802,7 @@ def plan_remediacion_matriz():
 
       .remmat-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -76522,7 +76818,7 @@ def plan_remediacion_matriz():
       }
 
       .remmat-filter-body{
-        padding:14px;
+        padding:8px 7px;
       }
 
       .remmat-filter-body .form-label{
@@ -76534,7 +76830,7 @@ def plan_remediacion_matriz():
       .remmat-filter-body .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -76550,7 +76846,7 @@ def plan_remediacion_matriz():
       }
 
       .remmat-filter-actions .btn{
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         font-weight:900;
         box-shadow:0 8px 16px rgba(15,23,42,.12);
@@ -76581,7 +76877,7 @@ def plan_remediacion_matriz():
       }
 
       .remmat-card-body{
-        padding:14px;
+        padding:8px 7px;
       }
 
       .remmat-table-wrap{
@@ -76997,7 +77293,7 @@ def plan_remediacion_detalle(id):
 
       .remdet-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -77034,7 +77330,7 @@ def plan_remediacion_detalle(id):
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 8px 18px rgba(15,23,42,.08);
       }
 
@@ -77044,7 +77340,7 @@ def plan_remediacion_detalle(id):
 
       .remdet-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -77120,7 +77416,7 @@ def plan_remediacion_detalle(id):
       .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -77155,7 +77451,7 @@ def plan_remediacion_detalle(id):
         }
 
         .remdet-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .remdet-section{
@@ -77549,7 +77845,7 @@ def plan_remediacion_edit(id):
       .remedit-header-actions .btn,
       .remedit-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -77585,7 +77881,7 @@ def plan_remediacion_edit(id):
 
       .remedit-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -77605,7 +77901,7 @@ def plan_remediacion_edit(id):
       .remedit-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -77650,7 +77946,7 @@ def plan_remediacion_edit(id):
         }
 
         .remedit-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -78080,7 +78376,7 @@ def plan_remediacion_jira(id):
 
       .jira-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -78115,7 +78411,7 @@ def plan_remediacion_jira(id):
 
       .jira-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -78137,7 +78433,7 @@ def plan_remediacion_jira(id):
       .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -78195,7 +78491,7 @@ def plan_remediacion_jira(id):
 
       .jira-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -78511,7 +78807,7 @@ def jira_config_view():
 
       .jiracfg-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -78545,7 +78841,7 @@ def jira_config_view():
 
       .jiracfg-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -78565,7 +78861,7 @@ def jira_config_view():
       .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -78592,7 +78888,7 @@ def jira_config_view():
 
       .jiracfg-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -78636,7 +78932,7 @@ def jira_config_view():
         }
 
         .jiracfg-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -81161,7 +81457,7 @@ def camp_conc_common_css(prefix):
       .{prefix}-header-actions .btn,
       .{prefix}-bottom-actions .btn{{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -81300,7 +81596,7 @@ def camp_conc_common_css(prefix):
       }}
 
       .{prefix}-kpi-label{{
-        font-size:.76rem;
+        font-size:.68rem;
         font-weight:900;
         color:#1459a6;
         text-transform:uppercase;
@@ -81316,7 +81612,7 @@ def camp_conc_common_css(prefix):
 
       .{prefix}-section-title{{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -81347,7 +81643,7 @@ def camp_conc_common_css(prefix):
       .{prefix}-filter-card .form-select{{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }}
@@ -81432,7 +81728,7 @@ def camp_conc_common_css(prefix):
 
       .campopt-meta{{
         display:flex;
-        gap:8px;
+        gap:6px;
         flex-wrap:wrap;
         margin-top:12px;
       }}
@@ -81451,14 +81747,14 @@ def camp_conc_common_css(prefix):
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         margin-bottom:14px;
         box-shadow:0 8px 18px rgba(15,23,42,.08);
       }}
 
       .campdet-section-title{{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -81949,7 +82245,7 @@ def plan_diseno_new():
       .plandis-header-actions .btn,
       .plandis-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -82000,7 +82296,7 @@ def plan_diseno_new():
       .plandis-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -82021,7 +82317,7 @@ def plan_diseno_new():
       ========================= */
       .plandis-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -82470,7 +82766,7 @@ def plan_diseno_matriz():
         min-width:110px;
         max-width:125px;
         padding:4px 12px !important;
-        font-size:.70rem !important;
+        font-size:.64rem !important;
         line-height:1.2;
         text-align:center;
         white-space:nowrap;
@@ -82788,7 +83084,7 @@ def plan_diseno_detalle(id):
 
       .plancapdet-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -82825,13 +83121,13 @@ def plan_diseno_detalle(id):
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 8px 18px rgba(15,23,42,.08);
       }
 
       .plancapdet-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -82884,7 +83180,7 @@ def plan_diseno_detalle(id):
         background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
         border:1px solid #dbe6f4;
         border-radius:14px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 6px 14px rgba(15,23,42,.08);
         transition:all .2s ease;
       }
@@ -82974,7 +83270,7 @@ def plan_diseno_detalle(id):
         }
 
         .plancapdet-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .plancapdet-file-card{
@@ -83444,7 +83740,7 @@ def plan_diseno_edit(id):
     ========================= */
     .plancapedit-section-title{
       font-weight:950;
-      font-size:.88rem;
+      font-size:.78rem;
       color:#1459a6;
       padding:10px 12px;
       border-radius:12px;
@@ -83502,7 +83798,7 @@ def plan_diseno_edit(id):
 
       .plancapedit-title{ font-size:1.15rem; }
 
-      .plancapedit-card-body{ padding:14px; }
+      .plancapedit-card-body{ padding:8px 7px; }
 
       .plancapedit-header-overlay{
         flex-direction:column;
@@ -83807,7 +84103,7 @@ def plan_diseno_evidencia_view(evi_id):
       }
 
       .plancevi-card-body{
-        padding:14px;
+        padding:8px 7px;
       }
 
       .plancevi-pdf-container{
@@ -84313,7 +84609,7 @@ def plan_cf_new():
       .plancf-header-actions .btn,
       .plancf-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -84358,7 +84654,7 @@ def plan_cf_new():
       .plancf-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -84377,7 +84673,7 @@ def plan_cf_new():
 
       .plancf-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -84421,7 +84717,7 @@ def plan_cf_new():
         }
 
         .plancf-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -84798,7 +85094,7 @@ def plan_cf_matriz():
 
       .plancfmat-header-actions .btn{{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -84933,7 +85229,7 @@ def plan_cf_matriz():
         min-width:110px;
         max-width:125px;
         padding:4px 12px !important;
-        font-size:.70rem !important;
+        font-size:.64rem !important;
         line-height:1.2;
         text-align:center;
         white-space:nowrap;
@@ -85260,7 +85556,7 @@ def plan_cf_detalle(id):
 
       .plancfdet-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -85304,7 +85600,7 @@ def plan_cf_detalle(id):
 
       .plancfdet-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -85320,7 +85616,7 @@ def plan_cf_detalle(id):
         background:#f8fafc;
         border:1px solid #dbe5f0;
         border-radius:14px;
-        padding:14px;
+        padding:8px 7px;
       }
 
       .plancfdet-label{
@@ -85351,7 +85647,7 @@ def plan_cf_detalle(id):
         }
 
         .plancfdet-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
     </style>
@@ -85762,7 +86058,7 @@ def plan_cf_edit(id):
       .plancfedit-header-actions .btn,
       .plancfedit-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -85798,7 +86094,7 @@ def plan_cf_edit(id):
 
       .plancfedit-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -85818,7 +86114,7 @@ def plan_cf_edit(id):
       .plancfedit-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -85886,7 +86182,7 @@ def plan_cf_edit(id):
         }
 
         .plancfedit-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -86309,7 +86605,7 @@ def plan_remediacion_competencias_new():
       .plancomp-header-actions .btn,
       .plancomp-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -86354,7 +86650,7 @@ def plan_remediacion_competencias_new():
       .plancomp-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -86373,7 +86669,7 @@ def plan_remediacion_competencias_new():
 
       .plancomp-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -86410,7 +86706,7 @@ def plan_remediacion_competencias_new():
         }
 
         .plancomp-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -86807,7 +87103,7 @@ def plan_remediacion_competencias_matriz():
 
       .plancompmat-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -86977,7 +87273,7 @@ def plan_remediacion_competencias_matriz():
         min-width:110px;
         max-width:125px;
         padding:4px 12px !important;
-        font-size:.70rem !important;
+        font-size:.64rem !important;
         line-height:1.2;
         text-align:center;
         white-space:nowrap;
@@ -87277,7 +87573,7 @@ def plan_remediacion_competencias_detalle(id):
       .plancompdet-header-actions .btn,
       .plancompdet-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -87313,7 +87609,7 @@ def plan_remediacion_competencias_detalle(id):
 
       .plancompdet-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -87423,7 +87719,7 @@ def plan_remediacion_competencias_detalle(id):
         }
 
         .plancompdet-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -87784,7 +88080,7 @@ def plan_remediacion_competencias_edit(id):
       .plancompedit-header-actions .btn,
       .plancompedit-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -87829,7 +88125,7 @@ def plan_remediacion_competencias_edit(id):
       .plancompedit-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -87848,7 +88144,7 @@ def plan_remediacion_competencias_edit(id):
 
       .plancompedit-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -87941,7 +88237,7 @@ def plan_remediacion_competencias_edit(id):
         }
 
         .plancompedit-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -89447,7 +89743,7 @@ def cuestionarios_proveedores():
 
       .propia-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -89487,7 +89783,7 @@ def cuestionarios_proveedores():
       ========================= */
       .propia-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -89510,7 +89806,7 @@ def cuestionarios_proveedores():
       .propia-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
-        min-height:38px;
+        min-height:32px;
         font-size:.80rem;
         background:#f8fafc;
       }
@@ -89602,7 +89898,7 @@ def cuestionarios_proveedores():
         }
 
         .propia-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -89913,7 +90209,7 @@ def cuestionarios_proveedores_recomendado():
 
       .propreco-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -89953,7 +90249,7 @@ def cuestionarios_proveedores_recomendado():
 
       .propreco-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -89973,7 +90269,7 @@ def cuestionarios_proveedores_recomendado():
         background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);
         border:1px solid #dbe6f4;
         border-radius:14px;
-        padding:14px;
+        padding:8px 7px;
         height:100%;
         box-shadow:0 6px 14px rgba(15,23,42,.06);
       }
@@ -89988,7 +90284,7 @@ def cuestionarios_proveedores_recomendado():
       .propreco-win-badge{
         background:linear-gradient(135deg,#16a34a,#22c55e);
         color:#fff;
-        font-size:.88rem;
+        font-size:.78rem;
         font-weight:950;
         border-radius:999px;
         box-shadow:0 8px 18px rgba(22,163,74,.25);
@@ -90051,7 +90347,7 @@ def cuestionarios_proveedores_recomendado():
         }
 
         .propreco-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -90282,7 +90578,7 @@ def cuestionarios_proveedores_historico():
 
       .prophist-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -90316,7 +90612,7 @@ def cuestionarios_proveedores_historico():
 
       .prophist-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -90388,7 +90684,7 @@ def cuestionarios_proveedores_historico():
         }
 
         .prophist-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -90619,7 +90915,7 @@ def cuestionarios_proveedores_historico_detalle(grupo_id):
 
       .prophdet-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -90653,7 +90949,7 @@ def cuestionarios_proveedores_historico_detalle(grupo_id):
 
       .prophdet-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -90725,7 +91021,7 @@ def cuestionarios_proveedores_historico_detalle(grupo_id):
         }
 
         .prophdet-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -91026,7 +91322,7 @@ def cuestionarios_proveedores_ficha_proponente(detalle_id):
 
       .proficha-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -91065,7 +91361,7 @@ def cuestionarios_proveedores_ficha_proponente(detalle_id):
       ========================= */
       .proficha-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -91083,7 +91379,7 @@ def cuestionarios_proveedores_ficha_proponente(detalle_id):
         background:#f8fafc;
         border:1px solid #e5e7eb;
         border-radius:14px;
-        padding:14px;
+        padding:8px 7px;
       }
 
       .proficha-score-item{
@@ -91147,7 +91443,7 @@ def cuestionarios_proveedores_ficha_proponente(detalle_id):
         }
 
         .proficha-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -92012,7 +92308,7 @@ def _render_proveedor_form(item=None, areas=None, paises=None, cfg=None, is_edit
       .provform-header-actions .btn,
       .provform-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -92156,7 +92452,7 @@ def _render_proveedor_form(item=None, areas=None, paises=None, cfg=None, is_edit
         }
 
         .provform-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -93066,7 +93362,7 @@ def proveedores_matriz():
       }
 
       .provmat-filter-body{
-        padding:14px;
+        padding:8px 7px;
       }
 
       .provmat-label{
@@ -93078,8 +93374,8 @@ def proveedores_matriz():
       }
 
       .provmat-input-sm{
-        min-height:34px !important;
-        font-size:.80rem !important;
+        min-height:30px !important;
+        font-size:.72rem !important;
         border-radius:10px !important;
         border:1px solid #d9e3f0 !important;
         background:#f8fafc !important;
@@ -93763,7 +94059,7 @@ def proveedores_detalle(id):
 
       .provdet-header-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -93800,13 +94096,13 @@ def proveedores_detalle(id):
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 8px 18px rgba(15,23,42,.08);
       }
 
       .provdet-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -93854,7 +94150,7 @@ def proveedores_detalle(id):
       }
 
       .provdet-score{
-        font-size:.76rem;
+        font-size:.68rem;
         font-weight:900;
         color:#64748b;
         white-space:nowrap;
@@ -93874,7 +94170,7 @@ def proveedores_detalle(id):
         background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
         border:1px solid #dbe6f4;
         border-radius:14px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 6px 14px rgba(15,23,42,.08);
         transition:all .2s ease;
       }
@@ -93991,7 +94287,7 @@ def proveedores_detalle(id):
         }
 
         .provdet-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
 
         .provdet-file-card{
@@ -94363,7 +94659,7 @@ def proveedores_param():
       .provparam-header-actions .btn,
       .provparam-bottom-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -94430,7 +94726,7 @@ def proveedores_param():
 
       .provparam-section-title{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -94467,7 +94763,7 @@ def proveedores_param():
         }
 
         .provparam-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -98645,7 +98941,7 @@ def metricas_incidente_matriz():
         }
 
         .minc-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
       }
 
@@ -99198,7 +99494,7 @@ def metricas_incidente_detalle(incidente_id):
         }
 
         .mind-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
 
         .mind-card .card-body{
@@ -99207,7 +99503,7 @@ def metricas_incidente_detalle(incidente_id):
 
         .mind-value,
         .mind-box{
-          font-size:.88rem;
+          font-size:.78rem;
         }
       }
 
@@ -99627,7 +99923,7 @@ def metricas_incidente_analisis(incidente_id):
         }
 
         .miia-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
       }
 
@@ -101009,7 +101305,7 @@ def metricas_vulnerabilidades():
         }
 
         .vulnmet-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
 
         .vulnmet-card{
@@ -101551,7 +101847,7 @@ def metricas_vulnerabilidades_ver_analisis(codigo):
         }
 
         .vulna-subtitle {
-          font-size:.76rem;
+          font-size:.68rem;
         }
 
         .vulna-card {
@@ -102813,7 +103109,7 @@ def metricas_cultura_matriz():
         background:linear-gradient(180deg,#ffffff 0%,#f9fbff 100%);
         border:1px solid #dbe5ef;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         text-align:center;
         min-height:170px;
         display:flex;
@@ -102854,7 +103150,7 @@ def metricas_cultura_matriz():
         align-self:center;
         border-radius:999px;
         padding:6px 12px;
-        font-size:.76rem;
+        font-size:.68rem;
         font-weight:900;
         white-space:normal;
         overflow-wrap:break-word;
@@ -102904,7 +103200,7 @@ def metricas_cultura_matriz():
         }
 
         .cultmet-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
 
         .cultmet-metric-grid,
@@ -103526,7 +103822,7 @@ def metricas_mejora_planes():
         }
 
         .mejmet-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
 
         .mejmet-card .card-body{
@@ -104167,7 +104463,7 @@ def mejora_new():
       .mejadd-cancel-btn,
       .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -104289,12 +104585,12 @@ def mejora_new():
         }
 
         .mejadd-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
 
         .mejadd-card-body,
         .mejadd-card .card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -104861,7 +105157,7 @@ def mejora_matriz():
         }
 
         .mejmat-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
 
         .mejmat-card-body{
@@ -105284,7 +105580,7 @@ def mejora_detalle(id):
         }
 
         .mejdet-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
 
         .mejdet-card-body{
@@ -105887,11 +106183,11 @@ def mejora_edit(id):
         }
 
         .mejedit-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
 
         .mejedit-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -110260,7 +110556,7 @@ def report_nist(run_id: int):
       .volver-center .btn,
       .plan-btn-main{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -110396,7 +110692,7 @@ def report_nist(run_id: int):
         }
 
         .card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -110714,7 +111010,7 @@ def param_maturity_levels():
       .madlvl-btn-main,
       .btn{{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -110875,7 +111171,7 @@ def param_maturity_levels():
         }}
 
         .madlvl-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
 
         .madlvl-card .card-body{{
@@ -111218,7 +111514,7 @@ def param_compliance_map():
       .madmap-btn-main,
       .btn{{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -111271,7 +111567,7 @@ def param_compliance_map():
         color:#334155;
         border-radius:12px;
         padding:12px 14px;
-        font-size:.88rem;
+        font-size:.78rem;
         line-height:1.45;
       }}
 
@@ -111389,7 +111685,7 @@ def param_compliance_map():
         }}
 
         .madmap-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
 
         .madmap-card .card-body{{
@@ -111728,7 +112024,7 @@ def param_gap_levels():
       .madgap-btn-main,
       .btn{{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -111885,7 +112181,7 @@ def param_gap_levels():
         }}
 
         .madgap-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
       }}
 
@@ -112630,7 +112926,7 @@ def home():
       .nistmad-header-actions .btn,
       .nistmad-btn-main {{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -112664,7 +112960,7 @@ def home():
 
       .nistmad-section-title {{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -112782,7 +113078,7 @@ def home():
         }}
 
         .nistmad-card .card-body {{
-          padding:14px;
+          padding:8px 7px;
         }}
       }}
 
@@ -113054,7 +113350,7 @@ def parametros_menu():
       .madpar-header-actions .btn,
       .madpar-btn-main{{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -113088,7 +113384,7 @@ def parametros_menu():
 
       .madpar-section-title{{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         padding:9px 12px;
         border-radius:12px;
@@ -113163,7 +113459,7 @@ def parametros_menu():
         }}
 
         .madpar-card .card-body{{
-          padding:14px;
+          padding:8px 7px;
         }}
       }}
 
@@ -113920,7 +114216,7 @@ def ingreso():
 
       .isoform-section-title {{
         font-weight:950;
-        font-size:.88rem;
+        font-size:.78rem;
         color:#1459a6;
         background:#eef5ff;
         border:1px solid #d9eaff;
@@ -114026,7 +114322,7 @@ def ingreso():
         background:#f8fbff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         margin-bottom:14px;
       }}
 
@@ -114056,7 +114352,7 @@ def ingreso():
         background:#fff;
         border:1px solid #e5edf7;
         border-radius:14px;
-        padding:14px;
+        padding:8px 7px;
         transition:.2s;
       }}
 
@@ -114090,7 +114386,7 @@ def ingreso():
         display:flex;
         justify-content:center;
         align-items:center;
-        gap:8px;
+        gap:6px;
         padding:10px;
         font-weight:800;
         cursor:pointer;
@@ -115561,7 +115857,7 @@ def view_report(run_id: int):
       }
 
       .report-header-actions .btn{
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         box-shadow:0 8px 16px rgba(15,23,42,.15);
@@ -115700,7 +115996,7 @@ def view_report(run_id: int):
 
       .accordion-item{
         border:1px solid #dbe6f4 !important;
-        border-radius:16px !important;
+        border-radius:0 20px 20px 0 !important;
         overflow:hidden;
         margin-bottom:12px;
         background:#ffffff;
@@ -115782,7 +116078,7 @@ def view_report(run_id: int):
         }
 
         .report-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
 
         .kpi,
@@ -115791,7 +116087,7 @@ def view_report(run_id: int):
         }
 
         .card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -118958,7 +119254,7 @@ def reportes_home():
       .rep-card form .rep-filter-actions{
         display:flex;
         flex-wrap:wrap;
-        gap:8px;
+        gap:6px;
         align-items:center;
         justify-content:flex-start;
         width:100%;
@@ -119039,7 +119335,7 @@ def reportes_home():
       }
 
       .rep-report-desc{
-        font-size:.88rem;
+        font-size:.78rem;
         color:#475569;
         line-height:1.45;
         min-height:58px;
@@ -119089,7 +119385,7 @@ def reportes_home():
       .rep-report-actions{
         display:flex;
         flex-wrap:wrap;
-        gap:8px;
+        gap:6px;
       }
 
       .rep-report-actions .btn{
@@ -119131,7 +119427,7 @@ def reportes_home():
         }
 
         .rep-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
           line-height:1.12;
         }
 
@@ -121536,7 +121832,7 @@ def parametros():
       }}
 
       .nistpar-header-actions .btn{{
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         box-shadow:0 8px 16px rgba(15,23,42,.15);
@@ -121789,11 +122085,11 @@ def parametros():
         }}
 
         .nistpar-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
 
         .card-body{{
-          padding:14px;
+          padding:8px 7px;
         }}
       }}
 
@@ -122465,7 +122761,7 @@ def ingreso():
       }}
 
       .nistform-header-actions .btn{{
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         box-shadow:0 8px 16px rgba(15,23,42,.15);
@@ -122582,7 +122878,7 @@ def ingreso():
       .nistform-acc-item,
       .accordion-item{{
         border:1px solid #dbe6f4 !important;
-        border-radius:16px !important;
+        border-radius:0 20px 20px 0 !important;
         overflow:hidden;
         margin-bottom:12px;
         background:#ffffff !important;
@@ -122660,7 +122956,7 @@ def ingreso():
       }}
 
       .nistform-cat-name{{
-        font-size:.88rem;
+        font-size:.78rem;
         color:#334155;
         margin-top:3px;
         line-height:1.25;
@@ -122670,7 +122966,7 @@ def ingreso():
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 4px 10px rgba(15,23,42,.05);
         height:100%;
         transition:.2s ease;
@@ -122756,7 +123052,7 @@ def ingreso():
         }}
 
         .nistform-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
       }}
 
@@ -123348,7 +123644,7 @@ def historial():
       }}
 
       .nisthist-header-actions .btn{{
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         box-shadow:0 8px 16px rgba(15,23,42,.15);
@@ -123490,11 +123786,11 @@ def historial():
         }}
 
         .nisthist-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
 
         .card-body{{
-          padding:14px;
+          padding:8px 7px;
         }}
       }}
 
@@ -124076,7 +124372,7 @@ def detalle(run_id: int):
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 6px 18px rgba(15,23,42,.08);
       }}
 
@@ -124089,7 +124385,7 @@ def detalle(run_id: int):
       .nistdet-subcard-body{{
         display:flex;
         flex-direction:column;
-        gap:8px;
+        gap:6px;
       }}
 
       .nistdet-row{{
@@ -124106,7 +124402,7 @@ def detalle(run_id: int):
       }}
 
       .nistdet-value{{
-        font-size:.88rem;
+        font-size:.78rem;
         color:#0f172a;
       }}
 
@@ -124138,7 +124434,7 @@ def detalle(run_id: int):
         }}
 
         .nistdet-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
 
         .nistdet-radar-img-small{{
@@ -124547,7 +124843,7 @@ def detalle_categoria(run_id: int, func: str, cat_code: str):
         }}
 
         .catdet-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
 
         .catdet-table{{
@@ -125196,7 +125492,7 @@ def analisis_categoria(run_id: int, func: str, cat_code: str):
         }}
 
         .nistana-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
 
         .nistana-read-box{{
@@ -125522,7 +125818,7 @@ def informe_ejecutivo_editar(run_id: int):
       .niststd-btn-main,
       .btn{{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -125639,7 +125935,7 @@ def informe_ejecutivo_editar(run_id: int):
         }}
 
         .niststd-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
 
         .niststd-card.p-4{{
@@ -127832,11 +128128,11 @@ def madurez_datos_inicio():
         }}
 
         .datamad-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
 
         .datamad-header-actions{{
-          gap:8px;
+          gap:6px;
         }}
       }}
 
@@ -128171,7 +128467,7 @@ def parametros():
         }}
 
         .datapar-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
       }}
 
@@ -128788,7 +129084,7 @@ def ingreso():
       }}
 
       .dataform-header-actions .btn{{
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         box-shadow:0 8px 16px rgba(15,23,42,.15);
@@ -128942,7 +129238,7 @@ def ingreso():
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 4px 10px rgba(15,23,42,.05);
         transition:.2s;
         height:100%;
@@ -129040,7 +129336,7 @@ def ingreso():
         }}
 
         .dataform-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
       }}
 
@@ -129597,7 +129893,7 @@ def historial():
         }}
 
         .datstd-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
       }}
 
@@ -129987,7 +130283,7 @@ def detalle_dominio_preguntas(run_id: int, dominio: str):
         }}
 
         .datadom-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
 
         .datadom-table{{
@@ -130209,7 +130505,7 @@ def plan_trabajo_editar(run_id: int):
       .datstd-btn-main,
       .btn{{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -130326,7 +130622,7 @@ def plan_trabajo_editar(run_id: int):
         }}
 
         .datstd-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
 
         .datstd-card.p-4{{
@@ -130897,7 +131193,7 @@ def analisis_dominio(run_id: int, dominio: str):
         }}
 
         .datstd-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
 
         .datstd-read-box{{
@@ -131360,7 +131656,7 @@ def detalle(run_id):
       .datares-header-overlay::before{{
         content:"🛡";
         width:56px;
-        height:56px;
+        height:42px;
         min-width:56px;
         border-radius:16px;
         background:#ffffff;
@@ -131598,7 +131894,7 @@ def detalle(run_id):
         }}
 
         .datares-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
 
         .datares-radar-wrap{{
@@ -131907,7 +132203,7 @@ def informe_ejecutivo_editar(run_id: int):
       .datstd-btn-main,
       .btn{{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -132024,7 +132320,7 @@ def informe_ejecutivo_editar(run_id: int):
         }}
 
         .datstd-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
 
         .datstd-card.p-4{{
@@ -134281,7 +134577,7 @@ def resultado(run_id):
 
       .mini-stat{{
         border-radius:12px;
-        padding:10px 8px;
+        padding:8px 7px;
         text-align:center;
         font-size:.84rem;
         font-weight:900;
@@ -134654,7 +134950,7 @@ def resultado_bloque_preguntas(run_id, bloque_codigo):
         }}
 
         .pcidet-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
       }}
 
@@ -135326,7 +135622,7 @@ def inicio_pci():
         }}
 
         .pcimad-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
       }}
 
@@ -136192,7 +136488,7 @@ def ingreso():
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
       }}
 
       .pciform-qtext{{
@@ -136650,7 +136946,7 @@ def parametros():
         }}
 
         .pcipar-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
       }}
 
@@ -137050,7 +137346,7 @@ def historial():
         }}
 
         .pcihist-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
       }}
 
@@ -137425,7 +137721,7 @@ def plan_trabajo_editar_pci(run_id: int):
         }}
 
         .datstd-subtitle {{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
 
         .datstd-textarea {{
@@ -137852,7 +138148,7 @@ def informe_ejecutivo_editar_pci(run_id: int):
         }}
 
         .pciexec-subtitle {{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
       }}
 
@@ -138298,7 +138594,7 @@ def detalle_resultado_pci(analysis_id: int):
       ========================= */
       .mini-stat{{
         border-radius:12px;
-        padding:10px 8px;
+        padding:8px 7px;
         text-align:center;
         font-size:.84rem;
         font-weight:900;
@@ -140467,7 +140763,7 @@ def historial():
         display:flex;
         justify-content:center;
         align-items:center;
-        gap:8px;
+        gap:6px;
         flex-wrap:wrap;
         margin:8px 0 10px 0;
       }}
@@ -140523,7 +140819,7 @@ def historial():
 
       .soc2hist-text {{
         color:#374151;
-        font-size:.76rem;
+        font-size:.68rem;
       }}
 
       .soc2hist-pct {{
@@ -140546,7 +140842,7 @@ def historial():
       .soc2hist-btn {{
         border-radius:999px !important;
         padding:3px 8px !important;
-        font-size:.70rem !important;
+        font-size:.64rem !important;
         font-weight:700 !important;
         line-height:1.2 !important;
       }}
@@ -141848,7 +142144,7 @@ def soc2_nist_css(prefix, icon, subtitle_label="SOC 2"):
   .{prefix}-btn-soft,
   .btn{{
     border-radius:10px !important;
-    min-height:38px;
+    min-height:32px;
     padding:8px 22px !important;
     font-size:.82rem;
     font-weight:900;
@@ -141939,7 +142235,7 @@ def soc2_nist_css(prefix, icon, subtitle_label="SOC 2"):
     }}
 
     .{prefix}-subtitle{{
-      font-size:.76rem;
+      font-size:.68rem;
     }}
   }}
 
@@ -142089,7 +142385,7 @@ def soc2_nistform_css():
       .nistform-header-actions .btn,
       .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -142186,7 +142482,7 @@ def soc2_nistform_css():
         background:rgba(255,255,255,.88);
         border:1px solid rgba(15,23,42,.08);
         border-radius:18px;
-        padding:14px;
+        padding:8px 7px;
         margin-bottom:14px;
       }
 
@@ -142231,7 +142527,7 @@ def soc2_nistform_css():
       .nistform-radio-row{
         display:grid;
         grid-template-columns:repeat(4,1fr);
-        gap:8px;
+        gap:6px;
         margin-top:14px;
       }
 
@@ -142339,7 +142635,7 @@ def soc2_nistform_css():
         }
 
         .nistform-subtitle{
-          font-size:.76rem;
+          font-size:.68rem;
         }
 
         .nistform-card{
@@ -143734,7 +144030,7 @@ def ai_css(prefix="aimad", icon="🤖", tag="SGSI · ISO 42001"):
     border-radius:16px;
     background:#ffffff;
     border:1px solid #e2e8f0;
-    padding:14px;
+    padding:8px 7px;
     height:100%;
   }}
 
@@ -144665,7 +144961,7 @@ def ingreso():
       }}
 
       .nistform-header-actions .btn{{
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         box-shadow:0 8px 16px rgba(15,23,42,.15);
@@ -144782,7 +145078,7 @@ def ingreso():
       .nistform-acc-item,
       .accordion-item{{
         border:1px solid #dbe6f4 !important;
-        border-radius:16px !important;
+        border-radius:0 20px 20px 0 !important;
         overflow:hidden;
         margin-bottom:12px;
         background:#ffffff !important;
@@ -144860,7 +145156,7 @@ def ingreso():
       }}
 
       .nistform-cat-name{{
-        font-size:.88rem;
+        font-size:.78rem;
         color:#334155;
         margin-top:3px;
         line-height:1.25;
@@ -144870,7 +145166,7 @@ def ingreso():
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         box-shadow:0 4px 10px rgba(15,23,42,.05);
         height:100%;
         transition:.2s ease;
@@ -144956,7 +145252,7 @@ def ingreso():
         }}
 
         .nistform-subtitle{{
-          font-size:.76rem;
+          font-size:.68rem;
         }}
       }}
 
@@ -145362,7 +145658,7 @@ def historial():
     display:flex;
     justify-content:center;
     align-items:center;
-    gap:8px;
+    gap:6px;
     flex-wrap:wrap;
   }}
 
@@ -145375,7 +145671,7 @@ def historial():
     font-weight:900;
     box-shadow:0 4px 10px rgba(0,0,0,.10);
     padding:6px 12px !important;
-    font-size:.74rem !important;
+    font-size:.68rem !important;
     gap:4px;
     white-space:nowrap;
   }}
@@ -146162,7 +146458,7 @@ def detalle(run_id):
         display:flex;
         align-items:center;
         justify-content:space-between;
-        gap:8px;
+        gap:6px;
         border-bottom:1px solid rgba(0,0,0,.06);
         padding-bottom:8px;
         margin-bottom:5px;
@@ -146220,8 +146516,8 @@ def detalle(run_id):
       }}
 
       .aidet-cat-name{{
-        min-height:62px;
-        max-height:62px;
+        min-height:32px;
+        max-height:32px;
         overflow:hidden;
         margin-top:6px;
         padding:0 4px;
@@ -146265,7 +146561,7 @@ def detalle(run_id):
         max-height:36px;
         overflow:hidden;
         text-align:center;
-        font-size:.76rem;
+        font-size:.68rem;
         line-height:1.18;
         color:#64748b;
         margin-top:4px;
@@ -146275,7 +146571,7 @@ def detalle(run_id):
         display:flex;
         justify-content:center;
         align-items:center;
-        gap:8px;
+        gap:6px;
         flex-wrap:wrap;
         margin-top:10px;
       }}
@@ -148855,7 +149151,7 @@ def listas_restrictivas_detalle(consulta_id):
 
       .lr-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -148900,7 +149196,7 @@ def listas_restrictivas_detalle(consulta_id):
         }
 
         .lr-detail-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -149519,7 +149815,7 @@ def listas_restrictivas_consulta_manual():
 
       .lr-actions .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 22px !important;
         font-size:.82rem;
         font-weight:900;
@@ -149728,7 +150024,7 @@ def listas_restrictivas_consulta_manual():
 
         .lr-form-card-body,
         .lr-result-card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -150226,7 +150522,7 @@ def listas_restrictivas_base():
         }
 
         .card-body{
-          padding:14px;
+          padding:8px 7px;
         }
       }
 
@@ -156047,7 +156343,7 @@ def proveedores_scorecard_rating(scorecard_id):
       .ssc-top{
         display:grid;
         grid-template-columns:.95fr .50fr 1.25fr;
-        gap:9px;
+        gap:7px;
         align-items:stretch;
       }
 
@@ -156060,7 +156356,7 @@ def proveedores_scorecard_rating(scorecard_id):
       }
 
       .company-meta{
-        font-size:.76rem;
+        font-size:.68rem;
         font-weight:800;
         color:#334155;
         margin-bottom:2px;
@@ -156183,14 +156479,14 @@ def proveedores_scorecard_rating(scorecard_id):
       .main-grid{
         display:grid;
         grid-template-columns:.98fr 1.02fr;
-        gap:9px;
+        gap:7px;
         margin-top:9px;
       }
 
       .left-stack,
       .right-stack{
         display:grid;
-        gap:9px;
+        gap:7px;
       }
 
       .right-stack{
@@ -156204,7 +156500,7 @@ def proveedores_scorecard_rating(scorecard_id):
       .gauge-grid{
         display:grid;
         grid-template-columns:repeat(5,1fr);
-        gap:8px;
+        gap:6px;
       }
 
       .gauge-card{
@@ -160163,7 +160459,7 @@ def proponentes_scorecard_dashboard():
       .score-action-row .btn,
       .btn{
         border-radius:10px !important;
-        min-height:38px;
+        min-height:32px;
         padding:8px 18px !important;
         font-size:.82rem;
         font-weight:900;
@@ -160179,7 +160475,7 @@ def proponentes_scorecard_dashboard():
         border:none !important;
         color:#ffffff !important;
         border-radius:12px !important;
-        min-height:42px !important;
+        min-height:36px !important;
         padding:10px 22px !important;
         font-size:.84rem !important;
         font-weight:900 !important;
@@ -161012,7 +161308,7 @@ def proponentes_scorecard_rating(scorecard_id):
       .ssc-top{
         display:grid;
         grid-template-columns:.95fr .50fr 1.25fr;
-        gap:9px;
+        gap:7px;
         align-items:stretch;
       }
 
@@ -161025,7 +161321,7 @@ def proponentes_scorecard_rating(scorecard_id):
       }
 
       .company-meta{
-        font-size:.76rem;
+        font-size:.68rem;
         font-weight:800;
         color:#334155;
         margin-bottom:2px;
@@ -161148,14 +161444,14 @@ def proponentes_scorecard_rating(scorecard_id):
       .main-grid{
         display:grid;
         grid-template-columns:.98fr 1.02fr;
-        gap:9px;
+        gap:7px;
         margin-top:9px;
       }
 
       .left-stack,
       .right-stack{
         display:grid;
-        gap:9px;
+        gap:7px;
       }
 
       .right-stack{
@@ -161169,7 +161465,7 @@ def proponentes_scorecard_rating(scorecard_id):
       .gauge-grid{
         display:grid;
         grid-template-columns:repeat(5,1fr);
-        gap:8px;
+        gap:6px;
       }
 
       .gauge-card{
@@ -161322,7 +161618,7 @@ def proponentes_scorecard_rating(scorecard_id):
         display:flex;
         justify-content:flex-end;
         align-items:center;
-        gap:8px;
+        gap:6px;
         flex-wrap:wrap;
       }
 
@@ -163017,7 +163313,7 @@ def proponentes_scorecard_scan_nuevo():
       .tool-title{
         font-weight:950;
         color:#1459a6;
-        font-size:.88rem;
+        font-size:.78rem;
       }
 
       .tool-desc{
@@ -163536,7 +163832,7 @@ def proponentes_scorecard_detalle(scorecard_id):
         border-radius:10px !important;
         font-weight:900;
         padding:.55rem 1.05rem;
-        font-size:.88rem;
+        font-size:.78rem;
         box-shadow:0 4px 10px rgba(0,0,0,.08);
       }
 
@@ -164251,7 +164547,7 @@ def proponentes_scorecard_kali_detalle(scorecard_id):
         background:#0f172a;
         color:#d1e7ff;
         border-radius:14px;
-        padding:14px;
+        padding:8px 7px;
         max-height:420px;
         overflow:auto;
         font-size:.78rem;
@@ -166838,7 +167134,7 @@ def _pesi_css():
       .approval-box {
         border:1px solid #dbe6f4;
         border-radius:14px;
-        padding:14px;
+        padding:8px 7px;
         background:#f8fbff;
         box-shadow:0 8px 18px rgba(15,23,42,.07);
         height:100%;
@@ -166897,7 +167193,7 @@ def _pesi_css():
         }
 
         .pesi-subtitle {
-          font-size:.76rem;
+          font-size:.68rem;
         }
       }
 
@@ -168464,7 +168760,7 @@ def _revdir_css():
 
       .dofa-quad {
         border-radius:16px;
-        padding:14px;
+        padding:8px 7px;
         min-height:190px;
         border:1px solid #dbe6f4;
         background:#f8fbff;
@@ -170099,7 +170395,7 @@ def bcp_render(title, body_html):
         .bcp-wrap{width:98%;margin:8px auto 22px auto;}
         .bcp-hero{min-height:88px;}
         .bcp-title{font-size:1.20rem;}
-        .bcp-subtitle{font-size:.76rem;}
+        .bcp-subtitle{font-size:.68rem;}
       }
 
       @media(max-width:768px){
@@ -171174,7 +171470,7 @@ def bcp_matriz_informes():
         display:flex;
         justify-content:center;
         align-items:center;
-        gap:8px;
+        gap:6px;
         flex-wrap:wrap;
       }
 
@@ -173275,7 +173571,7 @@ CONT_COMP_CSS = """
 
   .cc-kpi .lbl{
     margin-top:4px;
-    font-size:.76rem;
+    font-size:.68rem;
     color:#64748b;
     font-weight:850;
     line-height:1.15;
@@ -173298,14 +173594,14 @@ CONT_COMP_CSS = """
     text-align:center;
     vertical-align:middle;
     border-color:#c9daef !important;
-    padding:10px 8px;
+    padding:8px 7px;
     white-space:nowrap;
   }
 
   .cc-table tbody td{
     vertical-align:middle;
     border-color:#e3edf8 !important;
-    padding:8px 9px;
+    padding:6px 7px;
     color:#334155;
   }
 
