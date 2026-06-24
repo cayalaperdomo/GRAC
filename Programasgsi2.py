@@ -9517,7 +9517,7 @@ def filtrar_items_menu(items, usuario_actual):
 
 # ============================================================
 # MENÚ GLOBAL SGSI SIEMPRE VISIBLE EN TODOS LOS MÓDULOS
-# CON APERTURA PERSISTENTE, RESALTADO EXACTO Y SCROLL GUARDADO
+# FIX: marca en azul SOLO la opción exacta / más específica
 # ============================================================
 
 def _sgsi_build_global_menu_html():
@@ -9537,11 +9537,95 @@ def _sgsi_build_global_menu_html():
         current_endpoint = (request.endpoint or "").strip()
 
         # ============================================================
-        # Reglas exactas por opción del menú
-        # IMPORTANTE:
-        # - No usar /bcp solo para dashboard porque prende todo BCP.
-        # - No usar /madurez como prefijo con "_" porque prende madurez_nist.
-        # - No usar endpoint plan_remediacion como prefijo amplio porque prende competencias.
+        # Normalizadores
+        # ============================================================
+        def _norm_path(path):
+            path = str(path or "").split("?")[0].strip()
+            if not path or path in ("#", "javascript:void(0);"):
+                return path
+            if not path.startswith("/"):
+                path = "/" + path
+            path = path.rstrip("/")
+            return path or "/"
+
+        def _path_matches(path):
+            path = _norm_path(path)
+            if not path or path in ("#", "javascript:void(0);"):
+                return False
+
+            # Dashboard Cumplimiento Continuo: SOLO exacto
+            if path == "/cumplimiento_continuo":
+                return current_path == "/cumplimiento_continuo"
+
+            # Dashboard BCP: SOLO exacto
+            if path == "/bcp/dashboard":
+                return current_path == "/bcp/dashboard"
+
+            # ISO maturity: no debe activar NIST, Datos, PCI, SOC2 ni AI
+            if path == "/madurez":
+                return current_path == "/madurez" or current_path.startswith("/madurez/")
+
+            return current_path == path or current_path.startswith(path + "/")
+
+        def _endpoint_matches(endpoint_prefix):
+            endpoint_prefix = (endpoint_prefix or "").strip()
+            if not endpoint_prefix:
+                return False
+
+            if current_endpoint == endpoint_prefix:
+                return True
+
+            if current_endpoint.startswith(endpoint_prefix + "_"):
+                resto = current_endpoint[len(endpoint_prefix) + 1:]
+
+                # Evita falsas coincidencias entre módulos de madurez
+                if endpoint_prefix == "madurez" and resto.startswith((
+                    "nist",
+                    "datos",
+                    "pci",
+                    "soc2",
+                    "ai"
+                )):
+                    return False
+
+                # Evita que Plan de Remediación se active con Plan de Competencias
+                if endpoint_prefix == "plan_remediacion" and resto.startswith("competencias"):
+                    return False
+
+                # Evita que BCP dashboard se active con submódulos BCP
+                if endpoint_prefix == "bcp" and resto.startswith((
+                    "bia",
+                    "procesos",
+                    "planes",
+                    "drp",
+                    "crisis",
+                    "pruebas",
+                    "dependencias",
+                    "madurez",
+                    "ia",
+                    "metricas"
+                )):
+                    return False
+
+                # Evita que Dashboard de Cumplimiento Continuo se active con submódulos
+                if endpoint_prefix == "cumplimiento_continuo" and resto.startswith((
+                    "wazuh",
+                    "sincronizacion",
+                    "estandar",
+                    "evidencias",
+                    "planes"
+                )):
+                    return False
+
+                return True
+
+            if current_endpoint.endswith("." + endpoint_prefix):
+                return True
+
+            return False
+
+        # ============================================================
+        # Reglas por label del menú
         # ============================================================
         MENU_ACTIVE_RULES = {
             # Gobierno / Dirección
@@ -9551,15 +9635,34 @@ def _sgsi_build_global_menu_html():
             },
             "Gestión de Riesgos": {
                 "paths": ["/riesgos_menu", "/riesgos", "/riesgo"],
-                "endpoints": ["riesgos_menu", "riesgos", "riesgo", "riesgo_matriz", "riesgo_nuevo", "riesgo_editar"]
+                "endpoints": [
+                    "riesgos_menu",
+                    "riesgos",
+                    "riesgo",
+                    "riesgo_matriz",
+                    "riesgo_nuevo",
+                    "riesgo_editar"
+                ]
             },
             "Objetivos del Sistema de Gestión": {
                 "paths": ["/objetivos_menu", "/objetivos", "/objetivo"],
                 "endpoints": ["objetivos_menu", "objetivos", "objetivo"]
             },
             "Partes Interesadas": {
-                "paths": ["/partes_menu", "/partes", "/parte", "/partes_interesadas", "/parte_interesada"],
-                "endpoints": ["partes_menu", "partes", "parte", "partes_interesadas", "parte_interesada"]
+                "paths": [
+                    "/partes_menu",
+                    "/partes",
+                    "/parte",
+                    "/partes_interesadas",
+                    "/parte_interesada"
+                ],
+                "endpoints": [
+                    "partes_menu",
+                    "partes",
+                    "parte",
+                    "partes_interesadas",
+                    "parte_interesada"
+                ]
             },
             "Contexto Interno": {
                 "paths": ["/contexto_interno_menu", "/contexto_interno"],
@@ -9592,17 +9695,31 @@ def _sgsi_build_global_menu_html():
                 "endpoints": ["comunicaciones_menu", "comunicaciones"]
             },
             "Requisitos Legales": {
-                "paths": ["/requisitos_menu", "/requisitos", "/requisito_legal", "/req_legal"],
-                "endpoints": ["requisitos_menu", "requisitos", "requisito_legal", "req_legal"]
+                "paths": [
+                    "/requisitos_menu",
+                    "/requisitos",
+                    "/requisito_legal",
+                    "/req_legal"
+                ],
+                "endpoints": [
+                    "requisitos_menu",
+                    "requisitos",
+                    "requisito_legal",
+                    "req_legal"
+                ]
             },
 
             # Operación y Control
             "Gestión de Activos de Información": {
                 "paths": [
-                    "/inventario_software_menu", "/inventario_software",
-                    "/inventario_informacion_menu", "/inventario_informacion",
-                    "/inventario_datos_personales_menu", "/inventario_datos_personales",
-                    "/inventario_fisico_menu", "/inventario_fisico",
+                    "/inventario_software_menu",
+                    "/inventario_software",
+                    "/inventario_informacion_menu",
+                    "/inventario_informacion",
+                    "/inventario_datos_personales_menu",
+                    "/inventario_datos_personales",
+                    "/inventario_fisico_menu",
+                    "/inventario_fisico",
                     "/valor_confidencialidad",
                     "/valor_integridad",
                     "/valor_disponibilidad",
@@ -9623,10 +9740,14 @@ def _sgsi_build_global_menu_html():
             },
             "Matrices de Activos": {
                 "paths": [
-                    "/inventario_software_menu", "/inventario_software",
-                    "/inventario_informacion_menu", "/inventario_informacion",
-                    "/inventario_datos_personales_menu", "/inventario_datos_personales",
-                    "/inventario_fisico_menu", "/inventario_fisico"
+                    "/inventario_software_menu",
+                    "/inventario_software",
+                    "/inventario_informacion_menu",
+                    "/inventario_informacion",
+                    "/inventario_datos_personales_menu",
+                    "/inventario_datos_personales",
+                    "/inventario_fisico_menu",
+                    "/inventario_fisico"
                 ],
                 "endpoints": [
                     "inventario_software",
@@ -9652,8 +9773,18 @@ def _sgsi_build_global_menu_html():
                 "endpoints": ["inventario_fisico"]
             },
             "Tablas de Valoración": {
-                "paths": ["/valor_confidencialidad", "/valor_integridad", "/valor_disponibilidad", "/valor_criticidad_activo"],
-                "endpoints": ["valor_confidencialidad", "valor_integridad", "valor_disponibilidad", "valor_criticidad_activo"]
+                "paths": [
+                    "/valor_confidencialidad",
+                    "/valor_integridad",
+                    "/valor_disponibilidad",
+                    "/valor_criticidad_activo"
+                ],
+                "endpoints": [
+                    "valor_confidencialidad",
+                    "valor_integridad",
+                    "valor_disponibilidad",
+                    "valor_criticidad_activo"
+                ]
             },
             "Confidencialidad": {
                 "paths": ["/valor_confidencialidad"],
@@ -9719,8 +9850,14 @@ def _sgsi_build_global_menu_html():
                 "paths": [
                     "/campanias_concientizacion_menu",
                     "/campanias_concientizacion",
-                    "/campanias_concientizacion_matriz"],
-            },  
+                    "/campanias_concientizacion_matriz"
+                ],
+                "endpoints": [
+                    "campanias_concientizacion_menu",
+                    "campanias_concientizacion",
+                    "campanias_concientizacion_matriz"
+                ]
+            },
             "Plan de Concientización y Formación": {
                 "paths": ["/plan_diseno_menu", "/plan_diseno"],
                 "endpoints": ["plan_diseno"]
@@ -9730,7 +9867,10 @@ def _sgsi_build_global_menu_html():
                 "endpoints": ["plan_cf"]
             },
             "Plan de Competencia": {
-                "paths": ["/plan_remediacion_competencias_menu", "/plan_remediacion_competencias"],
+                "paths": [
+                    "/plan_remediacion_competencias_menu",
+                    "/plan_remediacion_competencias"
+                ],
                 "endpoints": ["plan_remediacion_competencias"]
             },
 
@@ -9755,7 +9895,8 @@ def _sgsi_build_global_menu_html():
             # Continuidad del Negocio
             "Continuidad del Negocio (BCP/DRP)": {
                 "paths": ["/bcp/dashboard"],
-                "endpoints": ["bcp_dashboard"]
+                "endpoints": ["bcp_dashboard"],
+                "exact": True
             },
             "BIA": {
                 "paths": ["/bcp/bia"],
@@ -9801,7 +9942,8 @@ def _sgsi_build_global_menu_html():
             # Medición y Mejora
             "Nivel de Madurez ISO-27001:2022": {
                 "paths": ["/madurez"],
-                "endpoints": ["madurez"]
+                "endpoints": ["madurez"],
+                "exact": True
             },
             "Nivel de Madurez NIST CSF V.2.0": {
                 "paths": ["/madurez_nist"],
@@ -9818,6 +9960,10 @@ def _sgsi_build_global_menu_html():
             "Nivel de Madurez SOC 2": {
                 "paths": ["/madurez_soc2"],
                 "endpoints": ["madurez_soc2"]
+            },
+            "Nivel de Madurez Gestión de Inteligencia Artificial": {
+                "paths": ["/madurez-ai"],
+                "endpoints": ["madurez_ai"]
             },
             "Métricas": {
                 "paths": ["/metricas"],
@@ -9847,6 +9993,22 @@ def _sgsi_build_global_menu_html():
                 "paths": ["/metricas/configuracion"],
                 "endpoints": ["metricas_configuracion"]
             },
+            "Parámetros de Incidentes": {
+                "paths": ["/metricas/configuracion/incidentes"],
+                "endpoints": ["metricas_configuracion_incidentes"]
+            },
+            "Parámetros de Vulnerabilidades": {
+                "paths": ["/metricas/configuracion/vulnerabilidades"],
+                "endpoints": ["metricas_configuracion_vulnerabilidades"]
+            },
+            "Parámetros de Cultura": {
+                "paths": ["/metricas/configuracion/cultura"],
+                "endpoints": ["metricas_configuracion_cultura"]
+            },
+            "Parámetros de Riesgos": {
+                "paths": ["/metricas/configuracion/riesgos"],
+                "endpoints": ["metricas_configuracion_riesgos"]
+            },
             "Planes de Acción del Sistema de Gestión (Mejora)": {
                 "paths": ["/mejora_menu", "/mejora"],
                 "endpoints": ["mejora"]
@@ -9858,14 +10020,53 @@ def _sgsi_build_global_menu_html():
                 "endpoints": ["reportes"]
             },
 
+            # Cumplimiento Continuo
+            "Dashboard": {
+                "paths": ["/cumplimiento_continuo"],
+                "endpoints": ["cumplimiento_continuo"],
+                "exact": True
+            },
+            "Conexión Wazuh": {
+                "paths": ["/cumplimiento_continuo/wazuh"],
+                "endpoints": ["cumplimiento_continuo_wazuh"]
+            },
+            "Sincronización": {
+                "paths": ["/cumplimiento_continuo/sincronizacion"],
+                "endpoints": ["cumplimiento_continuo_sincronizacion"]
+            },
+            "ISO 27001": {
+                "paths": ["/cumplimiento_continuo/estandar/ISO27001"],
+                "endpoints": ["cumplimiento_continuo_estandar"]
+            },
+            "SOC 2": {
+                "paths": ["/cumplimiento_continuo/estandar/SOC2"],
+                "endpoints": ["cumplimiento_continuo_estandar"]
+            },
+            "PCI-DSS": {
+                "paths": ["/cumplimiento_continuo/estandar/PCIDSS"],
+                "endpoints": ["cumplimiento_continuo_estandar"]
+            },
+            "NIST CSF 2.0": {
+                "paths": ["/cumplimiento_continuo/estandar/NISTCSF"],
+                "endpoints": ["cumplimiento_continuo_estandar"]
+            },
+            "Evidencias": {
+                "paths": ["/cumplimiento_continuo/evidencias"],
+                "endpoints": ["cumplimiento_continuo_evidencias"]
+            },
+            "Planes de Acción": {
+                "paths": ["/cumplimiento_continuo/planes"],
+                "endpoints": ["cumplimiento_continuo_planes"]
+            },
+
             # Administración
             "Configuración Parámetros de la Empresa": {
-                "paths": ["/areas_area", "/areas_division", "/config", "/empresa"],
-                "endpoints": ["areas", "config", "empresa"]
+                "paths": ["/areas_", "/config/email"],
+                "endpoints": ["areas", "config_email"]
             },
             "Estructura Organizacional": {
                 "paths": ["/areas_area", "/areas_division"],
-                "endpoints": ["areas"]
+                "endpoints": ["areas_area", "areas_division"]
             },
             "Áreas": {
                 "paths": ["/areas_area"],
@@ -9876,20 +10077,12 @@ def _sgsi_build_global_menu_html():
                 "endpoints": ["areas_division"]
             },
             "Parámetros Generales": {
-                "paths": ["/config/email", "/empresa/logo"],
-                "endpoints": ["config_email", "empresa_logo"]
+                "paths": ["/config/email"],
+                "endpoints": ["config_email"]
             },
             "Configuración del Correo": {
                 "paths": ["/config/email"],
                 "endpoints": ["config_email"]
-            },
-            "Logo Empresa": {
-                "paths": ["/empresa/logo"],
-                "endpoints": ["empresa_logo"]
-            },
-            "Configuración AI": {
-                "paths": ["/admin/openrouter_key"],
-                "endpoints": ["admin_openrouter_key", "openrouter_key"]
             },
             "Gestión de Usuarios": {
                 "paths": ["/usuarios"],
@@ -9905,96 +10098,95 @@ def _sgsi_build_global_menu_html():
             },
         }
 
-        def _norm_path(p):
-            p = (p or "").split("?")[0].strip().rstrip("/")
-            return p or "/"
-
-        def _path_matches(prefix):
-            prefix = _norm_path(prefix)
-
-            if current_path == prefix:
-                return True
-
-            # Solo subrutas reales con /
-            # Evita que /madurez coincida con /madurez_nist
-            # Evita que /plan_remediacion coincida con /plan_remediacion_competencias
-            if current_path.startswith(prefix + "/"):
-                return True
-
-            return False
-
-        def _endpoint_matches(endpoint_prefix):
-            endpoint_prefix = (endpoint_prefix or "").strip()
-            if not endpoint_prefix:
-                return False
-
-            if current_endpoint == endpoint_prefix:
-                return True
-
-            # Soporta blueprints: madurez_nist.historial
-            if current_endpoint.startswith(endpoint_prefix + "."):
-                return True
-
-            # Soporta funciones internas del mismo módulo,
-            # pero evita falsas coincidencias entre módulos similares.
-            if current_endpoint.startswith(endpoint_prefix + "_"):
-                resto = current_endpoint[len(endpoint_prefix) + 1:]
-
-                # Evita que ISO 27001 quede activo cuando se entra a otros módulos de madurez
-                if endpoint_prefix == "madurez" and (
-                    resto.startswith("nist")
-                    or resto.startswith("datos")
-                    or resto.startswith("pci")
-                    or resto.startswith("soc2")
-                    or resto.startswith("ai")
-                ):
-                    return False
-
-                # Evita que Plan de Remediación quede activo cuando se entra a Plan de Competencias
-                if endpoint_prefix == "plan_remediacion" and resto.startswith("competencias"):
-                    return False
-
-                # Evita que BCP dashboard quede activo en submódulos específicos
-                if endpoint_prefix == "bcp" and resto.startswith((
-                    "bia",
-                    "procesos",
-                    "planes",
-                    "drp",
-                    "crisis",
-                    "pruebas",
-                    "dependencias",
-                    "madurez",
-                    "ia",
-                    "metricas"
-                )):
-                    return False
-
-                return True
-
-            if current_endpoint.endswith("." + endpoint_prefix):
-                return True
-
-            return False
-
-        def _item_is_active(item):
+        # ============================================================
+        # Determina la opción activa usando la coincidencia más específica
+        # Esto evita que Dashboard (/cumplimiento_continuo) quede activo
+        # cuando se entra a /cumplimiento_continuo/sincronizacion, etc.
+        # ============================================================
+        def _item_candidate_score(item):
             href = _norm_path(item.get("href", ""))
             label = item.get("label", "")
-
-            if href not in ("", "#", "javascript:void(0);"):
-                if _path_matches(href):
-                    return True
-
             rules = MENU_ACTIVE_RULES.get(label, {})
+            exact = bool(rules.get("exact", False))
 
-            for alias in rules.get("paths", []):
-                if _path_matches(alias):
-                    return True
+            best = -1
 
-            for endpoint_alias in rules.get("endpoints", []):
-                if _endpoint_matches(endpoint_alias):
-                    return True
+            candidate_paths = []
+            if href not in ("", "#", "javascript:void(0);"):
+                candidate_paths.append(href)
 
-            return False
+            candidate_paths.extend(rules.get("paths", []) or [])
+
+            for p in candidate_paths:
+                p = _norm_path(p)
+                if p in ("", "#", "javascript:void(0);"):
+                    continue
+
+                if exact:
+                    if current_path == p:
+                        best = max(best, len(p))
+                else:
+                    if _path_matches(p):
+                        best = max(best, len(p))
+
+            # Endpoint como respaldo. No se usa para distinguir estándares,
+            # porque todos pueden compartir cumplimiento_continuo_estandar.
+            for ep in rules.get("endpoints", []) or []:
+                if _endpoint_matches(ep):
+                    if label in ("ISO 27001", "SOC 2", "PCI-DSS", "NIST CSF 2.0"):
+                        if best >= 0:
+                            best = max(best, 500 + best)
+                    else:
+                        best = max(best, 100)
+
+            return best
+
+        def _flatten_items(items):
+            out = []
+            for it in items:
+                out.append(it)
+                for ch in it.get("children") or []:
+                    out.extend(_flatten_items([ch]))
+            return out
+
+        # Primero filtra por permisos
+        sections = []
+        all_leaf_items = []
+
+        for sec in MENU_SECTIONS:
+            allowed_items = filtrar_items_menu(sec.get("items", []), usuario_actual)
+            if allowed_items:
+                sec2 = dict(sec)
+                sec2["items"] = allowed_items
+                sections.append(sec2)
+                all_leaf_items.extend([
+                    x for x in _flatten_items(allowed_items)
+                    if not x.get("children")
+                ])
+
+        # Calcula el mejor candidato global
+        best_item_key = None
+        best_score = -1
+
+        for item in all_leaf_items:
+            score = _item_candidate_score(item)
+            if score > best_score:
+                best_score = score
+                best_item_key = (
+                    item.get("label", ""),
+                    _norm_path(item.get("href", ""))
+                )
+
+        def _item_is_active(item):
+            if item.get("children"):
+                return False
+
+            key = (
+                item.get("label", ""),
+                _norm_path(item.get("href", ""))
+            )
+
+            return best_score >= 0 and key == best_item_key
 
         def _mark_items(items):
             marked = []
@@ -10016,14 +10208,9 @@ def _sgsi_build_global_menu_html():
 
             return marked
 
-        sections = []
-        for sec in MENU_SECTIONS:
-            allowed_items = filtrar_items_menu(sec.get("items", []), usuario_actual)
-            if allowed_items:
-                sec2 = dict(sec)
-                sec2["items"] = _mark_items(allowed_items)
-                sec2["_active_tree"] = any(it.get("_active_tree") for it in sec2["items"])
-                sections.append(sec2)
+        for sec in sections:
+            sec["items"] = _mark_items(sec.get("items", []))
+            sec["_active_tree"] = any(it.get("_active_tree") for it in sec["items"])
 
         return render_template_string("""
         <aside id="sgsiGlobalMenu" class="sgsi-global-menu-wrap">
@@ -10034,7 +10221,6 @@ def _sgsi_build_global_menu_html():
 
           <div class="sgsi-menu-fixed-shell">
 
-            <!-- Menú sin cabecera: estilo lateral limpio -->
             <div class="sgsi-menu-scroll-only" id="sgsiGlobalMenuScroll">
 
               <div class="sgsi-global-menu-list">
@@ -10050,7 +10236,7 @@ def _sgsi_build_global_menu_html():
 
                     {% if it.get("_children") %}
                       <li class="sgsi-global-node">
-                        <a class="sgsi-global-item sgsi-global-node-toggle {% if it.get('_active_tree') %}sgsi-active{% endif %}"
+                        <a class="sgsi-global-item sgsi-global-node-toggle {% if it.get('_active_tree') %}sgsi-active-tree{% endif %}"
                            href="javascript:void(0);"
                            data-target="{{ iid }}">
                           <i class="bi {{ it.get('icon','bi-box') }}"></i>
@@ -10077,7 +10263,7 @@ def _sgsi_build_global_menu_html():
                   {% set sid = "global_root_" ~ loop.index %}
 
                   <div class="sgsi-global-root-item">
-                    <button class="btn sgsi-global-root-toggle {% if sec.get('_active_tree') %}sgsi-active{% endif %}"
+                    <button class="btn sgsi-global-root-toggle {% if sec.get('_active_tree') %}sgsi-active-tree{% endif %}"
                             type="button"
                             data-target="{{ sid }}">
                       <i class="bi {{ sec.get('icon', 'bi-grid-1x2') }}"></i>
@@ -10105,350 +10291,193 @@ def _sgsi_build_global_menu_html():
           }
 
           body{
-            padding-left:0 !important;
-            padding-top:var(--sgsi-topbar-h) !important;
-            background:
-              linear-gradient(135deg, rgba(236,248,255,.94) 0%, rgba(226,242,255,.88) 42%, rgba(238,232,255,.78) 100%),
-              radial-gradient(circle at 86% 24%, rgba(91,27,181,.16) 0, rgba(91,27,181,.16) 17%, transparent 18%),
-              radial-gradient(circle at 6% 88%, rgba(44,123,229,.17) 0, rgba(44,123,229,.17) 22%, transparent 23%),
-              url('/static/img/ccsgsi.jpg') !important;
-            background-size:cover !important;
-            background-position:center !important;
-            background-attachment:fixed !important;
-            background-repeat:no-repeat !important;
+            padding-left:var(--sgsi-content-left) !important;
           }
 
-          .sgsi-topbar{
-            position:fixed !important;
-            top:0 !important;
-            left:0 !important;
-            right:0 !important;
-            width:100% !important;
-            z-index:999997 !important;
-            margin:0 !important;
-          }
-
-          body > .container.py-4{
-            margin-left:var(--sgsi-content-left) !important;
-            width:calc(100% - var(--sgsi-content-left)) !important;
-            max-width:calc(100% - var(--sgsi-content-left)) !important;
-            padding:8px 10px 10px 8px !important;
-          }
-
-          #sgsiGlobalMenu{
-            display:block !important;
-            visibility:visible !important;
-            opacity:1 !important;
-          }
-
+          #sgsiGlobalMenu,
           .sgsi-global-menu-wrap{
             position:fixed !important;
-            left:var(--sgsi-menu-left) !important;
             top:var(--sgsi-topbar-h) !important;
+            left:var(--sgsi-menu-left) !important;
             width:var(--sgsi-menu-w) !important;
             height:calc(100vh - var(--sgsi-topbar-h)) !important;
-            max-height:calc(100vh - var(--sgsi-topbar-h)) !important;
-            overflow:visible !important;
-            z-index:999998 !important;
-            transition:transform .22s ease;
-          }
-
-          .sgsi-menu-fixed-shell{
-            height:100% !important;
-            max-height:100% !important;
-            display:flex !important;
-            flex-direction:column !important;
-            overflow:hidden !important;
-            background:linear-gradient(180deg,rgba(247,251,255,.96) 0%,rgba(231,244,255,.94) 48%,rgba(219,237,255,.92) 100%) !important;
-            border:1px solid #cfe5ff !important;
-            border-radius:0 20px 20px 0 !important;
-            box-shadow:10px 0 30px rgba(28,91,160,.18), inset -1px 0 rgba(255,255,255,.65) !important;
-            padding:10px 8px 10px 8px !important;
-          }
-
-          .sgsi-menu-fixed-header{
-            flex:0 0 62px !important;
-            height:62px !important;
-            min-height:62px !important;
-            max-height:62px !important;
-            display:flex !important;
-            align-items:center !important;
-            gap:9px !important;
-            padding:6px 7px 7px 7px !important;
-            margin:0 0 6px 0 !important;
-            border-bottom:1px solid rgba(255,255,255,.28) !important;
-            background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5) !important;
-            border-radius:12px !important;
-            overflow:hidden !important;
-            position:relative !important;
-            z-index:20 !important;
-          }
-
-          .sgsi-menu-fixed-icon{
-            width:30px !important;
-            height:30px !important;
-            min-width:30px !important;
-            border-radius:10px !important;
-            display:flex !important;
-            align-items:center !important;
-            justify-content:center !important;
-            background:#ffffff !important;
-            color:#1459a6 !important;
-            font-weight:900 !important;
-            font-size:.88rem !important;
-            box-shadow:0 6px 12px rgba(0,0,0,.18) !important;
-          }
-
-          .sgsi-menu-fixed-title{
-            color:#ffffff !important;
-            font-size:.88rem !important;
-            font-weight:950 !important;
-            line-height:1.1 !important;
-          }
-
-          .sgsi-menu-fixed-subtitle{
-            color:rgba(255,255,255,.92) !important;
-            font-size:.64rem !important;
-            font-weight:700 !important;
-            line-height:1.1 !important;
-            margin-top:2px !important;
-          }
-
-          .sgsi-menu-scroll-only{
-            flex:1 1 auto !important;
-            min-height:0 !important;
-            overflow-y:auto !important;
-            overflow-x:hidden !important;
-            padding-right:2px !important;
-            overscroll-behavior:contain !important;
-          }
-
-          .sgsi-menu-scroll-only::-webkit-scrollbar{
-            width:7px;
-          }
-
-          .sgsi-menu-scroll-only::-webkit-scrollbar-track{
-            background:#e0efff;
-            border-radius:999px;
-          }
-
-          .sgsi-menu-scroll-only::-webkit-scrollbar-thumb{
-            background:#6aa7e8;
-            border-radius:999px;
-          }
-
-          .sgsi-menu-scroll-only::-webkit-scrollbar-thumb:hover{
-            background:#2c7be5;
-          }
-
-          .sgsi-global-menu-list{
-            display:flex !important;
-            flex-direction:column !important;
-            gap:5px !important;
-            padding-bottom:12px !important;
+            z-index:999990 !important;
+            pointer-events:none;
           }
 
           .sgsi-global-menu-arrow{
             position:absolute;
+            top:12px;
             right:-18px;
-            top:22px;
             width:22px;
-            height:42px;
-            border-radius:0 999px 999px 0;
-            background:linear-gradient(135deg,#0b5cab,#2c7be5);
-            color:#ffffff;
+            height:46px;
+            border-radius:0 14px 14px 0;
+            background:#0b3a6e;
+            color:#fff;
             display:flex;
             align-items:center;
             justify-content:center;
             cursor:pointer;
-            box-shadow:0 8px 18px rgba(0,0,0,.25);
-            border:1px solid rgba(255,255,255,.45);
-            z-index:1000000;
-            transition:all .22s ease;
+            box-shadow:0 10px 24px rgba(11,58,110,.24);
+            pointer-events:auto;
           }
 
-          .sgsi-arrow-icon{
-            font-size:26px;
-            font-weight:900;
-            line-height:1;
-            position:relative;
-            top:-1px;
+          .sgsi-menu-fixed-shell{
+            height:100%;
+            width:100%;
+            padding:8px 7px;
+            border-radius:0 16px 16px 0;
+            background:rgba(255,255,255,.94);
+            border-right:1px solid rgba(207,229,255,.95);
+            box-shadow:12px 0 30px rgba(20,89,166,.10);
+            backdrop-filter:blur(18px);
+            -webkit-backdrop-filter:blur(18px);
+            pointer-events:auto;
           }
 
-          body.sgsi-menu-collapsed .sgsi-global-menu-wrap{
-            transform:translateX(calc(-1 * var(--sgsi-menu-w) - 10px));
+          .sgsi-menu-scroll-only{
+            height:100%;
+            overflow-y:auto;
+            overflow-x:hidden;
+            padding-right:2px;
           }
 
-          body.sgsi-menu-collapsed .sgsi-global-menu-arrow{
-            right:-34px;
-            border-radius:999px;
+          .sgsi-global-menu-list{
+            display:flex;
+            flex-direction:column;
+            gap:6px;
           }
 
-          body.sgsi-menu-collapsed .sgsi-arrow-icon{
-            transform:rotate(180deg);
+          .sgsi-global-root-item{
+            display:block;
           }
 
-          body.sgsi-menu-collapsed > .container.py-4{
-            margin-left:10px !important;
-            width:calc(100% - 18px) !important;
-            max-width:calc(100% - 18px) !important;
+          .sgsi-global-root-toggle,
+          .sgsi-global-item,
+          .sgsi-global-node-toggle{
+            width:100%;
+            display:flex;
+            align-items:center;
+            gap:7px;
+            border:0;
+            text-decoration:none !important;
+            text-align:left;
+            color:#17375f !important;
+            background:transparent !important;
+            font-weight:800;
+            transition:all .18s ease;
           }
 
           .sgsi-global-root-toggle{
-            width:100%;
-            display:flex !important;
-            align-items:center !important;
-            gap:5px !important;
-            border:1px solid transparent !important;
-            border-radius:14px !important;
-            background:transparent !important;
-            color:#3b4b63 !important;
-            padding:7px 8px !important;
-            font-size:.72rem !important;
-            font-weight:800 !important;
-            text-align:left !important;
-            white-space:normal !important;
-            line-height:1.12 !important;
-            min-height:37px !important;
-            text-decoration:none !important;
+            font-size:.70rem;
+            min-height:35px;
+            padding:6px 8px;
+            border-radius:11px;
           }
 
-          .sgsi-global-panel-control-btn{
-            background:linear-gradient(135deg,#0b5cab 0%,#2c7be5 55%,#6bb7ff 100%) !important;
-            color:#ffffff !important;
-            border:1px solid rgba(255,255,255,.35) !important;
-            box-shadow:0 8px 18px rgba(0,0,0,.22) !important;
-          }
-
-          .sgsi-global-root-toggle::after,
-          .sgsi-global-node-toggle::after{
-            content:"⌄";
-            margin-left:auto;
-            font-size:13px;
-            font-weight:900;
-            transition:transform .18s ease;
-          }
-
-          .sgsi-global-panel-control-btn::after{
-            content:"" !important;
-          }
-
-          .sgsi-global-root-toggle.sgsi-active::after,
-          .sgsi-global-node-toggle.sgsi-active::after{
-            transform:rotate(180deg);
-          }
-
-          .sgsi-global-panel{
-            display:none;
-            list-style:none;
-            margin:6px 0 0 0 !important;
-            padding:5px 0 5px 7px !important;
-            width:100% !important;
-            background:rgba(237,246,255,.78) !important;
-            border:1px solid transparent !important;
-            border-radius:14px !important;
-          }
-
-          .sgsi-global-panel.sgsi-open{
-            display:block !important;
-          }
-
-          .sgsi-global-subpanel{
-            margin-left:4px !important;
-            padding-left:7px !important;
-            border-left:2px solid #97c9ff !important;
-            background:rgba(246,251,255,.78) !important;
-          }
-
-          .sgsi-global-item{
-            display:flex !important;
-            align-items:center !important;
-            gap:5px !important;
-            padding:7px 8px !important;
-            border-radius:9px !important;
-            font-size:.68rem !important;
-            font-weight:700 !important;
-            color:#1e5b94 !important;
-            text-decoration:none !important;
-            margin:3px 3px !important;
-            background:rgba(255,255,255,.55) !important;
-            border:1px solid rgba(207,229,255,.85) !important;
+          .sgsi-global-item,
+          .sgsi-global-node-toggle{
+            font-size:.66rem;
+            padding:6px 7px;
+            border-radius:10px;
           }
 
           .sgsi-global-item:hover,
-          .sgsi-global-item.sgsi-active{
+          .sgsi-global-root-toggle:hover,
+          .sgsi-global-node-toggle:hover{
+            background:linear-gradient(135deg,#eef7ff,#ffffff) !important;
+            color:#0b5cab !important;
+          }
+
+          /*
+            Azul fuerte para:
+            - capítulo principal activo: Gobierno, Documentación, etc.
+            - opción exacta activa.
+            Padres internos quedan azul claro.
+          */
+
+          /* Capítulo principal activo */
+          .sgsi-global-root-toggle.sgsi-active-tree{
+            background:linear-gradient(135deg,#0b5cab,#2c7be5) !important;
+            color:#ffffff !important;
+            box-shadow:0 8px 18px rgba(44,123,229,.28);
+          }
+
+          .sgsi-global-root-toggle.sgsi-active-tree i{
+            color:#ffffff !important;
+          }
+
+          /* Padres internos activos */
+          .sgsi-global-node-toggle.sgsi-active-tree{
             background:linear-gradient(135deg,#dff0ff,#ffffff) !important;
             color:#0b5cab !important;
           }
 
-          .sgsi-global-item i{
+          .sgsi-global-node-toggle.sgsi-active-tree i{
+            color:#0b5cab !important;
+          }
+
+          /* Opción final exacta activa */
+          .sgsi-global-item.sgsi-active{
+            background:linear-gradient(135deg,#0b5cab,#2c7be5) !important;
+            color:#ffffff !important;
+            box-shadow:0 8px 18px rgba(44,123,229,.28);
+          }
+
+          .sgsi-global-item.sgsi-active i{
+            color:#ffffff !important;
+          }
+
+          .sgsi-global-item i,
+          .sgsi-global-root-toggle i,
+          .sgsi-global-node-toggle i{
             color:inherit !important;
             width:16px;
             text-align:center;
             flex:0 0 auto;
           }
 
+          .sgsi-global-panel{
+            display:none;
+            list-style:none;
+            margin:4px 0 4px 0;
+            padding:4px 0 4px 6px;
+            border-left:1px solid rgba(207,229,255,.95);
+            border-radius:12px;
+          }
+
+          .sgsi-global-panel.sgsi-open{
+            display:block;
+          }
+
+          .sgsi-global-panel li{
+            list-style:none;
+            margin:0 0 3px 0;
+            padding:0;
+          }
+
+          body.sgsi-menu-collapsed{
+            padding-left:0 !important;
+          }
+
+          body.sgsi-menu-collapsed #sgsiGlobalMenu{
+            left:calc(var(--sgsi-menu-w) * -1) !important;
+          }
+
+          body.sgsi-menu-collapsed #sgsiGlobalMenuToggle .sgsi-arrow-icon{
+            transform:rotate(180deg);
+          }
+
           @media (max-width:992px){
             :root{
-              --sgsi-menu-w:235px;
               --sgsi-content-left:0px;
             }
 
-            body > .container.py-4{
-              margin-left:0 !important;
-              width:100% !important;
-              max-width:100% !important;
+            body{
+              padding-left:0 !important;
             }
           }
         </style>
-        <style id="sgsi-final-compact-blue-overrides">
-          :root{
-            --sgsi-menu-w:235px !important;
-            --sgsi-topbar-h:58px !important;
-            --sgsi-content-left:235px !important;
-          }
-          .sgsi-menu-fixed-shell{
-            padding:8px 7px !important;
-            border-radius:0 16px 16px 0 !important;
-          }
-          .sgsi-menu-fixed-header{
-            height:46px !important;
-            min-height:46px !important;
-            max-height:46px !important;
-            padding:6px 7px !important;
-            margin-bottom:6px !important;
-            border-radius:11px !important;
-          }
-          .sgsi-menu-fixed-icon{
-            width:28px !important;
-            height:28px !important;
-            min-width:28px !important;
-            border-radius:9px !important;
-            font-size:.78rem !important;
-          }
-          .sgsi-menu-fixed-title{font-size:.76rem !important;}
-          .sgsi-menu-fixed-subtitle{font-size:.60rem !important;}
-          .sgsi-global-root-toggle{
-            font-size:.70rem !important;
-            min-height:35px !important;
-            padding:6px 8px !important;
-            border-radius:11px !important;
-            gap:6px !important;
-          }
-          .sgsi-global-item,
-          .sgsi-global-node-toggle{
-            font-size:.66rem !important;
-            padding:6px 7px !important;
-            border-radius:10px !important;
-            gap:6px !important;
-          }
-          .sgsi-global-panel{
-            margin-top:4px !important;
-            padding:4px 0 4px 6px !important;
-            border-radius:12px !important;
-          }
-        </style>
-
 
         <script>
           (function(){
@@ -10485,10 +10514,10 @@ def _sgsi_build_global_menu_html():
               const isOpen = panel.classList.contains("sgsi-open");
 
               if(isOpen){
-                trigger.classList.remove("sgsi-active");
+                trigger.classList.remove("sgsi-active-tree");
                 panel.classList.remove("sgsi-open");
               }else{
-                trigger.classList.add("sgsi-active");
+                trigger.classList.add("sgsi-active-tree");
                 panel.classList.add("sgsi-open");
               }
 
@@ -10539,7 +10568,8 @@ def _sgsi_build_global_menu_html():
     except Exception as e:
         print("Error construyendo menú global SGSI:", repr(e))
         return ""
-    
+
+
 @app.after_request
 def inject_sgsi_global_vertical_menu(response):
     try:
