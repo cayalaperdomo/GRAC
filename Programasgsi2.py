@@ -477,27 +477,33 @@ SGSI_PROGRESS_GLOBAL = """
     .sgsi-topbar{
       min-height:58px !important;
       height:58px !important;
+      overflow:hidden !important;
     }
     .sgsi-topbar-inner{
       min-height:58px !important;
       height:58px !important;
-      padding-left:0 !important;
+      padding-left:14px !important;
       padding-right:24px !important;
     }
     .sgsi-brand{
       margin-left:0 !important;
       padding-left:0 !important;
-      min-width:380px !important;
+      min-width:220px !important;
+      width:220px !important;
       height:58px !important;
       display:flex !important;
+      align-items:center !important;
       justify-content:flex-start !important;
+      overflow:hidden !important;
     }
     .sgsi-logo{
-      height:56px !important;
-      max-width:380px !important;
+      height:44px !important;
+      width:auto !important;
+      max-width:205px !important;
       object-fit:contain !important;
       object-position:left center !important;
-      margin-left:0 !important;
+      margin:0 !important;
+      filter:drop-shadow(0 4px 9px rgba(11,58,110,.14)) !important;
     }
     .sgsi-user-link{
       padding:4px 10px 4px 5px !important;
@@ -5726,7 +5732,7 @@ def perfil():
       }
 
       .perfil-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -5768,7 +5774,7 @@ def perfil():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -5863,7 +5869,7 @@ def perfil():
       .card h6{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
         margin-bottom:16px;
@@ -5885,7 +5891,7 @@ def perfil():
         height:78px;
         border-radius:50%;
         object-fit:cover;
-        border:3px solid #1459a6;
+        border:3px solid #0b4a8f;
         box-shadow:0 6px 16px rgba(0,0,0,.12);
         flex:0 0 auto;
       }
@@ -5897,7 +5903,7 @@ def perfil():
       .perfil-user-name{
         font-size:1.05rem;
         font-weight:950;
-        color:#1f2937;
+        color:#101827;
         line-height:1.2;
         margin-bottom:4px;
       }
@@ -5912,7 +5918,7 @@ def perfil():
       .form-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -6132,6 +6138,7 @@ MODULES = [
     "Requisitos Legales",
     "Partes Interesadas",
     "Registro de Vulnerabilidades",
+    "Pruebas SAST",
     "Modelamiento de Amenazas",
     "Plan de Remediación",
     "Plan de Competencias",
@@ -6725,7 +6732,7 @@ def usuarios():
       }
 
       .users-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -6765,7 +6772,7 @@ def usuarios():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -6834,7 +6841,7 @@ def usuarios():
       .users-section-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
@@ -6858,7 +6865,7 @@ def usuarios():
 
       .users-table-head th{
         background:#eef5ff !important;
-        color:#1459a6 !important;
+        color:#0b4a8f !important;
         font-weight:950;
         vertical-align:middle !important;
         border-bottom:1px solid #d7dee7 !important;
@@ -6896,7 +6903,7 @@ def usuarios():
       .users-id-note{
         margin-top:10px;
         font-size:.74rem;
-        color:#64748b;
+        color:#475569;
         font-weight:700;
         text-align:right;
       }
@@ -7169,7 +7176,7 @@ def editar_permisos(user_id):
       }
 
       .perm-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -7211,7 +7218,7 @@ def editar_permisos(user_id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -7317,13 +7324,13 @@ def editar_permisos(user_id):
       }
 
       .form-check-input:checked{
-        background-color:#1459a6;
-        border-color:#1459a6;
+        background-color:#0b4a8f;
+        border-color:#0b4a8f;
       }
 
       .form-check-label{
         font-weight:800;
-        color:#1f2937;
+        color:#101827;
       }
 
       .perm-bottom-actions{
@@ -7615,7 +7622,7 @@ def logs_auditoria():
       }
 
       .logs-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -7655,7 +7662,7 @@ def logs_auditoria():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -7743,7 +7750,7 @@ def logs_auditoria():
       .logs-section-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
@@ -7767,7 +7774,7 @@ def logs_auditoria():
 
       .logs-table-head th{
         background:#eef5ff !important;
-        color:#1459a6 !important;
+        color:#0b4a8f !important;
         font-weight:950;
         vertical-align:middle !important;
         border-bottom:1px solid #d7dee7 !important;
@@ -7864,6 +7871,7 @@ def logs_auditoria():
 # ============================================================================================================================================
 #                                                               Menu Principal
 # ============================================================================================================================================
+# AJUSTE: menú activo corregido, Pruebas SAST integrado y botón duplicado removido.
 
 # =====================================================================
 # HELPERS TABLERO PRINCIPAL SGSI (VERSIÓN GRANDE + VELOCÍMETRO MEJORADO)
@@ -7903,12 +7911,12 @@ def _dashboard_empty_chart(title="Sin datos", subtitle="No hay información disp
     ax.text(
         0.5, 0.62, title,
         ha="center", va="center",
-        fontsize=18, fontweight="bold", color="#1f2937"
+        fontsize=18, fontweight="bold", color="#101827"
     )
     ax.text(
         0.5, 0.42, subtitle,
         ha="center", va="center",
-        fontsize=11, color="#6b7280"
+        fontsize=11, color="#4b5563"
     )
     return _dashboard_fig_to_b64(fig)
 
@@ -7945,11 +7953,11 @@ def _dashboard_gauge_b64(value, title="Cumplimiento", subtitle="Protección de d
 
     # segmentos de color: izquierda rojo -> derecha azul
     segmentos = [
-        (144, 180, "#dc2626"),  # 0-20
-        (108, 144, "#f59e0b"),  # 20-40
-        (72, 108, "#facc15"),   # 40-60
-        (36, 72, "#22c55e"),    # 60-80
-        (0, 36, "#0ea5e9"),     # 80-100
+        (144, 180, "#b91c1c"),  # 0-20
+        (108, 144, "#c76b00"),  # 20-40
+        (72, 108, "#d39b00"),   # 40-60
+        (36, 72, "#0f8a42"),    # 60-80
+        (0, 36, "#087ab8"),     # 80-100
     ]
 
     for a0, a1, color in segmentos:
@@ -7974,7 +7982,7 @@ def _dashboard_gauge_b64(value, title="Cumplimiento", subtitle="Protección de d
         # marca
         x0, y0 = 0.92 * math.cos(ang), 0.92 * math.sin(ang)
         x1, y1 = 1.08 * math.cos(ang), 1.08 * math.sin(ang)
-        ax.plot([x0, x1], [y0, y1], color="#94a3b8", linewidth=1.5)
+        ax.plot([x0, x1], [y0, y1], color="#64748b", linewidth=1.5)
 
         # texto
         tx, ty = 1.36 * math.cos(ang), 1.36 * math.sin(ang)
@@ -7982,7 +7990,7 @@ def _dashboard_gauge_b64(value, title="Cumplimiento", subtitle="Protección de d
             tx, ty, f"{pct}",
             ha="center", va="center",
             fontsize=10.5,
-            color="#64748b",
+            color="#475569",
             fontweight="bold"
         )
 
@@ -7996,7 +8004,7 @@ def _dashboard_gauge_b64(value, title="Cumplimiento", subtitle="Protección de d
     # aguja principal
     x = 0.83 * math.cos(ang)
     y = 0.83 * math.sin(ang)
-    ax.plot([0, x], [0, y], linewidth=4.6, color="#111827", solid_capstyle="round", zorder=6)
+    ax.plot([0, x], [0, y], linewidth=4.6, color="#0b1220", solid_capstyle="round", zorder=6)
 
     # punta triangular para que se vea más bonita
     tip_x = 0.98 * math.cos(ang)
@@ -8017,14 +8025,14 @@ def _dashboard_gauge_b64(value, title="Cumplimiento", subtitle="Protección de d
             (base_right_x, base_right_y),
         ],
         closed=True,
-        facecolor="#111827",
+        facecolor="#0b1220",
         edgecolor="none",
         zorder=7
     )
     ax.add_patch(needle)
 
     # centro
-    ax.add_patch(patches.Circle((0, 0), 0.085, color="#111827", zorder=8))
+    ax.add_patch(patches.Circle((0, 0), 0.085, color="#0b1220", zorder=8))
     ax.add_patch(patches.Circle((0, 0), 0.035, color="#ffffff", zorder=9))
 
     # =========================================================
@@ -8035,7 +8043,7 @@ def _dashboard_gauge_b64(value, title="Cumplimiento", subtitle="Protección de d
         ha="center", va="center",
         fontsize=30,
         fontweight="bold",
-        color="#111827"
+        color="#0b1220"
     )
 
     ax.text(
@@ -8043,14 +8051,14 @@ def _dashboard_gauge_b64(value, title="Cumplimiento", subtitle="Protección de d
         ha="center", va="center",
         fontsize=14,
         fontweight="bold",
-        color="#1f2937"
+        color="#101827"
     )
 
     ax.text(
         0, -0.02, subtitle,
         ha="center", va="center",
         fontsize=10.5,
-        color="#6b7280"
+        color="#4b5563"
     )
 
     ax.set_xlim(-1.50, 1.50)
@@ -8067,13 +8075,13 @@ def _dashboard_donut_b64(labels, values, title="", subtitle=""):
         return _dashboard_empty_chart(title or "Sin datos", "No hay información para graficar")
 
     palette = [
-        "#16a34a",
+        "#087c3d",
         "#84cc16",
-        "#facc15",
-        "#f97316",
-        "#dc2626",
-        "#7c3aed",
-        "#0ea5e9",
+        "#d39b00",
+        "#c95508",
+        "#b91c1c",
+        "#5521a8",
+        "#087ab8",
     ]
     colors = [palette[i % len(palette)] for i in range(len(labels))]
 
@@ -8099,18 +8107,18 @@ def _dashboard_donut_b64(labels, values, title="", subtitle=""):
 
     for t in autotexts:
         t.set_fontsize(10)
-        t.set_color("#111827")
+        t.set_color("#0b1220")
         t.set_fontweight("bold")
 
     ax.text(
         0, 0.08, str(int(total)),
         ha="center", va="center",
-        fontsize=28, fontweight="bold", color="#111827"
+        fontsize=28, fontweight="bold", color="#0b1220"
     )
     ax.text(
         0, -0.14, "Total",
         ha="center", va="center",
-        fontsize=10, color="#6b7280"
+        fontsize=10, color="#4b5563"
     )
 
     legend_labels = [f"{lab}: {val}" for lab, val in zip(labels, values)]
@@ -8126,9 +8134,9 @@ def _dashboard_donut_b64(labels, values, title="", subtitle=""):
     )
 
     if title:
-        ax.set_title(title, fontsize=15, fontweight="bold", color="#111827", pad=12)
+        ax.set_title(title, fontsize=15, fontweight="bold", color="#0b1220", pad=12)
     if subtitle:
-        fig.text(0.5, 0.03, subtitle, ha="center", fontsize=10, color="#6b7280")
+        fig.text(0.5, 0.03, subtitle, ha="center", fontsize=10, color="#4b5563")
 
     ax.set_aspect("equal")
     return _dashboard_fig_to_b64(fig)
@@ -8181,7 +8189,7 @@ def generar_radar_grande(labels, values, title):
     # 🔥 porcentaje en el centro
     promedio = sum(values[:-1]) / len(values[:-1]) if values else 0
     ax.text(0, 0, f"{promedio:.1f}%", ha='center', va='center',
-            fontsize=28, fontweight='bold', color="#111827")
+            fontsize=28, fontweight='bold', color="#0b1220")
 
     ax.set_title(title, size=16, pad=30, fontweight="bold")
 
@@ -8770,16 +8778,17 @@ BASE = """
 
   <style>
     :root{
-      --arky-blue:#0b3a6e;
-      --arky-blue-2:#1459a6;
-      --arky-blue-3:#2c7be5;
-      --arky-blue-4:#6bb7ff;
-      --arky-soft:#edf6ff;
-      --arky-soft-2:#dff0ff;
-      --arky-border:#cfe5ff;
-      --arky-text:#17375f;
-      --arky-muted:#5f7f9e;
-      --arky-purple:#5b1bb5;
+      /* Paleta Arkyntech ajustada: tonos más oscuros y mejor contraste */
+      --arky-blue:#062b55;
+      --arky-blue-2:#0b4a8f;
+      --arky-blue-3:#1d5fae;
+      --arky-blue-4:#3f8fd6;
+      --arky-soft:#dcecff;
+      --arky-soft-2:#c9e3ff;
+      --arky-border:#a9cdeb;
+      --arky-text:#102a4b;
+      --arky-muted:#425f7f;
+      --arky-purple:#3f148a;
       --arky-topbar-h:58px;
     }
 
@@ -8790,9 +8799,9 @@ BASE = """
       color:var(--arky-text);
       padding-top:var(--arky-topbar-h);
       background:
-        linear-gradient(135deg, rgba(236,248,255,.94) 0%, rgba(226,242,255,.88) 42%, rgba(238,232,255,.78) 100%),
-        radial-gradient(circle at 86% 24%, rgba(91,27,181,.18) 0, rgba(91,27,181,.18) 17%, transparent 18%),
-        radial-gradient(circle at 6% 88%, rgba(44,123,229,.17) 0, rgba(44,123,229,.17) 22%, transparent 23%),
+        linear-gradient(135deg, rgba(214,232,248,.96) 0%, rgba(202,224,245,.93) 42%, rgba(216,208,242,.86) 100%),
+        radial-gradient(circle at 86% 24%, rgba(47,18,102,.23) 0, rgba(47,18,102,.23) 17%, transparent 18%),
+        radial-gradient(circle at 6% 88%, rgba(18,84,157,.23) 0, rgba(18,84,157,.23) 22%, transparent 23%),
         url('/static/img/ccsgsi.jpg');
       background-size:cover;
       background-position:center;
@@ -8807,8 +8816,8 @@ BASE = """
       pointer-events:none;
       z-index:-1;
       background:
-        radial-gradient(circle at 96% 22%, rgba(91,27,181,.14), transparent 24%),
-        radial-gradient(circle at 2% 76%, rgba(44,123,229,.12), transparent 26%);
+        radial-gradient(circle at 96% 22%, rgba(47,18,102,.18), transparent 24%),
+        radial-gradient(circle at 2% 76%, rgba(18,84,157,.17), transparent 26%);
     }
 
     .sgsi-topbar{
@@ -8816,45 +8825,50 @@ BASE = """
       top:0;
       left:0;
       right:0;
+      height:var(--arky-topbar-h);
       min-height:var(--arky-topbar-h);
-      background:rgba(255,255,255,.93);
+      background:rgba(248,252,255,.96);
       backdrop-filter:blur(18px);
       -webkit-backdrop-filter:blur(18px);
       border-bottom:1px solid rgba(207,229,255,.95);
-      box-shadow:0 12px 30px rgba(20,89,166,.10);
+      box-shadow:0 10px 24px rgba(20,89,166,.10);
       z-index:999997;
-      overflow:visible;
+      overflow:hidden;
     }
 
     .sgsi-topbar-inner{
+      height:var(--arky-topbar-h);
       min-height:var(--arky-topbar-h);
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:8px;
-      padding:0 10px 0 0;
-      overflow:visible;
+      gap:12px;
+      padding:0 18px 0 14px;
+      overflow:hidden;
     }
 
     .sgsi-brand{
+      height:var(--arky-topbar-h);
+      width:220px;
+      min-width:220px;
       display:flex;
       align-items:center;
-      gap:12px;
-      min-width:220px;
+      justify-content:flex-start;
       text-decoration:none;
-      overflow:visible;
-      margin-left:-15px;
+      overflow:hidden;
+      margin-left:0;
+      padding:0;
     }
 
     .sgsi-logo{
-      height:220px;
+      height:44px;
       width:auto;
-      max-width:none;
+      max-width:205px;
       object-fit:contain;
       object-position:left center;
-      filter:drop-shadow(0 10px 20px rgba(11,58,110,.22));
-      margin-top:8px;
-      margin-bottom:8px;
+      filter:drop-shadow(0 4px 9px rgba(11,58,110,.14));
+      margin:0;
+      display:block;
     }
 
     .sgsi-title{ display:none !important; }
@@ -8925,32 +8939,40 @@ BASE = """
 
     @media(max-width:1100px){
       .sgsi-topbar-inner{
-        padding:0 10px;
-      }
-
-      .sgsi-logo{
-        height:150px;
-        max-width:none;
+        padding:0 12px;
       }
 
       .sgsi-brand{
-        min-width:auto;
-        margin-left:-10px;
+        width:190px;
+        min-width:190px;
+      }
+
+      .sgsi-logo{
+        height:40px;
+        max-width:180px;
       }
     }
 
     @media(max-width:575px){
       :root{
-        --arky-topbar-h:74px;
+        --arky-topbar-h:62px;
       }
 
-      .sgsi-logo{
-        height:100px;
-        max-width:none;
+      .sgsi-topbar,
+      .sgsi-topbar-inner,
+      .sgsi-brand{
+        height:var(--arky-topbar-h);
+        min-height:var(--arky-topbar-h);
       }
 
       .sgsi-brand{
-        margin-left:-8px;
+        width:160px;
+        min-width:160px;
+      }
+
+      .sgsi-logo{
+        height:36px;
+        max-width:150px;
       }
 
       .sgsi-user-name{
@@ -8992,7 +9014,7 @@ BASE = """
               else 'info'
             ) | tojson }},
             confirmButtonText: "Aceptar",
-            confirmButtonColor: "#1459a6",
+            confirmButtonColor: "#0b4a8f",
             backdrop: true,
             allowOutsideClick: false
           });
@@ -9828,6 +9850,32 @@ def _sgsi_build_global_menu_html():
                 "paths": ["/vulnerabilidades_menu", "/vulnerabilidades"],
                 "endpoints": ["vulnerabilidades", "vulnerabilidad", "vuln"]
             },
+            "Pruebas SAST": {
+                "paths": [
+                    "/pruebas_sast",
+                    "/pruebas_sast/informes",
+                    "/pruebas_sast/config",
+                    "/pruebas_sast/models",
+                    "/pruebas_sast/start",
+                    "/pruebas_sast/track",
+                    "/pruebas_sast/progress",
+                    "/pruebas_sast/result",
+                    "/pruebas_sast/download"
+                ],
+                "endpoints": [
+                    "sast_index",
+                    "sast_reports",
+                    "sast_report_detail",
+                    "sast_config",
+                    "sast_models",
+                    "sast_start",
+                    "sast_track",
+                    "sast_progress",
+                    "sast_result",
+                    "sast_download_pdf",
+                    "sast_download_json"
+                ]
+            },
             "Modelamiento de Amenazas": {
                 "paths": ["/modelamiento_amenazas", "/vulnerabilidades/threat_model"],
                 "endpoints": ["threat_model"]
@@ -10225,7 +10273,7 @@ def _sgsi_build_global_menu_html():
 
               <div class="sgsi-global-menu-list">
 
-                <a class="sgsi-global-root-toggle sgsi-global-panel-control-btn" href="/">
+                <a class="sgsi-global-root-toggle sgsi-global-panel-control-btn {% if center_active %}sgsi-center-active{% endif %}" href="/">
                   <i class="bi bi-speedometer2"></i>
                   <span>Centro de Control</span>
                 </a>
@@ -10284,10 +10332,19 @@ def _sgsi_build_global_menu_html():
 
         <style>
           :root{
-            --sgsi-menu-w:235px;
+            /* Menú global unificado con Centro de Control */
+            --sgsi-menu-w:245px;
             --sgsi-menu-left:0px;
-            --sgsi-topbar-h:58px;
-            --sgsi-content-left:235px;
+            --sgsi-topbar-h:var(--arky-topbar-h, 58px);
+            --sgsi-content-left:245px;
+            --sgsi-card:#ffffff;
+            --sgsi-purple:#074883;
+            --sgsi-purple-2:#1d5fae;
+            --sgsi-lav:#dcecff;
+            --sgsi-lav-2:#c9e3ff;
+            --sgsi-border:#a9cdeb;
+            --sgsi-text:#0f3766;
+            --sgsi-muted:#425f7f;
           }
 
           body{
@@ -10303,36 +10360,49 @@ def _sgsi_build_global_menu_html():
             height:calc(100vh - var(--sgsi-topbar-h)) !important;
             z-index:999990 !important;
             pointer-events:none;
+            transition:left .22s ease;
           }
 
           .sgsi-global-menu-arrow{
             position:absolute;
-            top:12px;
-            right:-18px;
+            right:-13px;
+            top:16px;
             width:22px;
-            height:46px;
-            border-radius:0 14px 14px 0;
-            background:#0b3a6e;
-            color:#fff;
+            height:50px;
+            border-radius:999px;
+            background:linear-gradient(135deg,var(--sgsi-purple),var(--sgsi-purple-2));
+            color:#ffffff;
             display:flex;
             align-items:center;
             justify-content:center;
             cursor:pointer;
-            box-shadow:0 10px 24px rgba(11,58,110,.24);
+            box-shadow:0 10px 22px rgba(43,0,79,.22);
+            border:2px solid #ffffff;
+            z-index:20;
             pointer-events:auto;
+          }
+
+          .sgsi-global-menu-arrow .sgsi-arrow-icon{
+            font-size:26px;
+            font-weight:950;
+            line-height:1;
+            position:relative;
+            top:-1px;
           }
 
           .sgsi-menu-fixed-shell{
             height:100%;
             width:100%;
             padding:8px 7px;
-            border-radius:0 16px 16px 0;
-            background:rgba(255,255,255,.94);
-            border-right:1px solid rgba(207,229,255,.95);
-            box-shadow:12px 0 30px rgba(20,89,166,.10);
-            backdrop-filter:blur(18px);
-            -webkit-backdrop-filter:blur(18px);
+            border-radius:0 18px 18px 0;
+            background:linear-gradient(180deg,rgba(238,247,255,.97) 0%,rgba(213,234,255,.95) 48%,rgba(198,222,245,.94) 100%);
+            border:1px solid var(--sgsi-border);
+            border-left:0;
+            box-shadow:10px 0 30px rgba(28,91,160,.18), inset -1px 0 rgba(255,255,255,.65);
+            backdrop-filter:blur(14px);
+            -webkit-backdrop-filter:blur(14px);
             pointer-events:auto;
+            transition:opacity .22s ease, transform .22s ease;
           }
 
           .sgsi-menu-scroll-only{
@@ -10342,10 +10412,14 @@ def _sgsi_build_global_menu_html():
             padding-right:2px;
           }
 
+          .sgsi-menu-scroll-only::-webkit-scrollbar{ width:7px; }
+          .sgsi-menu-scroll-only::-webkit-scrollbar-thumb{ background:#b8a3d8; border-radius:999px; }
+          .sgsi-menu-scroll-only::-webkit-scrollbar-track{ background:#eef4ff; border-radius:999px; }
+
           .sgsi-global-menu-list{
             display:flex;
             flex-direction:column;
-            gap:6px;
+            gap:7px;
           }
 
           .sgsi-global-root-item{
@@ -10356,75 +10430,107 @@ def _sgsi_build_global_menu_html():
           .sgsi-global-item,
           .sgsi-global-node-toggle{
             width:100%;
-            display:flex;
+            display:flex !important;
             align-items:center;
+            justify-content:flex-start;
             gap:7px;
-            border:0;
+            border:1px solid transparent !important;
             text-decoration:none !important;
             text-align:left;
-            color:#17375f !important;
+            color:#26384f !important;
             background:transparent !important;
-            font-weight:800;
+            font-weight:850;
+            white-space:normal !important;
+            line-height:1.15 !important;
             transition:all .18s ease;
           }
 
           .sgsi-global-root-toggle{
-            font-size:.70rem;
-            min-height:35px;
-            padding:6px 8px;
-            border-radius:11px;
+            font-size:.70rem !important;
+            min-height:35px !important;
+            padding:7px 8px !important;
+            border-radius:11px !important;
           }
 
           .sgsi-global-item,
           .sgsi-global-node-toggle{
-            font-size:.66rem;
-            padding:6px 7px;
-            border-radius:10px;
+            font-size:.66rem !important;
+            padding:6px 7px !important;
+            border-radius:10px !important;
           }
 
-          .sgsi-global-item:hover,
           .sgsi-global-root-toggle:hover,
           .sgsi-global-node-toggle:hover{
-            background:linear-gradient(135deg,#eef7ff,#ffffff) !important;
-            color:#0b5cab !important;
+            background:var(--sgsi-lav) !important;
+            color:var(--sgsi-purple) !important;
+            border-color:var(--sgsi-border) !important;
           }
 
-          /*
-            Azul fuerte para:
-            - capítulo principal activo: Gobierno, Documentación, etc.
-            - opción exacta activa.
-            Padres internos quedan azul claro.
-          */
+          .sgsi-global-item:hover{
+            background:#ffffff !important;
+            color:var(--sgsi-purple) !important;
+            box-shadow:0 8px 16px rgba(43,0,79,.08);
+          }
+
+          .sgsi-global-panel-control-btn.sgsi-center-active{
+            background:linear-gradient(135deg,var(--sgsi-purple) 0%,var(--sgsi-purple-2) 58%,#3f8fd6 100%) !important;
+            color:#ffffff !important;
+            border:1px solid rgba(255,255,255,.40) !important;
+            box-shadow:0 12px 26px rgba(75,11,130,.24) !important;
+          }
+
+          .sgsi-global-panel-control-btn.sgsi-center-active i,
+          .sgsi-global-panel-control-btn.sgsi-center-active span{
+            color:#ffffff !important;
+          }
+
+          .sgsi-global-node-toggle::after{
+            content:"⌄";
+            margin-left:auto;
+            font-size:13px;
+            font-weight:950;
+            transition:transform .18s ease;
+          }
+
+          .sgsi-global-node-toggle.sgsi-active-tree::after{
+            transform:rotate(180deg);
+          }
 
           /* Capítulo principal activo */
           .sgsi-global-root-toggle.sgsi-active-tree{
-            background:linear-gradient(135deg,#0b5cab,#2c7be5) !important;
+            background:linear-gradient(135deg,var(--sgsi-purple),var(--sgsi-purple-2)) !important;
             color:#ffffff !important;
+            border-color:rgba(255,255,255,.42) !important;
             box-shadow:0 8px 18px rgba(44,123,229,.28);
           }
 
-          .sgsi-global-root-toggle.sgsi-active-tree i{
+          .sgsi-global-root-toggle.sgsi-active-tree i,
+          .sgsi-global-root-toggle.sgsi-active-tree span{
             color:#ffffff !important;
           }
 
           /* Padres internos activos */
           .sgsi-global-node-toggle.sgsi-active-tree{
-            background:linear-gradient(135deg,#dff0ff,#ffffff) !important;
-            color:#0b5cab !important;
+            background:linear-gradient(135deg,#c9e3ff,#ffffff) !important;
+            color:var(--sgsi-purple) !important;
+            border-color:var(--sgsi-border) !important;
           }
 
-          .sgsi-global-node-toggle.sgsi-active-tree i{
-            color:#0b5cab !important;
+          .sgsi-global-node-toggle.sgsi-active-tree i,
+          .sgsi-global-node-toggle.sgsi-active-tree span{
+            color:var(--sgsi-purple) !important;
           }
 
           /* Opción final exacta activa */
           .sgsi-global-item.sgsi-active{
-            background:linear-gradient(135deg,#0b5cab,#2c7be5) !important;
+            background:linear-gradient(135deg,var(--sgsi-purple),var(--sgsi-purple-2)) !important;
             color:#ffffff !important;
+            border-color:rgba(255,255,255,.42) !important;
             box-shadow:0 8px 18px rgba(44,123,229,.28);
           }
 
-          .sgsi-global-item.sgsi-active i{
+          .sgsi-global-item.sgsi-active i,
+          .sgsi-global-item.sgsi-active span{
             color:#ffffff !important;
           }
 
@@ -10440,14 +10546,22 @@ def _sgsi_build_global_menu_html():
           .sgsi-global-panel{
             display:none;
             list-style:none;
-            margin:4px 0 4px 0;
-            padding:4px 0 4px 6px;
-            border-left:1px solid rgba(207,229,255,.95);
-            border-radius:12px;
+            margin:4px 0 4px 0 !important;
+            padding:4px 0 4px 6px !important;
+            background:var(--sgsi-lav) !important;
+            border:1px solid var(--sgsi-border) !important;
+            border-radius:12px !important;
+            overflow:visible !important;
+          }
+
+          .sgsi-global-subpanel{
+            margin-left:5px !important;
+            padding-left:8px !important;
+            border-left:2px solid #a88fd3 !important;
           }
 
           .sgsi-global-panel.sgsi-open{
-            display:block;
+            display:block !important;
           }
 
           .sgsi-global-panel li{
@@ -10456,12 +10570,29 @@ def _sgsi_build_global_menu_html():
             padding:0;
           }
 
+          .sgsi-global-panel .sgsi-global-item,
+          .sgsi-global-panel .sgsi-global-node-toggle{
+            margin:3px 4px;
+            background:rgba(241,247,255,.74) !important;
+            border:1px solid rgba(181,205,230,.78) !important;
+          }
+
+          .sgsi-global-panel .sgsi-global-item.sgsi-active{
+            background:linear-gradient(135deg,var(--sgsi-purple),var(--sgsi-purple-2)) !important;
+            border-color:rgba(255,255,255,.42) !important;
+          }
+
           body.sgsi-menu-collapsed{
             padding-left:0 !important;
           }
 
           body.sgsi-menu-collapsed #sgsiGlobalMenu{
-            left:calc(var(--sgsi-menu-w) * -1) !important;
+            left:calc((var(--sgsi-menu-w) - 24px) * -1) !important;
+          }
+
+          body.sgsi-menu-collapsed #sgsiGlobalMenu .sgsi-menu-fixed-shell{
+            opacity:0;
+            pointer-events:none;
           }
 
           body.sgsi-menu-collapsed #sgsiGlobalMenuToggle .sgsi-arrow-icon{
@@ -10475,6 +10606,14 @@ def _sgsi_build_global_menu_html():
 
             body{
               padding-left:0 !important;
+            }
+
+            #sgsiGlobalMenu{
+              left:calc((var(--sgsi-menu-w) - 24px) * -1) !important;
+            }
+
+            body:not(.sgsi-menu-collapsed) #sgsiGlobalMenu{
+              left:0 !important;
             }
           }
         </style>
@@ -10563,7 +10702,7 @@ def _sgsi_build_global_menu_html():
             setTimeout(restoreScroll, 80);
           })();
         </script>
-        """, sections=sections)
+        """, sections=sections, center_active=(current_path == "/"))
 
     except Exception as e:
         print("Error construyendo menú global SGSI:", repr(e))
@@ -10852,13 +10991,13 @@ def menu():
       :root{
         --sgsi-sidebar-w:245px;
         --sgsi-card:#ffffff;
-        --sgsi-purple:#0b5cab;
-        --sgsi-purple-2:#2c7be5;
-        --sgsi-lav:#edf6ff;
-        --sgsi-lav-2:#dff0ff;
-        --sgsi-border:#d7e9ff;
-        --sgsi-text:#174a7c;
-        --sgsi-muted:#5f7f9e;
+        --sgsi-purple:#074883;
+        --sgsi-purple-2:#1d5fae;
+        --sgsi-lav:#dcecff;
+        --sgsi-lav-2:#c9e3ff;
+        --sgsi-border:#a9cdeb;
+        --sgsi-text:#0f3766;
+        --sgsi-muted:#425f7f;
       }
 
       .soa-shell{
@@ -10882,7 +11021,7 @@ def menu():
       }
 
       .sgsi-leftnav-card{
-        background:linear-gradient(180deg,rgba(247,251,255,.96) 0%,rgba(231,244,255,.94) 48%,rgba(219,237,255,.92) 100%);
+        background:linear-gradient(180deg,rgba(238,247,255,.97) 0%,rgba(213,234,255,.95) 48%,rgba(198,222,245,.94) 100%);
         border:1px solid var(--sgsi-border);
         border-radius:0 18px 18px 0;
         box-shadow:10px 0 30px rgba(28,91,160,.18), inset -1px 0 rgba(255,255,255,.65);
@@ -10895,8 +11034,8 @@ def menu():
       }
 
       .sgsi-leftnav-card::-webkit-scrollbar{ width:7px; }
-      .sgsi-leftnav-card::-webkit-scrollbar-thumb{ background:#d8c7ef; border-radius:999px; }
-      .sgsi-leftnav-card::-webkit-scrollbar-track{ background:#f8f4ff; border-radius:999px; }
+      .sgsi-leftnav-card::-webkit-scrollbar-thumb{ background:#b8a3d8; border-radius:999px; }
+      .sgsi-leftnav-card::-webkit-scrollbar-track{ background:#eef4ff; border-radius:999px; }
 
       .sgsi-leftnav-header{
         display:flex;
@@ -10950,7 +11089,7 @@ def menu():
         border:1px solid transparent !important;
         border-radius:14px !important;
         background:transparent !important;
-        color:#4a3b5b !important;
+        color:#26384f !important;
         padding:8px 9px !important;
         font-size:.72rem !important;
         font-weight:850 !important;
@@ -10970,7 +11109,7 @@ def menu():
       }
 
       .sgsi-panel-control-btn{
-        background:linear-gradient(135deg,var(--sgsi-purple) 0%,#2c7be5 58%,#6bb7ff 100%) !important;
+        background:linear-gradient(135deg,var(--sgsi-purple) 0%,#1d5fae 58%,#3f8fd6 100%) !important;
         color:#ffffff !important;
         border:1px solid rgba(255,255,255,.40) !important;
         box-shadow:0 12px 26px rgba(75,11,130,.24) !important;
@@ -11006,7 +11145,7 @@ def menu():
       .sgsi-subpanel{
         margin-left:5px !important;
         padding-left:8px !important;
-        border-left:2px solid #dcc9f5 !important;
+        border-left:2px solid #a88fd3 !important;
       }
 
       .sgsi-dropdown-item{
@@ -11017,13 +11156,13 @@ def menu():
         border-radius:12px;
         font-size:.68rem;
         font-weight:800;
-        color:#4b3a5d !important;
+        color:#26384f !important;
         white-space:normal;
         line-height:1.16;
         text-decoration:none;
         margin:3px 4px;
-        background:rgba(255,255,255,.54);
-        border:1px solid rgba(234,223,247,.70);
+        background:rgba(241,247,255,.74);
+        border:1px solid rgba(181,205,230,.78);
         transition:all .18s ease;
       }
 
@@ -11041,7 +11180,7 @@ def menu():
         width:26px;
         height:58px;
         border-radius:999px;
-        background:linear-gradient(135deg,var(--sgsi-purple),#2c7be5);
+        background:linear-gradient(135deg,var(--sgsi-purple),#1d5fae);
         color:#ffffff;
         display:flex;
         align-items:center;
@@ -11099,7 +11238,7 @@ def menu():
         align-items:center;
         justify-content:center;
         gap:12px;
-        background:rgba(255,255,255,.94);
+        background:rgba(248,252,255,.96);
         border:1px solid var(--sgsi-border);
         border-radius:22px;
         box-shadow:0 18px 34px rgba(43,0,79,.10);
@@ -11122,21 +11261,21 @@ def menu():
         font-size:1.18rem;
       }
 
-      .sgsi-stat-icon.blue{background:#eef4ff;color:#2f6ff2;}
-      .sgsi-stat-icon.orange{background:#fff3e8;color:#f97316;}
-      .sgsi-stat-icon.green{background:#ecfdf3;color:#16a34a;}
-      .sgsi-stat-icon.purple{background:#f2eaff;color:#7c3aed;}
-      .blue-text{color:#2f6ff2 !important;} .orange-text{color:#f97316 !important;} .green-text{color:#16a34a !important;} .purple-text{color:#7c3aed !important;}
+      .sgsi-stat-icon.blue{background:#eef4ff;color:#0f56b3;}
+      .sgsi-stat-icon.orange{background:#fff3e8;color:#c95508;}
+      .sgsi-stat-icon.green{background:#ecfdf3;color:#087c3d;}
+      .sgsi-stat-icon.purple{background:#f2eaff;color:#5521a8;}
+      .blue-text{color:#0f56b3 !important;} .orange-text{color:#c95508 !important;} .green-text{color:#087c3d !important;} .purple-text{color:#5521a8 !important;}
 
       .sgsi-stat-text{ min-width:0; flex:1 1 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; overflow:hidden; }
-      .sgsi-stat-title{ width:100%; font-size:.72rem; font-weight:950; color:#2d203c; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .sgsi-stat-title{ width:100%; font-size:.72rem; font-weight:950; color:#17263b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
       .sgsi-stat-value{ width:100%; margin-top:3px; font-size:1.25rem; line-height:1.05; font-weight:950; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
       .sgsi-stat-link{ width:100%; margin-top:5px; color:var(--sgsi-muted); font-size:.65rem; font-weight:850; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
       .sgsi-dashboard-grid{ display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:18px; }
-      .sgsi-chart-card{ grid-column:span 4; background:rgba(255,255,255,.94); border:1px solid var(--sgsi-border); border-radius:24px; box-shadow:0 18px 34px rgba(43,0,79,.11); min-height:360px; overflow:hidden; }
-      .sgsi-chart-head{ padding:16px 18px 10px 18px; display:flex; justify-content:space-between; gap:10px; border-bottom:1px solid var(--sgsi-border); background:linear-gradient(180deg,#fff 0%,#fbf8ff 100%); }
-      .sgsi-chart-head h3{ margin:0; font-size:.92rem; font-weight:950; color:#2d203c; }
+      .sgsi-chart-card{ grid-column:span 4; background:rgba(248,252,255,.96); border:1px solid var(--sgsi-border); border-radius:24px; box-shadow:0 18px 34px rgba(43,0,79,.11); min-height:360px; overflow:hidden; }
+      .sgsi-chart-head{ padding:16px 18px 10px 18px; display:flex; justify-content:space-between; gap:10px; border-bottom:1px solid var(--sgsi-border); background:linear-gradient(180deg,#fff 0%,#f2f7ff 100%); }
+      .sgsi-chart-head h3{ margin:0; font-size:.92rem; font-weight:950; color:#17263b; }
       .sgsi-chart-head span{ font-size:.72rem; font-weight:900; color:var(--sgsi-purple-2); }
       .sgsi-chart-body{ min-height:295px; display:flex; align-items:center; justify-content:center; padding:10px 14px 16px; }
       .sgsi-chart-img{ width:100%; height:295px; object-fit:contain; }
@@ -11429,7 +11568,7 @@ def areas_area():
       }
 
       .areas-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -11469,7 +11608,7 @@ def areas_area():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -11558,7 +11697,7 @@ def areas_area():
       .areas-section-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
@@ -11585,7 +11724,7 @@ def areas_area():
       .areas-table-head th{
         background:#eef5ff !important;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         border-bottom:1px solid #d7dee7 !important;
         vertical-align:middle !important;
         white-space:nowrap;
@@ -11627,7 +11766,7 @@ def areas_area():
         border-radius:0 10px 10px 0;
         background:#eef5ff;
         border-color:#d9e3f0;
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:900;
       }
 
@@ -11908,7 +12047,7 @@ def areas_division():
       }
 
       .divisiones-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -11948,7 +12087,7 @@ def areas_division():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -12037,7 +12176,7 @@ def areas_division():
       .divisiones-section-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
@@ -12064,7 +12203,7 @@ def areas_division():
       .divisiones-table-head th{
         background:#eef5ff !important;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         border-bottom:1px solid #d7dee7 !important;
         vertical-align:middle !important;
         white-space:nowrap;
@@ -12106,7 +12245,7 @@ def areas_division():
         border-radius:0 10px 10px 0;
         background:#eef5ff;
         border-color:#d9e3f0;
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:900;
       }
 
@@ -12396,7 +12535,7 @@ def config_email():
       }
 
       .smtp-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -12436,7 +12575,7 @@ def config_email():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -12501,7 +12640,7 @@ def config_email():
       .smtp-section-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
@@ -12691,7 +12830,7 @@ def empresa_logo():
       }}
 
       .logo-header-card {{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -12731,7 +12870,7 @@ def empresa_logo():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -12820,7 +12959,7 @@ def empresa_logo():
       .logo-section-title {{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:18px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
@@ -12848,7 +12987,7 @@ def empresa_logo():
         border-radius:0 10px 10px 0;
         background:#eef5ff;
         border-color:#d9e3f0;
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:900;
       }}
 
@@ -13295,7 +13434,7 @@ def admin_openrouter_key():
       }}
 
       .openrouter-header-card {{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -13335,7 +13474,7 @@ def admin_openrouter_key():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -13423,7 +13562,7 @@ def admin_openrouter_key():
       .openrouter-section-title {{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:18px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
@@ -13934,7 +14073,7 @@ def declaracion_aplicabilidad():
         min-width: 54px;
         border-radius: 14px;
         background: rgba(255,255,255,.96);
-        color: #1459a6;
+        color: #0b4a8f;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -13971,7 +14110,7 @@ def declaracion_aplicabilidad():
       .soa-hero-subtitle {
         margin: 4px 0 0 0;
         font-size: .78rem;
-        color: rgba(255,255,255,.94);
+        color: rgba(248,252,255,.96);
         max-width: 820px;
         line-height: 1.25;
       }
@@ -13983,7 +14122,7 @@ def declaracion_aplicabilidad():
         height: 66px;
         border-radius: 18px;
         background: rgba(255,255,255,.95);
-        color: #1459a6;
+        color: #0b4a8f;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -14167,7 +14306,7 @@ def declaracion_aplicabilidad():
         vertical-align: middle;
         background: rgba(255,255,255,.98);
         font-size: .78rem;
-        color: #111827;
+        color: #0b1220;
       }
 
       .soa-table tbody tr:nth-child(even) td {
@@ -15292,7 +15431,7 @@ def gestion_riesgos():
         min-width: 54px;
         border-radius: 14px;
         background: rgba(255,255,255,.96);
-        color: #1459a6;
+        color: #0b4a8f;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -15329,7 +15468,7 @@ def gestion_riesgos():
       .risk-hero-subtitle {
         margin: 4px 0 0 0;
         font-size: .78rem;
-        color: rgba(255,255,255,.94);
+        color: rgba(248,252,255,.96);
         max-width: 820px;
         line-height: 1.25;
       }
@@ -15341,7 +15480,7 @@ def gestion_riesgos():
         height: 66px;
         border-radius: 18px;
         background: rgba(255,255,255,.95);
-        color: #1459a6;
+        color: #0b4a8f;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -15405,7 +15544,7 @@ def gestion_riesgos():
 
       .risk-menu-btn-disabled {
         background: #d1d5db !important;
-        color: #6b7280 !important;
+        color: #4b5563 !important;
         cursor: not-allowed;
         box-shadow: none;
       }
@@ -15439,7 +15578,7 @@ def gestion_riesgos():
       .risk-dropdown-content a {
         display: block;
         text-decoration: none;
-        color: #1f2937;
+        color: #101827;
         font-weight: 800;
         font-size: .80rem;
         padding: 9px 12px;
@@ -15476,7 +15615,7 @@ def gestion_riesgos():
 
       .risk-summary-label {
         font-size: .74rem;
-        color: #64748b;
+        color: #475569;
         font-weight: 800;
         margin-bottom: 3px;
       }
@@ -15489,11 +15628,11 @@ def gestion_riesgos():
       }
 
       .risk-summary-box.success .risk-summary-value {
-        color: #16a34a;
+        color: #087c3d;
       }
 
       .risk-summary-box.muted .risk-summary-value {
-        color: #64748b;
+        color: #475569;
       }
 
       .risk-summary-box.info .risk-summary-value {
@@ -15650,7 +15789,7 @@ def gestion_riesgos():
         vertical-align: middle;
         background: rgba(255,255,255,.98);
         font-size: .76rem;
-        color: #111827;
+        color: #0b1220;
         word-break: break-word;
       }
 
@@ -15741,11 +15880,11 @@ def gestion_riesgos():
         color: #ffffff;
       }
 
-      .risk-action-btn.view { background: #0ea5e9; }
-      .risk-action-btn.edit { background: #f59e0b; color: #111827; }
+      .risk-action-btn.view { background: #087ab8; }
+      .risk-action-btn.edit { background: #c76b00; color: #0b1220; }
       .risk-action-btn.archive { background: #2563eb; }
-      .risk-action-btn.delete { background: #dc2626; }
-      .risk-action-btn.restore { background: #16a34a; }
+      .risk-action-btn.delete { background: #b91c1c; }
+      .risk-action-btn.restore { background: #087c3d; }
 
       .risk-table-scroll::-webkit-scrollbar {
         height: 11px;
@@ -15817,7 +15956,7 @@ def gestion_riesgos():
         .risk-table tbody tr:nth-child(even) td.nivel-none,
         .risk-table tbody tr:hover td.nivel-none {
           background: rgba(255,255,255,.98) !important;
-          color: #64748b !important;
+          color: #475569 !important;
           font-weight: 800 !important;
         }
 
@@ -17085,7 +17224,7 @@ def agregar_riesgo():
             min-width:54px;
             border-radius:14px;
             background:rgba(255,255,255,.96);
-            color:#1459a6;
+            color:#0b4a8f;
             display:flex;
             align-items:center;
             justify-content:center;
@@ -17123,7 +17262,7 @@ def agregar_riesgo():
           }
 
           .riskform-subtitle{
-            color:rgba(255,255,255,.94);
+            color:rgba(248,252,255,.96);
             font-size:.78rem;
             margin-top:4px;
             line-height:1.25;
@@ -17172,7 +17311,7 @@ def agregar_riesgo():
           .riskform-section-title{
             font-weight:950;
             font-size:.78rem;
-            color:#1459a6;
+            color:#0b4a8f;
             padding:9px 12px;
             border-radius:12px;
             background:#eef5ff;
@@ -17563,7 +17702,7 @@ def configurar_probabilidad_residual():
         min-width:54px;
         border-radius:14px;
         background:rgba(255,255,255,.96);
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -17601,7 +17740,7 @@ def configurar_probabilidad_residual():
       }
 
       .prob-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -17732,7 +17871,7 @@ def configurar_probabilidad_residual():
 
       .prob-bottom-actions .btn-danger{
         border:none;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
       }
 
@@ -18045,7 +18184,7 @@ def configurar_impacto_residual():
         min-width:54px;
         border-radius:14px;
         background:rgba(255,255,255,.96);
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -18083,7 +18222,7 @@ def configurar_impacto_residual():
       }
 
       .imp-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -18500,7 +18639,7 @@ def configurar_tipos_riesgo():
         min-width:54px;
         border-radius:14px;
         background:rgba(255,255,255,.96);
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -18538,7 +18677,7 @@ def configurar_tipos_riesgo():
       }
 
       .tipo-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -18929,7 +19068,7 @@ def editar_tipo_riesgo(id):
       }
 
       .tipoedit-form-card{
-        background: rgba(255,255,255,.93);
+        background: rgba(248,252,255,.96);
         border-radius: 18px;
         backdrop-filter: blur(6px);
         box-shadow: 0 10px 24px rgba(0,0,0,.18);
@@ -18941,7 +19080,7 @@ def editar_tipo_riesgo(id):
       }
 
       .tipoedit-form-card .form-label{
-        color: #1f2937;
+        color: #101827;
         margin-bottom: 6px;
       }
 
@@ -19311,7 +19450,7 @@ def mapa_calor():
         height:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -19355,7 +19494,7 @@ def mapa_calor():
         background:#fff;
         border:1px solid #cfd8e3;
         text-decoration:none;
-        color:#1f2937;
+        color:#101827;
       }
 
       .heat-back-btn:hover{
@@ -19413,7 +19552,7 @@ def mapa_calor():
       .heatmap-table th{
         background:#eaf3ff;
         font-weight:900;
-        color:#1f2937;
+        color:#101827;
       }
 
       .heat-corner-fill{
@@ -19457,14 +19596,14 @@ def mapa_calor():
 
       .heat-impact-header{
         background:#eaf3ff !important;
-        color:#1f2937 !important;
+        color:#101827 !important;
         font-weight:950 !important;
         line-height:1.25;
       }
 
       .heat-prob-header{
         background:#eaf3ff !important;
-        color:#1f2937 !important;
+        color:#101827 !important;
         font-weight:950 !important;
         line-height:1.25;
       }
@@ -19501,7 +19640,7 @@ def mapa_calor():
       .heat-legend-title{
         font-size:.82rem;
         font-weight:950;
-        color:#1f2937;
+        color:#101827;
         margin-bottom:8px;
       }
 
@@ -19546,7 +19685,7 @@ def mapa_calor():
         font-size:1rem;
         font-weight:900;
         margin-bottom:12px;
-        color:#1f2937;
+        color:#101827;
       }
 
       .close{
@@ -20108,7 +20247,7 @@ def riesgo_detalle(riesgo_id):
             min-width:54px;
             border-radius:14px;
             background:rgba(255,255,255,.96);
-            color:#1459a6;
+            color:#0b4a8f;
             display:flex;
             align-items:center;
             justify-content:center;
@@ -20146,7 +20285,7 @@ def riesgo_detalle(riesgo_id):
           }
 
           .riskform-subtitle{
-            color:rgba(255,255,255,.94);
+            color:rgba(248,252,255,.96);
             font-size:.78rem;
             margin-top:4px;
             line-height:1.25;
@@ -20174,7 +20313,7 @@ def riesgo_detalle(riesgo_id):
           .riskform-section-title{
             font-weight:950;
             font-size:.78rem;
-            color:#1459a6;
+            color:#0b4a8f;
             padding:9px 12px;
             border-radius:12px;
             background:#eef5ff;
@@ -20252,7 +20391,7 @@ def riesgo_detalle(riesgo_id):
 
           .riskform-bottom-actions .btn-danger{
             border:none;
-            background:linear-gradient(135deg,#dc2626,#ef4444);
+            background:linear-gradient(135deg,#b91c1c,#ef4444);
             color:#fff;
           }
 
@@ -21434,7 +21573,7 @@ def editar_riesgo(id):
         min-width:54px;
         border-radius:14px;
         background:rgba(255,255,255,.96);
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -21472,7 +21611,7 @@ def editar_riesgo(id):
       }}
 
       .riskedit-subtitle{{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -21500,7 +21639,7 @@ def editar_riesgo(id):
       .riskedit-section-title{{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -21568,7 +21707,7 @@ def editar_riesgo(id):
 
       .riskedit-bottom-actions .btn-danger{{
         border:none;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
       }}
 
@@ -22117,7 +22256,7 @@ def objetivos_new():
         min-width:54px;
         border-radius:14px;
         background:rgba(255,255,255,.96);
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -22155,7 +22294,7 @@ def objetivos_new():
       }
 
       .objform-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -22284,7 +22423,7 @@ def objetivos_new():
 
       .objform-bottom-actions .btn-danger{
         border:none;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
       }
 
@@ -22578,7 +22717,7 @@ def objetivos_matriz():
         min-width:54px;
         border-radius:14px;
         background:rgba(255,255,255,.96);
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -22616,7 +22755,7 @@ def objetivos_matriz():
       }
 
       .obj-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -22692,13 +22831,13 @@ def objetivos_matriz():
       }
 
       .obj-table-note{
-        color:#64748b;
+        color:#475569;
         font-size:.78rem;
         margin-top:3px;
       }
 
       .obj-counter-badge{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         color:#fff;
         font-weight:900;
         border-radius:999px;
@@ -22754,7 +22893,7 @@ def objetivos_matriz():
         vertical-align:top;
         font-size:.68rem;
         padding:9px 8px;
-        color:#1f2937;
+        color:#101827;
         border-right:1px solid #dce6f3;
         border-bottom:1px solid #dce6f3;
         background:rgba(255,255,255,.98);
@@ -22778,7 +22917,7 @@ def objetivos_matriz():
       .obj-mini-note{
         margin-top:5px;
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         line-height:1.25;
       }
 
@@ -22805,25 +22944,25 @@ def objetivos_matriz():
       }
 
       .obj-matriz .btn-info{
-        background:#0ea5e9;
+        background:#087ab8;
         border:none;
         color:#fff;
       }
 
       .obj-matriz .btn-warning{
-        background:#f59e0b;
+        background:#c76b00;
         border:none;
-        color:#111827;
+        color:#0b1220;
       }
 
       .obj-matriz .btn-danger{
-        background:#dc2626;
+        background:#b91c1c;
         border:none;
         color:#fff;
       }
 
       .obj-matriz .btn-success{
-        background:#16a34a;
+        background:#087c3d;
         border:none;
         color:#fff;
       }
@@ -23142,7 +23281,7 @@ def objetivos_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:rgba(255,255,255,.96);
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -23180,7 +23319,7 @@ def objetivos_detalle(id):
       }
 
       .objd-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -23255,7 +23394,7 @@ def objetivos_detalle(id):
       .objd-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -23280,12 +23419,12 @@ def objetivos_detalle(id):
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:6px;
       }
 
       .objd-value{
-        color:#1f2937;
+        color:#101827;
         font-size:.82rem;
         line-height:1.38;
         white-space:pre-wrap;
@@ -23302,7 +23441,7 @@ def objetivos_detalle(id):
       .objd-subvalue{
         margin-top:7px;
         font-size:.74rem;
-        color:#64748b;
+        color:#475569;
         line-height:1.3;
       }
 
@@ -23599,7 +23738,7 @@ def objetivos_edit(id):
         min-width:54px;
         border-radius:14px;
         background:rgba(255,255,255,.96);
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -23637,7 +23776,7 @@ def objetivos_edit(id):
       }
 
       .objform-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -23768,7 +23907,7 @@ def objetivos_edit(id):
 
       .objform-bottom-actions .btn-danger{
         border:none;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
       }
 
@@ -24186,7 +24325,7 @@ def parte_interesada_new():
         min-width:54px;
         border-radius:14px;
         background:rgba(255,255,255,.96);
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -24224,7 +24363,7 @@ def parte_interesada_new():
       }
 
       .partesnew-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -24346,7 +24485,7 @@ def parte_interesada_new():
         align-items:center;
         justify-content:center;
         font-size:1.55rem;
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         color:#fff;
         box-shadow:0 8px 18px rgba(47,111,182,.24);
       }
@@ -24359,7 +24498,7 @@ def parte_interesada_new():
 
       .partesnew-upload-subtitle2{
         font-size:.78rem;
-        color:#64748b;
+        color:#475569;
         margin-top:4px;
       }
 
@@ -24404,7 +24543,7 @@ def parte_interesada_new():
         height:32px;
         min-width:32px;
         border-radius:11px;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
         display:flex;
         align-items:center;
@@ -24420,7 +24559,7 @@ def parte_interesada_new():
       .partesnew-file-name{
         font-size:.78rem;
         font-weight:900;
-        color:#111827;
+        color:#0b1220;
         white-space:nowrap;
         overflow:hidden;
         text-overflow:ellipsis;
@@ -24429,7 +24568,7 @@ def parte_interesada_new():
 
       .partesnew-file-status{
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         margin-top:2px;
       }
 
@@ -24478,7 +24617,7 @@ def parte_interesada_new():
 
       .partesnew-bottom-actions .btn-danger{
         border:none;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
       }
 
@@ -25066,7 +25205,7 @@ def partes_interesadas_matriz():
         min-width:54px;
         border-radius:14px;
         background:rgba(255,255,255,.96);
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -25104,7 +25243,7 @@ def partes_interesadas_matriz():
       }
 
       .pi-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -25178,13 +25317,13 @@ def partes_interesadas_matriz():
       }
 
       .pi-table-note{
-        color:#64748b;
+        color:#475569;
         font-size:.78rem;
         margin-top:3px;
       }
 
       .pi-counter-badge{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         color:#fff;
         font-weight:900;
         border-radius:999px;
@@ -25232,7 +25371,7 @@ def partes_interesadas_matriz():
         vertical-align:top;
         font-size:.68rem;
         padding:9px 8px;
-        color:#1f2937;
+        color:#101827;
         border-right:1px solid #dce6f3;
         border-bottom:1px solid #dce6f3;
         background:#ffffff;
@@ -25530,7 +25669,7 @@ def parte_interesada_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:rgba(255,255,255,.96);
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -25568,7 +25707,7 @@ def parte_interesada_detalle(id):
       }
 
       .pid-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -25634,7 +25773,7 @@ def parte_interesada_detalle(id):
       .pid-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -25655,12 +25794,12 @@ def parte_interesada_detalle(id):
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:6px;
       }
 
       .pid-value{
-        color:#1f2937;
+        color:#101827;
         font-size:.82rem;
         line-height:1.38;
         white-space:pre-wrap;
@@ -25704,7 +25843,7 @@ def parte_interesada_detalle(id):
         height:32px;
         min-width:32px;
         border-radius:11px;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
         display:flex;
         align-items:center;
@@ -25733,7 +25872,7 @@ def parte_interesada_detalle(id):
 
       .pid-ev-size{
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         margin-top:2px;
       }
 
@@ -25743,7 +25882,7 @@ def parte_interesada_detalle(id):
         border-radius:14px;
         padding:8px 7px;
         text-align:center;
-        color:#64748b;
+        color:#475569;
         font-size:.80rem;
       }
 
@@ -26178,7 +26317,7 @@ def parte_interesada_edit(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -26286,7 +26425,7 @@ def parte_interesada_edit(id):
         height:52px;
         margin:auto;
         border-radius:14px;
-        background:linear-gradient(135deg,#0b3a6e,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#1d5fae);
         color:#fff;
         display:flex;
         align-items:center;
@@ -26314,7 +26453,7 @@ def parte_interesada_edit(id):
         width:36px;
         height:36px;
         border-radius:10px;
-        background:#dc2626;
+        background:#b91c1c;
         color:#fff;
         display:flex;
         align-items:center;
@@ -26696,7 +26835,7 @@ def contexto_interno_new():
         min-width:54px;
         border-radius:14px;
         background:rgba(255,255,255,.96);
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -26734,7 +26873,7 @@ def contexto_interno_new():
       }
 
       .ctxint-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -26855,7 +26994,7 @@ def contexto_interno_new():
 
       .ctxint-bottom-actions .btn-danger{
         border:none;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
       }
 
@@ -27136,7 +27275,7 @@ def contexto_interno_matriz():
         min-width:54px;
         border-radius:14px;
         background:rgba(255,255,255,.96);
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -27174,7 +27313,7 @@ def contexto_interno_matriz():
       }
 
       .ctxintmat-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -27243,13 +27382,13 @@ def contexto_interno_matriz():
       }
 
       .ctxintmat-top-note{
-        color:#64748b;
+        color:#475569;
         font-size:.78rem;
         margin-top:3px;
       }
 
       .ctxintmat-counter-badge{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         color:#fff;
         font-weight:900;
         border-radius:999px;
@@ -27301,7 +27440,7 @@ def contexto_interno_matriz():
       }
 
       .ctxintmat-table td{
-        color:#1f2937;
+        color:#101827;
         border-right:1px solid #dce6f3;
         border-bottom:1px solid #dce6f3;
         background:#ffffff;
@@ -27343,25 +27482,25 @@ def contexto_interno_matriz():
       }
 
       .ctxintmat-table .btn-info{
-        background:#0ea5e9;
+        background:#087ab8;
         border:none;
         color:#fff;
       }
 
       .ctxintmat-table .btn-warning{
-        background:#f59e0b;
+        background:#c76b00;
         border:none;
-        color:#111827;
+        color:#0b1220;
       }
 
       .ctxintmat-table .btn-danger{
-        background:#dc2626;
+        background:#b91c1c;
         border:none;
         color:#fff;
       }
 
       .ctxintmat-table .btn-success{
-        background:#16a34a;
+        background:#087c3d;
         border:none;
         color:#fff;
       }
@@ -27626,7 +27765,7 @@ def contexto_interno_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -27710,7 +27849,7 @@ def contexto_interno_detalle(id):
       .ctxintd-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -27734,12 +27873,12 @@ def contexto_interno_detalle(id):
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:6px;
       }
 
       .ctxintd-value{
-        color:#1f2937;
+        color:#101827;
         font-size:.82rem;
         line-height:1.38;
         white-space:pre-wrap;
@@ -28000,7 +28139,7 @@ def contexto_interno_edit(id):
         min-width:54px;
         border-radius:14px;
         background:rgba(255,255,255,.96);
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -28038,7 +28177,7 @@ def contexto_interno_edit(id):
       }
 
       .ctxinted-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -28159,7 +28298,7 @@ def contexto_interno_edit(id):
 
       .ctxinted-bottom-actions .btn-danger{
         border:none;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
       }
 
@@ -28496,7 +28635,7 @@ def contexto_externo_new():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -28644,7 +28783,7 @@ def contexto_externo_new():
 
       .ctxext-bottom-actions .btn-danger{
         border:none;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
       }
 
@@ -28914,7 +29053,7 @@ def contexto_externo_matriz():
         min-width:54px;
         border-radius:14px;
         background:rgba(255,255,255,.96);
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -28952,7 +29091,7 @@ def contexto_externo_matriz():
       }
 
       .ctxextmat-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -29021,13 +29160,13 @@ def contexto_externo_matriz():
       }
 
       .ctxextmat-top-note{
-        color:#64748b;
+        color:#475569;
         font-size:.78rem;
         margin-top:3px;
       }
 
       .ctxextmat-counter-badge{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         color:#fff;
         font-weight:900;
         border-radius:999px;
@@ -29079,7 +29218,7 @@ def contexto_externo_matriz():
       }
 
       .ctxextmat-table td{
-        color:#1f2937;
+        color:#101827;
         border-right:1px solid #dce6f3;
         border-bottom:1px solid #dce6f3;
         background:#ffffff;
@@ -29121,25 +29260,25 @@ def contexto_externo_matriz():
       }
 
       .ctxextmat-table .btn-info{
-        background:#0ea5e9;
+        background:#087ab8;
         border:none;
         color:#fff;
       }
 
       .ctxextmat-table .btn-warning{
-        background:#f59e0b;
+        background:#c76b00;
         border:none;
-        color:#111827;
+        color:#0b1220;
       }
 
       .ctxextmat-table .btn-danger{
-        background:#dc2626;
+        background:#b91c1c;
         border:none;
         color:#fff;
       }
 
       .ctxextmat-table .btn-success{
-        background:#16a34a;
+        background:#087c3d;
         border:none;
         color:#fff;
       }
@@ -29401,7 +29540,7 @@ def contexto_externo_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -29429,7 +29568,7 @@ def contexto_externo_detalle(id):
       }
 
       .ctxextd-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -29493,7 +29632,7 @@ def contexto_externo_detalle(id):
       .ctxextd-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -29514,12 +29653,12 @@ def contexto_externo_detalle(id):
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:6px;
       }
 
       .ctxextd-value{
-        color:#1f2937;
+        color:#101827;
         font-size:.82rem;
         line-height:1.38;
         white-space:pre-wrap;
@@ -29781,7 +29920,7 @@ def contexto_externo_edit(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -29809,7 +29948,7 @@ def contexto_externo_edit(id):
       }
 
       .ctxexed-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -29929,7 +30068,7 @@ def contexto_externo_edit(id):
 
       .ctxexed-bottom-actions .btn-danger{
         border:none;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
       }
 
@@ -30320,7 +30459,7 @@ def dofa_new():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -30348,7 +30487,7 @@ def dofa_new():
       }
 
       .dofa-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -30458,12 +30597,12 @@ def dofa_new():
       .dofa-accordion .accordion-button{
         font-size:.84rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         background:#eef5ff;
       }
 
       .dofa-accordion .accordion-button:not(.collapsed){
-        color:#0b3a6e;
+        color:#062b55;
         background:#dbeafe;
         box-shadow:none;
       }
@@ -30494,7 +30633,7 @@ def dofa_new():
 
       .dofa-bottom-actions .btn-danger{
         border:none;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
       }
 
@@ -30758,7 +30897,7 @@ def dofa_list():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -30786,7 +30925,7 @@ def dofa_list():
       }
 
       .dofalist-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -31178,7 +31317,7 @@ def dofa_view(dofa_id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -31206,7 +31345,7 @@ def dofa_view(dofa_id):
       }
 
       .dofaview-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -31276,7 +31415,7 @@ def dofa_view(dofa_id):
         white-space:pre-wrap;
         font-size:.80rem;
         line-height:1.38;
-        color:#1f2937;
+        color:#101827;
       }
 
       .quad-f{ background:rgba(25,135,84,.10); }
@@ -31296,7 +31435,7 @@ def dofa_view(dofa_id):
         font-weight:950;
         font-size:.86rem;
         margin-bottom:8px;
-        color:#1459a6;
+        color:#0b4a8f;
       }
 
       .strat-box{
@@ -31307,7 +31446,7 @@ def dofa_view(dofa_id):
         min-height:95px;
         font-size:.80rem;
         line-height:1.38;
-        color:#1f2937;
+        color:#101827;
       }
 
       .dofaview-accordion .accordion-item{
@@ -31320,12 +31459,12 @@ def dofa_view(dofa_id):
       .dofaview-accordion .accordion-button{
         font-size:.84rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         background:#eef5ff;
       }
 
       .dofaview-accordion .accordion-button:not(.collapsed){
-        color:#0b3a6e;
+        color:#062b55;
         background:#dbeafe;
         box-shadow:none;
       }
@@ -31610,7 +31749,7 @@ def dofa_edit(dofa_id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -31638,7 +31777,7 @@ def dofa_edit(dofa_id):
       }
 
       .dofaedit-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -31759,12 +31898,12 @@ def dofa_edit(dofa_id):
       .dofaedit-accordion .accordion-button{
         font-size:.84rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         background:#eef5ff;
       }
 
       .dofaedit-accordion .accordion-button:not(.collapsed){
-        color:#0b3a6e;
+        color:#062b55;
         background:#dbeafe;
         box-shadow:none;
       }
@@ -31795,7 +31934,7 @@ def dofa_edit(dofa_id):
 
       .dofaedit-bottom-actions .btn-danger{
         border:none;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
       }
 
@@ -32160,7 +32299,7 @@ def docs_tipos_config():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -32188,7 +32327,7 @@ def docs_tipos_config():
       }
 
       .doccfg-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -32302,7 +32441,7 @@ def docs_tipos_config():
 
       .doccfg-bottom-actions .btn-danger{
         border:none;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
       }
 
@@ -32708,7 +32847,7 @@ def docs_new():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -32736,7 +32875,7 @@ def docs_new():
       }
 
       .docsadd-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -32838,7 +32977,7 @@ def docs_new():
 
       .docsadd-bottom-actions .btn-danger{
         border:none;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
       }
 
@@ -33281,7 +33420,7 @@ def docs_matriz():
         min-width:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -33309,7 +33448,7 @@ def docs_matriz():
       }
 
       .docmat-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -33410,13 +33549,13 @@ def docs_matriz():
       }
 
       .docmat-top-note{
-        color:#64748b;
+        color:#475569;
         font-size:.78rem;
         margin-top:3px;
       }
 
       .docmat-counter-badge{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         color:#fff;
         font-weight:900;
         border-radius:999px;
@@ -33469,7 +33608,7 @@ def docs_matriz():
       }
 
       .docmat-table td{
-        color:#1f2937;
+        color:#101827;
         border-right:1px solid #dce6f3;
         border-bottom:1px solid #dce6f3;
         background:#fff;
@@ -33939,7 +34078,7 @@ def docs_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -33967,7 +34106,7 @@ def docs_detalle(id):
       }
 
       .docdet-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -34031,7 +34170,7 @@ def docs_detalle(id):
       .docdet-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -34069,12 +34208,12 @@ def docs_detalle(id):
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:6px;
       }
 
       .docdet-value{
-        color:#1f2937;
+        color:#101827;
         font-size:.82rem;
         line-height:1.38;
         word-break:break-word;
@@ -34154,7 +34293,7 @@ def docs_detalle(id):
 
       .docdet-file-label{
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         font-weight:900;
       }
 
@@ -34173,7 +34312,7 @@ def docs_detalle(id):
 
       .docdet-file-size{
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         margin-top:2px;
       }
 
@@ -34183,7 +34322,7 @@ def docs_detalle(id):
         border-radius:14px;
         padding:8px 7px;
         text-align:center;
-        color:#64748b;
+        color:#475569;
         font-size:.80rem;
       }
 
@@ -34558,7 +34697,7 @@ def docs_edit(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -34586,7 +34725,7 @@ def docs_edit(id):
       }
 
       .docsedit-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -34707,7 +34846,7 @@ def docs_edit(id):
 
       .docsedit-bottom-actions .btn-danger{
         border:none;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
       }
 
@@ -35030,7 +35169,7 @@ def comunicaciones_new(reg_id=None):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -35058,7 +35197,7 @@ def comunicaciones_new(reg_id=None):
       }
 
       .com-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -35168,7 +35307,7 @@ def comunicaciones_new(reg_id=None):
 
       .com-bottom-actions .btn-danger{
         border:none;
-        background:linear-gradient(135deg,#dc2626,#ef4444);
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
         color:#fff;
       }
 
@@ -35444,7 +35583,7 @@ def comunicaciones_matriz():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -35472,7 +35611,7 @@ def comunicaciones_matriz():
       }
 
       .com-matrix-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -35538,13 +35677,13 @@ def comunicaciones_matriz():
       }
 
       .com-matrix-top-note{
-        color:#64748b;
+        color:#475569;
         font-size:.78rem;
         margin-top:3px;
       }
 
       .com-matrix-counter-badge{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         color:#fff;
         font-weight:900;
         border-radius:999px;
@@ -35918,7 +36057,7 @@ def comunicaciones_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -35946,7 +36085,7 @@ def comunicaciones_detalle(id):
       }
 
       .comdet-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -36010,7 +36149,7 @@ def comunicaciones_detalle(id):
       .comdet-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -36031,12 +36170,12 @@ def comunicaciones_detalle(id):
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:6px;
       }
 
       .comdet-value{
-        color:#1f2937;
+        color:#101827;
         font-size:.82rem;
         line-height:1.38;
         white-space:pre-wrap;
@@ -36376,7 +36515,7 @@ def requisito_legal_new():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -36404,7 +36543,7 @@ def requisito_legal_new():
       }
 
       .reqadd-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -36464,7 +36603,7 @@ def requisito_legal_new():
       .reqadd-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -36478,7 +36617,7 @@ def requisito_legal_new():
       .reqadd-card .form-label{
         font-weight:800;
         font-size:.78rem;
-        color:#1f2937;
+        color:#101827;
         margin-bottom:4px;
       }
 
@@ -36770,7 +36909,7 @@ def req_legal_matriz():
         min-width:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -36798,7 +36937,7 @@ def req_legal_matriz():
       }
 
       .req-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -36858,13 +36997,13 @@ def req_legal_matriz():
       }
 
       .req-top-note{
-        color:#64748b;
+        color:#475569;
         font-size:.78rem;
         margin-top:3px;
       }
 
       .req-counter-badge{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         color:#fff;
         font-weight:900;
         border-radius:999px;
@@ -37230,7 +37369,7 @@ def req_legal_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -37258,7 +37397,7 @@ def req_legal_detalle(id):
       }
 
       .reqdet-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -37322,7 +37461,7 @@ def req_legal_detalle(id):
       .reqdet-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -37343,12 +37482,12 @@ def req_legal_detalle(id):
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:6px;
       }
 
       .reqdet-value{
-        color:#1f2937;
+        color:#101827;
         font-size:.82rem;
         line-height:1.38;
         white-space:pre-wrap;
@@ -37616,7 +37755,7 @@ def requisito_legal_edit(id):
         min-width:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -37644,7 +37783,7 @@ def requisito_legal_edit(id):
       }
 
       .reqedit-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -37696,7 +37835,7 @@ def requisito_legal_edit(id):
       /* 🧾 FORM */
       .reqedit-card .form-label{
         font-weight:800;
-        color:#1459a6;
+        color:#0b4a8f;
         font-size:.78rem;
         margin-bottom:4px;
       }
@@ -38270,7 +38409,7 @@ def duenos_info():
         min-width:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -38306,7 +38445,7 @@ def duenos_info():
       }
 
       .duenos-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -39108,7 +39247,7 @@ def inventario_informacion_new():
         min-width:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -39136,7 +39275,7 @@ def inventario_informacion_new():
       }
 
       .invinfo-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -39740,7 +39879,7 @@ def inventario_informacion_edit(id):
         min-width:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -39768,7 +39907,7 @@ def inventario_informacion_edit(id):
       }
 
       .invinfoedit-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -40205,7 +40344,7 @@ def inventario_informacion():
         min-width:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -40233,7 +40372,7 @@ def inventario_informacion():
       }
 
       .invinfomat-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -40280,13 +40419,13 @@ def inventario_informacion():
       }
 
       .invinfomat-top-note{
-        color:#64748b;
+        color:#475569;
         font-size:.78rem;
         margin-top:3px;
       }
 
       .invinfomat-counter-badge{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         color:#fff;
         font-weight:900;
         border-radius:999px;
@@ -40779,7 +40918,7 @@ def inventario_informacion_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -40815,7 +40954,7 @@ def inventario_informacion_detalle(id):
       }
 
       .invinfodet-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
@@ -40878,7 +41017,7 @@ def inventario_informacion_detalle(id):
         min-height:37px;
         font-size:.80rem;
         background:#f8fafc !important;
-        color:#111827 !important;
+        color:#0b1220 !important;
         box-shadow:none;
       }
 
@@ -41442,7 +41581,7 @@ def inventario_software_new():
          HEADER SGSI UNIFICADO
       ========================= */
       .invsoft-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -41482,7 +41621,7 @@ def inventario_software_new():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -41641,7 +41780,7 @@ def inventario_software_new():
       }
 
       .invsoft-evidence-help{
-        color:#64748b;
+        color:#475569;
         font-size:.74rem;
         margin-top:5px;
       }
@@ -41666,7 +41805,7 @@ def inventario_software_new():
 
       .invsoftedit-evidence-help,
       .invsoftedit-empty-evidence{
-        color:#64748b;
+        color:#475569;
         font-size:.74rem;
         margin-top:5px;
       }
@@ -42153,7 +42292,7 @@ def inventario_software_edit(id):
       }
 
       .invsoftedit-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -42194,7 +42333,7 @@ def inventario_software_edit(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -42311,7 +42450,7 @@ def inventario_software_edit(id):
       }
 
       .invsoftedit-evidence-help{
-        color:#64748b;
+        color:#475569;
         font-size:.74rem;
         margin-top:5px;
       }
@@ -42373,7 +42512,7 @@ def inventario_software_edit(id):
       }
 
       .invsoftedit-evidence-meta{
-        color:#64748b;
+        color:#475569;
         font-size:.72rem;
         margin-top:3px;
       }
@@ -42396,7 +42535,7 @@ def inventario_software_edit(id):
         border:1px dashed #9ec5fe;
         border-radius:14px;
         padding:8px 7px;
-        color:#64748b;
+        color:#475569;
         font-size:.82rem;
         font-weight:700;
       }
@@ -42809,7 +42948,7 @@ def inventario_software():
       }
 
       .invsoftmat-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -42850,7 +42989,7 @@ def inventario_software():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -42933,12 +43072,12 @@ def inventario_software():
       }
 
       .invsoftmat-top-note{
-        color:#64748b;
+        color:#475569;
         font-size:.78rem;
       }
 
       .invsoftmat-counter-badge{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         color:#fff;
         font-weight:900;
         border-radius:999px;
@@ -43297,7 +43436,7 @@ def inventario_software_detalle(id):
       }
 
       .invsoftdet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -43336,7 +43475,7 @@ def inventario_software_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -43510,7 +43649,7 @@ def inventario_software_detalle(id):
       }
 
       .invsoftdet-evidence-meta{
-        color:#64748b;
+        color:#475569;
         font-size:.72rem;
         margin-top:3px;
       }
@@ -43533,7 +43672,7 @@ def inventario_software_detalle(id):
         border:1px dashed #9ec5fe;
         border-radius:14px;
         padding:8px 7px;
-        color:#64748b;
+        color:#475569;
         font-size:.82rem;
         font-weight:700;
       }
@@ -43768,9 +43907,9 @@ def inventario_software_evidencia_pdf(evidencia_id):
       .evidencia-header{
         background:linear-gradient(
           135deg,
-          #0b3a6e,
-          #1459a6,
-          #2c7be5
+          #062b55,
+          #0b4a8f,
+          #1d5fae
         );
 
         color:#fff !important;
@@ -45321,7 +45460,7 @@ def inventario_fisico_glpi_config():
       }
 
       .glpiinv-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -45360,7 +45499,7 @@ def inventario_fisico_glpi_config():
         min-width:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -45388,7 +45527,7 @@ def inventario_fisico_glpi_config():
       }
 
       .glpiinv-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -45924,7 +46063,7 @@ def inventario_fisico_new():
       }
 
       .invfis-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -45965,7 +46104,7 @@ def inventario_fisico_new():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -46538,7 +46677,7 @@ def inventario_fisico_edit(id):
          HEADER SGSI PRO
          ========================= */
       .invfisedit-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -46577,7 +46716,7 @@ def inventario_fisico_edit(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -47063,7 +47202,7 @@ def inventario_fisico():
       }
 
       .invfismat-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -47104,7 +47243,7 @@ def inventario_fisico():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -47140,7 +47279,7 @@ def inventario_fisico():
       }
 
       .invfismat-subtitle{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:4px;
       }
@@ -47164,9 +47303,9 @@ def inventario_fisico():
       }
 
       .invfismat-btn-config-glpi{
-        background:#64748b;
+        background:#475569;
         color:#fff;
-        border:1px solid #64748b;
+        border:1px solid #475569;
       }
 
       .invfismat-btn-config-glpi:hover{
@@ -47228,11 +47367,11 @@ def inventario_fisico():
 
       .invfismat-top-note{
         font-size:.78rem;
-        color:#64748b;
+        color:#475569;
       }
 
       .invfismat-counter-badge{
-        background:#1459a6;
+        background:#0b4a8f;
         color:#fff;
         border-radius:999px;
         padding:8px 14px;
@@ -47754,7 +47893,7 @@ def inventario_fisico_detalle(id):
       }
 
       .invfisdet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -47793,7 +47932,7 @@ def inventario_fisico_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -48452,7 +48591,7 @@ def inventario_datos_personales_new():
       }
 
       .invdp-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -48493,7 +48632,7 @@ def inventario_datos_personales_new():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -48607,7 +48746,7 @@ def inventario_datos_personales_new():
       .invdp-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -48827,7 +48966,7 @@ def inventario_datos_personales():
       }
 
       .invdpm-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -48868,7 +49007,7 @@ def inventario_datos_personales():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -48964,12 +49103,12 @@ def inventario_datos_personales():
       }
 
       .invdpm-top-note{
-        color:#64748b;
+        color:#475569;
         font-size:.78rem;
       }
 
       .invdpm-counter-badge{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         color:#fff;
         font-weight:900;
         border-radius:999px;
@@ -49218,7 +49357,7 @@ def inventario_datos_personales_detalle(id):
          HEADER SGSI MODERNO
       ========================= */
       .invdpd-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -49257,7 +49396,7 @@ def inventario_datos_personales_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -49770,7 +49909,7 @@ def inventario_datos_personales_edit(id):
       }
 
       .invdpe-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -49811,7 +49950,7 @@ def inventario_datos_personales_edit(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -49925,7 +50064,7 @@ def inventario_datos_personales_edit(id):
       .invdpe-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -50209,7 +50348,7 @@ def activos_valoracion():
       .plan-card-title{
         font-size:1.15rem; /* MISMA LETRA */
         font-weight:900;
-        color:#1f2937;
+        color:#101827;
         margin-top:10px;
         line-height:1.25;
       }
@@ -50601,7 +50740,7 @@ def valor_confidencialidad():
       }
 
       .valconf-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -50642,7 +50781,7 @@ def valor_confidencialidad():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -51210,7 +51349,7 @@ def valor_integridad():
        HEADER SGSI PRO
     ========================= */
     .valint-header-card{
-      background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+      background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
       border-radius:18px;
       padding:16px 24px;
       min-height:95px;
@@ -51249,7 +51388,7 @@ def valor_integridad():
       height:54px;
       border-radius:14px;
       background:#ffffff;
-      color:#1459a6;
+      color:#0b4a8f;
       display:flex;
       align-items:center;
       justify-content:center;
@@ -51781,7 +51920,7 @@ def valor_disponibilidad():
       }
 
       .valdisp-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:95px;
@@ -51819,7 +51958,7 @@ def valor_disponibilidad():
         height:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -52279,7 +52418,7 @@ def valor_criticidad_activo():
          HEADER SGSI MODERNO
       ========================= */
       .valcrit-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:95px;
@@ -52317,7 +52456,7 @@ def valor_criticidad_activo():
         height:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -52759,7 +52898,7 @@ def accesos_estados():
          HEADER SGSI UNIFICADO
       ========================= */
       .accestado-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -52797,7 +52936,7 @@ def accesos_estados():
         height:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -53215,7 +53354,7 @@ def accesos_new():
       }
 
       .accesoadd-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -53256,7 +53395,7 @@ def accesos_new():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -53765,7 +53904,7 @@ def accesos_matriz():
       }
 
       .accesomat-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -53806,7 +53945,7 @@ def accesos_matriz():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -53942,12 +54081,12 @@ def accesos_matriz():
       }
 
       .accesomat-top-note{
-        color:#64748b;
+        color:#475569;
         font-size:.78rem;
       }
 
       .accesomat-counter-badge{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         color:#fff;
         font-weight:900;
         border-radius:999px;
@@ -54345,7 +54484,7 @@ def accesos_detalle(id):
       }
 
       .accdet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -54386,7 +54525,7 @@ def accesos_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -54486,7 +54625,7 @@ def accesos_detalle(id):
       .accdet-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -54508,12 +54647,12 @@ def accesos_detalle(id):
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:6px;
       }
 
       .accdet-value{
-        color:#1f2937;
+        color:#101827;
         font-size:.82rem;
         line-height:1.38;
         white-space:pre-wrap;
@@ -54579,7 +54718,7 @@ def accesos_detalle(id):
 
       .accdet-file-size{
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         margin-top:2px;
       }
 
@@ -54969,7 +55108,7 @@ def accesos_edit(id):
          HEADER SGSI MODERNO
       ========================= */
       .accesoedit-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -55008,7 +55147,7 @@ def accesos_edit(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -55097,7 +55236,7 @@ def accesos_edit(id):
       .accesoedit-section-title{
         font-weight:950;
         font-size:.90rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:10px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -55111,7 +55250,7 @@ def accesos_edit(id):
       .accesoedit-card .form-label{
         font-weight:800;
         font-size:.78rem;
-        color:#1f2937;
+        color:#101827;
         margin-bottom:5px;
       }
 
@@ -55443,7 +55582,7 @@ def accesos_evidencia_view(evi_id):
       .accevi-file-pill{
         max-width:70%;
         background:rgba(255,255,255,.92);
-        color:#1f2937;
+        color:#101827;
         border:1px solid rgba(0,0,0,.08);
         border-radius:999px;
         padding:10px 16px;
@@ -55753,7 +55892,7 @@ def revision_accesos_new():
       }
 
       .revadd-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -55794,7 +55933,7 @@ def revision_accesos_new():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -56226,7 +56365,7 @@ def revision_accesos_matriz():
       }
 
       .revmat-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -56265,7 +56404,7 @@ def revision_accesos_matriz():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -56401,12 +56540,12 @@ def revision_accesos_matriz():
       }
 
       .revmat-top-note{
-        color:#64748b;
+        color:#475569;
         font-size:.78rem;
       }
 
       .revmat-counter-badge{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         color:#fff;
         font-weight:900;
         border-radius:999px;
@@ -56461,7 +56600,7 @@ def revision_accesos_matriz():
 
       .revmat-table td{
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .revmat-table tbody tr:nth-child(even){
@@ -56729,7 +56868,7 @@ def revision_accesos_detalle(id):
       }
 
       .revdet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -56770,7 +56909,7 @@ def revision_accesos_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -56870,7 +57009,7 @@ def revision_accesos_detalle(id):
       .revdet-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -56902,12 +57041,12 @@ def revision_accesos_detalle(id):
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:6px;
       }
 
       .revdet-value{
-        color:#1f2937;
+        color:#101827;
         font-size:.82rem;
         line-height:1.38;
         white-space:pre-wrap;
@@ -57160,7 +57299,7 @@ def revision_accesos_edit(id):
       }
 
       .revedit-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -57201,7 +57340,7 @@ def revision_accesos_edit(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -57288,7 +57427,7 @@ def revision_accesos_edit(id):
       .revedit-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -57328,7 +57467,7 @@ def revision_accesos_edit(id):
         border-radius:0 9px 9px 0;
         border:1px solid #d9e3f0;
         background:#eef5ff;
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:900;
       }
 
@@ -58392,7 +58531,7 @@ def rfc_new():
       }
 
       .rfcadd-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -58433,7 +58572,7 @@ def rfc_new():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -58548,7 +58687,7 @@ def rfc_new():
       .rfcadd-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -59110,7 +59249,7 @@ def rfc_aprobar_seguridad(id):
       }
 
       .rfcsec-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -59151,7 +59290,7 @@ def rfc_aprobar_seguridad(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -59259,7 +59398,7 @@ def rfc_aprobar_seguridad(id):
       }
 
       .rfcsec-status-subtitle{
-        color:#64748b;
+        color:#475569;
         font-size:.78rem;
         margin-top:2px;
       }
@@ -59267,7 +59406,7 @@ def rfc_aprobar_seguridad(id):
       .rfcsec-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -59701,7 +59840,7 @@ def rfc_matriz():
       }
 
       .rfcmat-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -59742,7 +59881,7 @@ def rfc_matriz():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -59821,7 +59960,7 @@ def rfc_matriz():
 
       .rfcmat-topbar-subtitle{
         font-size:.78rem;
-        color:#64748b;
+        color:#475569;
       }
 
       .rfcmat-filter-card{
@@ -59917,7 +60056,7 @@ def rfc_matriz():
 
       .rfcmat-table td{
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .rfcmat-table tbody tr:nth-child(even){
@@ -61102,7 +61241,7 @@ def rfc_edit(id):
       }
 
       .rfcedit-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -61143,7 +61282,7 @@ def rfc_edit(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -61260,7 +61399,7 @@ def rfc_edit(id):
       .rfcedit-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -61581,7 +61720,7 @@ def rfc_evidencia_view(evi_id):
       .rfcevi-file-pill{
         max-width:70%;
         background:rgba(255,255,255,.92);
-        color:#1f2937;
+        color:#101827;
         border:1px solid rgba(0,0,0,.08);
         border-radius:999px;
         padding:10px 16px;
@@ -62262,7 +62401,7 @@ def rfc_view(id):
       }
 
       .rfcdet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -62303,7 +62442,7 @@ def rfc_view(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -62404,7 +62543,7 @@ def rfc_view(id):
       .rfcdet-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -62447,12 +62586,12 @@ def rfc_view(id):
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:6px;
       }
 
       .rfcdet-value{
-        color:#1f2937;
+        color:#101827;
         font-size:.82rem;
         line-height:1.38;
         white-space:pre-wrap;
@@ -62589,7 +62728,7 @@ def rfc_view(id):
 
       .rfcdet-file-label{
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         font-weight:900;
       }
 
@@ -62608,7 +62747,7 @@ def rfc_view(id):
 
       .rfcdet-file-size{
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         margin-top:2px;
       }
 
@@ -62618,7 +62757,7 @@ def rfc_view(id):
         border-radius:14px;
         padding:16px;
         text-align:center;
-        color:#64748b;
+        color:#475569;
         font-size:.82rem;
         font-weight:800;
       }
@@ -63138,7 +63277,7 @@ def incidentes_nuevo():
       }
 
       .incadd-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -63179,7 +63318,7 @@ def incidentes_nuevo():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -63296,7 +63435,7 @@ def incidentes_nuevo():
       .incadd-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -63718,7 +63857,7 @@ def incidentes_matriz():
       }
 
       .incmat-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -63759,7 +63898,7 @@ def incidentes_matriz():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -63856,7 +63995,7 @@ def incidentes_matriz():
 
       .incmat-topbar-subtitle{
         font-size:.78rem;
-        color:#64748b;
+        color:#475569;
       }
 
       .incmat-filter-card{
@@ -63953,7 +64092,7 @@ def incidentes_matriz():
 
       .incmat-table td{
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .incmat-table tbody tr:nth-child(even){
@@ -64242,7 +64381,7 @@ def incidentes_detalle(id):
          HEADER SGSI UNIFICADO
       ========================= */
       .incview-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -64281,7 +64420,7 @@ def incidentes_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -64376,7 +64515,7 @@ def incidentes_detalle(id):
       .incview-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -64405,7 +64544,7 @@ def incidentes_detalle(id):
       }
 
       .incview-value{
-        color:#1f2937;
+        color:#101827;
         font-size:.85rem;
         white-space:pre-wrap;
         word-break:break-word;
@@ -64887,7 +65026,7 @@ def incidentes_editar(id):
       }
 
       .incedit-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -64928,7 +65067,7 @@ def incidentes_editar(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -65045,7 +65184,7 @@ def incidentes_editar(id):
       .incedit-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -67327,7 +67466,7 @@ def vuln_scan_shell(title, body_html):
       }
 
       .plan-hero{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -67357,7 +67496,7 @@ def vuln_scan_shell(title, body_html):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -67458,7 +67597,7 @@ def vuln_scan_shell(title, body_html):
       .section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -67507,7 +67646,7 @@ def vuln_scan_shell(title, body_html):
 
       .soft-table td{
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .soft-table tbody tr:nth-child(even){
@@ -67536,11 +67675,11 @@ def vuln_scan_shell(title, body_html):
       .sev-media{ background:#d97706; color:#ffffff; }
       .sev-baja{ background:#15803d; color:#ffffff; }
 
-      .estado-pendiente{ background:#6b7280; color:#ffffff; }
+      .estado-pendiente{ background:#4b5563; color:#ffffff; }
       .estado-ejecutando{ background:#1d4ed8; color:#ffffff; }
       .estado-finalizado{ background:#15803d; color:#ffffff; }
       .estado-error{ background:#b91c1c; color:#ffffff; }
-      .estado-detenido{ background:#7c3aed; color:#ffffff; }
+      .estado-detenido{ background:#5521a8; color:#ffffff; }
 
       .metric-box{
         padding:14px 16px;
@@ -67549,14 +67688,14 @@ def vuln_scan_shell(title, body_html):
 
       .metric-label{
         font-size:.78rem;
-        color:#64748b;
+        color:#475569;
         font-weight:900;
         overflow-wrap:break-word;
       }
 
       .metric-value{
         font-size:1.28rem;
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:950;
         margin-top:4px;
         overflow-wrap:break-word;
@@ -68046,7 +68185,7 @@ def vulnerabilidad_new():
          HEADER SGSI UNIFICADO (IGUAL A TODOS)
       ========================= */
       .vulnadd-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -68085,7 +68224,7 @@ def vulnerabilidad_new():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -68210,7 +68349,7 @@ def vulnerabilidad_new():
       .vulnadd-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -68469,6 +68608,12 @@ def vulnerabilidades_matriz():
             </div>
           </div>
 
+          <a href="{{ url_for('sast_index') }}"
+             class="btn btn-primary rounded-pill px-4 fw-semibold"
+             onclick="showLoader()">
+            Pruebas SAST
+          </a>
+
         </div>
       </div>
 
@@ -68644,7 +68789,7 @@ def vulnerabilidades_matriz():
       }
 
       .plan-hero{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -68674,7 +68819,7 @@ def vulnerabilidades_matriz():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -68800,7 +68945,7 @@ def vulnerabilidades_matriz():
       .kali-menu-header{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.04em;
         padding:7px 10px 8px 10px;
@@ -68814,7 +68959,7 @@ def vulnerabilidades_matriz():
         text-decoration:none;
         text-align:left;
         background:transparent;
-        color:#1f2937;
+        color:#101827;
         border:none;
         border-radius:10px;
         padding:9px 12px;
@@ -68826,7 +68971,7 @@ def vulnerabilidades_matriz():
 
       .kali-menu-item:hover{
         background:#eef5ff;
-        color:#1459a6;
+        color:#0b4a8f;
       }
 
       .kali-menu-item-disabled{
@@ -68932,7 +69077,7 @@ def vulnerabilidades_matriz():
 
       .vuln-table td{
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .desc-cell{
@@ -69161,9 +69306,9 @@ def vulnerabilidades_matriz():
             }
 
             const palette = {
-              success: ['#ecfdf5', '#16a34a', '#14532d', '✅'],
-              warning: ['#fffbeb', '#f59e0b', '#78350f', '⚠️'],
-              danger:  ['#fef2f2', '#dc2626', '#7f1d1d', '⛔'],
+              success: ['#ecfdf5', '#087c3d', '#14532d', '✅'],
+              warning: ['#fffbeb', '#c76b00', '#78350f', '⚠️'],
+              danger:  ['#fef2f2', '#b91c1c', '#7f1d1d', '⛔'],
               info:    ['#eff6ff', '#3f86d6', '#1e3a8a', 'ℹ️']
             };
 
@@ -69427,7 +69572,7 @@ def vulnerabilidad_detalle(id):
       }
 
       .vulndet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -69457,7 +69602,7 @@ def vulnerabilidad_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -69566,7 +69711,7 @@ def vulnerabilidad_detalle(id):
       .vulndet-section-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:10px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:6px;
@@ -69586,7 +69731,7 @@ def vulnerabilidad_detalle(id):
         font-size:.70rem;
         font-weight:900;
         text-transform:uppercase;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:4px;
         letter-spacing:.03em;
       }
@@ -69603,7 +69748,7 @@ def vulnerabilidad_detalle(id):
       .vulndet-value-lg{
         font-size:.90rem;
         font-weight:800;
-        color:#1f2937;
+        color:#101827;
       }
 
       .vulndet-file-card{
@@ -69623,7 +69768,7 @@ def vulnerabilidad_detalle(id):
       .vulndet-file-name{
         font-size:.82rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-decoration:none;
         word-break:break-word;
         overflow-wrap:anywhere;
@@ -69640,7 +69785,7 @@ def vulnerabilidad_detalle(id):
         padding:8px 7px;
         text-align:center;
         font-size:.82rem;
-        color:#64748b;
+        color:#475569;
         font-weight:700;
       }
 
@@ -69972,7 +70117,7 @@ def vulnerabilidad_edit(id):
       }
 
       .vulnedit-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -70013,7 +70158,7 @@ def vulnerabilidad_edit(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -70102,7 +70247,7 @@ def vulnerabilidad_edit(id):
       .vulnedit-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -70142,7 +70287,7 @@ def vulnerabilidad_edit(id):
         border-radius:0 9px 9px 0;
         border:1px solid #d9e3f0;
         background:#eef5ff;
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:900;
       }
 
@@ -70169,7 +70314,7 @@ def vulnerabilidad_edit(id):
 
       .vulnedit-evidence-meta{
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         margin-top:4px;
         font-weight:700;
       }
@@ -70936,7 +71081,7 @@ def vulnerabilidad_evidencia_view(evi_id):
 
       .vulevi-file-label{
         font-size:.78rem;
-        color:#64748b;
+        color:#475569;
         font-weight:700;
       }
 
@@ -74528,7 +74673,7 @@ def threat_model_asset_view():
       }
 
       .mitre-tactic-col{
-        background:rgba(255,255,255,.94);
+        background:rgba(248,252,255,.96);
         border:1px solid rgba(31,73,125,.13);
         border-radius:18px;
         box-shadow:0 10px 24px rgba(0,0,0,.10);
@@ -75465,7 +75610,7 @@ def threat_model_unmapped_complementary_view():
       .section-title{
         font-size:1.1rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
       }
 
       @media (max-width:992px){
@@ -76207,7 +76352,7 @@ def plan_remediacion_new():
       }
 
       .remadd-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -76248,7 +76393,7 @@ def plan_remediacion_new():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -76363,7 +76508,7 @@ def plan_remediacion_new():
       .remadd-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -76754,7 +76899,7 @@ def plan_remediacion_matriz():
       }
 
       .remmat-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -76790,7 +76935,7 @@ def plan_remediacion_matriz():
         height:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -77228,7 +77373,7 @@ def plan_remediacion_detalle(id):
       }
 
       .remdet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -77269,7 +77414,7 @@ def plan_remediacion_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -77371,7 +77516,7 @@ def plan_remediacion_detalle(id):
       .remdet-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -77403,12 +77548,12 @@ def plan_remediacion_detalle(id):
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:6px;
       }
 
       .remdet-value{
-        color:#1f2937;
+        color:#101827;
         font-size:.82rem;
         line-height:1.38;
         white-space:pre-wrap;
@@ -77777,7 +77922,7 @@ def plan_remediacion_edit(id):
       }
 
       .remedit-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -77820,7 +77965,7 @@ def plan_remediacion_edit(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -77912,7 +78057,7 @@ def plan_remediacion_edit(id):
       .remedit-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -78323,7 +78468,7 @@ def plan_remediacion_jira(id):
          HEADER SGSI MODERNO
       ========================= */
       .jira-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -78360,7 +78505,7 @@ def plan_remediacion_jira(id):
         height:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -78442,7 +78587,7 @@ def plan_remediacion_jira(id):
       .jira-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -78742,7 +78887,7 @@ def jira_config_view():
       }
 
       .jiracfg-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -78783,7 +78928,7 @@ def jira_config_view():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -78872,7 +79017,7 @@ def jira_config_view():
       .jiracfg-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -81399,7 +81544,7 @@ def camp_conc_common_css(prefix):
       }}
 
       .{prefix}-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -81439,7 +81584,7 @@ def camp_conc_common_css(prefix):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -81541,7 +81686,7 @@ def camp_conc_common_css(prefix):
 
       .{prefix}-top-note{{
         font-size:.80rem;
-        color:#64748b;
+        color:#475569;
       }}
 
       .{prefix}-counter-badge{{
@@ -81602,7 +81747,7 @@ def camp_conc_common_css(prefix):
         margin-top:4px;
         background:#eef5ff;
         border:1px solid #d9eaff;
-        color:#1459a6;
+        color:#0b4a8f;
         border-radius:999px;
         padding:3px 9px;
         font-size:.70rem;
@@ -81628,7 +81773,7 @@ def camp_conc_common_css(prefix):
       .{prefix}-kpi-label{{
         font-size:.68rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
       }}
@@ -81643,7 +81788,7 @@ def camp_conc_common_css(prefix):
       .{prefix}-section-title{{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -81730,7 +81875,7 @@ def camp_conc_common_css(prefix):
         margin:8px 0 10px;
         background:#eef5ff;
         border:1px solid #d9eaff;
-        color:#1459a6;
+        color:#0b4a8f;
         border-radius:999px;
         padding:4px 10px;
         font-size:.72rem;
@@ -81744,7 +81889,7 @@ def camp_conc_common_css(prefix):
       .campopt-label{{
         font-size:.70rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         margin-bottom:3px;
@@ -81785,7 +81930,7 @@ def camp_conc_common_css(prefix):
       .campdet-section-title{{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -81808,14 +81953,14 @@ def camp_conc_common_css(prefix):
         font-weight:950;
         text-transform:uppercase;
         letter-spacing:.35px;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:6px;
       }}
 
       .campdet-value,
       .campdet-section-body,
       .campdet-struct-value{{
-        color:#1f2937;
+        color:#101827;
         font-size:.84rem;
         line-height:1.48;
         word-break:break-word;
@@ -82182,7 +82327,7 @@ def plan_diseno_new():
          HEADER SGSI UNIFICADO (CORREGIDO)
       ========================= */
       .plandis-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -82221,7 +82366,7 @@ def plan_diseno_new():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -82348,7 +82493,7 @@ def plan_diseno_new():
       .plandis-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -82595,7 +82740,7 @@ def plan_diseno_matriz():
       }}
 
       .plancapmat-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -82638,7 +82783,7 @@ def plan_diseno_matriz():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -82707,7 +82852,7 @@ def plan_diseno_matriz():
       }}
 
       .plancapmat-top-note{{
-        color:#64748b;
+        color:#475569;
         font-size:.78rem;
       }}
 
@@ -82765,7 +82910,7 @@ def plan_diseno_matriz():
 
       .plancapmat-table td{{
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }}
 
       .plancapmat-table tbody tr:nth-child(even){{
@@ -83017,7 +83162,7 @@ def plan_diseno_detalle(id):
       }
 
       .plancapdet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -83060,7 +83205,7 @@ def plan_diseno_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -83158,7 +83303,7 @@ def plan_diseno_detalle(id):
       .plancapdet-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -83180,12 +83325,12 @@ def plan_diseno_detalle(id):
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:6px;
       }
 
       .plancapdet-value{
-        color:#1f2937;
+        color:#101827;
         font-size:.82rem;
         line-height:1.38;
         white-space:pre-wrap;
@@ -83232,7 +83377,7 @@ def plan_diseno_detalle(id):
         height:52px;
         min-width:52px;
         border-radius:12px;
-        background:linear-gradient(135deg,#dc2626,#b91c1c);
+        background:linear-gradient(135deg,#b91c1c,#b91c1c);
         color:#fff;
         display:flex;
         align-items:center;
@@ -83247,7 +83392,7 @@ def plan_diseno_detalle(id):
 
       .plancapdet-file-label{
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
@@ -83269,7 +83414,7 @@ def plan_diseno_detalle(id):
 
       .plancapdet-file-size{
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         margin-top:3px;
         font-weight:700;
       }
@@ -83280,7 +83425,7 @@ def plan_diseno_detalle(id):
         border-radius:14px;
         padding:16px;
         text-align:center;
-        color:#64748b;
+        color:#475569;
         font-size:.82rem;
         font-weight:800;
       }
@@ -83616,7 +83761,7 @@ def plan_diseno_edit(id):
        HEADER SGSI MODERNO (🔥 CLAVE)
     ========================= */
     .plancapedit-header-card{
-      background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+      background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
       border-radius:18px;
       padding:16px 24px;
       min-height:94px;
@@ -83657,7 +83802,7 @@ def plan_diseno_edit(id):
       min-width:54px;
       border-radius:14px;
       background:#ffffff;
-      color:#1459a6;
+      color:#0b4a8f;
       display:flex;
       align-items:center;
       justify-content:center;
@@ -83748,7 +83893,7 @@ def plan_diseno_edit(id):
       font-weight:800;
       font-size:.75rem;
       text-transform:uppercase;
-      color:#1459a6;
+      color:#0b4a8f;
     }
 
     .plancapedit-card .form-control,
@@ -83761,7 +83906,7 @@ def plan_diseno_edit(id):
 
     .plancapedit-card .form-control:focus,
     .plancapedit-card .form-select:focus{
-      border-color:#2c7be5;
+      border-color:#1d5fae;
       box-shadow:0 0 0 0.2rem rgba(44,123,229,.15);
     }
 
@@ -83771,7 +83916,7 @@ def plan_diseno_edit(id):
     .plancapedit-section-title{
       font-weight:950;
       font-size:.78rem;
-      color:#1459a6;
+      color:#0b4a8f;
       padding:10px 12px;
       border-radius:12px;
       background:#eef5ff;
@@ -84112,7 +84257,7 @@ def plan_diseno_evidencia_view(evi_id):
       .plancevi-file-pill{
         max-width:70%;
         background:rgba(255,255,255,.92);
-        color:#1f2937;
+        color:#101827;
         border:1px solid rgba(0,0,0,.08);
         border-radius:999px;
         padding:10px 16px;
@@ -84541,7 +84686,7 @@ def plan_cf_new():
       }
 
       .plancf-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -84584,7 +84729,7 @@ def plan_cf_new():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -84704,7 +84849,7 @@ def plan_cf_new():
       .plancf-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -84714,7 +84859,7 @@ def plan_cf_new():
 
       .plancf-readonly{
         background:#eef5ff !important;
-        color:#1459a6 !important;
+        color:#0b4a8f !important;
         border:1px solid #d9eaff !important;
         font-weight:900;
       }
@@ -85027,7 +85172,7 @@ def plan_cf_matriz():
       }}
 
       .plancfmat-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -85070,7 +85215,7 @@ def plan_cf_matriz():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -85168,7 +85313,7 @@ def plan_cf_matriz():
       }}
 
       .plancfmat-top-note{{
-        color:#64748b;
+        color:#475569;
         font-size:.78rem;
       }}
 
@@ -85228,7 +85373,7 @@ def plan_cf_matriz():
 
       .plancfmat-table td{{
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }}
 
       .plancfmat-table tbody tr:nth-child(even){{
@@ -85494,7 +85639,7 @@ def plan_cf_detalle(id):
          HEADER SGSI MODERNO (UNIFICADO)
       ========================= */
       .plancfdet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -85533,7 +85678,7 @@ def plan_cf_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -85631,7 +85776,7 @@ def plan_cf_detalle(id):
       .plancfdet-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -85658,7 +85803,7 @@ def plan_cf_detalle(id):
       }
 
       .plancfdet-value{
-        color:#111827;
+        color:#0b1220;
         font-size:.90rem;
         word-break:break-word;
       }
@@ -85990,7 +86135,7 @@ def plan_cf_edit(id):
       }
 
       .plancfedit-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -86033,7 +86178,7 @@ def plan_cf_edit(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -86125,7 +86270,7 @@ def plan_cf_edit(id):
       .plancfedit-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -86165,13 +86310,13 @@ def plan_cf_edit(id):
         border-radius:0 9px 9px 0;
         border:1px solid #d9e3f0;
         background:#eef5ff;
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:900;
       }
 
       .plancfedit-readonly{
         background:#eef5ff !important;
-        color:#1459a6 !important;
+        color:#0b4a8f !important;
         border:1px solid #d9eaff !important;
         font-weight:900;
       }
@@ -86537,7 +86682,7 @@ def plan_remediacion_competencias_new():
       }
 
       .plancomp-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -86580,7 +86725,7 @@ def plan_remediacion_competencias_new():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -86700,7 +86845,7 @@ def plan_remediacion_competencias_new():
       .plancomp-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -87036,7 +87181,7 @@ def plan_remediacion_competencias_matriz():
       }
 
       .plancompmat-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -87079,7 +87224,7 @@ def plan_remediacion_competencias_matriz():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -87176,7 +87321,7 @@ def plan_remediacion_competencias_matriz():
 
       .plancompmat-topbar-subtitle{
         font-size:.78rem;
-        color:#64748b;
+        color:#475569;
       }
 
       .plancompmat-filter-card{
@@ -87273,7 +87418,7 @@ def plan_remediacion_competencias_matriz():
 
       .plancompmat-table td{
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .plancompmat-table tbody tr:nth-child(even){
@@ -87505,7 +87650,7 @@ def plan_remediacion_competencias_detalle(id):
       }
 
       .plancompdet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -87548,7 +87693,7 @@ def plan_remediacion_competencias_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -87640,7 +87785,7 @@ def plan_remediacion_competencias_detalle(id):
       .plancompdet-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -87660,14 +87805,14 @@ def plan_remediacion_competencias_detalle(id):
       .plancompdet-label{
         font-weight:900;
         font-size:.72rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:4px;
         text-transform:uppercase;
         letter-spacing:.35px;
       }
 
       .plancompdet-value{
-        color:#1f2937;
+        color:#101827;
         font-size:.84rem;
         line-height:1.38;
         white-space:pre-wrap;
@@ -87688,7 +87833,7 @@ def plan_remediacion_competencias_detalle(id):
 
       .plancompdet-file-label{
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
@@ -87710,7 +87855,7 @@ def plan_remediacion_competencias_detalle(id):
 
       .plancompdet-file-size{
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         margin-top:2px;
         font-weight:700;
       }
@@ -87721,7 +87866,7 @@ def plan_remediacion_competencias_detalle(id):
         border-radius:14px;
         padding:16px;
         text-align:center;
-        color:#64748b;
+        color:#475569;
         font-size:.82rem;
         font-weight:800;
       }
@@ -88012,7 +88157,7 @@ def plan_remediacion_competencias_edit(id):
       }
 
       .plancompedit-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -88055,7 +88200,7 @@ def plan_remediacion_competencias_edit(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -88175,7 +88320,7 @@ def plan_remediacion_competencias_edit(id):
       .plancompedit-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -88201,7 +88346,7 @@ def plan_remediacion_competencias_edit(id):
 
       .plancompedit-file-label{
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
@@ -88223,7 +88368,7 @@ def plan_remediacion_competencias_edit(id):
 
       .plancompedit-file-size{
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         margin-top:2px;
         font-weight:700;
       }
@@ -88234,7 +88379,7 @@ def plan_remediacion_competencias_edit(id):
         border-radius:14px;
         padding:16px;
         text-align:center;
-        color:#64748b;
+        color:#475569;
         font-size:.82rem;
         font-weight:800;
       }
@@ -88533,7 +88678,7 @@ def plan_remediacion_competencias_evidencia_view(evi_id):
       }
 
       .plancompevi-card{
-        background:rgba(255,255,255,.93)!important;
+        background:rgba(248,252,255,.96)!important;
         border-radius:18px;
         backdrop-filter:blur(6px);
         box-shadow:0 10px 24px rgba(0,0,0,.18);
@@ -89681,7 +89826,7 @@ def cuestionarios_proveedores():
          HEADER SGSI MODERNO
       ========================= */
       .propia-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -89720,7 +89865,7 @@ def cuestionarios_proveedores():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -89814,7 +89959,7 @@ def cuestionarios_proveedores():
       .propia-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -90142,7 +90287,7 @@ def cuestionarios_proveedores_recomendado():
       }
 
       .propreco-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -90185,7 +90330,7 @@ def cuestionarios_proveedores_recomendado():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -90280,7 +90425,7 @@ def cuestionarios_proveedores_recomendado():
       .propreco-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -90289,7 +90434,7 @@ def cuestionarios_proveedores_recomendado():
       }
 
       .propreco-summary{
-        color:#111827;
+        color:#0b1220;
         line-height:1.55;
         font-size:.90rem;
       }
@@ -90312,7 +90457,7 @@ def cuestionarios_proveedores_recomendado():
       }
 
       .propreco-win-badge{
-        background:linear-gradient(135deg,#16a34a,#22c55e);
+        background:linear-gradient(135deg,#087c3d,#0f8a42);
         color:#fff;
         font-size:.78rem;
         font-weight:950;
@@ -90511,7 +90656,7 @@ def cuestionarios_proveedores_historico():
       }
 
       .prophist-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -90554,7 +90699,7 @@ def cuestionarios_proveedores_historico():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -90643,7 +90788,7 @@ def cuestionarios_proveedores_historico():
       .prophist-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -90848,7 +90993,7 @@ def cuestionarios_proveedores_historico_detalle(grupo_id):
       }
 
       .prophdet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -90891,7 +91036,7 @@ def cuestionarios_proveedores_historico_detalle(grupo_id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -90980,7 +91125,7 @@ def cuestionarios_proveedores_historico_detalle(grupo_id):
       .prophdet-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -91260,7 +91405,7 @@ def cuestionarios_proveedores_ficha_proponente(detalle_id):
          HEADER SGSI MODERNO
       ========================= */
       .proficha-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -91299,7 +91444,7 @@ def cuestionarios_proveedores_ficha_proponente(detalle_id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -91392,7 +91537,7 @@ def cuestionarios_proveedores_ficha_proponente(detalle_id):
       .proficha-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -91421,7 +91566,7 @@ def cuestionarios_proveedores_ficha_proponente(detalle_id):
 
       .proficha-score-label{
         font-weight:800;
-        color:#1f2937;
+        color:#101827;
       }
 
       /* =========================
@@ -92241,7 +92386,7 @@ def _render_proveedor_form(item=None, areas=None, paises=None, cfg=None, is_edit
       }
 
       .provform-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -92283,7 +92428,7 @@ def _render_proveedor_form(item=None, areas=None, paises=None, cfg=None, is_edit
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -92375,7 +92520,7 @@ def _render_proveedor_form(item=None, areas=None, paises=None, cfg=None, is_edit
       .provform-section-box{
         background:#eef5ff;
         border:1px solid #d9eaff;
-        border-left:6px solid #1459a6;
+        border-left:6px solid #0b4a8f;
         border-radius:14px;
         padding:12px 14px;
         margin:10px 0 12px;
@@ -92385,21 +92530,21 @@ def _render_proveedor_form(item=None, areas=None, paises=None, cfg=None, is_edit
       .provform-section-title{
         font-size:.90rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         line-height:1.1;
         margin-bottom:4px;
       }
 
       .provform-section-subtitle{
         font-size:.78rem;
-        color:#64748b;
+        color:#475569;
         line-height:1.35;
       }
 
       .provform-card .form-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -92871,7 +93016,7 @@ def proveedores_evidencia_view(evi_id):
       .provevi-back-btn{background:#ffffff;color:#000000;border:2px solid #ffffff;box-shadow:0 4px 10px rgba(0,0,0,.10);}
       .provevi-back-btn:hover{background:#f3f4f6;color:#000000;border-color:#f3f4f6;}
       .provevi-file-pill{background:#3f86d6;color:#fff;border-radius:999px;padding:10px 16px;font-weight:700;max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;box-shadow:0 4px 10px rgba(0,0,0,.10);}
-      .provevi-card{background:rgba(255,255,255,.93)!important;border-radius:18px;backdrop-filter:blur(6px);box-shadow:0 10px 24px rgba(0,0,0,.18);overflow:hidden;}
+      .provevi-card{background:rgba(248,252,255,.96)!important;border-radius:18px;backdrop-filter:blur(6px);box-shadow:0 10px 24px rgba(0,0,0,.18);overflow:hidden;}
       .provevi-card-body{padding:16px;}
       .provevi-frame{width:100%;height:78vh;border:none;border-radius:12px;background:#fff;}
     </style>
@@ -93242,7 +93387,7 @@ def proveedores_matriz():
          HEADER SGSI UNIFICADO
       ========================= */
       .provmat-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -93281,7 +93426,7 @@ def proveedores_matriz():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -93364,12 +93509,12 @@ def proveedores_matriz():
       .provmat-topbar-title{
         font-weight:900;
         font-size:.95rem;
-        color:#1f2937;
+        color:#101827;
       }
 
       .provmat-topbar-subtitle{
         font-size:.82rem;
-        color:#64748b;
+        color:#475569;
       }
 
       /* =========================
@@ -93398,7 +93543,7 @@ def proveedores_matriz():
       .provmat-label{
         font-size:.70rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         margin-bottom:4px;
       }
@@ -93993,7 +94138,7 @@ def proveedores_detalle(id):
       }
 
       .provdet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -94035,7 +94180,7 @@ def proveedores_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -94133,7 +94278,7 @@ def proveedores_detalle(id):
       .provdet-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -94155,12 +94300,12 @@ def proveedores_detalle(id):
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:6px;
       }
 
       .provdet-value{
-        color:#1f2937;
+        color:#101827;
         font-size:.86rem;
         line-height:1.38;
         white-space:pre-wrap;
@@ -94175,14 +94320,14 @@ def proveedores_detalle(id):
       .provdet-big-number{
         font-size:1.75rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         line-height:1.1;
       }
 
       .provdet-score{
         font-size:.68rem;
         font-weight:900;
-        color:#64748b;
+        color:#475569;
         white-space:nowrap;
       }
 
@@ -94222,7 +94367,7 @@ def proveedores_detalle(id):
         height:52px;
         min-width:52px;
         border-radius:12px;
-        background:linear-gradient(135deg,#dc2626,#b91c1c);
+        background:linear-gradient(135deg,#b91c1c,#b91c1c);
         color:#ffffff;
         display:flex;
         align-items:center;
@@ -94238,7 +94383,7 @@ def proveedores_detalle(id):
 
       .provdet-file-label{
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
@@ -94260,7 +94405,7 @@ def proveedores_detalle(id):
 
       .provdet-file-size{
         font-size:.70rem;
-        color:#64748b;
+        color:#475569;
         margin-top:3px;
         font-weight:700;
       }
@@ -94271,7 +94416,7 @@ def proveedores_detalle(id):
         border-radius:14px;
         padding:16px;
         text-align:center;
-        color:#64748b;
+        color:#475569;
         font-size:.82rem;
         font-weight:800;
       }
@@ -94592,7 +94737,7 @@ def proveedores_param():
       }
 
       .provparam-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -94634,7 +94779,7 @@ def proveedores_param():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -94726,7 +94871,7 @@ def proveedores_param():
       .provparam-card .form-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -94757,7 +94902,7 @@ def proveedores_param():
       .provparam-section-title{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -95770,7 +95915,7 @@ def config_param_riesgos():
       }
 
       .riskcfg-header-card {
-        background: linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background: linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius: 18px;
         padding: 16px 24px;
         min-height: 94px;
@@ -95810,7 +95955,7 @@ def config_param_riesgos():
         min-width: 54px;
         border-radius: 14px;
         background: #ffffff;
-        color: #1459a6;
+        color: #0b4a8f;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -95898,7 +96043,7 @@ def config_param_riesgos():
       .riskcfg-section-title {
         font-weight: 950;
         font-size: .95rem;
-        color: #1459a6;
+        color: #0b4a8f;
         margin-bottom: 16px;
         border-bottom: 2px solid rgba(59,130,246,.18);
         padding-bottom: 8px;
@@ -96265,7 +96410,7 @@ def config_param_incidentes():
       }
 
       .incparam-header-card {
-        background: linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background: linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius: 18px;
         padding: 16px 24px;
         min-height: 94px;
@@ -96305,7 +96450,7 @@ def config_param_incidentes():
         min-width: 54px;
         border-radius: 14px;
         background: #ffffff;
-        color: #1459a6;
+        color: #0b4a8f;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -96393,7 +96538,7 @@ def config_param_incidentes():
       .incparam-section-title {
         font-weight: 950;
         font-size: .95rem;
-        color: #1459a6;
+        color: #0b4a8f;
         margin-bottom: 16px;
         border-bottom: 2px solid rgba(59,130,246,.18);
         padding-bottom: 8px;
@@ -96436,7 +96581,7 @@ def config_param_incidentes():
       .incparam-table-wrap thead th {
         background: #eef5ff !important;
         font-weight: 900;
-        color: #1459a6;
+        color: #0b4a8f;
         border-bottom: 1px solid #d7dee7 !important;
         vertical-align: middle;
         white-space: nowrap;
@@ -96796,7 +96941,7 @@ def config_param_vulnerabilidades():
       }
 
       .vulnpar-header-card {
-        background: linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background: linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius: 18px;
         padding: 16px 24px;
         min-height: 94px;
@@ -96836,7 +96981,7 @@ def config_param_vulnerabilidades():
         min-width: 54px;
         border-radius: 14px;
         background: #ffffff;
-        color: #1459a6;
+        color: #0b4a8f;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -96923,7 +97068,7 @@ def config_param_vulnerabilidades():
       .vulnpar-section-title {
         font-weight: 950;
         font-size: .95rem;
-        color: #1459a6;
+        color: #0b4a8f;
         margin-bottom: 16px;
         border-bottom: 2px solid rgba(59,130,246,.18);
         padding-bottom: 8px;
@@ -96950,7 +97095,7 @@ def config_param_vulnerabilidades():
       .vulnpar-table-head th {
         background: #eef5ff !important;
         font-weight: 900;
-        color: #1459a6;
+        color: #0b4a8f;
         border-bottom: 1px solid #d7dee7 !important;
         vertical-align: middle !important;
         white-space: nowrap;
@@ -96991,7 +97136,7 @@ def config_param_vulnerabilidades():
         border-radius: 0 10px 10px 0;
         background: #eef5ff;
         border-color: #d9e3f0;
-        color: #1459a6;
+        color: #0b4a8f;
         font-weight: 900;
       }
 
@@ -97235,7 +97380,7 @@ def config_param_cultura():
       }
 
       .cultcfg-header-card {
-        background: linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background: linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius: 18px;
         padding: 16px 24px;
         min-height: 94px;
@@ -97275,7 +97420,7 @@ def config_param_cultura():
         min-width: 54px;
         border-radius: 14px;
         background: #ffffff;
-        color: #1459a6;
+        color: #0b4a8f;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -97362,7 +97507,7 @@ def config_param_cultura():
       .cultcfg-section-title {
         font-weight: 950;
         font-size: .95rem;
-        color: #1459a6;
+        color: #0b4a8f;
         margin-bottom: 16px;
         border-bottom: 2px solid rgba(59,130,246,.18);
         padding-bottom: 8px;
@@ -97389,7 +97534,7 @@ def config_param_cultura():
         border-radius: 0 10px 10px 0;
         background: #eef5ff;
         border-color: #d9e3f0;
-        color: #1459a6;
+        color: #0b4a8f;
         font-weight: 900;
       }
 
@@ -98185,7 +98330,7 @@ def metricas_riesgos():
       }
 
       .riskmet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -98223,7 +98368,7 @@ def metricas_riesgos():
         height:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -98269,7 +98414,7 @@ def metricas_riesgos():
 
       .riskmet-section-title{
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
       }
 
@@ -98766,7 +98911,7 @@ def metricas_incidente_matriz():
 
       /* 🔥 HEADER SGSI MODERNO */
       .minc-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -98804,7 +98949,7 @@ def metricas_incidente_matriz():
         height:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -98879,7 +99024,7 @@ def metricas_incidente_matriz():
       .minc-section-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
@@ -98887,7 +99032,7 @@ def metricas_incidente_matriz():
 
       .minc-total-badge{
         background:#eef5ff;
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:900;
         border-radius:999px;
         padding:6px 12px;
@@ -99340,7 +99485,7 @@ def metricas_incidente_detalle(incidente_id):
       }
 
       .mind-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -99378,7 +99523,7 @@ def metricas_incidente_detalle(incidente_id):
         height:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -99456,7 +99601,7 @@ def metricas_incidente_detalle(incidente_id):
       .mind-section-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
@@ -99476,7 +99621,7 @@ def metricas_incidente_detalle(incidente_id):
         border:1px solid #dbe6f4;
         border-radius:12px;
         padding:10px 12px;
-        color:#111827;
+        color:#0b1220;
         font-size:.90rem;
         line-height:1.4;
       }
@@ -99759,7 +99904,7 @@ def metricas_incidente_analisis(incidente_id):
       }
 
       .miia-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -99797,7 +99942,7 @@ def metricas_incidente_analisis(incidente_id):
         height:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -99871,7 +100016,7 @@ def metricas_incidente_analisis(incidente_id):
       .miia-section-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
@@ -99891,7 +100036,7 @@ def metricas_incidente_analisis(incidente_id):
         border:1px solid #dbe6f4;
         border-radius:12px;
         padding:10px 12px;
-        color:#111827;
+        color:#0b1220;
         font-size:.90rem;
         line-height:1.4;
       }
@@ -101112,7 +101257,7 @@ def metricas_vulnerabilidades():
       }
 
       .vulnmet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -101150,7 +101295,7 @@ def metricas_vulnerabilidades():
         height:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -101225,7 +101370,7 @@ def metricas_vulnerabilidades():
       .vulnmet-section-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
@@ -101304,7 +101449,7 @@ def metricas_vulnerabilidades():
         font-size:.82rem;
         padding:9px 8px;
         border-color:#e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .vulnmet-table-wrap .table tbody tr:nth-child(even){
@@ -101699,7 +101844,7 @@ def metricas_vulnerabilidades_ver_analisis(codigo):
       }
 
       .vulna-header-card {
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -101737,7 +101882,7 @@ def metricas_vulnerabilidades_ver_analisis(codigo):
         height:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -101815,7 +101960,7 @@ def metricas_vulnerabilidades_ver_analisis(codigo):
 
       .vulna-info-value {
         font-size:.98rem;
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:950;
         line-height:1.2;
         word-break:break-word;
@@ -102819,7 +102964,7 @@ def metricas_cultura_matriz():
       }
 
       .cultmet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -102859,7 +103004,7 @@ def metricas_cultura_matriz():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -102938,7 +103083,7 @@ def metricas_cultura_matriz():
       .cultmet-section-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
@@ -102992,7 +103137,7 @@ def metricas_cultura_matriz():
         border-radius:14px;
         padding:22px;
         text-align:center;
-        color:#6b7280;
+        color:#4b5563;
         font-weight:700;
       }
 
@@ -103019,7 +103164,7 @@ def metricas_cultura_matriz():
       .cultmet-kpi-label,
       .cultmet-period-label{
         font-size:.80rem;
-        color:#64748b;
+        color:#475569;
         font-weight:900;
         line-height:1.15;
         overflow-wrap:break-word;
@@ -103029,7 +103174,7 @@ def metricas_cultura_matriz():
       .cultmet-summary-value,
       .cultmet-mini-value,
       .cultmet-kpi-value{
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:950;
         line-height:1;
         overflow-wrap:break-word;
@@ -103062,7 +103207,7 @@ def metricas_cultura_matriz():
 
       .cultmet-period-value{
         font-size:1.15rem;
-        color:#1f2937;
+        color:#101827;
         font-weight:950;
         line-height:1.1;
         overflow-wrap:break-word;
@@ -103070,7 +103215,7 @@ def metricas_cultura_matriz():
 
       .cultmet-period-badge{
         background:#eef5ff;
-        color:#1459a6;
+        color:#0b4a8f;
         border:1px solid #cfe0ff;
         border-radius:999px;
         padding:7px 12px;
@@ -103119,7 +103264,7 @@ def metricas_cultura_matriz():
 
       .cultmet-mini-value{
         font-size:1.15rem;
-        color:#1f2937;
+        color:#101827;
       }
 
       /* =========================
@@ -103167,7 +103312,7 @@ def metricas_cultura_matriz():
 
       .cultmet-kpi-sub{
         font-size:.82rem;
-        color:#6b7280;
+        color:#4b5563;
         font-weight:800;
         margin-bottom:10px;
         overflow-wrap:break-word;
@@ -103644,7 +103789,7 @@ def metricas_mejora_planes():
       }
 
       .mejmet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -103684,7 +103829,7 @@ def metricas_mejora_planes():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -103769,7 +103914,7 @@ def metricas_mejora_planes():
 
       .mejmet-kpi-label{
         font-size:.80rem;
-        color:#64748b;
+        color:#475569;
         font-weight:900;
         line-height:1.15;
         margin-bottom:8px;
@@ -103777,7 +103922,7 @@ def metricas_mejora_planes():
       }
 
       .mejmet-kpi{
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:950;
         line-height:1;
         font-size:1.70rem;
@@ -103802,7 +103947,7 @@ def metricas_mejora_planes():
       .mejmet-section-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
@@ -104055,7 +104200,7 @@ def mejora_evidencia_view(evi_id):
       }
 
       .mejevi-card{
-        background:rgba(255,255,255,.93)!important;
+        background:rgba(248,252,255,.96)!important;
         border-radius:18px;
         backdrop-filter:blur(6px);
         box-shadow:0 10px 24px rgba(0,0,0,.18);
@@ -104394,7 +104539,7 @@ def mejora_new():
       }
 
       .mejadd-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -104436,7 +104581,7 @@ def mejora_new():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -104534,7 +104679,7 @@ def mejora_new():
       .card h6{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
       }
 
@@ -104547,7 +104692,7 @@ def mejora_new():
       .form-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -104910,7 +105055,7 @@ def mejora_matriz():
       }
 
       .mejmat-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -104950,7 +105095,7 @@ def mejora_matriz():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -105034,13 +105179,13 @@ def mejora_matriz():
       .mejmat-topbar-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         overflow-wrap:break-word;
       }
 
       .mejmat-topbar-subtitle{
         font-size:.82rem;
-        color:#64748b;
+        color:#475569;
         font-weight:700;
         overflow-wrap:break-word;
       }
@@ -105055,7 +105200,7 @@ def mejora_matriz():
       }
 
       .mejmat-filter-head{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         color:#ffffff;
         font-weight:950;
         font-size:.85rem;
@@ -105129,7 +105274,7 @@ def mejora_matriz():
         top:0;
         z-index:10;
         background:#eef5ff !important;
-        color:#1459a6 !important;
+        color:#0b4a8f !important;
         font-weight:950;
         font-size:.80rem;
         border-bottom:1px solid #d7dee7 !important;
@@ -105364,7 +105509,7 @@ def mejora_detalle(id):
       }
 
       .mejdet-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -105404,7 +105549,7 @@ def mejora_detalle(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -105491,7 +105636,7 @@ def mejora_detalle(id):
       .mejdet-section-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:10px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
@@ -105542,7 +105687,7 @@ def mejora_detalle(id):
 
       .mejdet-file-label{
         font-size:.75rem;
-        color:#64748b;
+        color:#475569;
         font-weight:800;
       }
 
@@ -105550,7 +105695,7 @@ def mejora_detalle(id):
         display:block;
         font-size:.90rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-decoration:none;
         word-break:break-word;
       }
@@ -105561,7 +105706,7 @@ def mejora_detalle(id):
 
       .mejdet-file-size{
         font-size:.75rem;
-        color:#64748b;
+        color:#475569;
         margin-top:2px;
       }
 
@@ -105571,7 +105716,7 @@ def mejora_detalle(id):
         border-radius:14px;
         padding:18px;
         text-align:center;
-        color:#64748b;
+        color:#475569;
         font-weight:700;
       }
 
@@ -105961,7 +106106,7 @@ def mejora_edit(id):
       }
 
       .mejedit-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -106001,7 +106146,7 @@ def mejora_edit(id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -106117,7 +106262,7 @@ def mejora_edit(id):
       .mejedit-section-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:10px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
@@ -106143,7 +106288,7 @@ def mejora_edit(id):
 
       .mejedit-file-label{
         font-size:.75rem;
-        color:#64748b;
+        color:#475569;
         font-weight:800;
       }
 
@@ -106151,7 +106296,7 @@ def mejora_edit(id):
         display:block;
         font-size:.90rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-decoration:none;
         word-break:break-word;
       }
@@ -106162,7 +106307,7 @@ def mejora_edit(id):
 
       .mejedit-file-size{
         font-size:.75rem;
-        color:#64748b;
+        color:#475569;
         margin-top:2px;
       }
 
@@ -106172,7 +106317,7 @@ def mejora_edit(id):
         border-radius:14px;
         padding:18px;
         text-align:center;
-        color:#64748b;
+        color:#475569;
         font-weight:700;
       }
 
@@ -106566,7 +106711,7 @@ def chatgpt_view():
       }
 
       .chatsgsi-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -106605,7 +106750,7 @@ def chatgpt_view():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -106652,7 +106797,7 @@ def chatgpt_view():
       }
 
       .chatsgsi-card-header{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         color:#ffffff;
         font-weight:950;
         padding:14px 18px;
@@ -106685,7 +106830,7 @@ def chatgpt_view():
       }
 
       .chatsgsi-user{
-        background:linear-gradient(135deg,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#0b4a8f,#1d5fae);
         color:#ffffff;
         margin-left:auto;
       }
@@ -110487,7 +110632,7 @@ def report_nist(run_id: int):
       }
 
       .plan-hero{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -110529,7 +110674,7 @@ def report_nist(run_id: int):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -110652,7 +110797,7 @@ def report_nist(run_id: int):
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .table tbody tr:nth-child(even){
@@ -110666,7 +110811,7 @@ def report_nist(run_id: int):
       .form-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -110942,7 +111087,7 @@ def param_maturity_levels():
       }}
 
       .madlvl-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -110984,7 +111129,7 @@ def param_maturity_levels():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -111078,7 +111223,7 @@ def param_maturity_levels():
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
       }}
 
@@ -111125,7 +111270,7 @@ def param_maturity_levels():
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }}
 
       .madlvl-table-wrap tbody tr:last-child td{{
@@ -111143,7 +111288,7 @@ def param_maturity_levels():
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -111175,7 +111320,7 @@ def param_maturity_levels():
         border-radius:0 10px 10px 0;
         background:#eef5ff;
         border:1px solid #d9eaff;
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:900;
       }}
 
@@ -111446,7 +111591,7 @@ def param_compliance_map():
       }}
 
       .madmap-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -111488,7 +111633,7 @@ def param_compliance_map():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -111582,7 +111727,7 @@ def param_compliance_map():
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
       }}
 
@@ -111639,7 +111784,7 @@ def param_compliance_map():
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }}
 
       .madmap-table-wrap tbody tr:last-child td{{
@@ -111657,7 +111802,7 @@ def param_compliance_map():
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -111689,7 +111834,7 @@ def param_compliance_map():
         border-radius:0 10px 10px 0;
         background:#eef5ff;
         border:1px solid #d9eaff;
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:900;
       }}
 
@@ -111956,7 +112101,7 @@ def param_gap_levels():
       }}
 
       .madgap-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -111998,7 +112143,7 @@ def param_gap_levels():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -112088,7 +112233,7 @@ def param_gap_levels():
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
       }}
 
@@ -112135,7 +112280,7 @@ def param_gap_levels():
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }}
 
       .madgap-table-wrap tbody tr:last-child td{{
@@ -112153,7 +112298,7 @@ def param_gap_levels():
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -112185,7 +112330,7 @@ def param_gap_levels():
         border-radius:0 10px 10px 0;
         background:#eef5ff;
         border:1px solid #d9eaff;
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:900;
       }}
 
@@ -112859,7 +113004,7 @@ def home():
       }}
 
       .nistmad-header-card {{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -112901,7 +113046,7 @@ def home():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -112991,7 +113136,7 @@ def home():
       .nistmad-section-title {{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -113033,7 +113178,7 @@ def home():
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }}
 
       .nistmad-table-wrap tbody tr:nth-child(even) {{
@@ -113053,7 +113198,7 @@ def home():
       .form-label {{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -113283,7 +113428,7 @@ def parametros_menu():
       }}
 
       .madpar-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -113325,7 +113470,7 @@ def parametros_menu():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -113415,7 +113560,7 @@ def parametros_menu():
       .madpar-section-title{{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding:9px 12px;
         border-radius:12px;
         background:#eef5ff;
@@ -113426,7 +113571,7 @@ def parametros_menu():
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -113458,7 +113603,7 @@ def parametros_menu():
         border-radius:0 10px 10px 0;
         background:#eef5ff;
         border:1px solid #d9eaff;
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:900;
       }}
 
@@ -114139,7 +114284,7 @@ def ingreso():
       }}
 
       .isoform-header-card {{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -114176,7 +114321,7 @@ def ingreso():
         height:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -114247,7 +114392,7 @@ def ingreso():
       .isoform-section-title {{
         font-weight:950;
         font-size:.78rem;
-        color:#1459a6;
+        color:#0b4a8f;
         background:#eef5ff;
         border:1px solid #d9eaff;
         padding:9px 12px;
@@ -114269,7 +114414,7 @@ def ingreso():
       .form-label {{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         background:#eef5ff;
         border:1px solid #d9eaff;
         padding:6px 10px;
@@ -114369,7 +114514,7 @@ def ingreso():
       .isoform-cat-code {{
         font-size:.72rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
       }}
 
       .isoform-cat-name {{
@@ -114429,7 +114574,7 @@ def ingreso():
       }}
 
       .isoform-radio-card input:checked + span {{
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:950;
       }}
 
@@ -115785,7 +115930,7 @@ def view_report(run_id: int):
       }
 
       .report-hero{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -115827,7 +115972,7 @@ def view_report(run_id: int):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -115949,13 +116094,13 @@ def view_report(run_id: int):
       .card h6{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:0;
       }
 
       .section-sub,
       .muted{
-        color:#64748b;
+        color:#475569;
         font-size:.82rem;
       }
 
@@ -115964,7 +116109,7 @@ def view_report(run_id: int):
         font-size:2rem;
         line-height:1.05;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         letter-spacing:-0.5px;
       }
 
@@ -116001,7 +116146,7 @@ def view_report(run_id: int):
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .table tbody tr:nth-child(even){
@@ -116042,7 +116187,7 @@ def view_report(run_id: int):
 
       .accordion-button:not(.collapsed){
         background:#dbeafe !important;
-        color:#1459a6 !important;
+        color:#0b4a8f !important;
       }
 
       .accordion-body{
@@ -116052,7 +116197,7 @@ def view_report(run_id: int):
       .form-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -117258,14 +117403,14 @@ def _pdf_info_box(title, text, bg_color="#f8fafc"):
         parent=styles["BodyText"],
         fontSize=9,
         leading=11,
-        textColor=colors.HexColor("#111827")
+        textColor=colors.HexColor("#0b1220")
     )
     body_style = ParagraphStyle(
         "ibox_body",
         parent=styles["BodyText"],
         fontSize=8,
         leading=10,
-        textColor=colors.HexColor("#1f2937")
+        textColor=colors.HexColor("#101827")
     )
 
     data = [[Paragraph(f"<b>{title}</b>", title_style)],
@@ -119116,7 +119261,7 @@ def reportes_home():
       }
 
       .rep-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -119156,7 +119301,7 @@ def reportes_home():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -119245,7 +119390,7 @@ def reportes_home():
       .rep-section-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         border-bottom:2px solid rgba(59,130,246,.18);
         padding-bottom:8px;
@@ -119340,7 +119485,7 @@ def reportes_home():
         width:52px;
         height:52px;
         border-radius:14px;
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         display:flex;
         align-items:center;
         justify-content:center;
@@ -119358,7 +119503,7 @@ def reportes_home():
       .rep-report-title{
         font-weight:950;
         font-size:1.03rem;
-        color:#1459a6;
+        color:#0b4a8f;
         line-height:1.25;
         margin-bottom:6px;
         overflow-wrap:break-word;
@@ -120381,7 +120526,7 @@ def _nist_build_pdf_run(run: "NistMadurezRun") -> io.BytesIO:
         fontName="Helvetica",
         fontSize=8.5,
         leading=11,
-        textColor=colors.HexColor("#1f2937"),
+        textColor=colors.HexColor("#101827"),
         spaceAfter=5
     ))
 
@@ -121385,7 +121530,7 @@ def home():
          HEADER ESTÁNDAR NIST
          ========================= */
       .nistmad-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -121427,7 +121572,7 @@ def home():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -121757,7 +121902,7 @@ def parametros():
          HEADER ESTÁNDAR NIST PARÁMETROS
          ========================= */
       .nistpar-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -121799,7 +121944,7 @@ def parametros():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -121952,7 +122097,7 @@ def parametros():
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:0;
       }}
 
@@ -121972,7 +122117,7 @@ def parametros():
 
       .section-sub,
       .muted{{
-        color:#64748b;
+        color:#475569;
         font-size:.82rem;
       }}
 
@@ -122016,7 +122161,7 @@ def parametros():
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }}
 
       .table tbody tr:nth-child(even){{
@@ -122045,7 +122190,7 @@ def parametros():
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -122689,7 +122834,7 @@ def ingreso():
       }}
 
       .nistform-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -122731,7 +122876,7 @@ def ingreso():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -122830,7 +122975,7 @@ def ingreso():
       .nistform-section-title{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
         margin-bottom:16px;
@@ -122851,7 +122996,7 @@ def ingreso():
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -122928,7 +123073,7 @@ def ingreso():
       .nistform-acc-btn:not(.collapsed),
       .accordion-button:not(.collapsed){{
         background:#dbeafe !important;
-        color:#1459a6 !important;
+        color:#0b4a8f !important;
         box-shadow:none !important;
       }}
 
@@ -122981,7 +123126,7 @@ def ingreso():
       .nistform-cat-code{{
         font-size:.92rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         line-height:1.15;
       }}
 
@@ -123039,7 +123184,7 @@ def ingreso():
         border-radius:12px;
         min-height:46px;
         font-weight:900;
-        color:#1f2937;
+        color:#101827;
         cursor:pointer;
         transition:.2s;
         padding:8px 10px;
@@ -123569,7 +123714,7 @@ def historial():
          HEADER ESTÁNDAR HISTORIAL NIST
          ========================= */
       .nisthist-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -123611,7 +123756,7 @@ def historial():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -123723,7 +123868,7 @@ def historial():
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:0;
       }}
 
@@ -123774,7 +123919,7 @@ def historial():
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }}
 
       .table tbody tr:nth-child(even){{
@@ -124229,7 +124374,7 @@ def detalle(run_id: int):
       }}
 
       .nistdet-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -124271,7 +124416,7 @@ def detalle(run_id: int):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -124366,7 +124511,7 @@ def detalle(run_id: int):
       .nistdet-card-title,
       .nistdet-section-title{{
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
       }}
 
       .nistdet-section-title{{
@@ -124394,7 +124539,7 @@ def detalle(run_id: int):
       .nistdet-exec-text{{
         font-size:.96rem;
         line-height:1.65;
-        color:#1f2937;
+        color:#101827;
         white-space:normal;
       }}
 
@@ -124633,7 +124778,7 @@ def detalle_categoria(run_id: int, func: str, cat_code: str):
       }}
 
       .catdet-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -124676,7 +124821,7 @@ def detalle_categoria(run_id: int, func: str, cat_code: str):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -124772,7 +124917,7 @@ def detalle_categoria(run_id: int, func: str, cat_code: str):
       .catdet-resumen-title{{
         font-weight:950;
         font-size:1rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:4px;
       }}
 
@@ -124821,7 +124966,7 @@ def detalle_categoria(run_id: int, func: str, cat_code: str):
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }}
 
       .catdet-table .col-estado{{
@@ -125280,7 +125425,7 @@ def analisis_categoria(run_id: int, func: str, cat_code: str):
       }}
 
       .nistana-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -125323,7 +125468,7 @@ def analisis_categoria(run_id: int, func: str, cat_code: str):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -125426,7 +125571,7 @@ def analisis_categoria(run_id: int, func: str, cat_code: str):
       .card h6{{
         font-weight:950;
         font-size:1rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:10px;
       }}
 
@@ -125458,14 +125603,14 @@ def analisis_categoria(run_id: int, func: str, cat_code: str):
 
       .nistana-ai-icon{{
         font-size:2.2rem;
-        color:#1459a6;
+        color:#0b4a8f;
         line-height:1;
       }}
 
       .nistana-ai-title{{
         font-weight:950;
         font-size:1.08rem;
-        color:#1459a6;
+        color:#0b4a8f;
       }}
 
       .nistana-ai-text{{
@@ -125479,7 +125624,7 @@ def analisis_categoria(run_id: int, func: str, cat_code: str):
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -125750,7 +125895,7 @@ def informe_ejecutivo_editar(run_id: int):
       }}
 
       .niststd-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -125792,7 +125937,7 @@ def informe_ejecutivo_editar(run_id: int):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -125886,7 +126031,7 @@ def informe_ejecutivo_editar(run_id: int):
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
       }}
 
@@ -125915,7 +126060,7 @@ def informe_ejecutivo_editar(run_id: int):
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -126966,10 +127111,10 @@ def _gdpr_construir_velocimetro_niveles_fig(resumen: dict):
 
             # Aguja
             needle_angle = math.pi * frac
-            ax.plot([needle_angle, needle_angle], [0, 7.2], color="#111827", linewidth=2)
+            ax.plot([needle_angle, needle_angle], [0, 7.2], color="#0b1220", linewidth=2)
 
             # Centro
-            ax.scatter([0], [0], s=30, color="#111827", zorder=5)
+            ax.scatter([0], [0], s=30, color="#0b1220", zorder=5)
 
             # Limpiar ejes
             ax.set_xticks([])
@@ -126991,7 +127136,7 @@ def _gdpr_construir_velocimetro_niveles_fig(resumen: dict):
                 transform=ax.transAxes,
                 ha="center", va="center",
                 fontsize=18, fontweight="bold",
-                color="#111827"
+                color="#0b1220"
             )
 
             ax.text(
@@ -126999,7 +127144,7 @@ def _gdpr_construir_velocimetro_niveles_fig(resumen: dict):
                 transform=ax.transAxes,
                 ha="center", va="center",
                 fontsize=8,
-                color="#6b7280"
+                color="#4b5563"
             )
 
         plt.tight_layout()
@@ -127242,7 +127387,7 @@ def _gdpr_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: s
         # =========================
         for tick in [0, 20, 40, 60, 80, 100]:
             ang = np.pi * (tick / 100.0)
-            ax.plot([ang, ang], [6.9, 8.9], color="#94a3b8", linewidth=1.2, zorder=3)
+            ax.plot([ang, ang], [6.9, 8.9], color="#64748b", linewidth=1.2, zorder=3)
 
         # Etiquetas de escala
         escala = [
@@ -127258,7 +127403,7 @@ def _gdpr_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: s
                 ang, 9.65, txt,
                 ha="center", va="center",
                 fontsize=7.5,
-                color="#64748b",
+                color="#475569",
                 fontweight="bold"
             )
 
@@ -127293,7 +127438,7 @@ def _gdpr_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: s
             ha="center", va="center",
             fontsize=10,
             fontweight="bold",
-            color="#1f2937"
+            color="#101827"
         )
 
         ax.text(
@@ -127302,7 +127447,7 @@ def _gdpr_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: s
             ha="center", va="center",
             fontsize=20,
             fontweight="bold",
-            color="#111827"
+            color="#0b1220"
         )
 
         ax.text(
@@ -127319,7 +127464,7 @@ def _gdpr_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: s
             transform=ax.transAxes,
             ha="center", va="center",
             fontsize=8,
-            color="#6b7280"
+            color="#4b5563"
         )
 
         fig.subplots_adjust(top=0.88, bottom=0.06, left=0.06, right=0.94)
@@ -127395,7 +127540,7 @@ def _gdpr_build_pdf_run(run: "DatosMadurezRun") -> io.BytesIO:
         fontName="Helvetica",
         fontSize=8.5,
         leading=11,
-        textColor=colors.HexColor("#1f2937"),
+        textColor=colors.HexColor("#101827"),
         spaceAfter=5
     ))
 
@@ -127914,7 +128059,7 @@ def madurez_datos_inicio():
       }}
 
       .datamad-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -127956,7 +128101,7 @@ def madurez_datos_inicio():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -128059,7 +128204,7 @@ def madurez_datos_inicio():
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:0;
       }}
 
@@ -128098,7 +128243,7 @@ def madurez_datos_inicio():
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -128295,7 +128440,7 @@ def parametros():
       }}
 
       .datapar-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -128337,7 +128482,7 @@ def parametros():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -128428,7 +128573,7 @@ def parametros():
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:0;
       }}
 
@@ -128441,7 +128586,7 @@ def parametros():
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -129012,7 +129157,7 @@ def ingreso():
       }}
 
       .dataform-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -129054,7 +129199,7 @@ def ingreso():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -129162,7 +129307,7 @@ def ingreso():
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -129236,7 +129381,7 @@ def ingreso():
       .dataform-acc-btn:not(.collapsed),
       .accordion-button:not(.collapsed){{
         background:#dbeafe !important;
-        color:#1459a6 !important;
+        color:#0b4a8f !important;
         box-shadow:none !important;
       }}
 
@@ -129282,7 +129427,7 @@ def ingreso():
       .dataform-qtitle{{
         font-size:.92rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:5px;
       }}
 
@@ -129310,7 +129455,7 @@ def ingreso():
         border-radius:12px;
         min-height:46px;
         font-weight:900;
-        color:#1f2937;
+        color:#101827;
         cursor:pointer;
         transition:.2s;
         padding:8px 10px;
@@ -129712,7 +129857,7 @@ def historial():
       }}
 
       .datstd-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -129754,7 +129899,7 @@ def historial():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -129845,7 +129990,7 @@ def historial():
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:12px;
       }}
 
@@ -129889,7 +130034,7 @@ def historial():
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }}
 
       .table tbody tr:nth-child(even){{
@@ -130093,7 +130238,7 @@ def detalle_dominio_preguntas(run_id: int, dominio: str):
       }}
 
       .datadom-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -130135,7 +130280,7 @@ def detalle_dominio_preguntas(run_id: int, dominio: str):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -130221,7 +130366,7 @@ def detalle_dominio_preguntas(run_id: int, dominio: str):
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
@@ -130267,7 +130412,7 @@ def detalle_dominio_preguntas(run_id: int, dominio: str):
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }}
 
       .datadom-table .col-estado{{
@@ -130437,7 +130582,7 @@ def plan_trabajo_editar(run_id: int):
       }}
 
       .datstd-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -130479,7 +130624,7 @@ def plan_trabajo_editar(run_id: int):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -130573,7 +130718,7 @@ def plan_trabajo_editar(run_id: int):
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
       }}
 
@@ -130602,7 +130747,7 @@ def plan_trabajo_editar(run_id: int):
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -131007,7 +131152,7 @@ def analisis_dominio(run_id: int, dominio: str):
       }}
 
       .datstd-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -131049,7 +131194,7 @@ def analisis_dominio(run_id: int, dominio: str):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -131140,7 +131285,7 @@ def analisis_dominio(run_id: int, dominio: str):
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:10px;
       }}
 
@@ -131173,7 +131318,7 @@ def analisis_dominio(run_id: int, dominio: str):
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -131645,7 +131790,7 @@ def detalle(run_id):
       }}
 
       .datares-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:20px;
         padding:16px 24px;
         min-height:96px;
@@ -131690,7 +131835,7 @@ def detalle(run_id):
         min-width:56px;
         border-radius:16px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -131796,7 +131941,7 @@ def detalle(run_id):
       .card h6{{
         font-weight:950;
         font-size:1rem;
-        color:#1459a6;
+        color:#0b4a8f;
       }}
 
       .datares-radar-wrap{{
@@ -131821,7 +131966,7 @@ def detalle(run_id):
       .datares-radar-pct-label{{
         font-size:.72rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.45px;
       }}
@@ -131836,7 +131981,7 @@ def detalle(run_id):
 
       .datares-radar-pct-subtitle{{
         font-size:.80rem;
-        color:#64748b;
+        color:#475569;
         font-weight:800;
       }}
 
@@ -131868,14 +132013,14 @@ def detalle(run_id):
       .datares-exec-text{{
         font-size:.96rem;
         line-height:1.72;
-        color:#1f2937;
+        color:#101827;
         white-space:normal;
       }}
 
       .datares-domain-title{{
         font-size:1rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         line-height:1.2;
       }}
 
@@ -132135,7 +132280,7 @@ def informe_ejecutivo_editar(run_id: int):
       }}
 
       .datstd-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -132177,7 +132322,7 @@ def informe_ejecutivo_editar(run_id: int):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -132271,7 +132416,7 @@ def informe_ejecutivo_editar(run_id: int):
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
       }}
 
@@ -132300,7 +132445,7 @@ def informe_ejecutivo_editar(run_id: int):
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -133764,10 +133909,10 @@ def _pci_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: st
 
         # aguja
         needle_angle = np.pi * frac
-        ax.plot([needle_angle, needle_angle], [0, 7.1], color="#111827", linewidth=2)
+        ax.plot([needle_angle, needle_angle], [0, 7.1], color="#0b1220", linewidth=2)
 
         # centro
-        ax.scatter([0], [0], s=30, color="#111827", zorder=5)
+        ax.scatter([0], [0], s=30, color="#0b1220", zorder=5)
 
         ax.set_xticks([])
         ax.set_yticks([])
@@ -133775,9 +133920,9 @@ def _pci_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: st
         ax.spines["polar"].set_visible(False)
 
         ax.text(0.5, 1.10, label, transform=ax.transAxes, ha="center", va="center",
-                fontsize=9, fontweight="bold", color="#1f2937")
+                fontsize=9, fontweight="bold", color="#101827")
         ax.text(0.5, 0.44, f"{pct:.0f}%", transform=ax.transAxes, ha="center", va="center",
-                fontsize=18, fontweight="bold", color="#111827")
+                fontsize=18, fontweight="bold", color="#0b1220")
         ax.text(0.5, 0.26, nivel, transform=ax.transAxes, ha="center", va="center",
                 fontsize=8.5, color=color)
 
@@ -133845,7 +133990,7 @@ def generar_pci_velocimetro_png_bytes(titulo, valor, nivel="", color="#6c757d"):
             y1 = math.sin(ang) * 0.78
             x2 = math.cos(ang) * 0.88
             y2 = math.sin(ang) * 0.88
-            ax.plot([x1, x2], [y1, y2], linewidth=1.2, color="#6b7280")
+            ax.plot([x1, x2], [y1, y2], linewidth=1.2, color="#4b5563")
 
         # Etiquetas principales
         for pct in [0, 25, 50, 75, 100]:
@@ -133870,13 +134015,13 @@ def generar_pci_velocimetro_png_bytes(titulo, valor, nivel="", color="#6c757d"):
             arrowstyle="-|>",
             mutation_scale=18,
             linewidth=2.4,
-            color="#111827",
+            color="#0b1220",
             zorder=5
         )
         ax.add_patch(aguja)
 
         # Centro
-        ax.add_patch(Circle((0, 0), radius=0.065, facecolor="#111827", edgecolor="white", linewidth=1.0, zorder=6))
+        ax.add_patch(Circle((0, 0), radius=0.065, facecolor="#0b1220", edgecolor="white", linewidth=1.0, zorder=6))
 
         # =========================
         # Textos
@@ -133910,12 +134055,12 @@ def generar_pci_velocimetro_png_bytes(titulo, valor, nivel="", color="#6c757d"):
         ax.text(
             -0.96, -0.05, "Bajo",
             ha="left", va="center",
-            fontsize=9, color="#6b7280"
+            fontsize=9, color="#4b5563"
         )
         ax.text(
             0.96, -0.05, "Alto",
             ha="right", va="center",
-            fontsize=9, color="#6b7280"
+            fontsize=9, color="#4b5563"
         )
 
         # =========================
@@ -134426,7 +134571,7 @@ def resultado(run_id):
       }}
 
       .pcires-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -134468,7 +134613,7 @@ def resultado(run_id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -134545,7 +134690,7 @@ def resultado(run_id):
       .pcires-card-title{{
         font-weight:950;
         font-size:1rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:8px;
       }}
 
@@ -134560,7 +134705,7 @@ def resultado(run_id):
       .pcires-general-score-label{{
         font-size:.78rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
       }}
 
@@ -134602,7 +134747,7 @@ def resultado(run_id):
       .pcires-exec-text{{
         font-size:.95rem;
         line-height:1.6;
-        color:#1f2937;
+        color:#101827;
       }}
 
       .mini-stat{{
@@ -134755,7 +134900,7 @@ def resultado_bloque_preguntas(run_id, bloque_codigo):
       }}
 
       .pcidet-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -134797,7 +134942,7 @@ def resultado_bloque_preguntas(run_id, bloque_codigo):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -134896,7 +135041,7 @@ def resultado_bloque_preguntas(run_id, bloque_codigo):
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
@@ -134940,7 +135085,7 @@ def resultado_bloque_preguntas(run_id, bloque_codigo):
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }}
 
       .table tbody tr:nth-child(even){{
@@ -135067,7 +135212,7 @@ def exportar_pdf(run_id):
         fontName="Helvetica",
         fontSize=8.5,
         leading=11,
-        textColor=colors.HexColor("#1f2937"),
+        textColor=colors.HexColor("#101827"),
         spaceAfter=5
     ))
 
@@ -135432,7 +135577,7 @@ def inicio_pci():
       }}
 
       .pcimad-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -135474,7 +135619,7 @@ def inicio_pci():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -135577,7 +135722,7 @@ def inicio_pci():
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
       }}
 
@@ -135609,7 +135754,7 @@ def inicio_pci():
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -136312,7 +136457,7 @@ def ingreso():
       }}
 
       .pciform-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -136354,7 +136499,7 @@ def ingreso():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -136415,7 +136560,7 @@ def ingreso():
       .pciform-section-title{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:14px;
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
@@ -136431,7 +136576,7 @@ def ingreso():
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -136511,7 +136656,7 @@ def ingreso():
       .pciform-cat-code{{
         font-size:.92rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
       }}
 
       .pciform-qcard{{
@@ -136733,7 +136878,7 @@ def parametros():
       }}
 
       .pcipar-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -136775,7 +136920,7 @@ def parametros():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -136866,7 +137011,7 @@ def parametros():
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
       }}
 
@@ -136911,7 +137056,7 @@ def parametros():
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }}
 
       .table tbody tr:nth-child(even){{
@@ -136926,7 +137071,7 @@ def parametros():
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -137147,7 +137292,7 @@ def historial():
       }}
 
       .pcihist-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -137189,7 +137334,7 @@ def historial():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -137280,7 +137425,7 @@ def historial():
       .card h6{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
       }}
 
@@ -137325,7 +137470,7 @@ def historial():
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }}
 
       .table tbody tr:nth-child(even){{
@@ -137533,7 +137678,7 @@ def plan_trabajo_editar_pci(run_id: int):
       }}
 
       .datstd-header-card {{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -137575,7 +137720,7 @@ def plan_trabajo_editar_pci(run_id: int):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -137666,7 +137811,7 @@ def plan_trabajo_editar_pci(run_id: int):
       .card h6 {{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
       }}
 
@@ -137697,7 +137842,7 @@ def plan_trabajo_editar_pci(run_id: int):
       .form-label {{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -137960,7 +138105,7 @@ def informe_ejecutivo_editar_pci(run_id: int):
       }}
 
       .pciexec-header-card {{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -138002,7 +138147,7 @@ def informe_ejecutivo_editar_pci(run_id: int):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -138093,7 +138238,7 @@ def informe_ejecutivo_editar_pci(run_id: int):
       .card h6 {{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
       }}
 
@@ -138124,7 +138269,7 @@ def informe_ejecutivo_editar_pci(run_id: int):
       .form-label {{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -138455,7 +138600,7 @@ def detalle_resultado_pci(analysis_id: int):
          HEADER SGSI REAL (UNIFICADO)
       ========================= */
       .pcidet-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -138492,7 +138637,7 @@ def detalle_resultado_pci(analysis_id: int):
         height:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -138585,7 +138730,7 @@ def detalle_resultado_pci(analysis_id: int):
       .card h5,
       .card h6{{
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
       }}
 
       /* =========================
@@ -138616,7 +138761,7 @@ def detalle_resultado_pci(analysis_id: int):
       .pcidet-exec-text{{
         font-size:.92rem;
         line-height:1.6;
-        color:#1f2937;
+        color:#101827;
       }}
 
       /* =========================
@@ -138629,7 +138774,7 @@ def detalle_resultado_pci(analysis_id: int):
         font-size:.84rem;
         font-weight:900;
         background:#eef5ff;
-        color:#1459a6;
+        color:#0b4a8f;
         box-shadow:0 4px 10px rgba(15,23,42,.08);
       }}
 
@@ -139184,13 +139329,13 @@ def generar_soc2_velocimetro_png_bytes(titulo, valor, nivel="", color="#6c757d")
             ax.add_patch(Wedge((0, 0), 1.00, theta2, theta1, width=0.18, facecolor=c, edgecolor="white", linewidth=2))
         for pct in range(0, 101, 10):
             ang = math.radians(180 - (pct / 100.0) * 180.0)
-            ax.plot([math.cos(ang) * 0.78, math.cos(ang) * 0.88], [math.sin(ang) * 0.78, math.sin(ang) * 0.88], linewidth=1.2, color="#6b7280")
+            ax.plot([math.cos(ang) * 0.78, math.cos(ang) * 0.88], [math.sin(ang) * 0.78, math.sin(ang) * 0.88], linewidth=1.2, color="#4b5563")
         for pct in [0, 25, 50, 75, 100]:
             ang = math.radians(180 - (pct / 100.0) * 180.0)
             ax.text(math.cos(ang) * 0.63, math.sin(ang) * 0.63, f"{pct}", ha="center", va="center", fontsize=10, fontweight="bold", color="#374151")
         ang = math.radians(180 - (valor / 100.0) * 180.0)
-        ax.add_patch(FancyArrowPatch((0, 0), (math.cos(ang) * 0.72, math.sin(ang) * 0.72), arrowstyle="-|>", mutation_scale=18, linewidth=2.4, color="#111827", zorder=5))
-        ax.add_patch(Circle((0, 0), radius=0.065, facecolor="#111827", edgecolor="white", linewidth=1.0, zorder=6))
+        ax.add_patch(FancyArrowPatch((0, 0), (math.cos(ang) * 0.72, math.sin(ang) * 0.72), arrowstyle="-|>", mutation_scale=18, linewidth=2.4, color="#0b1220", zorder=5))
+        ax.add_patch(Circle((0, 0), radius=0.065, facecolor="#0b1220", edgecolor="white", linewidth=1.0, zorder=6))
         titulo_corto = (titulo or "").strip()
         if len(titulo_corto) > 42:
             titulo_corto = titulo_corto[:39] + "..."
@@ -140783,7 +140928,7 @@ def historial():
       }}
 
       .soc2hist-subtitle {{
-        color:rgba(255,255,255,.94);
+        color:rgba(248,252,255,.96);
         font-size:.78rem;
         margin-top:3px;
         font-weight:500;
@@ -140843,7 +140988,7 @@ def historial():
       }}
 
       .soc2hist-text-main {{
-        color:#111827;
+        color:#0b1220;
         font-size:.80rem;
       }}
 
@@ -141842,7 +141987,7 @@ def _soc2_build_pdf_run(run: "Soc2MadurezRun") -> io.BytesIO:
         fontName="Helvetica",
         fontSize=8.5,
         leading=11,
-        textColor=colors.HexColor("#1f2937"),
+        textColor=colors.HexColor("#101827"),
         spaceAfter=5
     ))
 
@@ -142072,7 +142217,7 @@ def soc2_nist_css(prefix, icon, subtitle_label="SOC 2"):
   }}
 
   .{prefix}-header-card{{
-    background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+    background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
     border-radius:18px;
     padding:16px 24px;
     min-height:94px;
@@ -142114,7 +142259,7 @@ def soc2_nist_css(prefix, icon, subtitle_label="SOC 2"):
     min-width:54px;
     border-radius:14px;
     background:#ffffff;
-    color:#1459a6;
+    color:#0b4a8f;
     display:flex;
     align-items:center;
     justify-content:center;
@@ -142183,8 +142328,8 @@ def soc2_nist_css(prefix, icon, subtitle_label="SOC 2"):
 
   .{prefix}-btn-main,
   .{prefix}-btn-primary{{
-    background:#1459a6 !important;
-    border:1px solid #1459a6 !important;
+    background:#0b4a8f !important;
+    border:1px solid #0b4a8f !important;
     color:#ffffff !important;
   }}
 
@@ -142220,7 +142365,7 @@ def soc2_nist_css(prefix, icon, subtitle_label="SOC 2"):
   .card h6{{
     font-weight:950;
     font-size:.95rem;
-    color:#1459a6;
+    color:#0b4a8f;
     margin:8px 0 14px 0;
     padding-bottom:8px;
     border-bottom:2px solid rgba(59,130,246,.18);
@@ -142316,7 +142461,7 @@ def soc2_nistform_css():
       }
 
       .nistform-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -142358,7 +142503,7 @@ def soc2_nistform_css():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -142437,7 +142582,7 @@ def soc2_nistform_css():
       .card h6{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin:8px 0 14px 0;
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
@@ -142471,7 +142616,7 @@ def soc2_nistform_css():
 
       .nistform-acc-item .accordion-button{
         background:linear-gradient(135deg,#eef6ff,#ffffff);
-        color:#1f2937;
+        color:#101827;
         font-weight:900;
         box-shadow:none;
         padding:16px 18px;
@@ -142479,7 +142624,7 @@ def soc2_nistform_css():
 
       .nistform-acc-item .accordion-button:not(.collapsed){
         background:linear-gradient(135deg,#dceeff,#ffffff);
-        color:#1459a6;
+        color:#0b4a8f;
       }
 
       .nistform-acc-inner{
@@ -142493,7 +142638,7 @@ def soc2_nistform_css():
       .nistform-func-title{
         font-size:1.02rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
       }
 
       .nistform-func-subtitle{
@@ -142522,7 +142667,7 @@ def soc2_nistform_css():
         justify-content:space-between;
         gap:12px;
         margin-bottom:14px;
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:950;
       }
 
@@ -142548,7 +142693,7 @@ def soc2_nistform_css():
       }
 
       .nistform-qtext{
-        color:#111827;
+        color:#0b1220;
         font-weight:800;
         line-height:1.35;
         min-height:76px;
@@ -142568,7 +142713,7 @@ def soc2_nistform_css():
         gap:7px;
         border:1px solid #d7e0ec;
         background:#ffffff;
-        color:#1f2937;
+        color:#101827;
         border-radius:999px;
         padding:8px 10px;
         font-weight:900;
@@ -142580,7 +142725,7 @@ def soc2_nistform_css():
       }
 
       .nistform-radio-card input{
-        accent-color:#1459a6;
+        accent-color:#0b4a8f;
       }
 
       .nistform-radio-card:hover{
@@ -142615,7 +142760,7 @@ def soc2_nistform_css():
       .form-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -143860,7 +144005,7 @@ def ai_css(prefix="aimad", icon="🤖", tag="SGSI · ISO 42001"):
   }}
 
   .{prefix}-header-card{{
-    background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+    background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
     border-radius:18px;
     padding:16px 24px;
     min-height:94px;
@@ -143902,7 +144047,7 @@ def ai_css(prefix="aimad", icon="🤖", tag="SGSI · ISO 42001"):
     min-width:54px;
     border-radius:14px;
     background:#ffffff;
-    color:#1459a6;
+    color:#0b4a8f;
     display:flex;
     align-items:center;
     justify-content:center;
@@ -144048,7 +144193,7 @@ def ai_css(prefix="aimad", icon="🤖", tag="SGSI · ISO 42001"):
 
   .ai-progress-fill{{
     height:100%;
-    background:linear-gradient(135deg,#1459a6,#2c7be5);
+    background:linear-gradient(135deg,#0b4a8f,#1d5fae);
     color:#fff;
     font-size:.72rem;
     font-weight:900;
@@ -144067,11 +144212,11 @@ def ai_css(prefix="aimad", icon="🤖", tag="SGSI · ISO 42001"):
   .ai-kpi-value{{
     font-size:1.45rem;
     font-weight:950;
-    color:#1459a6;
+    color:#0b4a8f;
   }}
 
   .ai-kpi-label{{
-    color:#64748b;
+    color:#475569;
     font-size:.78rem;
     font-weight:800;
   }}
@@ -144889,7 +145034,7 @@ def ingreso():
       }}
 
       .nistform-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -144931,7 +145076,7 @@ def ingreso():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -145030,7 +145175,7 @@ def ingreso():
       .nistform-section-title{{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
         margin-bottom:16px;
@@ -145051,7 +145196,7 @@ def ingreso():
       .form-label{{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -145128,7 +145273,7 @@ def ingreso():
       .nistform-acc-btn:not(.collapsed),
       .accordion-button:not(.collapsed){{
         background:#dbeafe !important;
-        color:#1459a6 !important;
+        color:#0b4a8f !important;
         box-shadow:none !important;
       }}
 
@@ -145181,7 +145326,7 @@ def ingreso():
       .nistform-cat-code{{
         font-size:.92rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         line-height:1.15;
       }}
 
@@ -145239,7 +145384,7 @@ def ingreso():
         border-radius:12px;
         min-height:46px;
         font-weight:900;
-        color:#1f2937;
+        color:#101827;
         cursor:pointer;
         transition:.2s;
         padding:8px 10px;
@@ -146055,19 +146200,19 @@ def detalle(run_id):
 
           <text x="64" y="49"
                 text-anchor="middle"
-                style="font-size:16px;font-weight:950;fill:#111827;">
+                style="font-size:16px;font-weight:950;fill:#0b1220;">
             {pct:.0f}%
           </text>
 
           <text x="22" y="80"
                 text-anchor="middle"
-                style="font-size:9px;font-weight:800;fill:#64748b;">
+                style="font-size:9px;font-weight:800;fill:#475569;">
             0
           </text>
 
           <text x="106" y="80"
                 text-anchor="middle"
-                style="font-size:9px;font-weight:800;fill:#64748b;">
+                style="font-size:9px;font-weight:800;fill:#475569;">
             100
           </text>
         </svg>
@@ -146251,7 +146396,7 @@ def detalle(run_id):
       }}
 
       .aidet-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -146293,7 +146438,7 @@ def detalle(run_id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -146383,7 +146528,7 @@ def detalle(run_id):
       .aidet-card-title,
       .aidet-section-title{{
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
       }}
 
       .aidet-section-title{{
@@ -146403,7 +146548,7 @@ def detalle(run_id):
       .aidet-general-score-label{{
         font-size:.78rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
       }}
 
@@ -146425,7 +146570,7 @@ def detalle(run_id):
 
       .aidet-mini-kpi-label{{
         font-size:.72rem;
-        color:#64748b;
+        color:#475569;
         font-weight:900;
         text-transform:uppercase;
       }}
@@ -146448,7 +146593,7 @@ def detalle(run_id):
       .aidet-exec-text{{
         font-size:.96rem;
         line-height:1.65;
-        color:#1f2937;
+        color:#101827;
         overflow-wrap:anywhere;
       }}
 
@@ -146481,7 +146626,7 @@ def detalle(run_id):
         left:0;
         right:0;
         height:5px;
-        background:linear-gradient(90deg,#1459a6,#2c7be5,#6fb7ff);
+        background:linear-gradient(90deg,#0b4a8f,#1d5fae,#6fb7ff);
       }}
 
       .aidet-gauge-head{{
@@ -146497,7 +146642,7 @@ def detalle(run_id):
       .aidet-cat-code{{
         font-size:.83rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         white-space:nowrap;
         overflow:hidden;
         text-overflow:ellipsis;
@@ -146506,7 +146651,7 @@ def detalle(run_id):
       .aidet-cat-subcode{{
         width:100%;
         text-align:center;
-        color:#64748b;
+        color:#475569;
         font-size:.70rem;
         font-weight:900;
         text-transform:uppercase;
@@ -146521,7 +146666,7 @@ def detalle(run_id):
 
       .aidet-items-pill{{
         background:#eef5ff;
-        color:#1459a6;
+        color:#0b4a8f;
         border:1px solid #d9eaff;
         border-radius:999px;
         padding:4px 10px;
@@ -146593,7 +146738,7 @@ def detalle(run_id):
         text-align:center;
         font-size:.68rem;
         line-height:1.18;
-        color:#64748b;
+        color:#475569;
         margin-top:4px;
       }}
 
@@ -146860,7 +147005,7 @@ def detalle_categoria(run_id, cap, cat_code):
       }}
 
       .aidetcat-header-card{{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -146902,7 +147047,7 @@ def detalle_categoria(run_id, cap, cat_code):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -146988,7 +147133,7 @@ def detalle_categoria(run_id, cap, cat_code):
 
       .aidetcat-section-title{{
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         font-size:1rem;
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
@@ -147027,7 +147172,7 @@ def detalle_categoria(run_id, cap, cat_code):
 
       .aidetcat-meta{{
         margin-top:6px;
-        color:#64748b;
+        color:#475569;
         font-size:.72rem;
         font-weight:700;
         overflow-wrap:anywhere;
@@ -147750,7 +147895,7 @@ def _ai_build_pdf_run(run_id):
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="AI_Title", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=18, textColor=colors.white, alignment=TA_CENTER, spaceAfter=8))
     styles.add(ParagraphStyle(name="AI_Section", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=12, textColor=colors.HexColor("#1d4f8f"), spaceBefore=10, spaceAfter=8))
-    styles.add(ParagraphStyle(name="AI_Normal", parent=styles["Normal"], fontName="Helvetica", fontSize=8.5, leading=11, textColor=colors.HexColor("#1f2937"), spaceAfter=5))
+    styles.add(ParagraphStyle(name="AI_Normal", parent=styles["Normal"], fontName="Helvetica", fontSize=8.5, leading=11, textColor=colors.HexColor("#101827"), spaceAfter=5))
     styles.add(ParagraphStyle(name="AI_Small", parent=styles["Normal"], fontName="Helvetica", fontSize=7.5, leading=9, textColor=colors.HexColor("#374151"), spaceAfter=4))
 
     def pdf_escape(v):
@@ -148631,7 +148776,7 @@ def listas_restrictivas_home():
       }
 
       .lr-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -148674,7 +148819,7 @@ def listas_restrictivas_home():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -148738,7 +148883,7 @@ def listas_restrictivas_home():
       }
 
       .lr-kpi-label{
-        color:#64748b;
+        color:#475569;
         font-weight:900;
         font-size:.78rem;
         text-transform:uppercase;
@@ -148749,7 +148894,7 @@ def listas_restrictivas_home():
       .lr-kpi-value{
         font-size:1.85rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         line-height:1.1;
       }
 
@@ -148770,7 +148915,7 @@ def listas_restrictivas_home():
         border-radius:14px;
         background:#eef5ff;
         border:1px solid #d9eaff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -148785,7 +148930,7 @@ def listas_restrictivas_home():
       }
 
       .lr-action-desc{
-        color:#64748b;
+        color:#475569;
         font-size:.78rem;
         margin-top:6px;
         line-height:1.35;
@@ -148833,7 +148978,7 @@ def listas_restrictivas_home():
 
       .lr-table td{
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .lr-table tbody tr:nth-child(even){
@@ -149048,7 +149193,7 @@ def listas_restrictivas_detalle(consulta_id):
       }
 
       .lr-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -149090,7 +149235,7 @@ def listas_restrictivas_detalle(consulta_id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -149157,14 +149302,14 @@ def listas_restrictivas_detalle(consulta_id):
       .lr-detail-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         margin-bottom:6px;
       }
 
       .lr-detail-value{
-        color:#1f2937;
+        color:#101827;
         font-size:.90rem;
         line-height:1.38;
         word-break:break-word;
@@ -149705,7 +149850,7 @@ def listas_restrictivas_consulta_manual():
       }
 
       .lr-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -149747,7 +149892,7 @@ def listas_restrictivas_consulta_manual():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -149809,7 +149954,7 @@ def listas_restrictivas_consulta_manual():
       .lr-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -149871,7 +150016,7 @@ def listas_restrictivas_consulta_manual():
       }
 
       .lr-kpi-label{
-        color:#64748b;
+        color:#475569;
         font-weight:900;
         font-size:.72rem;
         text-transform:uppercase;
@@ -149882,14 +150027,14 @@ def listas_restrictivas_consulta_manual():
       .lr-kpi-value{
         font-size:1.85rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         line-height:1.1;
       }
 
       .lr-kpi-value-sm{
         font-size:.92rem;
         font-weight:900;
-        color:#111827;
+        color:#0b1220;
         word-break:break-word;
       }
 
@@ -149931,7 +150076,7 @@ def listas_restrictivas_consulta_manual():
 
       .lr-table td{
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .lr-table tbody tr:nth-child(even){
@@ -150331,7 +150476,7 @@ def listas_restrictivas_base():
       }
 
       .lr-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -150373,7 +150518,7 @@ def listas_restrictivas_base():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -150433,7 +150578,7 @@ def listas_restrictivas_base():
       .form-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -150512,7 +150657,7 @@ def listas_restrictivas_base():
 
       .lr-table td{
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .lr-table tbody tr:nth-child(even){
@@ -150772,7 +150917,7 @@ def listas_restrictivas_historial_proveedor(proveedor_id):
     <style>
       .provlist-shell{width:96%;max-width:1700px;margin:10px auto 30px auto;}
       .provlist-header-card{
-        background: linear-gradient(135deg, #b91c1c 0%, #dc2626 55%, #ef4444 100%);
+        background: linear-gradient(135deg, #b91c1c 0%, #b91c1c 55%, #ef4444 100%);
         min-height: 88px; border-radius: 18px; overflow: hidden;
         box-shadow: 0 12px 28px rgba(0,0,0,.22); margin-bottom: 14px;
       }
@@ -150783,7 +150928,7 @@ def listas_restrictivas_historial_proveedor(proveedor_id):
       .provlist-title{color:#fff;font-weight:900;font-size:1.35rem;}
       .provlist-subtitle{color:rgba(255,255,255,.96);font-size:.86rem;margin-top:4px;}
       .provlist-card{
-        background: rgba(255,255,255,.94);
+        background: rgba(248,252,255,.96);
         border-radius: 18px; backdrop-filter: blur(6px);
         box-shadow: 0 10px 24px rgba(0,0,0,.16);
       }
@@ -153870,7 +154015,7 @@ def proveedores_scorecard_apis():
       }
 
       .score-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -153910,7 +154055,7 @@ def proveedores_scorecard_apis():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -153953,12 +154098,12 @@ def proveedores_scorecard_apis():
 
       .api-title{
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:4px;
       }
 
       .api-sub{
-        color:#64748b;
+        color:#475569;
         font-size:.9rem;
         font-weight:700;
         margin-bottom:14px;
@@ -153967,7 +154112,7 @@ def proveedores_scorecard_apis():
       .api-mask{
         background:#eef5ff;
         border:1px solid #d9eaff;
-        color:#1459a6;
+        color:#0b4a8f;
         border-radius:10px;
         padding:8px 10px;
         font-weight:900;
@@ -154191,7 +154336,7 @@ def proveedores_scorecard_dashboard():
       }
 
       .score-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -154239,7 +154384,7 @@ def proveedores_scorecard_dashboard():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -154287,7 +154432,7 @@ def proveedores_scorecard_dashboard():
 
       .score-kpi .label{
         font-size:.72rem;
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:900;
         text-transform:uppercase;
         letter-spacing:.35px;
@@ -154302,7 +154447,7 @@ def proveedores_scorecard_dashboard():
       .score-kpi .value{
         font-size:2rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         line-height:1.1;
       }
 
@@ -154347,7 +154492,7 @@ def proveedores_scorecard_dashboard():
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
         white-space:nowrap;
       }
 
@@ -154376,7 +154521,7 @@ def proveedores_scorecard_dashboard():
          BOTON API AZUL SGSI
       ====================================================== */
       .btn-api-blue{
-        background:linear-gradient(135deg,#1459a6,#2f7fd1) !important;
+        background:linear-gradient(135deg,#0b4a8f,#2f7fd1) !important;
         border:none !important;
         color:#ffffff !important;
         border-radius:999px !important;
@@ -154413,7 +154558,7 @@ def proveedores_scorecard_dashboard():
 
       .api-mini-title{
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         font-size:.84rem;
         text-transform:uppercase;
       }
@@ -154776,7 +154921,7 @@ def proveedores_scorecard_scan_nuevo():
       }
 
       .score-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -154808,7 +154953,7 @@ def proveedores_scorecard_scan_nuevo():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -154863,7 +155008,7 @@ def proveedores_scorecard_scan_nuevo():
       .form-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -155149,7 +155294,7 @@ def proveedores_scorecard_detalle(scorecard_id):
       }
 
       .score-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -155180,7 +155325,7 @@ def proveedores_scorecard_detalle(scorecard_id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -155235,7 +155380,7 @@ def proveedores_scorecard_detalle(scorecard_id):
       .score-main{
         font-size:3rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         line-height:1;
       }
 
@@ -155272,7 +155417,7 @@ def proveedores_scorecard_detalle(scorecard_id):
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .table tbody tr:nth-child(even){
@@ -155310,7 +155455,7 @@ def proveedores_scorecard_detalle(scorecard_id):
 
       .score-progress-title{
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
       }
 
       .score-live-dot{
@@ -156263,7 +156408,7 @@ def proveedores_scorecard_rating(scorecard_id):
       }
 
       .score-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -156294,7 +156439,7 @@ def proveedores_scorecard_rating(scorecard_id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -156426,7 +156571,7 @@ def proveedores_scorecard_rating(scorecard_id):
         border-radius:999px;
         background:#eef5ff;
         border:1px solid #d8e9ff;
-        color:#1459a6;
+        color:#0b4a8f;
         font-size:.64rem;
         font-weight:950;
         text-align:center;
@@ -156436,7 +156581,7 @@ def proveedores_scorecard_rating(scorecard_id):
       .section-title{
         font-size:.80rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:5px;
         line-height:1.1;
       }
@@ -156504,7 +156649,7 @@ def proveedores_scorecard_rating(scorecard_id):
       .dot-critical{background:#991b1b;}
       .dot-high{background:#c2410c;}
       .dot-medium{background:#d97706;}
-      .dot-low{background:#1459a6;}
+      .dot-low{background:#0b4a8f;}
 
       .main-grid{
         display:grid;
@@ -156673,7 +156818,7 @@ def proveedores_scorecard_rating(scorecard_id):
       .sev-critical{background:#991b1b;}
       .sev-high{background:#c2410c;}
       .sev-medium{background:#d97706;}
-      .sev-low{background:#1459a6;}
+      .sev-low{background:#0b4a8f;}
 
       @media(max-width:1200px){
         .ssc-top,
@@ -157010,7 +157155,7 @@ def proveedores_scorecard_rating(scorecard_id):
 
           // etiquetas 0 / 50 / 100
           ctx.save();
-          ctx.fillStyle = '#64748b';
+          ctx.fillStyle = '#475569';
           ctx.font = '700 8px Arial';
           ctx.textAlign = 'center';
           ctx.fillText('0', x - outerRadius + 12, y + 12);
@@ -157034,7 +157179,7 @@ def proveedores_scorecard_rating(scorecard_id):
             labels: ['Crítico', 'Alto', 'Medio', 'Bajo'],
             datasets: [{
               data: [50, 20, 15, 15],
-              backgroundColor: ['#991b1b', '#c2410c', '#d97706', '#16a34a'],
+              backgroundColor: ['#991b1b', '#c2410c', '#d97706', '#087c3d'],
               borderColor: '#ffffff',
               borderWidth: 2,
               circumference: 180,
@@ -157101,7 +157246,7 @@ def proveedores_scorecard_rating(scorecard_id):
             labels: riskLabels,
             datasets: [{
               data: riskValues,
-              backgroundColor: ['#991b1b', '#c2410c', '#d97706', '#1459a6'],
+              backgroundColor: ['#991b1b', '#c2410c', '#d97706', '#0b4a8f'],
               borderWidth: 1
             }]
           },
@@ -157138,7 +157283,7 @@ def proveedores_scorecard_rating(scorecard_id):
             datasets: [{
               label: 'Score',
               data: peerValues,
-              backgroundColor: ['#16a34a', '#334155', '#1459a6'],
+              backgroundColor: ['#087c3d', '#334155', '#0b4a8f'],
               borderWidth: 1
             }]
           },
@@ -157313,7 +157458,7 @@ def proveedores_scorecard_kali_detalle(scorecard_id):
       }
 
       .score-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -157355,7 +157500,7 @@ def proveedores_scorecard_kali_detalle(scorecard_id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -157446,7 +157591,7 @@ def proveedores_scorecard_kali_detalle(scorecard_id):
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .table tbody tr:nth-child(even){
@@ -158104,7 +158249,7 @@ def proveedores_scorecard_parametros():
       }
 
       .score-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -158135,7 +158280,7 @@ def proveedores_scorecard_parametros():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -158193,7 +158338,7 @@ def proveedores_scorecard_parametros():
       .card h6{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
@@ -158235,7 +158380,7 @@ def proveedores_scorecard_parametros():
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .table tbody tr:nth-child(even){
@@ -158256,7 +158401,7 @@ def proveedores_scorecard_parametros():
       .form-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -160404,7 +160549,7 @@ def proponentes_scorecard_dashboard():
       }
 
       .prop-score-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -160450,7 +160595,7 @@ def proponentes_scorecard_dashboard():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -160501,7 +160646,7 @@ def proponentes_scorecard_dashboard():
       ========================================================= */
 
       .btn-api-blue{
-        background:linear-gradient(135deg,#1459a6,#2f7fd1) !important;
+        background:linear-gradient(135deg,#0b4a8f,#2f7fd1) !important;
         border:none !important;
         color:#ffffff !important;
         border-radius:12px !important;
@@ -160549,7 +160694,7 @@ def proponentes_scorecard_dashboard():
       .metric-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -160561,7 +160706,7 @@ def proponentes_scorecard_dashboard():
       }
 
       .metric-value{
-        color:#1459a6;
+        color:#0b4a8f;
         font-size:1.8rem;
         font-weight:950;
         line-height:1;
@@ -160601,7 +160746,7 @@ def proponentes_scorecard_dashboard():
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .table tbody tr:nth-child(even){
@@ -160833,7 +160978,7 @@ def scorecard_proponentes_rating_color(score):
     score = float(score or 0)
 
     if score >= 90:
-        return "#16a34a"
+        return "#087c3d"
     if score >= 80:
         return "#15803d"
     if score >= 70:
@@ -161224,7 +161369,7 @@ def proponentes_scorecard_rating(scorecard_id):
       }
 
       .score-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -161255,7 +161400,7 @@ def proponentes_scorecard_rating(scorecard_id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -161391,7 +161536,7 @@ def proponentes_scorecard_rating(scorecard_id):
         border-radius:999px;
         background:#eef5ff;
         border:1px solid #d8e9ff;
-        color:#1459a6;
+        color:#0b4a8f;
         font-size:.64rem;
         font-weight:950;
         text-align:center;
@@ -161401,7 +161546,7 @@ def proponentes_scorecard_rating(scorecard_id):
       .section-title{
         font-size:.80rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:5px;
         line-height:1.1;
       }
@@ -161469,7 +161614,7 @@ def proponentes_scorecard_rating(scorecard_id):
       .dot-critical{background:#991b1b;}
       .dot-high{background:#c2410c;}
       .dot-medium{background:#d97706;}
-      .dot-low{background:#1459a6;}
+      .dot-low{background:#0b4a8f;}
 
       .main-grid{
         display:grid;
@@ -161638,7 +161783,7 @@ def proponentes_scorecard_rating(scorecard_id):
       .sev-critical{background:#991b1b;}
       .sev-high{background:#c2410c;}
       .sev-medium{background:#d97706;}
-      .sev-low{background:#1459a6;}
+      .sev-low{background:#0b4a8f;}
 
       .ai-report-card{
         margin-top:9px;
@@ -161665,7 +161810,7 @@ def proponentes_scorecard_rating(scorecard_id):
 
       .ai-report-textarea.ai-editable{
         background:#ffffff;
-        border:2px solid #f59e0b;
+        border:2px solid #c76b00;
         box-shadow:0 0 0 .15rem rgba(245,158,11,.18);
       }
 
@@ -162070,7 +162215,7 @@ def proponentes_scorecard_rating(scorecard_id):
           ctx.restore();
 
           ctx.save();
-          ctx.fillStyle = '#64748b';
+          ctx.fillStyle = '#475569';
           ctx.font = '700 8px Arial';
           ctx.textAlign = 'center';
           ctx.fillText('0', x - outerRadius + 12, y + 12);
@@ -162097,7 +162242,7 @@ def proponentes_scorecard_rating(scorecard_id):
             labels: ['Crítico', 'Alto', 'Medio', 'Bajo'],
             datasets: [{
               data: [50, 20, 15, 15],
-              backgroundColor: ['#991b1b', '#c2410c', '#d97706', '#16a34a'],
+              backgroundColor: ['#991b1b', '#c2410c', '#d97706', '#087c3d'],
               borderColor: '#ffffff',
               borderWidth: 2,
               circumference: 180,
@@ -162164,7 +162309,7 @@ def proponentes_scorecard_rating(scorecard_id):
             labels: riskLabels,
             datasets: [{
               data: riskValues,
-              backgroundColor: ['#991b1b', '#c2410c', '#d97706', '#1459a6'],
+              backgroundColor: ['#991b1b', '#c2410c', '#d97706', '#0b4a8f'],
               borderWidth: 1
             }]
           },
@@ -162201,7 +162346,7 @@ def proponentes_scorecard_rating(scorecard_id):
             datasets: [{
               label: 'Score',
               data: peerValues,
-              backgroundColor: ['#16a34a', '#334155', '#1459a6'],
+              backgroundColor: ['#087c3d', '#334155', '#0b4a8f'],
               borderWidth: 1
             }]
           },
@@ -162433,12 +162578,12 @@ def proponentes_scorecard_rating_pdf(scorecard_id):
 
     def score_color(v):
         if v >= 85:
-            return "#16a34a"
+            return "#087c3d"
         if v >= 70:
-            return "#f59e0b"
+            return "#c76b00"
         if v >= 50:
-            return "#f97316"
-        return "#dc2626"
+            return "#c95508"
+        return "#b91c1c"
 
     def fig_to_image(fig, width, height):
         img = BytesIO()
@@ -162471,7 +162616,7 @@ def proponentes_scorecard_rating_pdf(scorecard_id):
              fontsize=20, fontweight="bold", color="#0f172a")
     ax0.text(0, -0.18, f"Rating {letra}", ha="center", va="center",
              fontsize=10, fontweight="bold", color="#334155")
-    ax0.set_title("Score General", fontsize=11, fontweight="bold", color="#0b3a6e", pad=18)
+    ax0.set_title("Score General", fontsize=11, fontweight="bold", color="#062b55", pad=18)
     ax0.axis("equal")
     fig0.subplots_adjust(left=0.06, right=0.94, top=0.76, bottom=0.04)
     chart_score = fig_to_image(fig0, 190, 142)
@@ -162485,7 +162630,7 @@ def proponentes_scorecard_rating_pdf(scorecard_id):
 
     bars = ax1.barh(labels, values, color=bar_colors, height=0.45)
     ax1.set_xlim(0, 112)
-    ax1.set_title("Componentes Evaluados", fontsize=11, fontweight="bold", color="#0b3a6e", pad=18)
+    ax1.set_title("Componentes Evaluados", fontsize=11, fontweight="bold", color="#062b55", pad=18)
     ax1.grid(axis="x", alpha=.16)
     ax1.invert_yaxis()
     ax1.tick_params(axis="both", labelsize=8)
@@ -162498,7 +162643,7 @@ def proponentes_scorecard_rating_pdf(scorecard_id):
             va="center",
             fontsize=8,
             fontweight="bold",
-            color="#111827"
+            color="#0b1220"
         )
 
     ax1.spines["top"].set_visible(False)
@@ -162513,9 +162658,9 @@ def proponentes_scorecard_rating_pdf(scorecard_id):
     if sum(risk_vals) == 0:
         risk_labs = ["Sin hallazgos"]
         risk_vals = [1]
-        risk_colors = ["#16a34a"]
+        risk_colors = ["#087c3d"]
     else:
-        risk_colors = ["#7f1d1d", "#dc2626", "#f59e0b", "#16a34a"]
+        risk_colors = ["#7f1d1d", "#b91c1c", "#c76b00", "#087c3d"]
 
     fig2, ax2 = plt.subplots(figsize=(3.7, 2.85))
     fig2.patch.set_facecolor("white")
@@ -162534,7 +162679,7 @@ def proponentes_scorecard_rating_pdf(scorecard_id):
         textprops={
             "fontsize": 8,
             "fontweight": "bold",
-            "color": "#111827"
+            "color": "#0b1220"
         }
     )
     ax2.legend(
@@ -162545,7 +162690,7 @@ def proponentes_scorecard_rating_pdf(scorecard_id):
         frameon=False,
         borderaxespad=0.0
     )
-    ax2.set_title("Distribución de Riesgos", fontsize=11, fontweight="bold", color="#0b3a6e", pad=28)
+    ax2.set_title("Distribución de Riesgos", fontsize=11, fontweight="bold", color="#062b55", pad=28)
     ax2.axis("equal")
     fig2.subplots_adjust(left=0.02, right=0.60, top=0.74, bottom=0.04)
     chart_riesgos = fig_to_image(fig2, 240, 168)
@@ -162562,7 +162707,7 @@ def proponentes_scorecard_rating_pdf(scorecard_id):
     cat_values = [x[1] for x in cat_items]
 
     bars = ax3.barh(cat_labels, cat_values, color="#2563eb", height=0.48)
-    ax3.set_title("Hallazgos por Categoría", fontsize=11, fontweight="bold", color="#0b3a6e", pad=18)
+    ax3.set_title("Hallazgos por Categoría", fontsize=11, fontweight="bold", color="#062b55", pad=18)
     ax3.invert_yaxis()
     ax3.grid(axis="x", alpha=.16)
     ax3.tick_params(axis="both", labelsize=8)
@@ -162624,7 +162769,7 @@ def proponentes_scorecard_rating_pdf(scorecard_id):
         parent=styles["Heading2"],
         fontSize=10,
         leading=12,
-        textColor=colors.HexColor("#0b3a6e"),
+        textColor=colors.HexColor("#062b55"),
         spaceBefore=6,
         spaceAfter=6
     )
@@ -162634,7 +162779,7 @@ def proponentes_scorecard_rating_pdf(scorecard_id):
         parent=styles["Normal"],
         fontSize=7.2,
         leading=9,
-        textColor=colors.HexColor("#1f2937"),
+        textColor=colors.HexColor("#101827"),
         spaceAfter=4
     )
 
@@ -162651,7 +162796,7 @@ def proponentes_scorecard_rating_pdf(scorecard_id):
         parent=styles["Normal"],
         fontSize=6.2,
         leading=7.2,
-        textColor=colors.HexColor("#1459a6"),
+        textColor=colors.HexColor("#0b4a8f"),
         fontName="Helvetica-Bold"
     )
 
@@ -162680,8 +162825,8 @@ def proponentes_scorecard_rating_pdf(scorecard_id):
     ], colWidths=[470, 350])
 
     header.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#0b3a6e")),
-        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#0b3a6e")),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#062b55")),
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#062b55")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 8),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
@@ -162798,7 +162943,7 @@ def proponentes_scorecard_rating_pdf(scorecard_id):
     findings_table = Table(findings_data, colWidths=[125, 180, 65, 45, 385], repeatRows=1)
 
     findings_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1459a6")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0b4a8f")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#dbe6f4")),
@@ -162839,7 +162984,7 @@ def proponentes_scorecard_rating_pdf(scorecard_id):
     matriz_table = Table(matriz, colWidths=[160, 80, 180, 380])
 
     matriz_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1459a6")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0b4a8f")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#dbe6f4")),
@@ -163274,7 +163419,7 @@ def proponentes_scorecard_scan_nuevo():
       }
 
       .score-new-header{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:18px 24px;
         min-height:94px;
@@ -163342,18 +163487,18 @@ def proponentes_scorecard_scan_nuevo():
 
       .tool-title{
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         font-size:.78rem;
       }
 
       .tool-desc{
-        color:#64748b;
+        color:#475569;
         font-size:.74rem;
         line-height:1.25;
       }
 
       .zap-box{
-        border-color:#f59e0b;
+        border-color:#c76b00;
         background:#fff7ed;
       }
 
@@ -163783,7 +163928,7 @@ def proponentes_scorecard_detalle(scorecard_id):
       }
 
       .score-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -163814,7 +163959,7 @@ def proponentes_scorecard_detalle(scorecard_id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -163889,7 +164034,7 @@ def proponentes_scorecard_detalle(scorecard_id):
       .score-number{
         font-size:3.8rem;
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         line-height:1;
       }
 
@@ -163903,7 +164048,7 @@ def proponentes_scorecard_detalle(scorecard_id):
 
       .risk-pill.bg-warning,
       .risk-pill.text-dark{
-        color:#111827 !important;
+        color:#0b1220 !important;
       }
 
       .company-title{
@@ -163916,7 +164061,7 @@ def proponentes_scorecard_detalle(scorecard_id):
       .company-meta{
         font-size:1rem;
         font-weight:800;
-        color:#1f2937;
+        color:#101827;
         margin-bottom:6px;
       }
 
@@ -163952,7 +164097,7 @@ def proponentes_scorecard_detalle(scorecard_id):
       }
 
       .section-title{
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:950;
         margin-bottom:12px;
       }
@@ -164468,7 +164613,7 @@ def proponentes_scorecard_kali_detalle(scorecard_id):
       }
 
       .score-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -164489,7 +164634,7 @@ def proponentes_scorecard_kali_detalle(scorecard_id):
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -164544,7 +164689,7 @@ def proponentes_scorecard_kali_detalle(scorecard_id):
       }
 
       .section-title{
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:950;
         margin-bottom:12px;
       }
@@ -164891,7 +165036,7 @@ def admin_scorecard_proponentes_apis():
       }
 
       .api-prop-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -164933,7 +165078,7 @@ def admin_scorecard_proponentes_apis():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -164986,7 +165131,7 @@ def admin_scorecard_proponentes_apis():
       }
 
       .api-title{
-        color:#1459a6;
+        color:#0b4a8f;
         font-weight:950;
         font-size:1.05rem;
       }
@@ -165000,7 +165145,7 @@ def admin_scorecard_proponentes_apis():
       .form-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -166009,7 +166154,7 @@ def proponentes_scorecard_parametros():
       }
 
       .score-header-card{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -166040,7 +166185,7 @@ def proponentes_scorecard_parametros():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -166090,7 +166235,7 @@ def proponentes_scorecard_parametros():
       .section-title{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
@@ -166106,7 +166251,7 @@ def proponentes_scorecard_parametros():
       .form-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -166959,7 +167104,7 @@ def _pesi_css():
       }
 
       .pesi-header-card {
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -167001,7 +167146,7 @@ def _pesi_css():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -167064,7 +167209,7 @@ def _pesi_css():
       .section-title {
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
@@ -167109,7 +167254,7 @@ def _pesi_css():
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .table tbody tr:nth-child(even) {
@@ -167128,7 +167273,7 @@ def _pesi_css():
       .form-label {
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -167172,7 +167317,7 @@ def _pesi_css():
 
       .approval-box h6 {
         font-weight:950;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         font-size:.82rem;
         margin-bottom:14px;
@@ -167203,7 +167348,7 @@ def _pesi_css():
 
       .pesi-help {
         font-size:.78rem;
-        color:#64748b;
+        color:#475569;
         margin-top:-8px;
         margin-bottom:12px;
       }
@@ -168604,7 +168749,7 @@ def _revdir_css():
       }
 
       .revdir-header-card {
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -168636,7 +168781,7 @@ def _revdir_css():
         min-width:54px;
         border-radius:14px;
         background:#ffffff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -168682,7 +168827,7 @@ def _revdir_css():
       .section-title {
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:16px;
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
@@ -168722,7 +168867,7 @@ def _revdir_css():
       .form-label {
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -168777,7 +168922,7 @@ def _revdir_css():
 
       .revdir-help {
         font-size:.78rem;
-        color:#64748b;
+        color:#475569;
         margin-top:-8px;
         margin-bottom:12px;
       }
@@ -168801,7 +168946,7 @@ def _revdir_css():
         font-weight:950;
         font-size:.9rem;
         margin-bottom:8px;
-        color:#1459a6;
+        color:#0b4a8f;
       }
 
       .dofa-quad textarea {
@@ -169501,7 +169646,7 @@ def revdir_pdf(informe_id):
         leftIndent=18,
         firstLineIndent=-14,
         spaceAfter=7,
-        textColor=colors.HexColor("#1f2937")
+        textColor=colors.HexColor("#101827")
     )
 
     normal = ParagraphStyle(
@@ -170127,7 +170272,7 @@ def bcp_render(title, body_html):
       .bcp-wrap{width:96%;max-width:1600px;margin:26px auto 24px auto;}
 
       .bcp-hero{
-        background:linear-gradient(135deg,#0b3a6e,#1459a6,#2c7be5);
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
         min-height:94px;
@@ -170166,7 +170311,7 @@ def bcp_render(title, body_html):
         min-width:54px;
         border-radius:14px;
         background:#fff;
-        color:#1459a6;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -170285,7 +170430,7 @@ def bcp_render(title, body_html):
       .card h6{
         font-weight:950;
         font-size:.95rem;
-        color:#1459a6;
+        color:#0b4a8f;
         margin-bottom:4px;
       }
 
@@ -170303,13 +170448,13 @@ def bcp_render(title, body_html):
         box-shadow:0 8px 18px rgba(15,23,42,.10);
         height:100%;
         border:1px solid #dbe6f4;
-        border-left:6px solid #1459a6;
+        border-left:6px solid #0b4a8f;
       }
 
       .bcp-kpi-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -170322,7 +170467,7 @@ def bcp_render(title, body_html):
       }
 
       .bcp-kpi-value{
-        color:#1459a6;
+        color:#0b4a8f;
         font-size:1.42rem;
         font-weight:950;
         line-height:1;
@@ -170372,7 +170517,7 @@ def bcp_render(title, body_html):
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
-        color:#1f2937;
+        color:#101827;
       }
 
       .bcp-table tbody tr:nth-child(even),
@@ -170384,7 +170529,7 @@ def bcp_render(title, body_html):
       .form-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
         background:#eef5ff;
@@ -171466,7 +171611,7 @@ def bcp_matriz_informes():
       .bcp-ia-mini-card{
         background:#ffffff;
         border:1px solid #dbe6f4;
-        border-left:6px solid #1459a6;
+        border-left:6px solid #0b4a8f;
         border-radius:16px;
         padding:14px 16px;
         box-shadow:0 8px 18px rgba(15,23,42,.10);
@@ -171475,7 +171620,7 @@ def bcp_matriz_informes():
       .bcp-ia-mini-label{
         font-size:.72rem;
         font-weight:900;
-        color:#1459a6;
+        color:#0b4a8f;
         text-transform:uppercase;
         letter-spacing:.35px;
       }
@@ -171484,7 +171629,7 @@ def bcp_matriz_informes():
         margin-top:5px;
         font-size:1.35rem;
         font-weight:950;
-        color:#1f2937;
+        color:#101827;
       }
 
       .bcp-ia-table{
@@ -173486,7 +173631,7 @@ CONT_COMP_CSS = """
     min-width:54px;
     border-radius:14px;
     background:rgba(255,255,255,.96);
-    color:#1459a6;
+    color:#0b4a8f;
     display:flex;
     align-items:center;
     justify-content:center;
@@ -173555,14 +173700,14 @@ CONT_COMP_CSS = """
   }
 
   .cc-section-title{
-    color:#0b3a6e;
+    color:#062b55;
     font-weight:950;
     font-size:1.02rem;
     margin:0 0 10px 0;
   }
 
   .cc-muted{
-    color:#64748b;
+    color:#475569;
     font-size:.84rem;
     font-weight:600;
   }
@@ -173587,7 +173732,7 @@ CONT_COMP_CSS = """
     display:flex;
     align-items:center;
     justify-content:center;
-    background:linear-gradient(135deg,#1459a6,#2c7be5);
+    background:linear-gradient(135deg,#0b4a8f,#1d5fae);
     color:#ffffff;
     font-size:1.22rem;
   }
@@ -173595,14 +173740,14 @@ CONT_COMP_CSS = """
   .cc-kpi .num{
     font-size:1.55rem;
     font-weight:950;
-    color:#1459a6;
+    color:#0b4a8f;
     line-height:1;
   }
 
   .cc-kpi .lbl{
     margin-top:4px;
     font-size:.68rem;
-    color:#64748b;
+    color:#475569;
     font-weight:850;
     line-height:1.15;
   }
@@ -173619,7 +173764,7 @@ CONT_COMP_CSS = """
 
   .cc-table thead th{
     background:linear-gradient(180deg,#eaf3ff 0%,#dcecff 100%) !important;
-    color:#0b3a6e !important;
+    color:#062b55 !important;
     font-weight:950 !important;
     text-align:center;
     vertical-align:middle;
@@ -173644,7 +173789,7 @@ CONT_COMP_CSS = """
     font-size:.72rem;
     font-weight:900;
     background:#eaf3ff;
-    color:#1459a6;
+    color:#0b4a8f;
     border:1px solid #cbdff7;
   }
 
@@ -173679,7 +173824,7 @@ CONT_COMP_CSS = """
 
   .cc-empty{
     text-align:center;
-    color:#64748b;
+    color:#475569;
     padding:34px 12px;
     font-weight:750;
   }
@@ -174842,6 +174987,3122 @@ def cont_comp_action_plan_edit(plan_id):
 #                                            FIN MÓDULO CUMPLIMIENTO CONTINUO - WAZUH + GRAC
 # ============================================================================================================================================
 
+
+
+
+# ============================================================================================================================================
+#                                                       MÓDULO PRUEBAS SAST - OLLAMA LOCAL
+# ============================================================================================================================================
+# Integración directa al SGSI:
+# - Menú: Gestión de Eventos -> Pruebas SAST
+# - Motor IA: Ollama local (/api/tags y /api/chat)
+# - Salidas: PDF + JSON en reports/sast
+# - No usa llaves externas ni OpenRouter/Azure para este módulo.
+
+try:
+    app.json.ensure_ascii = False
+except Exception:
+    pass
+
+SAST_APP_TITLE = "Pruebas SAST con IA Local – OWASP / CERT / SANS"
+SAST_MODULE_NAME = "Pruebas SAST"
+SAST_BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+SAST_UPLOAD_DIR = os.path.join(SAST_BASE_DIR, "uploads", "sast")
+SAST_REPORT_DIR = os.path.join(SAST_BASE_DIR, "reports", "sast")
+SAST_CONFIG_FILE = os.path.join(SAST_BASE_DIR, "sast_ollama_config.json")
+SAST_HISTORY_FILE = os.path.join(SAST_REPORT_DIR, "sast_scan_history.json")
+SAST_MAX_CODE_CHARS = int(os.getenv("SAST_MAX_CODE_CHARS", "22000"))
+
+SAST_ALLOWED_EXT = {
+    ".py", ".js", ".ts", ".java", ".cs", ".go", ".php", ".rb", ".c", ".cpp", ".h",
+    ".json", ".yml", ".yaml", ".xml", ".html", ".sql", ".txt", ".md", ".css", ".sh"
+}
+
+os.makedirs(SAST_UPLOAD_DIR, exist_ok=True)
+os.makedirs(SAST_REPORT_DIR, exist_ok=True)
+
+SAST_DEFAULT_OLLAMA_CONFIG = {
+    "base_url": os.getenv("SAST_OLLAMA_BASE_URL", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")),
+    "default_model": os.getenv("SAST_OLLAMA_MODEL", os.getenv("OLLAMA_MODEL", "")),
+    "temperature": float(os.getenv("SAST_OLLAMA_TEMPERATURE", "0.2")),
+    "timeout": int(os.getenv("SAST_OLLAMA_TIMEOUT", "240")),
+    "summary_max_tokens": int(os.getenv("SAST_OLLAMA_SUMMARY_MAX_TOKENS", "1100")),
+    "findings_max_tokens": int(os.getenv("SAST_OLLAMA_FINDINGS_MAX_TOKENS", "4000")),
+}
+
+SAST_JOBS = {}
+SAST_MAX_CONCURRENT_JOBS = int(os.getenv("SAST_MAX_CONCURRENT_JOBS", "1"))
+_sast_job_sem = threading.Semaphore(SAST_MAX_CONCURRENT_JOBS)
+_sast_ollama_lock = threading.Lock()
+
+_sast_history_lock = threading.Lock()
+
+
+def sast_safe_int(value, default=0):
+    try:
+        if value is None or value == "":
+            return default
+        return int(float(value))
+    except Exception:
+        return default
+
+
+def sast_safe_float(value, default=0.0):
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def sast_history_report_id_from_json_name(json_name):
+    base = os.path.basename(json_name or "")
+    if base.startswith("analysis_") and base.endswith(".json"):
+        return base[len("analysis_"):-len(".json")]
+    return ""
+
+
+def sast_counts_from_analysis(analysis):
+    analysis = analysis or {}
+    metrics = analysis.get("metrics", {}) or {}
+    findings = analysis.get("findings", []) or []
+    by_sev = dict(metrics.get("by_severity", {}) or {})
+
+    if not by_sev and isinstance(findings, list):
+        by_sev = {"Crítico": 0, "Alto": 0, "Medio": 0, "Bajo": 0}
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            sev = (finding.get("severity") or "Bajo").strip()
+            if sev in ("Critico", "Critical", "critical"):
+                sev = "Crítico"
+            if sev == "Alta":
+                sev = "Alto"
+            if sev == "Media":
+                sev = "Medio"
+            if sev == "Baja":
+                sev = "Bajo"
+            by_sev[sev] = by_sev.get(sev, 0) + 1
+
+    total = metrics.get("total_findings")
+    if total is None:
+        total = len(findings) if isinstance(findings, list) else 0
+
+    return {
+        "total_findings": sast_safe_int(total, 0),
+        "critical_count": sast_safe_int(by_sev.get("Crítico", by_sev.get("Critica", by_sev.get("Critical", 0))), 0),
+        "high_count": sast_safe_int(by_sev.get("Alto", by_sev.get("Alta", by_sev.get("High", 0))), 0),
+        "medium_count": sast_safe_int(by_sev.get("Medio", by_sev.get("Media", by_sev.get("Medium", 0))), 0),
+        "low_count": sast_safe_int(by_sev.get("Bajo", by_sev.get("Baja", by_sev.get("Low", 0))), 0),
+    }
+
+
+def sast_record_sort_key(record):
+    date_txt = (record.get("date_str") or record.get("created_at") or "").strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(date_txt[:19], fmt).timestamp()
+        except Exception:
+            pass
+    return sast_safe_float(record.get("mtime"), 0.0)
+
+
+def sast_build_scan_history_record(report_id, analysis, meta, pdf_name, json_name, registration_summary=None, payload=None):
+    analysis = analysis or {}
+    meta = meta or {}
+    registration_summary = registration_summary or {}
+    payload = payload or {}
+    ex = analysis.get("executive_summary", {}) or {}
+    counts = sast_counts_from_analysis(analysis)
+
+    return {
+        "report_id": str(report_id or "").strip(),
+        "date_str": meta.get("date_str") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "project_name": meta.get("project_name") or "Proyecto sin nombre",
+        "artifact_type": meta.get("artifact_type") or "N/A",
+        "filename": meta.get("filename") or "N/A",
+        "language": meta.get("language") or "N/A",
+        "model": meta.get("model") or "Ollama local",
+        "overall_risk_level": ex.get("overall_risk_level") or "N/A",
+        "overall_risk_score": ex.get("overall_risk_score", "N/A"),
+        "total_findings": counts["total_findings"],
+        "critical_count": counts["critical_count"],
+        "high_count": counts["high_count"],
+        "medium_count": counts["medium_count"],
+        "low_count": counts["low_count"],
+        "pdf_name": pdf_name or "",
+        "json_name": json_name or "",
+        "requested_register_vulnerabilities": bool(registration_summary.get("requested_register_vulnerabilities", payload.get("register_vulnerabilities"))),
+        "requested_create_remediation_plans": bool(registration_summary.get("requested_create_remediation_plans", payload.get("create_remediation_plans"))),
+        "requested_ai_remediation": bool(registration_summary.get("requested_ai_remediation", payload.get("generate_ai_remediation"))),
+        "vulnerabilities_created": sast_safe_int(registration_summary.get("vulnerabilities_created"), 0),
+        "remediation_plans_created": sast_safe_int(registration_summary.get("remediation_plans_created"), 0),
+        "registration_error": registration_summary.get("error") or "",
+        "executed_by": payload.get("username") or payload.get("responsable") or session.get("username") or "N/A",
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+def sast_load_history_file_records():
+    if not os.path.exists(SAST_HISTORY_FILE):
+        return []
+    try:
+        with open(SAST_HISTORY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return [x for x in data if isinstance(x, dict)]
+    except Exception as e:
+        print("No se pudo leer historial SAST:", repr(e))
+    return []
+
+
+def sast_write_history_file_records(records):
+    try:
+        os.makedirs(SAST_REPORT_DIR, exist_ok=True)
+        tmp = SAST_HISTORY_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(records, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, SAST_HISTORY_FILE)
+    except Exception as e:
+        print("No se pudo escribir historial SAST:", repr(e))
+
+
+def sast_save_scan_history_record(record):
+    if not isinstance(record, dict):
+        return
+    report_id = (record.get("report_id") or "").strip()
+    if not report_id:
+        return
+
+    with _sast_history_lock:
+        records = sast_load_history_file_records()
+        updated = False
+        for idx, item in enumerate(records):
+            if (item.get("report_id") or "").strip() == report_id:
+                current = dict(item)
+                current.update(record)
+                records[idx] = current
+                updated = True
+                break
+        if not updated:
+            records.append(record)
+        records.sort(key=sast_record_sort_key, reverse=True)
+        sast_write_history_file_records(records)
+
+
+def sast_discover_scan_history_from_reports(existing_ids=None):
+    existing_ids = set(existing_ids or [])
+    discovered = []
+    try:
+        if not os.path.isdir(SAST_REPORT_DIR):
+            return discovered
+        for name in os.listdir(SAST_REPORT_DIR):
+            if not (name.startswith("analysis_") and name.endswith(".json")):
+                continue
+            report_id = sast_history_report_id_from_json_name(name)
+            if not report_id or report_id in existing_ids:
+                continue
+            json_path = os.path.join(SAST_REPORT_DIR, name)
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    analysis = json.load(f)
+                if not isinstance(analysis, dict):
+                    continue
+            except Exception:
+                continue
+
+            meta = analysis.get("sast_meta", {}) or {}
+            reg = analysis.get("sgsi_registration", {}) or {}
+            report = analysis.get("sast_report", {}) or {}
+            pdf_name = report.get("pdf_name") or f"Informe_SAST_{report_id}.pdf"
+            stat = os.stat(json_path)
+
+            if not meta.get("date_str"):
+                try:
+                    meta["date_str"] = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    meta["date_str"] = ""
+            if not meta.get("project_name"):
+                meta["project_name"] = "Análisis SAST"
+            if not meta.get("filename"):
+                meta["filename"] = "N/A"
+            if not meta.get("model"):
+                meta["model"] = "Ollama local"
+
+            record = sast_build_scan_history_record(report_id, analysis, meta, pdf_name, name, reg, {})
+            record["mtime"] = stat.st_mtime
+            discovered.append(record)
+    except Exception as e:
+        print("No se pudo reconstruir historial SAST desde reportes:", repr(e))
+    return discovered
+
+
+def sast_get_scan_history():
+    with _sast_history_lock:
+        records = sast_load_history_file_records()
+        existing_ids = {(r.get("report_id") or "").strip() for r in records if isinstance(r, dict)}
+        discovered = sast_discover_scan_history_from_reports(existing_ids)
+        if discovered:
+            records.extend(discovered)
+            records.sort(key=sast_record_sort_key, reverse=True)
+            sast_write_history_file_records(records)
+        else:
+            records.sort(key=sast_record_sort_key, reverse=True)
+        return records
+
+
+def sast_get_scan_history_record(report_id):
+    report_id = (report_id or "").strip()
+    if not report_id:
+        return None
+    for record in sast_get_scan_history():
+        if (record.get("report_id") or "").strip() == report_id:
+            return record
+    return None
+
+
+def sast_delete_scan_history_record(report_id):
+    """
+    Elimina un registro del historial SAST sin tocar vulnerabilidades ni planes de remediación.
+    Retorna True si el registro existía en el archivo de historial.
+    """
+    report_id = (report_id or "").strip()
+    if not report_id:
+        return False
+
+    with _sast_history_lock:
+        records = sast_load_history_file_records()
+        new_records = [
+            r for r in records
+            if (r.get("report_id") or "").strip() != report_id
+        ]
+
+        changed = len(new_records) != len(records)
+        sast_write_history_file_records(new_records)
+        return changed
+
+
+def sast_require_access(write=False, config=False):
+    user = User.query.get(session.get("user_id"))
+
+    if not user:
+        flash("Debe iniciar sesión.", "danger")
+        return None, redirect(url_for("login")), True
+
+    if getattr(user, "role", "") == "admin":
+        return user, None, False
+
+    if config:
+        flash("Solo el administrador puede modificar la configuración SAST/Ollama.", "danger")
+        return user, redirect(url_for("menu")), True
+
+    if getattr(user, "role", "") == "auditor":
+        if write:
+            flash("El rol Auditor solo puede consultar este módulo.", "danger")
+            return user, redirect(url_for("sast_index")), True
+        return user, None, True
+
+    if not verificar_permiso(user, SAST_MODULE_NAME):
+        flash("No tiene permiso para acceder al módulo Pruebas SAST.", "danger")
+        return user, redirect(url_for("menu")), True
+
+    return user, None, False
+
+
+def sast_normalize_ollama_base_url(base_url):
+    base_url = (base_url or SAST_DEFAULT_OLLAMA_CONFIG["base_url"]).strip()
+    if not base_url.startswith(("http://", "https://")):
+        base_url = "http://" + base_url
+    return base_url.rstrip("/")
+
+
+def sast_coerce_float(value, default):
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def sast_coerce_int(value, default):
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+
+def sast_load_ollama_config():
+    cfg = dict(SAST_DEFAULT_OLLAMA_CONFIG)
+
+    if os.path.exists(SAST_CONFIG_FILE):
+        try:
+            with open(SAST_CONFIG_FILE, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            if isinstance(saved, dict):
+                cfg.update(saved)
+        except Exception:
+            pass
+
+    cfg["base_url"] = sast_normalize_ollama_base_url(cfg.get("base_url"))
+    cfg["default_model"] = (cfg.get("default_model") or "").strip()
+    cfg["temperature"] = sast_coerce_float(cfg.get("temperature"), SAST_DEFAULT_OLLAMA_CONFIG["temperature"])
+    cfg["timeout"] = sast_coerce_int(cfg.get("timeout"), SAST_DEFAULT_OLLAMA_CONFIG["timeout"])
+    cfg["summary_max_tokens"] = sast_coerce_int(cfg.get("summary_max_tokens"), SAST_DEFAULT_OLLAMA_CONFIG["summary_max_tokens"])
+    cfg["findings_max_tokens"] = sast_coerce_int(cfg.get("findings_max_tokens"), SAST_DEFAULT_OLLAMA_CONFIG["findings_max_tokens"])
+    return cfg
+
+
+def sast_save_ollama_config(config):
+    cfg = sast_load_ollama_config()
+    cfg.update(config or {})
+    cfg["base_url"] = sast_normalize_ollama_base_url(cfg.get("base_url"))
+    cfg["default_model"] = (cfg.get("default_model") or "").strip()
+    cfg["temperature"] = sast_coerce_float(cfg.get("temperature"), SAST_DEFAULT_OLLAMA_CONFIG["temperature"])
+    cfg["timeout"] = sast_coerce_int(cfg.get("timeout"), SAST_DEFAULT_OLLAMA_CONFIG["timeout"])
+    cfg["summary_max_tokens"] = sast_coerce_int(cfg.get("summary_max_tokens"), SAST_DEFAULT_OLLAMA_CONFIG["summary_max_tokens"])
+    cfg["findings_max_tokens"] = sast_coerce_int(cfg.get("findings_max_tokens"), SAST_DEFAULT_OLLAMA_CONFIG["findings_max_tokens"])
+
+    with open(SAST_CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+    return cfg
+
+
+def sast_ollama_api_url(base_url, path):
+    return sast_normalize_ollama_base_url(base_url) + "/" + path.lstrip("/")
+
+
+def sast_list_ollama_models(base_url=None, timeout=8):
+    cfg = sast_load_ollama_config()
+    base_url = sast_normalize_ollama_base_url(base_url or cfg.get("base_url"))
+
+    try:
+        resp = requests.get(sast_ollama_api_url(base_url, "/api/tags"), timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json() or {}
+        models = []
+        for item in data.get("models", []) or []:
+            name = item.get("name") or item.get("model")
+            if name:
+                models.append(name)
+        return sorted(set(models)), None
+    except Exception as e:
+        return [], str(e)
+
+
+def sast_resolve_ollama_model(requested_model=None):
+    cfg = sast_load_ollama_config()
+    model = (requested_model or cfg.get("default_model") or "").strip()
+
+    if model:
+        return model
+
+    models, _ = sast_list_ollama_models(cfg.get("base_url"), timeout=5)
+    if models:
+        return models[0]
+
+    raise RuntimeError(
+        "No hay modelo configurado en Ollama. Instale un modelo con 'ollama pull <modelo>' "
+        "y selecciónelo en Pruebas SAST > Configuración Ollama."
+    )
+
+
+def sast_test_ollama_connection(base_url=None):
+    cfg = sast_load_ollama_config()
+    base_url = sast_normalize_ollama_base_url(base_url or cfg.get("base_url"))
+    models, err = sast_list_ollama_models(base_url, timeout=8)
+
+    if err:
+        return False, f"No fue posible conectar con Ollama en {base_url}. Detalle: {err}", []
+
+    if not models:
+        return True, "Conexión exitosa, pero no se encontraron modelos instalados.", []
+
+    return True, f"Conexión exitosa. Modelos disponibles: {len(models)}.", models
+
+
+def sast_strip_json_fences(raw):
+    raw = (raw or "").strip()
+
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```$", "", raw).strip()
+
+    if raw and not raw.startswith("{"):
+        first = raw.find("{")
+        last = raw.rfind("}")
+        if first >= 0 and last > first:
+            raw = raw[first:last + 1]
+
+    return raw
+
+
+def sast_call_ollama_json(prompt, model=None, max_tokens=1200, temperature=None, timeout=None):
+    cfg = sast_load_ollama_config()
+    base_url = cfg.get("base_url")
+    model = sast_resolve_ollama_model(model)
+    temperature = cfg.get("temperature") if temperature is None else temperature
+    timeout = cfg.get("timeout") if timeout is None else timeout
+
+    payload = {
+        "model": model,
+        "stream": False,
+        "format": "json",
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Responde únicamente con un objeto JSON válido. "
+                    "No incluyas markdown, comentarios ni texto fuera del JSON."
+                )
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "options": {
+            "temperature": float(temperature),
+            "num_predict": int(max_tokens),
+        }
+    }
+
+    try:
+        with _sast_ollama_lock:
+            resp = requests.post(
+                sast_ollama_api_url(base_url, "/api/chat"),
+                json=payload,
+                timeout=int(timeout)
+            )
+        resp.raise_for_status()
+        data = resp.json() or {}
+
+    except requests.exceptions.ConnectionError as e:
+        raise RuntimeError(
+            f"No fue posible conectar con Ollama en {base_url}. "
+            "Verifique que Ollama esté ejecutándose localmente. Detalle: " + str(e)
+        )
+    except requests.exceptions.Timeout:
+        raise RuntimeError(
+            f"Tiempo de espera agotado consultando Ollama en {base_url}. "
+            "Aumente el timeout o use un modelo más liviano."
+        )
+    except requests.exceptions.HTTPError as e:
+        raise RuntimeError(f"Ollama respondió con error HTTP: {e}. Respuesta: {getattr(resp, 'text', '')[:600]}")
+    except Exception as e:
+        raise RuntimeError(f"Error llamando a Ollama local: {e}")
+
+    content = ((data.get("message") or {}).get("content") or data.get("response") or "").strip()
+    if not content:
+        raise RuntimeError(f"Ollama no devolvió contenido. Respuesta: {json.dumps(data, ensure_ascii=False)[:800]}")
+
+    return sast_strip_json_fences(content)
+
+
+def sast_safe_filename(name):
+    name = re.sub(r"[^a-zA-Z0-9._-]+", "_", (name or "").strip())
+    if not name:
+        name = "archivo.txt"
+    return name[:140]
+
+
+def sast_ext_ok(filename):
+    _, ext = os.path.splitext((filename or "").lower())
+    return ext in SAST_ALLOWED_EXT
+
+
+def sast_read_text_file(path, max_bytes=2_000_000):
+    with open(path, "rb") as f:
+        data = f.read(max_bytes)
+
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode("latin-1", errors="replace")
+
+
+def sast_detect_language_from_filename(filename):
+    ext = os.path.splitext((filename or "").lower())[1]
+    return {
+        ".py": "python",
+        ".js": "javascript",
+        ".ts": "typescript",
+        ".java": "java",
+        ".cs": "csharp",
+        ".go": "go",
+        ".php": "php",
+        ".rb": "ruby",
+        ".c": "c",
+        ".cpp": "cpp",
+        ".h": "c/cpp",
+        ".html": "html",
+        ".css": "css",
+        ".sql": "sql",
+        ".yml": "yaml",
+        ".yaml": "yaml",
+        ".json": "json",
+        ".xml": "xml",
+        ".md": "markdown",
+        ".txt": "text",
+        ".sh": "shell",
+    }.get(ext, "unknown")
+
+
+def sast_trim_code_for_ai(code, max_chars=SAST_MAX_CODE_CHARS):
+    if not code:
+        return ""
+
+    if len(code) <= max_chars:
+        return code
+
+    head = code[: max_chars // 2]
+    tail = code[-max_chars // 2:]
+    return head + "\n\n/* --- CÓDIGO RECORTADO PARA ANÁLISIS IA --- */\n\n" + tail
+
+
+def sast_escape_pdf(value):
+    if value is None:
+        return ""
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\t", "    ")
+    )
+
+
+def sast_severity_color(sev):
+    sev = (sev or "").strip().lower()
+    if sev in ("crítico", "critico"):
+        return colors.HexColor("#7A0019")
+    if sev == "alto":
+        return colors.HexColor("#B71C1C")
+    if sev == "medio":
+        return colors.HexColor("#E65100")
+    if sev == "bajo":
+        return colors.HexColor("#1B5E20")
+    return colors.black
+
+
+def sast_loads_json_object(raw, where=""):
+    raw = sast_strip_json_fences(raw)
+
+    if not raw:
+        raise RuntimeError(f"{where}: respuesta vacía del modelo.")
+
+    try:
+        obj = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"{where}: JSON inválido. Error: {e}. Respuesta: {raw[:900]}")
+
+    if not isinstance(obj, dict):
+        raise RuntimeError(f"{where}: se esperaba un objeto JSON y llegó {type(obj).__name__}")
+
+    return obj
+
+
+def sast_build_prompt_summary(code_text, artifact_type, language, filename):
+    return f"""
+Eres un analista senior de AppSec. Realiza un análisis SAST asistido sobre el código provisto.
+Basado en OWASP Top 10, CERT Secure Coding y SANS Top 25 / CWE.
+
+Devuelve ÚNICAMENTE un JSON válido, sin texto adicional.
+
+OBJETIVO:
+Genera un resumen ejecutivo, alcance, métricas y conclusiones. No generes todavía la lista completa de findings.
+
+REGLAS:
+- No devuelvas null.
+- Usa español profesional.
+- Si no hay evidencia suficiente, indícalo como limitación.
+- El puntaje debe estar entre 0 y 100.
+
+ESQUEMA:
+{{
+  "executive_summary": {{
+    "overall_risk_level": "Bajo|Medio|Alto|Crítico",
+    "overall_risk_score": 0,
+    "key_risks": ["..."],
+    "management_overview": "..."
+  }},
+  "scope_context": {{
+    "artifact_type": "{artifact_type}",
+    "language": "{language}",
+    "files_analyzed": ["{filename}"],
+    "sast_notes": "Análisis estático asistido por IA local con Ollama."
+  }},
+  "metrics": {{
+    "total_findings": 0,
+    "by_severity": {{"Crítico":0,"Alto":0,"Medio":0,"Bajo":0}},
+    "by_category": {{}},
+    "top_cwe": ["CWE-..."],
+    "compliance_snapshot": {{
+      "owasp_alignment": "Bajo|Medio|Alto",
+      "cert_alignment": "Bajo|Medio|Alto",
+      "sans_top25_alignment": "Bajo|Medio|Alto"
+    }}
+  }},
+  "conclusions": {{
+    "summary": "...",
+    "next_steps": ["..."]
+  }}
+}}
+
+CONTEXTO:
+- Tipo de artefacto: {artifact_type}
+- Lenguaje: {language}
+- Archivo: {filename}
+
+CÓDIGO:
+\"\"\"
+{code_text}
+\"\"\"
+""".strip()
+
+
+def sast_build_prompt_findings(code_text, artifact_type, language, filename, summary_json):
+    ex = summary_json.get("executive_summary", {}) or {}
+    risk_level = ex.get("overall_risk_level", "N/A")
+    risk_score = ex.get("overall_risk_score", "N/A")
+
+    return f"""
+Eres un analista senior de AppSec. Genera SOLO la lista de hallazgos SAST en JSON válido.
+Basado en OWASP Top 10, CERT Secure Coding y SANS Top 25 / CWE.
+
+Devuelve ÚNICAMENTE:
+{{ "findings": [ ... ] }}
+
+REGLAS:
+- Máximo 20 hallazgos, priorizando severidad y explotabilidad.
+- Usa español profesional.
+- No inventes CVE; usa "N/A" si no hay una dependencia/version concreta.
+- Para inyección SQL usa CWE-89 si aplica.
+- Para XSS usa CWE-79 si aplica.
+- Para command injection usa CWE-78 si aplica.
+- Si no puedes determinar línea exacta, usa line_start=1 y line_end=1 e indícalo en remediation_notes.
+- evidence_snippet y secure_code_example deben ser cortos.
+
+CONTEXTO:
+- Riesgo general del paso 1: {risk_level}
+- Puntaje general del paso 1: {risk_score}
+- Tipo de artefacto: {artifact_type}
+- Lenguaje: {language}
+- Archivo: {filename}
+
+ESQUEMA:
+{{
+  "findings": [
+    {{
+      "id": "F-001",
+      "title": "...",
+      "category": "Injection|XSS|Auth|Crypto|Secrets|AccessControl|InputValidation|MemorySafety|Dependency|Logging|Other",
+      "description": "...",
+      "location": {{
+        "file": "{filename}",
+        "line_start": 1,
+        "line_end": 1
+      }},
+      "evidence_snippet": "...",
+      "cwe": "CWE-xxx",
+      "cve": "CVE-YYYY-NNNN o N/A",
+      "cvss_score": 0.0,
+      "severity": "Bajo|Medio|Alto|Crítico",
+      "risk_rationale": {{
+        "impact": "Bajo|Medio|Alto",
+        "likelihood": "Bajo|Medio|Alto",
+        "notes": "..."
+      }},
+      "remediation": {{
+        "recommendation": "...",
+        "secure_code_example": "...",
+        "remediation_notes": "..."
+      }},
+      "references": ["OWASP ...", "CERT ...", "SANS/CWE ..."]
+    }}
+  ]
+}}
+
+CÓDIGO:
+\"\"\"
+{code_text}
+\"\"\"
+""".strip()
+
+
+def sast_analyze_code_with_ai(code_text, artifact_type, language, filename, model=None):
+    cfg = sast_load_ollama_config()
+    safe_code = sast_trim_code_for_ai(code_text)
+
+    prompt1 = sast_build_prompt_summary(safe_code, artifact_type, language, filename)
+    raw1 = sast_call_ollama_json(
+        prompt1,
+        model=model,
+        max_tokens=cfg.get("summary_max_tokens", 1100),
+        temperature=cfg.get("temperature", 0.2),
+        timeout=cfg.get("timeout", 240)
+    )
+    data1 = sast_loads_json_object(raw1, where="Paso 1 SAST")
+
+    prompt2 = sast_build_prompt_findings(safe_code, artifact_type, language, filename, data1)
+    raw2 = sast_call_ollama_json(
+        prompt2,
+        model=model,
+        max_tokens=cfg.get("findings_max_tokens", 4000),
+        temperature=cfg.get("temperature", 0.2),
+        timeout=cfg.get("timeout", 240)
+    )
+    data2 = sast_loads_json_object(raw2, where="Paso 2 SAST")
+
+    findings = data2.get("findings", []) or []
+    if not isinstance(findings, list):
+        findings = []
+
+    final = {
+        "executive_summary": data1.get("executive_summary", {}) or {},
+        "scope_context": data1.get("scope_context", {}) or {},
+        "findings": findings,
+        "metrics": data1.get("metrics", {}) or {},
+        "conclusions": data1.get("conclusions", {}) or {},
+    }
+
+    if not isinstance(final["metrics"], dict):
+        final["metrics"] = {}
+
+    final["metrics"]["total_findings"] = len(findings)
+
+    by_sev = {"Crítico": 0, "Alto": 0, "Medio": 0, "Bajo": 0}
+    by_cat = {}
+    top_cwe = []
+
+    for f in findings:
+        if not isinstance(f, dict):
+            continue
+        sev = (f.get("severity") or "Bajo").strip()
+        if sev == "Critico":
+            sev = "Crítico"
+        if sev not in by_sev:
+            by_sev[sev] = 0
+        by_sev[sev] += 1
+
+        cat = (f.get("category") or "Other").strip()
+        by_cat[cat] = by_cat.get(cat, 0) + 1
+
+        cwe = (f.get("cwe") or "").strip()
+        if cwe and cwe.upper() != "N/A":
+            top_cwe.append(cwe)
+
+    final["metrics"]["by_severity"] = by_sev
+    final["metrics"]["by_category"] = by_cat
+    final["metrics"]["top_cwe"] = list(dict.fromkeys(top_cwe))[:10]
+
+    return final
+
+
+def sast_bool_form(value):
+    return str(value or "").strip().lower() in ("1", "true", "on", "yes", "si", "sí")
+
+
+def sast_text_limit(value, limit=500):
+    value = (value or "").strip()
+    if len(value) > limit:
+        return value[: limit - 3].rstrip() + "..."
+    return value
+
+
+def sast_severity_to_clasificacion(severity):
+    sev = (severity or "").strip().lower()
+    if sev in ("crítico", "critico", "critical"):
+        return "Crítica"
+    if sev in ("alto", "alta", "high"):
+        return "Alta"
+    if sev in ("medio", "media", "medium"):
+        return "Media"
+    if sev in ("bajo", "baja", "low"):
+        return "Baja"
+    return "Media"
+
+
+def sast_severity_to_priority(severity):
+    return sast_severity_to_clasificacion(severity)
+
+
+def sast_priority_due_date(prioridad):
+    prioridad = (prioridad or "").strip().lower()
+    if prioridad in ("crítica", "critica"):
+        days = 15
+    elif prioridad == "alta":
+        days = 30
+    elif prioridad == "media":
+        days = 60
+    else:
+        days = 90
+    try:
+        return datetime.now().date() + timedelta(days=days)
+    except Exception:
+        return None
+
+
+def sast_finding_location_text(finding):
+    loc = finding.get("location", {}) or {}
+    file_ = loc.get("file") or ""
+    ls = loc.get("line_start") or ""
+    le = loc.get("line_end") or ""
+    if file_ or ls or le:
+        return f"{file_}:{ls}-{le}".strip(":-")
+    return "N/A"
+
+
+def sast_finding_to_vulnerability_description(finding, meta):
+    rem = finding.get("remediation", {}) or {}
+    rr = finding.get("risk_rationale", {}) or {}
+    parts = [
+        f"Hallazgo SAST: {finding.get('title', 'Sin título')}",
+        f"Descripción: {finding.get('description', 'N/A')}",
+        f"Categoría: {finding.get('category', 'N/A')}",
+        f"CWE: {finding.get('cwe', 'N/A')} | CVE: {finding.get('cve', 'N/A')} | CVSS: {finding.get('cvss_score', 'N/A')}",
+        f"Ubicación: {sast_finding_location_text(finding)}",
+        f"Impacto: {rr.get('impact', 'N/A')} | Probabilidad: {rr.get('likelihood', 'N/A')}",
+        f"Evidencia: {finding.get('evidence_snippet', 'N/A')}",
+        f"Recomendación / acción correctiva: {rem.get('recommendation', 'N/A')}",
+        f"Origen: Pruebas SAST con Ollama local. Proyecto: {meta.get('project_name', 'N/A')} | Archivo: {meta.get('filename', 'N/A')} | Modelo: {meta.get('model', 'N/A')}",
+    ]
+    return "\n".join([str(p) for p in parts if p])
+
+
+def sast_finding_to_hallazgo_for_remediation(finding, meta):
+    loc = finding.get("location", {}) or {}
+    rem = finding.get("remediation", {}) or {}
+    return {
+        "titulo": finding.get("title") or "Hallazgo SAST",
+        "descripcion": finding.get("description") or "",
+        "fuente": "Pruebas SAST con Ollama local",
+        "severidad": sast_severity_to_clasificacion(finding.get("severity")),
+        "cve": "" if (finding.get("cve") or "").strip().upper() == "N/A" else (finding.get("cve") or ""),
+        "cvss": str(finding.get("cvss_score") or ""),
+        "puerto": "",
+        "servicio": meta.get("artifact_type") or "",
+        "evidencia": f"{finding.get('evidence_snippet','')} | Ubicación: {loc.get('file','')}:{loc.get('line_start','')}",
+        "recomendacion_base": rem.get("recommendation") or "",
+    }
+
+
+def sast_build_congruent_corrective_action(hallazgo):
+    """
+    Construye una acción correctiva que pueda usarse tanto en el informe SAST como en
+    el Plan de Remediación. Así se evita que el PDF muestre una recomendación técnica
+    y la matriz de remediación registre una acción genérica distinta.
+    """
+    titulo = (hallazgo.get("titulo") or "hallazgo detectado").strip()
+    recomendacion_base = (hallazgo.get("recomendacion_base") or "").strip()
+
+    if recomendacion_base:
+        return (
+            f"Validar técnicamente el hallazgo '{titulo}', confirmar su impacto real y aplicar la corrección específica: "
+            f"{recomendacion_base} Posteriormente, ejecutar pruebas de regresión, repetir el análisis SAST, validar que el hallazgo no se reproduzca "
+            "y documentar evidencia técnica de cierre."
+        )
+
+    return (
+        f"Validar técnicamente el hallazgo '{titulo}', identificar y corregir la causa raíz en el código, dependencias o configuración afectada, "
+        "aplicar controles seguros, ejecutar pruebas de regresión, repetir el análisis SAST y documentar evidencia técnica de cierre."
+    )
+
+
+def sast_generic_remediation(hallazgo):
+    severidad = (hallazgo.get("severidad") or "").strip()
+    prioridad = sast_severity_to_priority(severidad)
+
+    try:
+        data = _fallback_remediacion_segura(hallazgo)
+        if not isinstance(data, dict):
+            raise RuntimeError("Fallback de remediación no devolvió dict.")
+
+        # Garantiza congruencia con la recomendación técnica del informe SAST.
+        data["accion_correctiva"] = sast_build_congruent_corrective_action(hallazgo)
+        data["prioridad"] = data.get("prioridad") or prioridad
+        data["recursos_necesarios"] = data.get("recursos_necesarios") or (
+            "Equipo de desarrollo responsable, apoyo de seguridad de aplicaciones, ambiente de pruebas, "
+            "repositorio de código, herramienta SAST y evidencia técnica de validación."
+        )
+        return data
+    except Exception:
+        return {
+            "accion_correctiva": sast_build_congruent_corrective_action(hallazgo),
+            "prioridad": prioridad,
+            "recursos_necesarios": (
+                "Equipo de desarrollo responsable, apoyo de seguridad de aplicaciones, ambiente de pruebas, "
+                "repositorio de código, herramienta SAST y evidencia técnica de validación."
+            )
+        }
+
+
+def sast_apply_remediation_data_to_finding(finding, rem_data, plan_id=None):
+    """
+    Sincroniza la recomendación visible en el informe SAST con la acción correctiva
+    realmente registrada en Plan de Remediación.
+    """
+    if not isinstance(finding, dict):
+        return finding
+
+    if not isinstance(rem_data, dict):
+        rem_data = {}
+
+    rem = finding.get("remediation")
+    if not isinstance(rem, dict):
+        rem = {}
+        finding["remediation"] = rem
+
+    accion = (rem_data.get("accion_correctiva") or rem.get("recommendation") or "").strip()
+    recursos = (rem_data.get("recursos_necesarios") or "").strip()
+    origen = (rem_data.get("origen") or "genérica").strip()
+
+    original_recommendation = (rem.get("recommendation") or "").strip()
+    if original_recommendation and original_recommendation != accion:
+        rem.setdefault("original_recommendation", original_recommendation)
+
+    if accion:
+        rem["recommendation"] = accion
+        rem["corrective_action"] = accion
+        finding["sgsi_remediation_action"] = accion
+
+    if recursos:
+        rem["resources_required"] = recursos
+        finding["sgsi_remediation_resources"] = recursos
+
+    rem["remediation_source"] = origen
+    finding["sgsi_remediation_source"] = origen
+
+    if plan_id is not None:
+        rem["plan_remediacion_id"] = plan_id
+        finding["sgsi_plan_remediacion_id"] = plan_id
+
+    notes = (rem.get("remediation_notes") or "").strip()
+    congruence_note = "La recomendación del informe corresponde a la acción correctiva registrada en el Plan de Remediación."
+    if notes:
+        if congruence_note not in notes:
+            rem["remediation_notes"] = notes + " " + congruence_note
+    else:
+        rem["remediation_notes"] = congruence_note
+
+    return finding
+
+
+def sast_generate_remediation_data(finding, meta, use_ai=True):
+    hallazgo = sast_finding_to_hallazgo_for_remediation(finding, meta)
+
+    if not use_ai:
+        data = sast_generic_remediation(hallazgo)
+        data["origen"] = "genérica"
+        return data
+
+    try:
+        data = sugerir_remediacion_ai(hallazgo)
+        if not isinstance(data, dict):
+            raise RuntimeError("La sugerencia IA no devolvió un objeto válido.")
+        data.setdefault("accion_correctiva", "")
+        data.setdefault("prioridad", sast_severity_to_priority(finding.get("severity")))
+        data.setdefault("recursos_necesarios", "")
+        data["origen"] = "IA/fallback"
+        if not data.get("accion_correctiva"):
+            raise RuntimeError("La sugerencia IA no incluyó acción correctiva.")
+
+        # Si la IA responde demasiado genérica, reforzamos con la recomendación técnica del SAST.
+        base = (hallazgo.get("recomendacion_base") or "").strip()
+        accion = (data.get("accion_correctiva") or "").strip()
+        if base and base.lower() not in accion.lower():
+            data["accion_correctiva"] = (
+                f"{accion} Recomendación técnica específica del análisis SAST: {base}"
+            ).strip()
+
+        return data
+    except Exception:
+        data = sast_generic_remediation(hallazgo)
+        data["origen"] = "genérica"
+        return data
+
+
+def sast_register_findings_in_sgsi(analysis, meta, payload):
+    """
+    Registra automáticamente hallazgos SAST en:
+    - Matriz de Vulnerabilidades
+    - Plan de Remediación
+
+    Si se solicita crear plan de remediación, se registra la vulnerabilidad aunque el switch de
+    vulnerabilidades no venga activo, porque el plan requiere FK obligatoria a vulnerabilidades_registro.
+    """
+    findings = analysis.get("findings", []) or []
+    register_vulns = bool(payload.get("register_vulnerabilities"))
+    create_plans = bool(payload.get("create_remediation_plans"))
+    use_ai_remediation = bool(payload.get("generate_ai_remediation"))
+
+    if create_plans:
+        register_vulns = True
+
+    summary = {
+        "requested_register_vulnerabilities": register_vulns,
+        "requested_create_remediation_plans": create_plans,
+        "requested_ai_remediation": use_ai_remediation,
+        "vulnerabilities_created": 0,
+        "remediation_plans_created": 0,
+        "vulnerability_ids": [],
+        "plan_ids": [],
+        "error": "",
+    }
+
+    if not findings or not register_vulns:
+        return summary
+
+    responsable = (
+        payload.get("responsable")
+        or payload.get("username")
+        or "Seguridad de la Información"
+    )
+
+    report_id = (payload.get("report_id") or uuid.uuid4().hex[:12]).upper()
+    project_name = meta.get("project_name") or "Proyecto SAST"
+    filename = meta.get("filename") or "archivo"
+    activo_base = f"{project_name} · {filename}".strip(" ·")
+    activo_base = activo_base[:200]
+
+    try:
+        for idx, finding in enumerate(findings, start=1):
+            if not isinstance(finding, dict):
+                continue
+
+            codigo = f"SAST-{report_id}-{idx:03d}"[:50]
+            severity = finding.get("severity") or "Media"
+            clasificacion = sast_severity_to_clasificacion(severity)
+            cve = (finding.get("cve") or "").strip()
+            if cve.upper() == "N/A":
+                cve = ""
+
+            cvss = str(finding.get("cvss_score") or "").strip()
+
+            # Si se creará Plan de Remediación, se genera primero la acción correctiva
+            # y se sincroniza con el hallazgo antes de armar la descripción de la vulnerabilidad.
+            # Así el informe, el JSON, la matriz de vulnerabilidades y el plan quedan congruentes.
+            rem_data = None
+            if create_plans:
+                rem_data = sast_generate_remediation_data(finding, meta, use_ai=use_ai_remediation)
+                accion_sync = (rem_data.get("accion_correctiva") or "").strip()
+                if not accion_sync:
+                    accion_sync = sast_generic_remediation(sast_finding_to_hallazgo_for_remediation(finding, meta))["accion_correctiva"]
+                    rem_data["accion_correctiva"] = accion_sync
+                sast_apply_remediation_data_to_finding(finding, rem_data)
+
+            descripcion = sast_finding_to_vulnerability_description(finding, meta)
+
+            vuln = VulnerabilidadRegistro(
+                codigo=codigo,
+                activo=activo_base,
+                descripcion_vulnerabilidad=descripcion,
+                cve=cve,
+                cvss=cvss,
+                clasificacion=clasificacion,
+                fecha_identificacion=datetime.now().date(),
+                fecha_cierre=None,
+                estado="Abierto",
+                responsable=responsable,
+                riesgo_residual=(
+                    f"Riesgo residual inicial estimado por SAST: {clasificacion}. "
+                    f"CVSS: {cvss or 'N/A'}. Requiere validación técnica y seguimiento."
+                )
+            )
+            db.session.add(vuln)
+            db.session.flush()
+
+            summary["vulnerabilities_created"] += 1
+            summary["vulnerability_ids"].append(vuln.id)
+
+            if create_plans:
+                if rem_data is None:
+                    rem_data = sast_generate_remediation_data(finding, meta, use_ai=use_ai_remediation)
+
+                accion_plan = (rem_data.get("accion_correctiva") or "").strip()
+                if not accion_plan:
+                    accion_plan = sast_generic_remediation(sast_finding_to_hallazgo_for_remediation(finding, meta))["accion_correctiva"]
+                    rem_data["accion_correctiva"] = accion_plan
+
+                # Se vuelve a sincronizar justo antes de crear el plan para garantizar que
+                # el texto del informe sea exactamente el mismo texto de acción correctiva.
+                sast_apply_remediation_data_to_finding(finding, rem_data)
+
+                prioridad = (rem_data.get("prioridad") or clasificacion or "Media").strip()
+                if prioridad == "Critica":
+                    prioridad = "Crítica"
+                if prioridad not in ("Crítica", "Alta", "Media", "Baja"):
+                    prioridad = clasificacion if clasificacion in ("Crítica", "Alta", "Media", "Baja") else "Media"
+
+                plan = PlanRemediacion(
+                    vulnerabilidad_id=vuln.id,
+                    accion_correctiva=accion_plan,
+                    responsable=responsable,
+                    prioridad=prioridad,
+                    fecha_objetivo=sast_priority_due_date(prioridad),
+                    fecha_remediacion=None,
+                    recursos_necesarios=rem_data.get("recursos_necesarios") or "Equipo técnico responsable, AppSec y evidencia de cierre.",
+                    estado="Abierto"
+                )
+                db.session.add(plan)
+                db.session.flush()
+
+                # Guarda el ID del plan también dentro del JSON del informe SAST.
+                sast_apply_remediation_data_to_finding(finding, rem_data, plan_id=plan.id)
+
+                summary["remediation_plans_created"] += 1
+                summary["plan_ids"].append(plan.id)
+
+        db.session.commit()
+
+        try:
+            registrar_log(
+                responsable,
+                (
+                    f"Pruebas SAST registró {summary['vulnerabilities_created']} vulnerabilidad(es) "
+                    f"y {summary['remediation_plans_created']} plan(es) de remediación. Reporte: {report_id}"
+                )
+            )
+        except Exception:
+            pass
+
+    except Exception as e:
+        db.session.rollback()
+        summary["error"] = str(e)
+
+    return summary
+
+
+def sast_build_pdf(report_path, analysis, meta):
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="SAST_H1", fontSize=16, leading=19, spaceAfter=10))
+    styles.add(ParagraphStyle(name="SAST_H2", fontSize=13, leading=16, spaceAfter=8))
+    styles.add(ParagraphStyle(name="SAST_Body", fontSize=10.5, leading=13.5))
+    styles.add(ParagraphStyle(name="SAST_Small", fontSize=9, leading=11))
+    styles.add(ParagraphStyle(name="SAST_Mono", fontName="Courier", fontSize=8.2, leading=10.2))
+
+    doc = SimpleDocTemplate(
+        report_path,
+        pagesize=letter,
+        leftMargin=0.72 * inch,
+        rightMargin=0.72 * inch,
+        topMargin=0.72 * inch,
+        bottomMargin=0.72 * inch,
+        title="Informe de Pruebas SAST",
+    )
+
+    story = []
+
+    story.append(Paragraph("Informe de Pruebas SAST con IA Local", styles["SAST_H1"]))
+    story.append(Paragraph(f"<b>Proyecto:</b> {sast_escape_pdf(meta.get('project_name'))}", styles["SAST_Body"]))
+    story.append(Paragraph(f"<b>Tipo de artefacto:</b> {sast_escape_pdf(meta.get('artifact_type'))}", styles["SAST_Body"]))
+    story.append(Paragraph(f"<b>Archivo:</b> {sast_escape_pdf(meta.get('filename'))}", styles["SAST_Body"]))
+    story.append(Paragraph(f"<b>Lenguaje:</b> {sast_escape_pdf(meta.get('language'))}", styles["SAST_Body"]))
+    story.append(Paragraph(f"<b>Motor:</b> Ollama local · {sast_escape_pdf(meta.get('model'))}", styles["SAST_Body"]))
+    story.append(Paragraph(f"<b>Fecha:</b> {sast_escape_pdf(meta.get('date_str'))}", styles["SAST_Body"]))
+    story.append(Spacer(1, 12))
+
+    ex = analysis.get("executive_summary", {}) or {}
+    story.append(Paragraph("1. Resumen Ejecutivo", styles["SAST_H2"]))
+    story.append(Paragraph(f"<b>Nivel de riesgo general:</b> {sast_escape_pdf(ex.get('overall_risk_level','N/A'))}", styles["SAST_Body"]))
+    story.append(Paragraph(f"<b>Puntaje global:</b> {sast_escape_pdf(ex.get('overall_risk_score','N/A'))}/100", styles["SAST_Body"]))
+
+    if ex.get("management_overview"):
+        story.append(Paragraph(f"<b>Visión para dirección:</b> {sast_escape_pdf(ex.get('management_overview'))}", styles["SAST_Body"]))
+
+    key_risks = ex.get("key_risks", []) or []
+    if key_risks:
+        story.append(Spacer(1, 5))
+        story.append(Paragraph("<b>Riesgos clave:</b><br/>" + "<br/>".join([f"• {sast_escape_pdf(x)}" for x in key_risks[:10]]), styles["SAST_Body"]))
+
+    story.append(Spacer(1, 10))
+
+    metrics = analysis.get("metrics", {}) or {}
+    by_sev = metrics.get("by_severity", {}) or {}
+    compliance = metrics.get("compliance_snapshot", {}) or {}
+    story.append(Paragraph("2. Métricas", styles["SAST_H2"]))
+    story.append(Paragraph(f"<b>Total de hallazgos:</b> {sast_escape_pdf(metrics.get('total_findings', 0))}", styles["SAST_Body"]))
+    story.append(Paragraph(
+        "<b>Distribución por severidad:</b> " +
+        f"Crítico: {by_sev.get('Crítico',0)} | Alto: {by_sev.get('Alto',0)} | Medio: {by_sev.get('Medio',0)} | Bajo: {by_sev.get('Bajo',0)}",
+        styles["SAST_Body"]
+    ))
+    story.append(Paragraph(
+        "<b>Alineación:</b> " +
+        f"OWASP={sast_escape_pdf(compliance.get('owasp_alignment','N/A'))}, " +
+        f"CERT={sast_escape_pdf(compliance.get('cert_alignment','N/A'))}, " +
+        f"SANS Top 25={sast_escape_pdf(compliance.get('sans_top25_alignment','N/A'))}",
+        styles["SAST_Body"]
+    ))
+    story.append(Spacer(1, 10))
+
+    findings = analysis.get("findings", []) or []
+    story.append(Paragraph("3. Hallazgos", styles["SAST_H2"]))
+
+    if not findings:
+        story.append(Paragraph("No se identificaron hallazgos en el código analizado.", styles["SAST_Body"]))
+    else:
+        table_data = [["ID", "Título", "Severidad", "CVSS", "CWE", "CVE", "Ubicación"]]
+        for f in findings[:200]:
+            loc = f.get("location", {}) or {}
+            table_data.append([
+                str(f.get("id", "N/A")),
+                (f.get("title", "") or "")[:60],
+                str(f.get("severity", "N/A")),
+                str(f.get("cvss_score", "N/A")),
+                str(f.get("cwe", "N/A")),
+                str(f.get("cve", "N/A")),
+                f"{loc.get('file', meta.get('filename'))}:{loc.get('line_start','N/A')}",
+            ])
+
+        tbl = Table(
+            table_data,
+            colWidths=[0.55*inch, 2.15*inch, 0.78*inch, 0.55*inch, 0.72*inch, 1.02*inch, 1.25*inch]
+        )
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1459A6")),
+            ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("GRID", (0,0), (-1,-1), 0.25, colors.grey),
+            ("FONTSIZE", (0,0), (-1,0), 8.2),
+            ("FONTSIZE", (0,1), (-1,-1), 7.8),
+            ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ]))
+        story.append(tbl)
+        story.append(PageBreak())
+
+        for f in findings[:200]:
+            loc = f.get("location", {}) or {}
+            story.append(Paragraph(f"{sast_escape_pdf(f.get('id','N/A'))} – {sast_escape_pdf(f.get('title','Sin título'))}", styles["SAST_H2"]))
+            story.append(Paragraph(
+                f"<b>Severidad:</b> {sast_escape_pdf(f.get('severity','N/A'))} | "
+                f"<b>CVSS:</b> {sast_escape_pdf(f.get('cvss_score','N/A'))} | "
+                f"<b>CWE:</b> {sast_escape_pdf(f.get('cwe','N/A'))} | "
+                f"<b>CVE:</b> {sast_escape_pdf(f.get('cve','N/A'))}",
+                styles["SAST_Body"]
+            ))
+            story.append(Paragraph(
+                f"<b>Ubicación:</b> {sast_escape_pdf(loc.get('file', meta.get('filename')))} "
+                f"líneas {sast_escape_pdf(loc.get('line_start','N/A'))}–{sast_escape_pdf(loc.get('line_end','N/A'))}",
+                styles["SAST_Body"]
+            ))
+            if f.get("description"):
+                story.append(Paragraph(f"<b>Descripción:</b> {sast_escape_pdf(f.get('description'))}", styles["SAST_Body"]))
+
+            rr = f.get("risk_rationale", {}) or {}
+            if rr:
+                story.append(Paragraph(
+                    f"<b>Racional de riesgo:</b> Impacto={sast_escape_pdf(rr.get('impact','N/A'))}, "
+                    f"Probabilidad={sast_escape_pdf(rr.get('likelihood','N/A'))}. "
+                    f"{sast_escape_pdf(rr.get('notes',''))}",
+                    styles["SAST_Body"]
+                ))
+
+            if f.get("evidence_snippet"):
+                story.append(Spacer(1, 4))
+                story.append(Paragraph("<b>Evidencia:</b>", styles["SAST_Body"]))
+                story.append(Paragraph(f"<font name='Courier'>{sast_escape_pdf(f.get('evidence_snippet'))}</font>", styles["SAST_Mono"]))
+
+            rem = f.get("remediation", {}) or {}
+            if rem.get("recommendation"):
+                story.append(Spacer(1, 4))
+                story.append(Paragraph(f"<b>Recomendación / acción correctiva:</b> {sast_escape_pdf(rem.get('recommendation'))}", styles["SAST_Body"]))
+            if rem.get("secure_code_example"):
+                story.append(Paragraph("<b>Ejemplo seguro:</b>", styles["SAST_Body"]))
+                story.append(Paragraph(f"<font name='Courier'>{sast_escape_pdf(rem.get('secure_code_example'))}</font>", styles["SAST_Mono"]))
+            if rem.get("remediation_notes"):
+                story.append(Paragraph(f"<b>Notas:</b> {sast_escape_pdf(rem.get('remediation_notes'))}", styles["SAST_Small"]))
+
+            refs = f.get("references", []) or []
+            if refs:
+                story.append(Paragraph("<b>Referencias:</b> " + "; ".join([sast_escape_pdf(x) for x in refs[:8]]), styles["SAST_Small"]))
+
+            story.append(Spacer(1, 12))
+
+    concl = analysis.get("conclusions", {}) or {}
+    story.append(Paragraph("4. Conclusiones", styles["SAST_H2"]))
+    story.append(Paragraph(sast_escape_pdf(concl.get("summary", "N/A")), styles["SAST_Body"]))
+
+    next_steps = concl.get("next_steps", []) or []
+    if next_steps:
+        story.append(Paragraph("<b>Próximos pasos:</b><br/>" + "<br/>".join([f"• {sast_escape_pdf(x)}" for x in next_steps[:12]]), styles["SAST_Body"]))
+
+    doc.build(story)
+
+
+def sast_job_update(job_id, percent, message, status="running"):
+    job = SAST_JOBS.get(job_id)
+    if not job:
+        return
+    job["percent"] = int(percent)
+    job["message"] = message
+    job["status"] = status
+
+
+def sast_run_analysis_job(job_id, payload):
+    with _sast_job_sem:
+        with app.app_context():
+            try:
+                sast_job_update(job_id, 5, "Preparando entrada…")
+
+                project_name = payload["project_name"]
+                artifact_type = payload["artifact_type"]
+                filename = payload["filename"]
+                language = payload["language"]
+                code_text = payload["code_text"]
+                model = payload["model"]
+
+                report_id = payload["report_id"]
+                date_str = payload["date_str"]
+
+                meta = {
+                    "project_name": project_name,
+                    "artifact_type": artifact_type,
+                    "filename": filename,
+                    "language": language,
+                    "date_str": date_str,
+                    "model": model,
+                }
+
+                sast_job_update(job_id, 20, f"Ejecutando análisis SAST con Ollama ({model})…")
+
+                analysis = sast_analyze_code_with_ai(code_text, artifact_type, language, filename, model=model)
+                if not isinstance(analysis, dict):
+                    raise RuntimeError("El análisis no devolvió un objeto válido.")
+
+                registration_summary = {
+                    "requested_register_vulnerabilities": bool(payload.get("register_vulnerabilities")),
+                    "requested_create_remediation_plans": bool(payload.get("create_remediation_plans")),
+                    "requested_ai_remediation": bool(payload.get("generate_ai_remediation")),
+                    "vulnerabilities_created": 0,
+                    "remediation_plans_created": 0,
+                    "vulnerability_ids": [],
+                    "plan_ids": [],
+                    "error": "",
+                }
+
+                if payload.get("register_vulnerabilities") or payload.get("create_remediation_plans"):
+                    if payload.get("create_remediation_plans") and payload.get("generate_ai_remediation"):
+                        sast_job_update(job_id, 60, "Registrando vulnerabilidades y generando remediaciones con IA…")
+                    elif payload.get("create_remediation_plans"):
+                        sast_job_update(job_id, 60, "Registrando vulnerabilidades y creando planes con texto genérico…")
+                    else:
+                        sast_job_update(job_id, 60, "Registrando hallazgos en la matriz de vulnerabilidades…")
+
+                    registration_summary = sast_register_findings_in_sgsi(analysis, meta, payload)
+
+                analysis["sgsi_registration"] = registration_summary
+
+                if registration_summary.get("error"):
+                    sast_job_update(job_id, 72, "Generando PDF… El registro SGSI presentó advertencia.")
+                else:
+                    sast_job_update(job_id, 72, "Generando PDF…")
+
+                pdf_name = f"Informe_SAST_{report_id}.pdf"
+                pdf_path = os.path.join(SAST_REPORT_DIR, pdf_name)
+
+                sast_build_pdf(pdf_path, analysis, meta)
+
+                sast_job_update(job_id, 88, "Guardando JSON…")
+
+                json_name = f"analysis_{report_id}.json"
+                json_path = os.path.join(SAST_REPORT_DIR, json_name)
+
+                analysis["sast_meta"] = meta
+                analysis["sast_report"] = {
+                    "report_id": report_id,
+                    "pdf_name": pdf_name,
+                    "json_name": json_name,
+                }
+
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(analysis, f, ensure_ascii=False, indent=2)
+
+                history_record = sast_build_scan_history_record(
+                    report_id,
+                    analysis,
+                    meta,
+                    pdf_name,
+                    json_name,
+                    registration_summary,
+                    payload
+                )
+                sast_save_scan_history_record(history_record)
+
+                SAST_JOBS[job_id]["result"] = {
+                    "analysis": analysis,
+                    "pdf_name": pdf_name,
+                    "json_name": json_name,
+                    "meta": meta,
+                    "registration_summary": registration_summary,
+                    "history_record": history_record,
+                }
+
+                sast_job_update(job_id, 100, "Listo ✅", status="done")
+                SAST_JOBS[job_id]["done"] = True
+
+            except Exception as e:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                SAST_JOBS[job_id]["error"] = str(e)
+                SAST_JOBS[job_id]["done"] = True
+                sast_job_update(job_id, 100, "Error en análisis SAST", status="error")
+
+
+SAST_INDEX_HTML = """
+<div class="sast-shell">
+
+  <div class="sast-hero">
+    <div class="sast-hero-icon">🧪</div>
+    <div>
+      <div class="sast-badge">SGSI · Gestión de Eventos · Pruebas SAST</div>
+      <h2 class="sast-title">Pruebas SAST con IA Local</h2>
+      <div class="sast-subtitle">
+        Revisión de seguridad de código fuente con Ollama local, orientada a OWASP, CERT Secure Coding y SANS Top 25.
+      </div>
+    </div>
+  </div>
+
+  <div class="sast-actions">
+    <a href="{{ url_for('vulnerabilidades_matriz') }}" class="btn btn-light rounded-pill px-4 fw-bold">
+      ⬅ Volver a Vulnerabilidades
+    </a>
+
+    <div class="dropdown">
+      <button class="btn btn-primary rounded-pill px-4 fw-bold dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+        Ejecución de pruebas
+      </button>
+      <ul class="dropdown-menu shadow-sm rounded-4">
+        <li>
+          <a class="dropdown-item fw-semibold" href="{{ url_for('sast_index') }}">
+            🧪 Nueva prueba SAST
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item fw-semibold" href="{{ url_for('sast_reports') }}">
+            📊 Ver informes
+          </a>
+        </li>
+        <li><hr class="dropdown-divider"></li>
+        <li>
+          <a class="dropdown-item fw-semibold" href="{{ url_for('sast_config') }}">
+            ⚙️ Configuración Ollama
+          </a>
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="sast-card">
+    <div class="sast-card-body">
+
+      <div class="sast-status-grid mb-3">
+        <div class="sast-status-box">
+          <div class="sast-status-label">URL Ollama</div>
+          <div class="sast-status-value">{{ cfg.base_url }}</div>
+        </div>
+        <div class="sast-status-box">
+          <div class="sast-status-label">Modelo por defecto</div>
+          <div class="sast-status-value">{{ cfg.default_model or 'No configurado' }}</div>
+        </div>
+        <div class="sast-status-box">
+          <div class="sast-status-label">Estado</div>
+          <div class="sast-status-value {{ 'text-success' if conn_ok else 'text-danger' }}">
+            {{ conn_msg }}
+          </div>
+        </div>
+      </div>
+
+      {% if read_only %}
+        <div class="alert alert-warning rounded-4">
+          El rol Auditor puede consultar el módulo, pero no puede ejecutar nuevos análisis.
+        </div>
+      {% endif %}
+
+      <form id="sastAnalyzeForm" method="POST" action="{{ url_for('sast_start') }}" enctype="multipart/form-data" data-no-progress="true">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Nombre del proyecto</label>
+            <input class="form-control" name="project_name" placeholder="Ej: API Clientes v2">
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Tipo de artefacto</label>
+            <select class="form-select" name="artifact_type" id="sastArtifactType" required>
+              <option>API</option>
+              <option>Librería</option>
+              <option>Script</option>
+              <option>Parte de Código</option>
+              <option selected>Programa completo</option>
+            </select>
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Lenguaje</label>
+            <select class="form-select" name="language">
+              <option value="">Auto / No especificar</option>
+              <option>python</option>
+              <option>javascript</option>
+              <option>typescript</option>
+              <option>java</option>
+              <option>csharp</option>
+              <option>go</option>
+              <option>php</option>
+              <option>ruby</option>
+              <option>c</option>
+              <option>cpp</option>
+              <option>sql</option>
+            </select>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Modelo / algoritmo Ollama</label>
+            <select class="form-select" name="ollama_model" required>
+              {% if models %}
+                {% for m in models %}
+                  <option value="{{ m }}" {% if m == cfg.default_model %}selected{% endif %}>{{ m }}</option>
+                {% endfor %}
+              {% else %}
+                <option value="">No se encontraron modelos</option>
+              {% endif %}
+            </select>
+            <div class="sast-help">Instala modelos con: <code>ollama pull qwen2.5-coder</code></div>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Extensiones permitidas</label>
+            <div class="sast-ext-box">{{ allowed_ext }}</div>
+          </div>
+
+          <div class="col-12">
+            <div class="sast-register-box">
+              <div class="sast-register-title">Registro automático en SGSI</div>
+              <div class="row g-3">
+                <div class="col-md-4">
+                  <label class="sast-switch-card">
+                    <input type="checkbox" name="register_vulnerabilities" id="sastRegisterVulnerabilities" value="1">
+                    <span>
+                      <b>Registrar en Vulnerabilidades</b>
+                      <small>Guarda cada hallazgo SAST en la matriz de vulnerabilidades.</small>
+                    </span>
+                  </label>
+                </div>
+
+                <div class="col-md-4">
+                  <label class="sast-switch-card">
+                    <input type="checkbox" name="create_remediation_plans" id="sastCreateRemediationPlans" value="1">
+                    <span>
+                      <b>Crear Plan de Remediación</b>
+                      <small>Crea una acción correctiva por cada hallazgo registrado.</small>
+                    </span>
+                  </label>
+                </div>
+
+                <div class="col-md-4">
+                  <label class="sast-switch-card">
+                    <input type="checkbox" name="generate_ai_remediation" id="sastGenerateAiRemediation" value="1" checked>
+                    <span>
+                      <b>Remediación con IA</b>
+                      <small>Si IA no responde o no está habilitada, se usa texto genérico seguro.</small>
+                    </span>
+                  </label>
+                </div>
+              </div>
+              <div class="sast-help mt-2">
+                Nota: si activa el plan de remediación, el sistema también registrará la vulnerabilidad porque el plan queda asociado a ese ID.
+              </div>
+            </div>
+          </div>
+
+          <div class="col-12">
+            <div class="sast-source-tabs">
+              <button type="button" class="sast-tab active" id="sastFileTab" onclick="sastShowPane('file')">📤 Subir archivo</button>
+              <button type="button" class="sast-tab" id="sastPasteTab" onclick="sastShowPane('paste')">💻 Pegar código</button>
+            </div>
+
+            <div id="sastFilePane" class="sast-pane">
+              <label class="form-label">Archivo de código</label>
+              <input class="form-control" type="file" name="file" id="sastFileInput">
+              <div class="sast-help mt-1">Para DVWA puedes probar: <code>vulnerabilities/sqli/source/low.php</code></div>
+            </div>
+
+            <div id="sastPastePane" class="sast-pane d-none">
+              <label class="form-label">Código</label>
+              <textarea class="form-control" name="pasted_code" rows="12" placeholder="Pega aquí el fragmento o programa completo..."></textarea>
+            </div>
+          </div>
+
+          <div class="col-12 d-flex justify-content-center gap-2 flex-wrap mt-3">
+            {% if read_only %}
+              <button type="button" class="btn btn-secondary rounded-pill px-5 fw-bold" disabled>
+                Analizar y generar PDF
+              </button>
+            {% else %}
+              <button id="sastSubmitBtn" class="btn btn-primary rounded-pill px-5 fw-bold" type="submit" {% if not models %}disabled{% endif %}>
+                🛡️ Analizar y generar PDF
+              </button>
+            {% endif %}
+          </div>
+
+          <div class="col-12">
+            <div class="sast-progress d-none" id="sastProgressBox">
+              <div class="sast-progress-label" id="sastProgressText">Enviando código al servidor…</div>
+              <div class="progress">
+                <div class="progress-bar" id="sastProgressBar" role="progressbar" style="width:20%;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </form>
+
+    </div>
+  </div>
+</div>
+
+<style>
+  body{
+    background-image:url('/static/img/ccsgsi.jpg');
+    background-size:cover;
+    background-position:center;
+    background-attachment:fixed;
+    background-repeat:no-repeat;
+  }
+
+  .sast-shell{
+    width:96%;
+    max-width:1320px;
+    margin:26px auto 24px auto;
+  }
+
+  .sast-hero{
+    background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+    border-radius:18px;
+    padding:18px 26px;
+    min-height:94px;
+    display:flex;
+    align-items:center;
+    gap:16px;
+    box-shadow:0 12px 24px rgba(15,23,42,.25);
+    position:relative;
+    overflow:hidden;
+    color:#fff;
+  }
+
+  .sast-hero::before{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:
+      radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+      repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+    pointer-events:none;
+  }
+
+  .sast-hero > *{ position:relative; z-index:1; }
+
+  .sast-hero-icon{
+    width:58px;
+    height:58px;
+    min-width:58px;
+    border-radius:16px;
+    background:#fff;
+    color:#0b4a8f;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:1.55rem;
+    box-shadow:0 8px 18px rgba(0,0,0,.25);
+  }
+
+  .sast-badge{
+    width:fit-content;
+    background:rgba(255,255,255,.18);
+    border-radius:999px;
+    padding:4px 11px;
+    font-size:.68rem;
+    font-weight:900;
+    margin-bottom:4px;
+  }
+
+  .sast-title{
+    font-size:1.42rem;
+    font-weight:950;
+    margin:0;
+    text-shadow:0 4px 14px rgba(0,0,0,.42);
+  }
+
+  .sast-subtitle{
+    font-size:.84rem;
+    color:rgba(255,255,255,.88);
+    margin-top:3px;
+  }
+
+  .sast-actions{
+    display:flex;
+    justify-content:center;
+    flex-wrap:wrap;
+    gap:10px;
+    margin:12px 0 14px;
+  }
+
+  .sast-actions .btn{
+    min-height:34px;
+    padding:8px 22px !important;
+    font-size:.82rem;
+    font-weight:900;
+    box-shadow:0 8px 16px rgba(15,23,42,.15);
+  }
+
+  .sast-card{
+    background:rgba(255,255,255,.96);
+    backdrop-filter:blur(8px);
+    border:1px solid rgba(219,230,244,.9);
+    border-radius:18px;
+    box-shadow:0 12px 24px rgba(15,23,42,.18);
+    overflow:hidden;
+  }
+
+  .sast-card-body{
+    padding:20px;
+  }
+
+  .sast-status-grid{
+    display:grid;
+    grid-template-columns:repeat(3, minmax(0, 1fr));
+    gap:12px;
+  }
+
+  .sast-status-box{
+    background:#f8fbff;
+    border:1px solid #dbe6f4;
+    border-radius:16px;
+    padding:12px 14px;
+  }
+
+  .sast-status-label{
+    font-size:.70rem;
+    font-weight:950;
+    color:#5f6f86;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+  }
+
+  .sast-status-value{
+    font-size:.82rem;
+    font-weight:900;
+    color:#172033;
+    word-break:break-word;
+  }
+
+  .sast-source-tabs{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+    margin:8px 0 12px;
+  }
+
+  .sast-tab{
+    border:1px solid #d9e3f0;
+    background:#ffffff;
+    color:#102a4b;
+    border-radius:999px;
+    padding:8px 18px;
+    font-weight:900;
+    font-size:.82rem;
+  }
+
+  .sast-tab.active{
+    background:linear-gradient(135deg,#0b4a8f,#1d5fae);
+    color:#fff;
+    border-color:#0b4a8f;
+  }
+
+  .sast-pane{
+    background:#f8fbff;
+    border:1px dashed #cfe0f4;
+    border-radius:16px;
+    padding:15px;
+  }
+
+  .sast-ext-box{
+    min-height:40px;
+    border:1px solid #d9e3f0;
+    background:#f8fafc;
+    border-radius:10px;
+    display:flex;
+    align-items:center;
+    padding:8px 12px;
+    font-size:.80rem;
+    color:#334155;
+    word-break:break-word;
+  }
+
+  .sast-help{
+    color:#475569;
+    font-size:.76rem;
+    margin-top:6px;
+  }
+
+  .sast-help code{
+    background:#eef5ff;
+    border:1px solid #d8e8fb;
+    border-radius:7px;
+    padding:2px 6px;
+    color:#062b55;
+  }
+
+  .sast-register-box{
+    background:#f8fbff;
+    border:1px solid #dbe6f4;
+    border-radius:16px;
+    padding:14px;
+    box-shadow:0 6px 14px rgba(15,23,42,.06);
+  }
+
+  .sast-register-title{
+    font-size:.78rem;
+    font-weight:950;
+    color:#0b4a8f;
+    margin-bottom:10px;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+  }
+
+  .sast-switch-card{
+    display:flex;
+    gap:10px;
+    align-items:flex-start;
+    min-height:86px;
+    padding:12px;
+    border:1px solid #d9e3f0;
+    background:#ffffff;
+    border-radius:14px;
+    cursor:pointer;
+    transition:.18s ease;
+  }
+
+  .sast-switch-card:hover{
+    border-color:#3f86d6;
+    box-shadow:0 8px 16px rgba(63,134,214,.12);
+  }
+
+  .sast-switch-card input{
+    margin-top:4px;
+    width:18px;
+    height:18px;
+    accent-color:#0b4a8f;
+  }
+
+  .sast-switch-card b{
+    display:block;
+    font-size:.82rem;
+    color:#172033;
+  }
+
+  .sast-switch-card small{
+    display:block;
+    color:#475569;
+    font-size:.72rem;
+    line-height:1.25;
+    margin-top:3px;
+  }
+
+  .sast-progress{
+    margin-top:10px;
+    background:#f8fbff;
+    border:1px solid #dbe6f4;
+    border-radius:16px;
+    padding:14px;
+  }
+
+  .sast-progress-label{
+    font-size:.82rem;
+    font-weight:900;
+    color:#0b4a8f;
+    margin-bottom:8px;
+  }
+
+  .form-label{
+    color:#25324a;
+    margin-bottom:4px;
+    font-weight:900;
+    font-size:.78rem;
+  }
+
+  .form-control,
+  .form-select{
+    border-radius:10px;
+    min-height:40px;
+    border:1px solid #d9e3f0;
+    font-size:.86rem;
+    background:#f8fafc;
+  }
+
+  .form-control:focus,
+  .form-select:focus{
+    border-color:#3f86d6;
+    box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
+    background:#ffffff;
+  }
+
+  @media(max-width:992px){
+    .sast-status-grid{
+      grid-template-columns:1fr;
+    }
+  }
+
+  @media(max-width:768px){
+    .sast-hero{
+      flex-direction:column;
+      text-align:center;
+    }
+    .sast-badge{
+      margin-left:auto;
+      margin-right:auto;
+    }
+  }
+</style>
+
+<script>
+  function sastShowPane(kind){
+    const filePane = document.getElementById("sastFilePane");
+    const pastePane = document.getElementById("sastPastePane");
+    const fileTab = document.getElementById("sastFileTab");
+    const pasteTab = document.getElementById("sastPasteTab");
+
+    if(kind === "paste"){
+      filePane.classList.add("d-none");
+      pastePane.classList.remove("d-none");
+      fileTab.classList.remove("active");
+      pasteTab.classList.add("active");
+    }else{
+      pastePane.classList.add("d-none");
+      filePane.classList.remove("d-none");
+      pasteTab.classList.remove("active");
+      fileTab.classList.add("active");
+    }
+  }
+
+  const artifactType = document.getElementById("sastArtifactType");
+  if(artifactType){
+    artifactType.addEventListener("change", function(){
+      const v = (artifactType.value || "").toLowerCase();
+      if(v === "parte de código" || v === "parte de codigo"){
+        sastShowPane("paste");
+      }
+    });
+  }
+
+  const createPlansToggle = document.getElementById("sastCreateRemediationPlans");
+  const registerVulnToggle = document.getElementById("sastRegisterVulnerabilities");
+  if(createPlansToggle && registerVulnToggle){
+    createPlansToggle.addEventListener("change", function(){
+      if(createPlansToggle.checked){
+        registerVulnToggle.checked = true;
+      }
+    });
+    registerVulnToggle.addEventListener("change", function(){
+      if(!registerVulnToggle.checked && createPlansToggle.checked){
+        createPlansToggle.checked = false;
+      }
+    });
+  }
+
+  const form = document.getElementById("sastAnalyzeForm");
+  if(form){
+    form.addEventListener("submit", async function(e){
+      e.preventDefault();
+
+      const progressBox = document.getElementById("sastProgressBox");
+      const progressText = document.getElementById("sastProgressText");
+      const progressBar = document.getElementById("sastProgressBar");
+      const submitBtn = document.getElementById("sastSubmitBtn");
+
+      if(progressBox) progressBox.classList.remove("d-none");
+      if(progressText) progressText.textContent = "Enviando código al servidor…";
+      if(progressBar) progressBar.style.width = "20%";
+      if(submitBtn) submitBtn.disabled = true;
+
+      try{
+        const fd = new FormData(form);
+        const resp = await fetch(form.action, {
+          method: "POST",
+          body: fd,
+          headers: {
+            "Accept": "application/json",
+            "X-Requested-With": "fetch"
+          }
+        });
+
+        const data = await resp.json().catch(() => null);
+
+        if(!resp.ok){
+          throw new Error((data && data.error) ? data.error : "Error HTTP " + resp.status);
+        }
+
+        if(!data || !data.ok || !data.job_id){
+          throw new Error("Respuesta inválida del servidor.");
+        }
+
+        window.location.href = "{{ url_for('sast_track', job_id='__JOB__') }}".replace("__JOB__", data.job_id);
+
+      }catch(err){
+        if(progressText) progressText.textContent = "Error: " + (err.message || err);
+        if(submitBtn) submitBtn.disabled = false;
+      }
+    });
+  }
+</script>
+"""
+
+
+SAST_CONFIG_HTML = """
+<div class="sast-shell">
+
+  <div class="sast-hero">
+    <div class="sast-hero-icon">⚙️</div>
+    <div>
+      <div class="sast-badge">SGSI · Pruebas SAST · Ollama Local</div>
+      <h2 class="sast-title">Configuración Ollama</h2>
+      <div class="sast-subtitle">
+        Configure la URL local y seleccione el modelo/algoritmo instalado en Ollama.
+      </div>
+    </div>
+  </div>
+
+  <div class="sast-actions">
+    <a href="{{ url_for('sast_index') }}" class="btn btn-light rounded-pill px-4 fw-bold">
+      ⬅ Volver a Pruebas SAST
+    </a>
+    <a href="{{ url_for('vulnerabilidades_matriz') }}" class="btn btn-outline-secondary rounded-pill px-4 fw-bold">
+      Matriz de Vulnerabilidades
+    </a>
+  </div>
+
+  <div class="sast-card">
+    <div class="sast-card-body">
+      <div class="alert {{ 'alert-success' if conn_ok else 'alert-danger' }} rounded-4">
+        <b>Estado de conexión:</b> {{ conn_msg }}
+      </div>
+
+      <form method="post">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">URL base de Ollama</label>
+            <input class="form-control" name="base_url" value="{{ cfg.base_url }}" placeholder="http://localhost:11434" required>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Modelo por defecto</label>
+            <select class="form-select" name="default_model">
+              <option value="">Seleccione un modelo</option>
+              {% for m in models %}
+                <option value="{{ m }}" {% if m == cfg.default_model %}selected{% endif %}>{{ m }}</option>
+              {% endfor %}
+            </select>
+            {% if not models %}
+              <div class="sast-help text-danger">No se encontraron modelos. Ejecute: <code>ollama pull qwen2.5-coder</code></div>
+            {% endif %}
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Temperatura</label>
+            <input class="form-control" name="temperature" value="{{ cfg.temperature }}" type="number" min="0" max="1" step="0.1">
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Timeout segundos</label>
+            <input class="form-control" name="timeout" value="{{ cfg.timeout }}" type="number" min="30" max="1200" step="10">
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Tokens resumen</label>
+            <input class="form-control" name="summary_max_tokens" value="{{ cfg.summary_max_tokens }}" type="number" min="300" max="5000" step="100">
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Tokens hallazgos</label>
+            <input class="form-control" name="findings_max_tokens" value="{{ cfg.findings_max_tokens }}" type="number" min="800" max="12000" step="100">
+          </div>
+
+          <div class="col-12 d-flex justify-content-center gap-2 flex-wrap mt-3">
+            <button class="btn btn-primary rounded-pill px-5 fw-bold" type="submit">
+              Guardar configuración
+            </button>
+            <a class="btn btn-outline-primary rounded-pill px-5 fw-bold" href="{{ url_for('sast_config') }}">
+              Probar conexión
+            </a>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<style>
+  body{
+    background-image:url('/static/img/ccsgsi.jpg');
+    background-size:cover;
+    background-position:center;
+    background-attachment:fixed;
+    background-repeat:no-repeat;
+  }
+  .sast-shell{width:96%; max-width:1180px; margin:26px auto 24px auto;}
+  .sast-hero{
+    background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+    border-radius:18px;
+    padding:18px 26px;
+    min-height:94px;
+    display:flex;
+    align-items:center;
+    gap:16px;
+    box-shadow:0 12px 24px rgba(15,23,42,.25);
+    color:#fff;
+    position:relative;
+    overflow:hidden;
+  }
+  .sast-hero::before{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:
+      radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+      repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+    pointer-events:none;
+  }
+  .sast-hero > *{position:relative; z-index:1;}
+  .sast-hero-icon{
+    width:58px;height:58px;min-width:58px;border-radius:16px;background:#fff;color:#0b4a8f;
+    display:flex;align-items:center;justify-content:center;font-size:1.55rem;box-shadow:0 8px 18px rgba(0,0,0,.25);
+  }
+  .sast-badge{width:fit-content;background:rgba(255,255,255,.18);border-radius:999px;padding:4px 11px;font-size:.68rem;font-weight:900;margin-bottom:4px;}
+  .sast-title{font-size:1.42rem;font-weight:950;margin:0;text-shadow:0 4px 14px rgba(0,0,0,.42);}
+  .sast-subtitle{font-size:.84rem;color:rgba(255,255,255,.88);margin-top:3px;}
+  .sast-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:10px;margin:12px 0 14px;}
+  .sast-actions .btn{min-height:34px;padding:8px 22px!important;font-size:.82rem;font-weight:900;box-shadow:0 8px 16px rgba(15,23,42,.15);}
+  .sast-card{background:rgba(255,255,255,.96);backdrop-filter:blur(8px);border:1px solid rgba(219,230,244,.9);border-radius:18px;box-shadow:0 12px 24px rgba(15,23,42,.18);overflow:hidden;}
+  .sast-card-body{padding:20px;}
+  .form-label{color:#25324a;margin-bottom:4px;font-weight:900;font-size:.78rem;}
+  .form-control,.form-select{border-radius:10px;min-height:40px;border:1px solid #d9e3f0;font-size:.86rem;background:#f8fafc;}
+  .form-control:focus,.form-select:focus{border-color:#3f86d6;box-shadow:0 0 0 .15rem rgba(63,134,214,.18);background:#ffffff;}
+  .sast-help{color:#475569;font-size:.76rem;margin-top:6px;}
+  .sast-help code{background:#eef5ff;border:1px solid #d8e8fb;border-radius:7px;padding:2px 6px;color:#062b55;}
+</style>
+"""
+
+
+SAST_TRACK_HTML = """
+<div class="sast-shell">
+  <div class="sast-card">
+    <div class="sast-card-body text-center">
+      <h4 class="fw-bold text-primary mb-2">Procesando análisis SAST…</h4>
+      <div class="text-muted mb-3">No cierre esta ventana mientras Ollama analiza el código.</div>
+      <div class="progress" style="height:16px; border-radius:999px;">
+        <div id="sastTrackBar" class="progress-bar" role="progressbar" style="width:5%;"></div>
+      </div>
+      <div class="mt-3 fw-bold text-primary" id="sastTrackMsg">Iniciando…</div>
+      <div class="mt-4">
+        <a href="{{ url_for('sast_index') }}" class="btn btn-outline-secondary rounded-pill px-4">Cancelar / volver</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  body{
+    background-image:url('/static/img/ccsgsi.jpg');
+    background-size:cover;
+    background-position:center;
+    background-attachment:fixed;
+    background-repeat:no-repeat;
+  }
+  .sast-shell{width:96%; max-width:760px; margin:70px auto 24px auto;}
+  .sast-card{background:rgba(255,255,255,.96);backdrop-filter:blur(8px);border:1px solid rgba(219,230,244,.9);border-radius:18px;box-shadow:0 12px 24px rgba(15,23,42,.18);overflow:hidden;}
+  .sast-card-body{padding:30px;}
+</style>
+
+<script>
+  const jobId = "{{ job_id }}";
+  const bar = document.getElementById("sastTrackBar");
+  const msg = document.getElementById("sastTrackMsg");
+
+  const es = new EventSource("{{ url_for('sast_progress', job_id=job_id) }}");
+
+  es.onmessage = function(evt){
+    const p = JSON.parse(evt.data);
+    const pct = Math.max(0, Math.min(100, p.percent || 0));
+    if(bar) bar.style.width = pct + "%";
+    if(msg) msg.textContent = p.message || "Procesando…";
+
+    if(p.status === "error"){
+      es.close();
+      if(msg) msg.textContent = "Error: " + (p.error || "desconocido");
+    }
+
+    if(p.done && p.status === "done"){
+      es.close();
+      window.location.href = "{{ url_for('sast_result', job_id=job_id) }}";
+    }
+  };
+
+  es.onerror = function(){
+    es.close();
+    if(msg) msg.textContent = "Error recibiendo progreso del servidor.";
+  };
+</script>
+"""
+
+
+SAST_RESULT_HTML = """
+<div class="sast-shell">
+
+  <div class="sast-hero">
+    <div class="sast-hero-icon">📄</div>
+    <div>
+      <div class="sast-badge">SGSI · Resultado Pruebas SAST</div>
+      <h2 class="sast-title">Resultado del análisis SAST</h2>
+      <div class="sast-subtitle">
+        Informe generado con Ollama local y clasificado por severidad, CWE/CVE y recomendación de remediación.
+      </div>
+    </div>
+  </div>
+
+  <div class="sast-actions">
+    <a class="btn btn-primary rounded-pill px-4 fw-bold" href="{{ url_for('sast_download_pdf', name=pdf_name) }}">
+      Descargar PDF
+    </a>
+    <a class="btn btn-outline-primary rounded-pill px-4 fw-bold" href="{{ url_for('sast_download_json', name=json_name) }}">
+      Descargar JSON
+    </a>
+    <a class="btn btn-light rounded-pill px-4 fw-bold" href="{{ url_for('sast_index') }}">
+      Nuevo análisis
+    </a>
+    <a class="btn btn-outline-primary rounded-pill px-4 fw-bold" href="{{ url_for('sast_reports') }}">
+      Ver informes
+    </a>
+    <a class="btn btn-outline-secondary rounded-pill px-4 fw-bold" href="{{ url_for('vulnerabilidades_matriz') }}">
+      Matriz de Vulnerabilidades
+    </a>
+  </div>
+
+  {% set reg = registration_summary or analysis.get('sgsi_registration', {}) or {} %}
+  {% if reg.get('requested_register_vulnerabilities') or reg.get('requested_create_remediation_plans') %}
+    <div class="sast-card mb-3">
+      <div class="sast-card-body">
+        <div class="sast-section-title">Registro automático SGSI</div>
+
+        {% if reg.get('error') %}
+          <div class="alert alert-warning rounded-4 mb-3">
+            El análisis SAST se generó correctamente, pero el registro automático presentó una advertencia:
+            <b>{{ reg.get('error') }}</b>
+          </div>
+        {% endif %}
+
+        <div class="row g-3">
+          <div class="col-md-4">
+            <div class="sast-kpi">
+              <div class="sast-kpi-label">Vulnerabilidades creadas</div>
+              <div class="sast-kpi-value">{{ reg.get('vulnerabilities_created', 0) }}</div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="sast-kpi">
+              <div class="sast-kpi-label">Planes creados</div>
+              <div class="sast-kpi-value">{{ reg.get('remediation_plans_created', 0) }}</div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="sast-kpi">
+              <div class="sast-kpi-label">Remediación</div>
+              <div class="sast-kpi-value small">
+                {{ 'IA / fallback seguro' if reg.get('requested_ai_remediation') else 'Texto genérico' }}
+              </div>
+            </div>
+          </div>
+          <div class="col-12 d-flex gap-2 flex-wrap justify-content-center">
+            <a class="btn btn-outline-primary rounded-pill px-4 fw-bold" href="{{ url_for('vulnerabilidades_matriz') }}">
+              Ver Matriz de Vulnerabilidades
+            </a>
+            <a class="btn btn-outline-primary rounded-pill px-4 fw-bold" href="{{ url_for('plan_remediacion_matriz') }}">
+              Ver Plan de Remediación
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="sast-card mb-3">
+    <div class="sast-card-body">
+      {% set ex = analysis.get('executive_summary', {}) or {} %}
+      <div class="row g-3">
+        <div class="col-md-4">
+          <div class="sast-kpi">
+            <div class="sast-kpi-label">Riesgo general</div>
+            <div class="sast-kpi-value">{{ ex.get('overall_risk_level', 'N/A') }}</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="sast-kpi">
+            <div class="sast-kpi-label">Puntaje</div>
+            <div class="sast-kpi-value">{{ ex.get('overall_risk_score', 'N/A') }}/100</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="sast-kpi">
+            <div class="sast-kpi-label">Modelo</div>
+            <div class="sast-kpi-value small">{{ meta.get('model', 'Ollama') }}</div>
+          </div>
+        </div>
+        <div class="col-12">
+          <div class="sast-summary">{{ ex.get('management_overview', 'Sin resumen ejecutivo.') }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sast-card mb-3">
+    <div class="sast-card-body">
+      <div class="sast-section-title">Métricas</div>
+      <pre class="sast-pre">{{ analysis.get('metrics', {}) | tojson(indent=2) }}</pre>
+    </div>
+  </div>
+
+  <div class="sast-card">
+    <div class="sast-card-body">
+      <div class="sast-section-title">Hallazgos</div>
+
+      {% set findings = analysis.get('findings', []) or [] %}
+      {% if findings|length == 0 %}
+        <div class="alert alert-success rounded-4 mb-0">No se identificaron hallazgos.</div>
+      {% else %}
+        <div class="table-responsive">
+          <table class="table table-hover align-middle sast-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Título</th>
+                <th>Severidad</th>
+                <th>CVSS</th>
+                <th>CWE</th>
+                <th>CVE</th>
+                <th>Ubicación</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for f in findings %}
+                {% set loc = f.get('location', {}) or {} %}
+                <tr>
+                  <td class="fw-bold">{{ f.get('id','N/A') }}</td>
+                  <td>
+                    <div class="fw-bold">{{ f.get('title','') }}</div>
+                    <div class="text-muted small">{{ f.get('description','') }}</div>
+                  </td>
+                  <td class="fw-bold">{{ f.get('severity','N/A') }}</td>
+                  <td>{{ f.get('cvss_score','N/A') }}</td>
+                  <td>{{ f.get('cwe','N/A') }}</td>
+                  <td>{{ f.get('cve','N/A') }}</td>
+                  <td class="small">{{ loc.get('file','') }}:{{ loc.get('line_start','') }}</td>
+                </tr>
+                <tr>
+                  <td></td>
+                  <td colspan="6">
+                    <div class="sast-detail-grid">
+                      <div>
+                        <b>Evidencia:</b>
+                        <pre class="sast-pre">{{ f.get('evidence_snippet','') }}</pre>
+                      </div>
+                      <div>
+                        {% set rem = f.get('remediation', {}) or {} %}
+                        <b>Recomendación / acción correctiva:</b>
+                        <div class="sast-summary">{{ rem.get('recommendation','') }}</div>
+                        {% if rem.get('secure_code_example') %}
+                          <b class="mt-2 d-block">Ejemplo seguro:</b>
+                          <pre class="sast-pre">{{ rem.get('secure_code_example','') }}</pre>
+                        {% endif %}
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<style>
+  body{
+    background-image:url('/static/img/ccsgsi.jpg');
+    background-size:cover;
+    background-position:center;
+    background-attachment:fixed;
+    background-repeat:no-repeat;
+  }
+  .sast-shell{width:96%; max-width:1320px; margin:26px auto 24px auto;}
+  .sast-hero{background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);border-radius:18px;padding:18px 26px;min-height:94px;display:flex;align-items:center;gap:16px;box-shadow:0 12px 24px rgba(15,23,42,.25);color:#fff;position:relative;overflow:hidden;}
+  .sast-hero::before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);pointer-events:none;}
+  .sast-hero > *{position:relative;z-index:1;}
+  .sast-hero-icon{width:58px;height:58px;min-width:58px;border-radius:16px;background:#fff;color:#0b4a8f;display:flex;align-items:center;justify-content:center;font-size:1.55rem;box-shadow:0 8px 18px rgba(0,0,0,.25);}
+  .sast-badge{width:fit-content;background:rgba(255,255,255,.18);border-radius:999px;padding:4px 11px;font-size:.68rem;font-weight:900;margin-bottom:4px;}
+  .sast-title{font-size:1.42rem;font-weight:950;margin:0;text-shadow:0 4px 14px rgba(0,0,0,.42);}
+  .sast-subtitle{font-size:.84rem;color:rgba(255,255,255,.88);margin-top:3px;}
+  .sast-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:10px;margin:12px 0 14px;}
+  .sast-actions .btn{min-height:34px;padding:8px 22px!important;font-size:.82rem;font-weight:900;box-shadow:0 8px 16px rgba(15,23,42,.15);}
+  .sast-card{background:rgba(255,255,255,.96);backdrop-filter:blur(8px);border:1px solid rgba(219,230,244,.9);border-radius:18px;box-shadow:0 12px 24px rgba(15,23,42,.18);overflow:hidden;}
+  .sast-card-body{padding:20px;}
+  .sast-kpi{background:#f8fbff;border:1px solid #dbe6f4;border-radius:16px;padding:14px;}
+  .sast-kpi-label{font-size:.70rem;font-weight:950;color:#475569;text-transform:uppercase;letter-spacing:.04em;}
+  .sast-kpi-value{font-size:1.2rem;font-weight:950;color:#0b4a8f;word-break:break-word;}
+  .sast-summary{background:#f8fbff;border:1px solid #dbe6f4;border-radius:14px;padding:12px;color:#101827;font-size:.86rem;}
+  .sast-section-title{font-size:.95rem;font-weight:950;color:#0b4a8f;margin-bottom:10px;}
+  .sast-pre{white-space:pre-wrap;background:#f8fbff;border:1px solid #dbe6f4;border-radius:14px;padding:10px;font-size:.78rem;margin:4px 0;color:#101827;}
+  .sast-table thead th{background:linear-gradient(135deg,#1d5fa9,#2f7fd1)!important;color:#fff!important;font-weight:900;font-size:.78rem;}
+  .sast-table td{font-size:.78rem;vertical-align:top;}
+  .sast-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  @media(max-width:992px){.sast-detail-grid{grid-template-columns:1fr;}}
+</style>
+"""
+
+
+SAST_REPORTS_HTML = """
+<div class="sast-shell">
+
+  <div class="sast-hero">
+    <div class="sast-hero-icon">📊</div>
+    <div>
+      <div class="sast-badge">SGSI · Pruebas SAST · Informes</div>
+      <h2 class="sast-title">Informes de Pruebas SAST</h2>
+      <div class="sast-subtitle">
+        Matriz histórica de ejecuciones SAST efectuadas con Ollama local, con acceso a PDF, JSON y detalle del análisis.
+      </div>
+    </div>
+  </div>
+
+  <div class="sast-actions">
+    <a href="{{ url_for('sast_index') }}" class="btn btn-light rounded-pill px-4 fw-bold">
+      ⬅ Volver a Pruebas SAST
+    </a>
+
+    <div class="dropdown">
+      <button class="btn btn-primary rounded-pill px-4 fw-bold dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+        Ejecución de pruebas
+      </button>
+      <ul class="dropdown-menu shadow-sm rounded-4">
+        <li><a class="dropdown-item fw-semibold" href="{{ url_for('sast_index') }}">🧪 Nueva prueba SAST</a></li>
+        <li><a class="dropdown-item fw-semibold active" href="{{ url_for('sast_reports') }}">📊 Ver informes</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item fw-semibold" href="{{ url_for('sast_config') }}">⚙️ Configuración Ollama</a></li>
+      </ul>
+    </div>
+
+    <a href="{{ url_for('vulnerabilidades_matriz') }}" class="btn btn-outline-primary rounded-pill px-4 fw-bold">
+      Matriz de Vulnerabilidades
+    </a>
+  </div>
+
+  <div class="sast-card mb-3">
+    <div class="sast-card-body">
+      <form method="get" action="{{ url_for('sast_reports') }}" class="row g-3 align-items-end">
+        <div class="col-md-8">
+          <label class="form-label">Buscar ejecución</label>
+          <input class="form-control" name="q" value="{{ q }}" placeholder="Proyecto, archivo, modelo, riesgo o usuario...">
+        </div>
+        <div class="col-md-4 d-flex gap-2 flex-wrap">
+          <button class="btn btn-primary rounded-pill px-4 fw-bold" type="submit">Filtrar</button>
+          <a class="btn btn-outline-secondary rounded-pill px-4 fw-bold" href="{{ url_for('sast_reports') }}">Limpiar</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="sast-card">
+    <div class="sast-card-body">
+      <div class="d-flex justify-content-between flex-wrap gap-2 align-items-center mb-3">
+        <div>
+          <div class="sast-section-title mb-1">Matriz de ejecuciones</div>
+          <div class="text-muted small">Total mostrado: {{ reports|length }}</div>
+        </div>
+      </div>
+
+      {% if reports|length == 0 %}
+        <div class="alert alert-info rounded-4 mb-0">
+          No hay informes SAST registrados todavía. Ejecuta una prueba desde <b>Pruebas SAST con IA Local</b> para alimentar esta matriz.
+        </div>
+      {% else %}
+        <div class="table-responsive">
+          <table class="table table-hover align-middle sast-table">
+            <thead>
+              <tr>
+                <th style="width:120px;">Fecha</th>
+                <th>Proyecto</th>
+                <th>Archivo</th>
+                <th style="width:110px;">Lenguaje</th>
+                <th>Modelo</th>
+                <th style="width:100px;">Riesgo</th>
+                <th style="width:95px;">Score</th>
+                <th style="width:130px;">Hallazgos</th>
+                <th style="width:150px;">Registro SGSI</th>
+                <th style="width:260px;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in reports %}
+                <tr>
+                  <td class="small fw-semibold">{{ r.get('date_str','') }}</td>
+                  <td>
+                    <div class="fw-bold">{{ r.get('project_name','N/A') }}</div>
+                    <div class="text-muted small">{{ r.get('artifact_type','N/A') }} · Ejecutado por: {{ r.get('executed_by','N/A') }}</div>
+                  </td>
+                  <td class="small">{{ r.get('filename','N/A') }}</td>
+                  <td>{{ r.get('language','N/A') }}</td>
+                  <td class="small">{{ r.get('model','N/A') }}</td>
+                  <td>
+                    <span class="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle">
+                      {{ r.get('overall_risk_level','N/A') }}
+                    </span>
+                  </td>
+                  <td class="fw-bold">{{ r.get('overall_risk_score','N/A') }}</td>
+                  <td class="small">
+                    <b>{{ r.get('total_findings',0) }}</b>
+                    <div class="text-muted">
+                      C:{{ r.get('critical_count',0) }} · A:{{ r.get('high_count',0) }} · M:{{ r.get('medium_count',0) }} · B:{{ r.get('low_count',0) }}
+                    </div>
+                  </td>
+                  <td class="small">
+                    <div>Vuln: <b>{{ r.get('vulnerabilities_created',0) }}</b></div>
+                    <div>Planes: <b>{{ r.get('remediation_plans_created',0) }}</b></div>
+                    {% if r.get('registration_error') %}
+                      <div class="text-warning fw-bold">Advertencia</div>
+                    {% endif %}
+                  </td>
+                  <td>
+                    <div class="d-flex gap-1 flex-wrap">
+                      <a class="btn btn-sm btn-outline-primary rounded-pill fw-bold"
+                         href="{{ url_for('sast_report_detail', report_id=r.get('report_id')) }}">
+                        Abrir
+                      </a>
+
+                      {% if r.get('pdf_name') %}
+                        <a class="btn btn-sm btn-primary rounded-pill fw-bold"
+                           href="{{ url_for('sast_download_pdf', name=r.get('pdf_name')) }}">
+                          PDF
+                        </a>
+                      {% endif %}
+
+                      {% if r.get('json_name') %}
+                        <a class="btn btn-sm btn-outline-secondary rounded-pill fw-bold"
+                           href="{{ url_for('sast_download_json', name=r.get('json_name')) }}">
+                          JSON
+                        </a>
+                      {% endif %}
+
+                      {% if not read_only %}
+                        <form method="POST"
+                              action="{{ url_for('sast_report_delete', report_id=r.get('report_id')) }}"
+                              class="d-inline"
+                              data-no-progress="true"
+                              onsubmit="return confirm('¿Seguro que deseas eliminar este informe SAST? Se eliminarán el PDF y el JSON del informe, pero no las vulnerabilidades ni los planes de remediación ya registrados.');">
+                          <button type="submit"
+                                  class="btn btn-sm btn-outline-danger rounded-pill fw-bold">
+                            Eliminar
+                          </button>
+                        </form>
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<style>
+  body{background-image:url('/static/img/ccsgsi.jpg');background-size:cover;background-position:center;background-attachment:fixed;background-repeat:no-repeat;}
+  .sast-shell{width:96%;max-width:1360px;margin:26px auto 24px auto;}
+  .sast-hero{background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);border-radius:18px;padding:18px 26px;min-height:94px;display:flex;align-items:center;gap:16px;box-shadow:0 12px 24px rgba(15,23,42,.25);color:#fff;position:relative;overflow:hidden;}
+  .sast-hero::before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);pointer-events:none;}
+  .sast-hero>*{position:relative;z-index:1;}
+  .sast-hero-icon{width:58px;height:58px;min-width:58px;border-radius:16px;background:#fff;color:#0b4a8f;display:flex;align-items:center;justify-content:center;font-size:1.55rem;box-shadow:0 8px 18px rgba(0,0,0,.25);}
+  .sast-badge{width:fit-content;background:rgba(255,255,255,.18);border-radius:999px;padding:4px 11px;font-size:.68rem;font-weight:900;margin-bottom:4px;}
+  .sast-title{font-size:1.42rem;font-weight:950;margin:0;text-shadow:0 4px 14px rgba(0,0,0,.42);}
+  .sast-subtitle{font-size:.84rem;color:rgba(255,255,255,.88);margin-top:3px;}
+  .sast-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:10px;margin:12px 0 14px;}
+  .sast-actions .btn{min-height:34px;padding:8px 22px!important;font-size:.82rem;font-weight:900;box-shadow:0 8px 16px rgba(15,23,42,.15);}
+  .sast-card{background:rgba(255,255,255,.96);backdrop-filter:blur(8px);border:1px solid rgba(219,230,244,.9);border-radius:18px;box-shadow:0 12px 24px rgba(15,23,42,.18);overflow:hidden;}
+  .sast-card-body{padding:20px;}
+  .form-label{color:#25324a;margin-bottom:4px;font-weight:900;font-size:.78rem;}
+  .form-control,.form-select{border-radius:10px;min-height:40px;border:1px solid #d9e3f0;font-size:.86rem;background:#f8fafc;}
+  .sast-section-title{font-size:.95rem;font-weight:950;color:#0b4a8f;margin-bottom:10px;}
+  .sast-table thead th{background:linear-gradient(135deg,#1d5fa9,#2f7fd1)!important;color:#fff!important;font-weight:900;font-size:.75rem;white-space:nowrap;}
+  .sast-table td{font-size:.76rem;vertical-align:top;}
+  .dropdown-menu .dropdown-item{font-size:.82rem;}
+</style>
+"""
+
+
+@app.route("/pruebas_sast", methods=["GET"])
+@login_required
+def sast_index():
+    user, resp, read_only = sast_require_access(write=False)
+    if resp:
+        return resp
+
+    cfg = sast_load_ollama_config()
+    conn_ok, conn_msg, models = sast_test_ollama_connection(cfg.get("base_url"))
+
+    if cfg.get("default_model") and cfg.get("default_model") not in models:
+        models = [cfg.get("default_model")] + models
+
+    inner = render_template_string(
+        SAST_INDEX_HTML,
+        cfg=cfg,
+        models=models,
+        conn_ok=conn_ok,
+        conn_msg=conn_msg,
+        allowed_ext=", ".join(sorted(SAST_ALLOWED_EXT)),
+        read_only=read_only,
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+
+@app.route("/pruebas_sast/informes", methods=["GET"])
+@login_required
+def sast_reports():
+    user, resp, read_only = sast_require_access(write=False)
+    if resp:
+        return resp
+
+    q = (request.args.get("q") or "").strip()
+    q_norm = q.lower()
+    reports = sast_get_scan_history()
+
+    if q_norm:
+        def match_record(r):
+            haystack = " ".join([
+                str(r.get("report_id", "")),
+                str(r.get("date_str", "")),
+                str(r.get("project_name", "")),
+                str(r.get("artifact_type", "")),
+                str(r.get("filename", "")),
+                str(r.get("language", "")),
+                str(r.get("model", "")),
+                str(r.get("overall_risk_level", "")),
+                str(r.get("executed_by", "")),
+            ]).lower()
+            return q_norm in haystack
+        reports = [r for r in reports if match_record(r)]
+
+    inner = render_template_string(
+        SAST_REPORTS_HTML,
+        reports=reports,
+        q=q,
+        read_only=read_only,
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+
+@app.route("/pruebas_sast/informes/<report_id>", methods=["GET"])
+@login_required
+def sast_report_detail(report_id):
+    user, resp, read_only = sast_require_access(write=False)
+    if resp:
+        return resp
+
+    report_id = (report_id or "").strip()
+    record = sast_get_scan_history_record(report_id)
+    if not record:
+        flash("Informe SAST no encontrado en el historial.", "warning")
+        return redirect(url_for("sast_reports"))
+
+    json_name = record.get("json_name") or f"analysis_{report_id}.json"
+    json_path = os.path.join(SAST_REPORT_DIR, sast_safe_filename(json_name))
+
+    if not os.path.exists(json_path):
+        flash("El archivo JSON del informe SAST no existe en reports/sast.", "warning")
+        return redirect(url_for("sast_reports"))
+
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            analysis = json.load(f)
+        if not isinstance(analysis, dict):
+            analysis = {}
+    except Exception as e:
+        flash(f"No fue posible abrir el JSON del informe SAST: {e}", "danger")
+        return redirect(url_for("sast_reports"))
+
+    meta = analysis.get("sast_meta", {}) or {
+        "project_name": record.get("project_name"),
+        "artifact_type": record.get("artifact_type"),
+        "filename": record.get("filename"),
+        "language": record.get("language"),
+        "date_str": record.get("date_str"),
+        "model": record.get("model"),
+    }
+
+    inner = render_template_string(
+        SAST_RESULT_HTML,
+        analysis=analysis,
+        pdf_name=record.get("pdf_name") or f"Informe_SAST_{report_id}.pdf",
+        json_name=json_name,
+        meta=meta,
+        registration_summary=(analysis.get("sgsi_registration", {}) or {}),
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+
+@app.route("/pruebas_sast/informes/<report_id>/eliminar", methods=["POST"])
+@login_required
+def sast_report_delete(report_id):
+    user, resp, read_only = sast_require_access(write=True)
+    if resp:
+        return resp
+
+    report_id = (report_id or "").strip()
+    if not report_id:
+        flash("ID de informe SAST inválido.", "warning")
+        return redirect(url_for("sast_reports"))
+
+    record = sast_get_scan_history_record(report_id)
+    if not record:
+        flash("Informe SAST no encontrado en el historial.", "warning")
+        return redirect(url_for("sast_reports"))
+
+    deleted_files = []
+    file_errors = []
+    base_dir = os.path.abspath(SAST_REPORT_DIR)
+
+    for field in ("pdf_name", "json_name"):
+        name = (record.get(field) or "").strip()
+        if not name:
+            continue
+
+        safe_name = sast_safe_filename(name)
+        path = os.path.abspath(os.path.join(SAST_REPORT_DIR, safe_name))
+
+        # Evita traversal fuera de reports/sast
+        if not path.startswith(base_dir + os.sep):
+            file_errors.append(f"{safe_name}: ruta no permitida")
+            continue
+
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+                deleted_files.append(os.path.basename(path))
+            except Exception as e:
+                file_errors.append(f"{safe_name}: {e}")
+
+    sast_delete_scan_history_record(report_id)
+
+    try:
+        username = getattr(user, "username", None) or session.get("username") or "Sistema"
+        registrar_log(
+            username,
+            (
+                f"Eliminó informe SAST {report_id}. "
+                f"Archivos eliminados: {', '.join(deleted_files) if deleted_files else 'ninguno'}."
+            )
+        )
+    except Exception:
+        pass
+
+    if file_errors:
+        flash(
+            "El informe fue retirado del historial, pero algunos archivos no pudieron eliminarse: "
+            + " | ".join(file_errors),
+            "warning"
+        )
+    else:
+        flash(
+            "Informe SAST eliminado correctamente. "
+            "No se eliminaron vulnerabilidades ni planes de remediación asociados.",
+            "success"
+        )
+
+    return redirect(url_for("sast_reports"))
+
+
+@app.route("/pruebas_sast/config", methods=["GET", "POST"])
+@login_required
+def sast_config():
+    user, resp, read_only = sast_require_access(write=True, config=True)
+    if resp:
+        return resp
+
+    if request.method == "POST":
+        cfg = sast_save_ollama_config({
+            "base_url": request.form.get("base_url"),
+            "default_model": request.form.get("default_model"),
+            "temperature": request.form.get("temperature"),
+            "timeout": request.form.get("timeout"),
+            "summary_max_tokens": request.form.get("summary_max_tokens"),
+            "findings_max_tokens": request.form.get("findings_max_tokens"),
+        })
+        flash("Configuración SAST/Ollama guardada correctamente.", "success")
+        return redirect(url_for("sast_config"))
+
+    cfg = sast_load_ollama_config()
+    conn_ok, conn_msg, models = sast_test_ollama_connection(cfg.get("base_url"))
+
+    if cfg.get("default_model") and cfg.get("default_model") not in models:
+        models = [cfg.get("default_model")] + models
+
+    inner = render_template_string(
+        SAST_CONFIG_HTML,
+        cfg=cfg,
+        models=models,
+        conn_ok=conn_ok,
+        conn_msg=conn_msg,
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+
+@app.route("/pruebas_sast/models", methods=["GET"])
+@login_required
+def sast_models():
+    user, resp, read_only = sast_require_access(write=False)
+    if resp:
+        return resp
+
+    base_url = request.args.get("base_url") or None
+    models, err = sast_list_ollama_models(base_url)
+    return jsonify({"ok": err is None, "models": models, "error": err})
+
+
+@app.route("/pruebas_sast/start", methods=["POST"])
+@login_required
+def sast_start():
+    user, resp, read_only = sast_require_access(write=True)
+    if resp:
+        return jsonify({"ok": False, "error": "No tiene permiso para ejecutar pruebas SAST."}), 403
+
+    register_vulnerabilities = sast_bool_form(request.form.get("register_vulnerabilities"))
+    create_remediation_plans = sast_bool_form(request.form.get("create_remediation_plans"))
+    generate_ai_remediation = sast_bool_form(request.form.get("generate_ai_remediation"))
+
+    # Si se crea plan de remediación, se requiere vulnerabilidad porque PlanRemediacion
+    # tiene FK obligatoria contra VulnerabilidadRegistro.
+    if create_remediation_plans:
+        register_vulnerabilities = True
+
+    if register_vulnerabilities:
+        if user.role != "admin" and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+            return jsonify({
+                "ok": False,
+                "error": "No tiene permiso para registrar hallazgos en Registro de Vulnerabilidades."
+            }), 403
+
+    if create_remediation_plans:
+        if user.role != "admin" and not verificar_permiso(user, "Plan de Remediación"):
+            return jsonify({
+                "ok": False,
+                "error": "No tiene permiso para crear planes de remediación."
+            }), 403
+
+    project_name = (request.form.get("project_name") or "Proyecto sin nombre").strip()
+    artifact_type = (request.form.get("artifact_type") or "Programa completo").strip()
+    requested_model = (request.form.get("ollama_model") or "").strip()
+    pasted_code = (request.form.get("pasted_code") or "").strip()
+    uploaded = request.files.get("file")
+
+    artifact_norm = artifact_type.strip().lower()
+    is_partial = artifact_norm in ("parte de código", "parte de codigo")
+
+    if is_partial:
+        if not pasted_code:
+            return jsonify({"ok": False, "error": 'Para "Parte de Código" debe pegar el fragmento en la caja de texto.'}), 400
+        uploaded = None
+
+    if not pasted_code and (not uploaded or not uploaded.filename or uploaded.filename.strip() == ""):
+        return jsonify({"ok": False, "error": "Debe pegar código o cargar un archivo."}), 400
+
+    filename = "codigo_pegado.txt"
+    code_text = ""
+    language = (request.form.get("language") or "").strip()
+
+    if uploaded and uploaded.filename and not pasted_code:
+        original_name = uploaded.filename
+        if not sast_ext_ok(original_name):
+            return jsonify({"ok": False, "error": f"Extensión no permitida: {os.path.splitext(original_name)[1]}"}), 400
+
+        filename = sast_safe_filename(original_name)
+        stored_name = f"{uuid.uuid4().hex}_{filename}"
+        path = os.path.join(SAST_UPLOAD_DIR, stored_name)
+        uploaded.save(path)
+        code_text = sast_read_text_file(path)
+
+        if not language:
+            language = sast_detect_language_from_filename(filename)
+    else:
+        code_text = pasted_code
+        if not language:
+            language = "unknown"
+
+    if not code_text.strip():
+        return jsonify({"ok": False, "error": "El código está vacío."}), 400
+
+    try:
+        model = sast_resolve_ollama_model(requested_model)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+    report_id = uuid.uuid4().hex[:12]
+    job_id = uuid.uuid4().hex
+
+    SAST_JOBS[job_id] = {
+        "status": "queued",
+        "percent": 0,
+        "message": "En cola…",
+        "done": False,
+        "error": None,
+        "result": None,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+    username = getattr(user, "username", None) or session.get("username") or "Seguridad de la Información"
+
+    payload = {
+        "project_name": project_name,
+        "artifact_type": artifact_type,
+        "filename": filename,
+        "language": language,
+        "code_text": code_text,
+        "model": model,
+        "report_id": report_id,
+        "date_str": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "register_vulnerabilities": register_vulnerabilities,
+        "create_remediation_plans": create_remediation_plans,
+        "generate_ai_remediation": generate_ai_remediation,
+        "username": username,
+        "responsable": username,
+    }
+
+    t = threading.Thread(target=sast_run_analysis_job, args=(job_id, payload), daemon=True)
+    t.start()
+
+    return jsonify({"ok": True, "job_id": job_id})
+
+
+@app.route("/pruebas_sast/track/<job_id>", methods=["GET"])
+@login_required
+def sast_track(job_id):
+    user, resp, read_only = sast_require_access(write=False)
+    if resp:
+        return resp
+
+    if job_id not in SAST_JOBS:
+        flash("Job SAST no encontrado.", "warning")
+        return redirect(url_for("sast_index"))
+
+    inner = render_template_string(SAST_TRACK_HTML, job_id=job_id)
+    return render_template_string(BASE, content=Markup(inner))
+
+
+@app.route("/pruebas_sast/progress/<job_id>", methods=["GET"])
+@login_required
+def sast_progress(job_id):
+    user, resp, read_only = sast_require_access(write=False)
+    if resp:
+        return resp
+
+    def event_stream():
+        last = None
+        while True:
+            job = SAST_JOBS.get(job_id)
+            if not job:
+                yield 'event: error\ndata: {"error":"Job no encontrado"}\n\n'
+                break
+
+            snapshot = json.dumps({
+                "status": job.get("status"),
+                "percent": job.get("percent"),
+                "message": job.get("message"),
+                "done": job.get("done"),
+                "error": job.get("error"),
+            }, ensure_ascii=False)
+
+            if snapshot != last:
+                yield f"data: {snapshot}\n\n"
+                last = snapshot
+
+            if job.get("done"):
+                break
+
+            time.sleep(0.4)
+
+    return Response(event_stream(), mimetype="text/event-stream")
+
+
+@app.route("/pruebas_sast/result/<job_id>", methods=["GET"])
+@login_required
+def sast_result(job_id):
+    user, resp, read_only = sast_require_access(write=False)
+    if resp:
+        return resp
+
+    job = SAST_JOBS.get(job_id)
+    if not job:
+        flash("Job SAST no encontrado.", "warning")
+        return redirect(url_for("sast_index"))
+
+    if job.get("status") == "error":
+        flash(f"Error en análisis SAST: {job.get('error')}", "danger")
+        return redirect(url_for("sast_index"))
+
+    if not job.get("done") or not job.get("result"):
+        flash("El análisis SAST aún no termina.", "warning")
+        return redirect(url_for("sast_index"))
+
+    res = job["result"]
+    inner = render_template_string(
+        SAST_RESULT_HTML,
+        analysis=(res.get("analysis") or {}),
+        pdf_name=res["pdf_name"],
+        json_name=res["json_name"],
+        meta=(res.get("meta") or {}),
+        registration_summary=(res.get("registration_summary") or {}),
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+
+@app.route("/pruebas_sast/download/pdf/<name>", methods=["GET"])
+@login_required
+def sast_download_pdf(name):
+    user, resp, read_only = sast_require_access(write=False)
+    if resp:
+        return resp
+
+    path = os.path.join(SAST_REPORT_DIR, sast_safe_filename(name))
+    if not os.path.exists(path):
+        flash("PDF SAST no encontrado.", "warning")
+        return redirect(url_for("sast_index"))
+
+    return send_file(path, as_attachment=True, download_name=os.path.basename(path), mimetype="application/pdf")
+
+
+@app.route("/pruebas_sast/download/json/<name>", methods=["GET"])
+@login_required
+def sast_download_json(name):
+    user, resp, read_only = sast_require_access(write=False)
+    if resp:
+        return resp
+
+    path = os.path.join(SAST_REPORT_DIR, sast_safe_filename(name))
+    if not os.path.exists(path):
+        flash("JSON SAST no encontrado.", "warning")
+        return redirect(url_for("sast_index"))
+
+    return send_file(path, as_attachment=True, download_name=os.path.basename(path), mimetype="application/json")
+
+
+# ============================================================================================================================================
+#                                                   FIN MÓDULO PRUEBAS SAST - OLLAMA LOCAL
+# ============================================================================================================================================
 
 # =========================
 # INICIO
