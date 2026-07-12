@@ -477,13 +477,19 @@ SGSI_PROGRESS_GLOBAL = """
     .sgsi-topbar{
       min-height:58px !important;
       height:58px !important;
-      overflow:hidden !important;
+      overflow:visible !important;
+      position:fixed !important;
+      top:0 !important;
+      left:0 !important;
+      right:0 !important;
+      z-index:10050 !important;
     }
     .sgsi-topbar-inner{
       min-height:58px !important;
       height:58px !important;
-      padding-left:14px !important;
-      padding-right:24px !important;
+      padding:0 24px 0 14px !important;
+      margin:0 !important;
+      overflow:visible !important;
     }
     .sgsi-brand{
       margin-left:0 !important;
@@ -8880,7 +8886,29 @@ BASE = """
       gap:10px;
       min-width:max-content;
       position:relative;
-      z-index:5;
+      z-index:10060;
+    }
+
+    .sgsi-topbar,
+    .sgsi-topbar-inner{
+      overflow:visible !important;
+    }
+
+    .sgsi-user-area .dropdown-menu{
+      position:absolute !important;
+      top:calc(100% + 8px) !important;
+      right:0 !important;
+      left:auto !important;
+      z-index:10070 !important;
+      min-width:210px !important;
+      margin:0 !important;
+      transform:none !important;
+    }
+
+    .sgsi-user-area .dropdown-menu.show{
+      display:block !important;
+      visibility:visible !important;
+      opacity:1 !important;
     }
 
     .sgsi-pill-login{
@@ -8904,6 +8932,19 @@ BASE = """
       text-decoration:none;
       box-shadow:0 12px 26px rgba(20,89,166,.24);
       border:1px solid rgba(255,255,255,.38);
+    }
+
+    button.sgsi-user-link{
+      font-family:inherit;
+      line-height:1;
+      appearance:none;
+      -webkit-appearance:none;
+      outline:none;
+    }
+
+    button.sgsi-user-link:focus,
+    button.sgsi-user-link:focus-visible{
+      box-shadow:0 0 0 3px rgba(52,125,220,.30),0 12px 26px rgba(20,89,166,.24);
     }
 
     .sgsi-user-photo{
@@ -9035,13 +9076,13 @@ BASE = """
 
     {% if current_user %}
     <div class="sgsi-user-area dropdown">
-      <a class="sgsi-user-link dropdown-toggle" href="#" data-bs-toggle="dropdown" aria-expanded="false">
+      <button class="sgsi-user-link dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="true" aria-expanded="false" style="cursor:pointer;">
         <img src="{{ url_for('static', filename='uploads/profiles/' ~ current_user.photo_filename)
                      if current_user.photo_filename
                      else url_for('static', filename='img/default_user.png') }}"
              class="sgsi-user-photo" alt="Perfil">
         <span class="sgsi-user-name">{{ current_user.username }}</span>
-      </a>
+      </button>
 
       <ul class="dropdown-menu dropdown-menu-end">
         <li><a class="dropdown-item" href="{{ url_for('perfil') }}">👤 Ver perfil</a></li>
@@ -10728,10 +10769,20 @@ def inject_sgsi_global_vertical_menu(response):
             "logout",
             "static",
             "dashboard_status",
-            "menu"
+            "menu",
+            "verificar_otp",
+            "configurar_otp"
         }
 
-        if endpoint in rutas_excluidas:
+        # Las pantallas de autenticación y OTP deben mostrarse
+        # completamente aisladas del menú, encabezado y navegación interna de GRAC.
+        rutas_sin_menu = (
+            "/verificar_otp",
+            "/configurar_otp",
+            "/otp/"
+        )
+
+        if endpoint in rutas_excluidas or request.path.startswith(rutas_sin_menu):
             return response
 
         html = response.get_data(as_text=True)
@@ -10759,6 +10810,7 @@ def inject_sgsi_global_vertical_menu(response):
         print("No se pudo inyectar menú global SGSI:", repr(e))
 
     return response
+
 
 # =========================
 # API JSON TABLERO PRINCIPAL
@@ -68032,8 +68084,12 @@ def vulnerabilidad_new():
             )
             db.session.add(ev)
 
+        # Sincronización automática con Modelamiento de Amenazas / MITRE ATT&CK
+        db.session.flush()
+        sincronizar_vulnerabilidad_con_modelamiento(it)
+
         db.session.commit()
-        flash("Vulnerabilidad registrada.", "success")
+        flash("Vulnerabilidad registrada y sincronizada con Modelamiento de Amenazas.", "success")
         return redirect(url_for('vulnerabilidades_matriz'))
 
     # GET
@@ -69930,8 +69986,11 @@ def vulnerabilidad_edit(id):
             )
             db.session.add(ev)
 
+        # Actualiza también el modelamiento asociado y sus técnicas MITRE
+        sincronizar_vulnerabilidad_con_modelamiento(it)
+
         db.session.commit()
-        flash("Vulnerabilidad actualizada.", "success")
+        flash("Vulnerabilidad actualizada y sincronizada con Modelamiento de Amenazas.", "success")
         return redirect(url_for('vulnerabilidades_matriz'))
 
     # GET: reutilizamos el mismo formulario de new pero con valores precargados
@@ -70511,11 +70570,11 @@ def _normalizar_ids_vulnerabilidad(ids):
 
 def eliminar_modelamientos_por_vulnerabilidades(vulnerabilidad_ids):
     """
-    Elimina los registros de modelamiento de amenazas asociados a vulnerabilidades.
+    Elimina los registros de modelamiento asociados a vulnerabilidades.
 
-    Regla funcional:
-    - Si se elimina una vulnerabilidad, también desaparece su modelamiento de amenazas.
-    - Las técnicas MITRE se eliminan por cascade desde ThreatModelEntry.tecnicas.
+    Además de las entradas y técnicas MITRE, elimina los registros de
+    ``Clasificación complementaria No Mapeados`` creados automáticamente
+    para vulnerabilidades que no pudieron clasificarse en MITRE ATT&CK.
     """
     ids = _normalizar_ids_vulnerabilidad(vulnerabilidad_ids)
 
@@ -70530,20 +70589,50 @@ def eliminar_modelamientos_por_vulnerabilidades(vulnerabilidad_ids):
             .all()
         )
 
-        total = len(registros)
+        no_mapeados = (
+            ThreatModelUnmapped.query
+            .filter(
+                ThreatModelUnmapped.herramienta == THREAT_MODEL_VULN_SOURCE,
+                ThreatModelUnmapped.finding_id.in_(ids)
+            )
+            .all()
+        )
+
+        total = len(registros) + len(no_mapeados)
 
         for item in registros:
+            db.session.delete(item)
+
+        # La clasificación complementaria se elimina por cascade desde
+        # ThreatModelUnmapped.clasificacion_complementaria.
+        for item in no_mapeados:
             db.session.delete(item)
 
         return total
 
     except Exception:
-        # Fallback por si el modelo aún no está cargado en algún arranque parcial.
+        # Fallback SQL para arranques parciales o bases históricas.
         placeholders = ",".join(str(i) for i in ids)
         if not placeholders:
             return 0
 
         try:
+            db.session.execute(text(f"""
+                DELETE FROM threat_model_unmapped_classifications
+                WHERE unmapped_id IN (
+                    SELECT id
+                    FROM threat_model_unmapped
+                    WHERE herramienta = '{THREAT_MODEL_VULN_SOURCE}'
+                      AND finding_id IN ({placeholders})
+                )
+            """))
+
+            db.session.execute(text(f"""
+                DELETE FROM threat_model_unmapped
+                WHERE herramienta = '{THREAT_MODEL_VULN_SOURCE}'
+                  AND finding_id IN ({placeholders})
+            """))
+
             db.session.execute(text(f"""
                 DELETE FROM threat_model_techniques
                 WHERE threat_entry_id IN (
@@ -70562,6 +70651,7 @@ def eliminar_modelamientos_por_vulnerabilidades(vulnerabilidad_ids):
 
         except Exception:
             raise
+
 
 
 def existe_vulnerabilidad_asociada_a_threat_model(item):
@@ -72597,6 +72687,8 @@ ATTACK_TACTIC_ORDER = [
     "Impact"
 ]
 
+MITRE_PENDING_TACTIC = "Pendiente de mapeo MITRE"
+
 MITRE_ATTACK_MAPPING_RULES = [
     # =========================
     # Discovery / Recon
@@ -73505,6 +73597,458 @@ def crear_threat_model_desde_hallazgo(run, hallazgo, vuln=None, finding_rec=None
     return entry
 
 
+# ============================================================================
+# SINCRONIZACIÓN MATRIZ DE VULNERABILIDADES -> MODELAMIENTO / MITRE ATT&CK
+# ============================================================================
+
+THREAT_MODEL_VULN_SOURCE = "registro_vulnerabilidades"
+
+
+def tm_severidad_desde_vulnerabilidad(vuln):
+    """Normaliza la clasificación de la matriz y usa CVSS como respaldo."""
+    clasificacion = (getattr(vuln, "clasificacion", None) or "").strip()
+    normalizadas = {
+        "critica": "Crítica",
+        "crítica": "Crítica",
+        "alta": "Alta",
+        "media": "Media",
+        "baja": "Baja",
+    }
+
+    clave = tm_normalize_text(clasificacion)
+    if clave in normalizadas:
+        return normalizadas[clave]
+
+    cvss_raw = str(getattr(vuln, "cvss", None) or "").strip().replace(",", ".")
+    match = re.search(r"(?:^|\s)(10(?:\.0+)?|[0-9](?:\.[0-9]+)?)(?:\s|$)", cvss_raw)
+    if match:
+        try:
+            cvss = float(match.group(1))
+            if cvss >= 9.0:
+                return "Crítica"
+            if cvss >= 7.0:
+                return "Alta"
+            if cvss >= 4.0:
+                return "Media"
+            return "Baja"
+        except Exception:
+            pass
+
+    return "Media"
+
+
+def tm_aliases_mitre_espanol(*textos):
+    """Agrega términos equivalentes para reconocer descripciones escritas en español."""
+    base = tm_normalize_text(*textos)
+    equivalencias = [
+        (("inyeccion sql", "inyeccion de sql"), "sql injection"),
+        (("inyeccion de comandos", "ejecucion remota de codigo", "ejecucion de codigo", "rce"),
+         "remote code execution command injection"),
+        (("credenciales por defecto", "contrasena por defecto", "clave por defecto"),
+         "default credentials default password"),
+        (("credenciales debiles", "contrasena debil", "autenticacion debil"),
+         "weak credentials weak password"),
+        (("acceso anonimo", "inicio de sesion anonimo"), "anonymous login"),
+        (("omision de autenticacion", "bypass de autenticacion", "evasión de autenticacion", "autenticacion ausente"),
+         "authentication bypass missing authentication"),
+        (("listado de directorios", "indexacion de directorios", "navegacion de directorios"),
+         "directory listing directory indexing"),
+        (("divulgacion de informacion", "exposicion de informacion", "filtracion de informacion"),
+         "information disclosure"),
+        (("version expuesta", "divulgacion de version", "cabecera del servidor", "banner expuesto"),
+         "version disclosure server header banner disclosure"),
+        (("recorrido de directorios", "traversal de rutas", "traversal de directorios"),
+         "path traversal directory traversal"),
+        (("inclusion local de archivos", "inclusion de archivos locales"), "local file inclusion lfi"),
+        (("inclusion remota de archivos", "inclusion de archivos remotos"), "remote file inclusion rfi"),
+        (("carga de archivos", "subida de archivos", "carga irrestricta de archivos"),
+         "unrestricted file upload arbitrary file upload"),
+        (("cross site scripting", "secuencias de comandos entre sitios", "xss"), "cross-site scripting xss"),
+        (("tls obsoleto", "ssl obsoleto", "protocolo obsoleto"), "deprecated protocol obsolete ssl"),
+        (("cifrado debil", "cifrados debiles", "suite criptografica debil"), "weak cipher weak ciphers"),
+        (("certificado vencido", "certificado expirado"), "expired certificate"),
+        (("certificado autofirmado", "certificado auto firmado"), "self-signed certificate"),
+        (("cabecera de seguridad faltante", "cabeceras de seguridad faltantes", "falta cabecera de seguridad"),
+         "missing security header"),
+        (("servidor desactualizado", "software obsoleto", "version obsoleta", "version no soportada"),
+         "outdated web server unsupported version multiple vulnerabilities"),
+    ]
+
+    encontrados = []
+    for frases, alias in equivalencias:
+        if any(tm_normalize_text(frase) in base for frase in frases):
+            encontrados.append(alias)
+
+    return " ".join(encontrados)
+
+
+def tm_hallazgo_desde_vulnerabilidad(vuln):
+    """Convierte una fila de la matriz de vulnerabilidades al formato MITRE interno."""
+    codigo = (getattr(vuln, "codigo", None) or f"VULN-{getattr(vuln, 'id', '')}").strip()
+    descripcion = (getattr(vuln, "descripcion_vulnerabilidad", None) or "Vulnerabilidad registrada").strip()
+    activo = (getattr(vuln, "activo", None) or "Activo").strip()
+    cve = (getattr(vuln, "cve", None) or "").strip().upper()
+    cvss = (getattr(vuln, "cvss", None) or "").strip()
+    riesgo = (getattr(vuln, "riesgo_residual", None) or "").strip()
+    estado = (getattr(vuln, "estado", None) or "").strip()
+    responsable = (getattr(vuln, "responsable", None) or "").strip()
+    aliases_mitre = tm_aliases_mitre_espanol(descripcion, riesgo, activo, cve)
+
+    contexto = [descripcion]
+    if cve:
+        contexto.append(f"CVE: {cve}")
+    if cvss:
+        contexto.append(f"CVSS: {cvss}")
+    if estado:
+        contexto.append(f"Estado: {estado}")
+    if responsable:
+        contexto.append(f"Responsable: {responsable}")
+
+    return {
+        "fuente": THREAT_MODEL_VULN_SOURCE,
+        "titulo": f"{codigo} - {descripcion}"[:500],
+        "descripcion": " | ".join(contexto)[:5000],
+        "evidencia": riesgo[:5000],
+        "recomendacion_base": f"{riesgo} {aliases_mitre}".strip()[:5000],
+        "servicio": activo[:200],
+        "activo": activo[:200],
+        "severidad": tm_severidad_desde_vulnerabilidad(vuln),
+        "cve": cve,
+        "cvss": cvss,
+    }
+
+
+def sincronizar_vulnerabilidad_no_mapeada(vuln, hallazgo, mappings):
+    """
+    Mantiene sincronizada la vulnerabilidad en
+    ``Clasificación complementaria No Mapeados``.
+
+    Reglas:
+    - Si la vulnerabilidad tiene una técnica MITRE válida, elimina cualquier
+      registro complementario anterior.
+    - Si no puede mapearse a MITRE ATT&CK, crea o actualiza un único registro
+      ``ThreatModelUnmapped`` con origen ``registro_vulnerabilidades``.
+    - Genera automáticamente su clasificación complementaria OWASP, CWE,
+      CAPEC, ISO 27001 y NIST CSF 2.0.
+    """
+    if vuln is None or not getattr(vuln, "id", None):
+        return None
+
+    registros = (
+        ThreatModelUnmapped.query
+        .filter(
+            ThreatModelUnmapped.herramienta == THREAT_MODEL_VULN_SOURCE,
+            ThreatModelUnmapped.finding_id == int(vuln.id)
+        )
+        .order_by(ThreatModelUnmapped.id.asc())
+        .all()
+    )
+
+    # Si ya existe un mapeo MITRE, el registro deja de ser "No Mapeado".
+    if mappings:
+        for item in registros:
+            db.session.delete(item)
+        db.session.flush()
+        return None
+
+    principal = registros[0] if registros else None
+
+    # Elimina duplicados históricos de la misma vulnerabilidad.
+    for duplicado in registros[1:]:
+        db.session.delete(duplicado)
+
+    if principal is None:
+        principal = ThreatModelUnmapped(
+            run_id=None,
+            finding_id=int(vuln.id),
+            activo=(hallazgo.get("activo") or "Activo")[:200],
+            herramienta=THREAT_MODEL_VULN_SOURCE,
+            severidad=(hallazgo.get("severidad") or "Media")[:20],
+            titulo=(hallazgo.get("titulo") or "Vulnerabilidad registrada")[:500],
+            descripcion=(hallazgo.get("descripcion") or "")[:5000],
+            evidencia=(hallazgo.get("evidencia") or "")[:5000],
+        )
+        db.session.add(principal)
+    else:
+        principal.run_id = None
+        principal.finding_id = int(vuln.id)
+        principal.activo = (hallazgo.get("activo") or "Activo")[:200]
+        principal.herramienta = THREAT_MODEL_VULN_SOURCE
+        principal.severidad = (hallazgo.get("severidad") or "Media")[:20]
+        principal.titulo = (hallazgo.get("titulo") or "Vulnerabilidad registrada")[:500]
+        principal.descripcion = (hallazgo.get("descripcion") or "")[:5000]
+        principal.evidencia = (hallazgo.get("evidencia") or "")[:5000]
+
+    db.session.flush()
+
+    # La clasificación complementaria se crea o actualiza automáticamente.
+    guardar_clasificacion_complementaria_unmapped(principal)
+    db.session.flush()
+
+    return principal
+
+
+def sincronizar_vulnerabilidad_con_modelamiento(vuln):
+    """
+    Garantiza que cada vulnerabilidad registrada tenga una entrada propia y
+    trazable en Modelamiento de Amenazas.
+
+    Reglas:
+    - Siempre existe una entrada canónica con herramienta
+      ``registro_vulnerabilidades``.
+    - Los registros generados por escáneres se conservan.
+    - Las técnicas MITRE de la entrada canónica se reconstruyen de forma
+      idempotente.
+    - Cuando no existe una coincidencia MITRE confiable, la vulnerabilidad se
+      registra automáticamente en ``Clasificación complementaria No Mapeados``.
+    """
+    if vuln is None:
+        return None
+
+    if not getattr(vuln, "id", None):
+        db.session.flush()
+
+    hallazgo = tm_hallazgo_desde_vulnerabilidad(vuln)
+    severidad = hallazgo.get("severidad") or "Media"
+
+    existentes = (
+        ThreatModelEntry.query
+        .options(selectinload(ThreatModelEntry.tecnicas))
+        .filter_by(vulnerabilidad_registro_id=vuln.id)
+        .order_by(ThreatModelEntry.id.asc())
+        .all()
+    )
+
+    manuales = [
+        entry for entry in existentes
+        if (entry.herramienta or "").strip().lower() == THREAT_MODEL_VULN_SOURCE
+    ]
+    manual = manuales[0] if manuales else None
+
+    # Elimina solo duplicados automáticos; conserva modelamientos de escáner.
+    for duplicado in manuales[1:]:
+        db.session.delete(duplicado)
+
+    # Mantiene actualizados los hallazgos de escáner vinculados.
+    for entry in existentes:
+        if entry in manuales:
+            continue
+        entry.activo = hallazgo["activo"]
+        entry.vulnerabilidad = hallazgo["titulo"]
+        entry.descripcion = hallazgo["descripcion"]
+        entry.severidad = severidad
+        if (getattr(vuln, "riesgo_residual", None) or "").strip():
+            entry.impacto = (vuln.riesgo_residual or "")[:4000]
+        entry.updated_at = datetime.utcnow()
+
+    mappings = tm_map_finding_to_mitre(hallazgo)
+    impacto_final = (getattr(vuln, "riesgo_residual", None) or "").strip()
+    max_conf = 0
+
+    for mapping in mappings:
+        conf = int(mapping.get("confidence", 0) or 0)
+        if conf > max_conf:
+            max_conf = conf
+            impacto_final = mapping.get("impacto") or impacto_final
+
+    impacto_entrada = (
+        impacto_final or
+        "No fue posible clasificar automáticamente esta vulnerabilidad en MITRE ATT&CK. "
+        "Se registró en Clasificación complementaria No Mapeados."
+    )[:4000]
+
+    if manual is None:
+        manual = ThreatModelEntry(
+            vulnerabilidad_registro_id=vuln.id,
+            activo=hallazgo["activo"],
+            herramienta=THREAT_MODEL_VULN_SOURCE,
+            vulnerabilidad=hallazgo["titulo"],
+            descripcion=hallazgo["descripcion"],
+            impacto=impacto_entrada,
+            severidad=severidad,
+            confianza=max_conf or 0,
+        )
+        db.session.add(manual)
+        db.session.flush()
+    else:
+        manual.activo = hallazgo["activo"]
+        manual.herramienta = THREAT_MODEL_VULN_SOURCE
+        manual.vulnerabilidad = hallazgo["titulo"]
+        manual.descripcion = hallazgo["descripcion"]
+        manual.impacto = impacto_entrada
+        manual.severidad = severidad
+        manual.confianza = max_conf or 0
+        manual.updated_at = datetime.utcnow()
+
+        # Reconstruye solo las técnicas de la entrada canónica.
+        manual.tecnicas.clear()
+        db.session.flush()
+
+    base_score = tm_score_from_severity(severidad)
+
+    for mapping in mappings:
+        manual.tecnicas.append(ThreatModelTechnique(
+            mitre_technique_id=mapping["technique_id"],
+            mitre_technique_name=mapping["technique_name"],
+            mitre_tactic_id=mapping.get("tactic_id"),
+            mitre_tactic_name=mapping["tactic_name"],
+            rationale=(
+                mapping.get("rationale") or
+                "Mapeo automático desde la matriz de vulnerabilidades"
+            ),
+            score=max(base_score, int(mapping.get("score", 50) or 50)),
+        ))
+
+    # Crea la clasificación complementaria cuando no existe mapeo MITRE,
+    # o elimina el registro complementario si posteriormente logra mapearse.
+    sincronizar_vulnerabilidad_no_mapeada(vuln, hallazgo, mappings)
+
+    db.session.flush()
+    return manual
+
+
+def sincronizar_todas_vulnerabilidades_con_modelamiento():
+    """
+    Sincroniza todas las vulnerabilidades existentes y corrige históricos.
+
+    También garantiza que cada vulnerabilidad sin técnica MITRE tenga un único
+    registro en ``Clasificación complementaria No Mapeados``.
+    """
+    vulnerabilidades = (
+        VulnerabilidadRegistro.query
+        .order_by(VulnerabilidadRegistro.id.asc())
+        .all()
+    )
+
+    if not vulnerabilidades:
+        return 0
+
+    entradas = (
+        ThreatModelEntry.query
+        .options(selectinload(ThreatModelEntry.tecnicas))
+        .filter(ThreatModelEntry.vulnerabilidad_registro_id.isnot(None))
+        .order_by(ThreatModelEntry.id.asc())
+        .all()
+    )
+
+    manuales_por_vulnerabilidad = defaultdict(list)
+    for entry in entradas:
+        if (
+            entry.vulnerabilidad_registro_id is not None and
+            (entry.herramienta or "").strip().lower() == THREAT_MODEL_VULN_SOURCE
+        ):
+            manuales_por_vulnerabilidad[int(entry.vulnerabilidad_registro_id)].append(entry)
+
+    no_mapeados = (
+        ThreatModelUnmapped.query
+        .filter(
+            ThreatModelUnmapped.herramienta == THREAT_MODEL_VULN_SOURCE,
+            ThreatModelUnmapped.finding_id.isnot(None)
+        )
+        .order_by(ThreatModelUnmapped.id.asc())
+        .all()
+    )
+
+    no_mapeados_por_vulnerabilidad = defaultdict(list)
+    for item in no_mapeados:
+        try:
+            no_mapeados_por_vulnerabilidad[int(item.finding_id)].append(item)
+        except Exception:
+            continue
+
+    ids_vigentes = {int(v.id) for v in vulnerabilidades if getattr(v, "id", None)}
+    cambios = 0
+
+    # Elimina registros complementarios huérfanos de vulnerabilidades ya borradas.
+    for vuln_id, items in list(no_mapeados_por_vulnerabilidad.items()):
+        if vuln_id not in ids_vigentes:
+            for item in items:
+                db.session.delete(item)
+                cambios += 1
+
+    for vuln in vulnerabilidades:
+        hallazgo = tm_hallazgo_desde_vulnerabilidad(vuln)
+        mappings = tm_map_finding_to_mitre(hallazgo)
+        manuales = manuales_por_vulnerabilidad.get(int(vuln.id), [])
+        complementarios = no_mapeados_por_vulnerabilidad.get(int(vuln.id), [])
+
+        expected_keys = {
+            (
+                str(mapping.get("technique_id") or "").strip().upper(),
+                str(mapping.get("tactic_id") or "").strip().upper(),
+            )
+            for mapping in mappings
+            if mapping.get("technique_id")
+        }
+
+        necesita_sincronizacion = len(manuales) != 1
+
+        if len(manuales) == 1:
+            manual = manuales[0]
+            actual_keys = {
+                (
+                    str(tech.mitre_technique_id or "").strip().upper(),
+                    str(tech.mitre_tactic_id or "").strip().upper(),
+                )
+                for tech in (manual.tecnicas or [])
+            }
+
+            severidad = hallazgo.get("severidad") or "Media"
+            datos_desactualizados = any([
+                (manual.activo or "") != hallazgo["activo"],
+                (manual.vulnerabilidad or "") != hallazgo["titulo"],
+                (manual.descripcion or "") != hallazgo["descripcion"],
+                (manual.severidad or "") != severidad,
+                actual_keys != expected_keys,
+            ])
+            necesita_sincronizacion = necesita_sincronizacion or datos_desactualizados
+
+        if mappings:
+            # Una vulnerabilidad mapeada no debe permanecer en No Mapeados.
+            if complementarios:
+                necesita_sincronizacion = True
+        else:
+            # Una vulnerabilidad no mapeada debe tener un único registro y una
+            # clasificación complementaria generada.
+            if len(complementarios) != 1:
+                necesita_sincronizacion = True
+            else:
+                item = complementarios[0]
+                clasificacion = getattr(item, "clasificacion_complementaria", None)
+                datos_complementarios_desactualizados = any([
+                    (item.activo or "") != hallazgo["activo"],
+                    (item.herramienta or "") != THREAT_MODEL_VULN_SOURCE,
+                    (item.severidad or "") != (hallazgo.get("severidad") or "Media"),
+                    (item.titulo or "") != hallazgo["titulo"],
+                    (item.descripcion or "") != hallazgo["descripcion"],
+                    (item.evidencia or "") != hallazgo["evidencia"],
+                    clasificacion is None,
+                ])
+                necesita_sincronizacion = (
+                    necesita_sincronizacion or
+                    datos_complementarios_desactualizados
+                )
+
+        if necesita_sincronizacion:
+            sincronizar_vulnerabilidad_con_modelamiento(vuln)
+            cambios += 1
+
+    if cambios:
+        db.session.commit()
+
+    return cambios
+
+
+def asegurar_sincronizacion_vulnerabilidades_modelamiento():
+    """Ejecuta la sincronización automática sin impedir el acceso si ocurre un error."""
+    try:
+        return sincronizar_todas_vulnerabilidades_con_modelamiento()
+    except Exception as exc:
+        db.session.rollback()
+        print("No fue posible sincronizar vulnerabilidades con MITRE ATT&CK:", repr(exc))
+        return 0
+
+
 # ===================
 # Helper
 # ===================
@@ -73578,13 +74122,25 @@ def build_attack_layer_from_entries(entries, asset_name="Activo"):
 
 def build_attack_matrix_view(entries):
     matrix = {t: [] for t in ATTACK_TACTIC_ORDER}
+    matrix[MITRE_PENDING_TACTIC] = []
 
+    vulnerabilidades_representadas = set()
+
+    # Primero agrega todas las técnicas MITRE reales.
     for entry in entries:
-        for tech in entry.tecnicas:
+        tecnicas = list(entry.tecnicas or [])
+        if not tecnicas:
+            continue
+
+        if entry.vulnerabilidad_registro_id is not None:
+            vulnerabilidades_representadas.add(int(entry.vulnerabilidad_registro_id))
+
+        for tech in tecnicas:
             tactic = tech.mitre_tactic_name or "Other"
             matrix.setdefault(tactic, [])
             matrix[tactic].append({
                 "entry_id": entry.id,
+                "vulnerabilidad_registro_id": entry.vulnerabilidad_registro_id,
                 "tool": entry.herramienta,
                 "severity": entry.severidad,
                 "vulnerability": entry.vulnerabilidad,
@@ -73592,8 +74148,45 @@ def build_attack_matrix_view(entries):
                 "technique_id": tech.mitre_technique_id,
                 "technique_name": tech.mitre_technique_name,
                 "score": tech.score,
-                "rationale": tech.rationale
+                "rationale": tech.rationale,
+                "pending": False,
             })
+
+    # Después incorpora una sola tarjeta pendiente por vulnerabilidad no representada.
+    pendientes_vistos = set()
+    for entry in entries:
+        if entry.tecnicas:
+            continue
+
+        vuln_id = entry.vulnerabilidad_registro_id
+        if vuln_id is not None:
+            vuln_id = int(vuln_id)
+            if vuln_id in vulnerabilidades_representadas:
+                continue
+            clave = ("vulnerabilidad", vuln_id)
+        else:
+            clave = ("entrada", int(entry.id))
+
+        if clave in pendientes_vistos:
+            continue
+        pendientes_vistos.add(clave)
+
+        matrix[MITRE_PENDING_TACTIC].append({
+            "entry_id": entry.id,
+            "vulnerabilidad_registro_id": entry.vulnerabilidad_registro_id,
+            "tool": entry.herramienta,
+            "severity": entry.severidad,
+            "vulnerability": entry.vulnerabilidad,
+            "impacto": entry.impacto,
+            "technique_id": "PENDIENTE",
+            "technique_name": "Pendiente de mapeo MITRE ATT&CK",
+            "score": tm_score_from_severity(entry.severidad),
+            "rationale": (
+                "La vulnerabilidad está registrada y visible, pero aún no existe una "
+                "correspondencia técnica confiable con una técnica MITRE ATT&CK."
+            ),
+            "pending": True,
+        })
 
     for tactic in matrix:
         matrix[tactic] = sorted(
@@ -73652,8 +74245,16 @@ def threat_model_dashboard():
 
     read_only = True if user.role == 'auditor' else False
 
+    # Incluye automáticamente todas las vulnerabilidades existentes de la matriz.
+    asegurar_sincronizacion_vulnerabilidades_modelamiento()
+
+    mapped_count = (
+        db.session.query(func.count(func.distinct(ThreatModelEntry.id)))
+        .join(ThreatModelTechnique, ThreatModelTechnique.threat_entry_id == ThreatModelEntry.id)
+        .scalar() or 0
+    )
+    pendientes_mitre = ThreatModelEntry.query.filter(~ThreatModelEntry.tecnicas.any()).count()
     unmapped_count = ThreatModelUnmapped.query.count()
-    mapped_count = ThreatModelEntry.query.count()
     coverage_pct = round((mapped_count / (mapped_count + unmapped_count) * 100), 1) if (mapped_count + unmapped_count) else 0
 
     filtro_activo = (request.args.get('activo') or '').strip()
@@ -73748,7 +74349,7 @@ def threat_model_dashboard():
           <label class="form-label">Herramienta</label>
           <select name="herramienta" class="form-select">
             <option value="">-- Todas --</option>
-            {% for op in ['nikto','nessus','nuclei','nmap','testssl','owasp_zap','zap'] %}
+            {% for op in ['registro_vulnerabilidades','nikto','nessus','nuclei','nmap','testssl','owasp_zap','zap'] %}
               <option value="{{ op }}" {% if filtro_herramienta == op %}selected{% endif %}>{{ op|upper }}</option>
             {% endfor %}
           </select>
@@ -73864,11 +74465,15 @@ def threat_model_dashboard():
                 <td class="text-center">{{ badge_severidad_html(it.severidad) }}</td>
 
                 <td class="small">
-                  {% for t in it.tecnicas %}
-                    <div>
-                      <b>{{ t.mitre_technique_id }}</b> - {{ t.mitre_technique_name }}
-                    </div>
-                  {% endfor %}
+                  {% if it.tecnicas %}
+                    {% for t in it.tecnicas %}
+                      <div>
+                        <b>{{ t.mitre_technique_id }}</b> - {{ t.mitre_technique_name }}
+                      </div>
+                    {% endfor %}
+                  {% else %}
+                    <span class="badge bg-warning text-dark">Pendiente de mapeo MITRE</span>
+                  {% endif %}
                 </td>
 
                 <td class="text-center">
@@ -74112,7 +74717,7 @@ def threat_model_unmapped_view():
           <label class="form-label">Herramienta</label>
           <select name="herramienta" class="form-select">
             <option value="">-- Todas --</option>
-            {% for op in ['nikto','nessus','nuclei','nmap','testssl','owasp_zap','zap'] %}
+            {% for op in ['registro_vulnerabilidades','nikto','nessus','nuclei','nmap','testssl','owasp_zap','zap'] %}
               <option value="{{ op }}" {% if filtro_herramienta == op %}selected{% endif %}>
                 {{ op|upper }}
               </option>
@@ -74385,6 +74990,8 @@ def threat_model_asset_view():
 
     read_only = True if user.role == 'auditor' else False
 
+    asegurar_sincronizacion_vulnerabilidades_modelamiento()
+
     activo = (request.args.get('activo') or '').strip()
 
     q = ThreatModelEntry.query.options(selectinload(ThreatModelEntry.tecnicas))
@@ -74395,11 +75002,22 @@ def threat_model_asset_view():
     entries = q.order_by(ThreatModelEntry.id.desc()).all()
     matrix = build_attack_matrix_view(entries)
 
-    total_tecnicas = sum(len(items) for items in matrix.values())
-    tacticas_con_hallazgos = sum(1 for items in matrix.values() if items)
+    total_tecnicas = sum(len(list(entry.tecnicas or [])) for entry in entries)
+    pendientes_mitre = len(matrix.get(MITRE_PENDING_TACTIC, []))
+    tacticas_con_hallazgos = sum(
+        1 for tactic in ATTACK_TACTIC_ORDER if matrix.get(tactic)
+    )
+    total_tacticas_attack = len(ATTACK_TACTIC_ORDER)
+    vulnerabilidades_representadas = len({
+        int(entry.vulnerabilidad_registro_id)
+        for entry in entries
+        if entry.vulnerabilidad_registro_id is not None
+    })
 
     scores = []
-    for items in matrix.values():
+    for tactic, items in matrix.items():
+        if tactic == MITRE_PENDING_TACTIC:
+            continue
         for item in items:
             try:
                 scores.append(int(item.get("score") or 0))
@@ -74415,7 +75033,7 @@ def threat_model_asset_view():
         <div>
           <div class="section-title mb-1">🧭 Matriz MITRE ATT&CK</div>
           <div class="small text-muted">
-            Visualización completa por táctica. Usa el desplazamiento horizontal para ver todas las etapas, incluyendo Discovery y Collection.
+            Visualización completa por táctica. Todas las vulnerabilidades registradas aparecen en la matriz; las que aún no tengan una correspondencia confiable se muestran en la columna Pendiente de mapeo MITRE.
           </div>
         </div>
 
@@ -74449,13 +75067,25 @@ def threat_model_asset_view():
         <div class="mitre-summary-card">
           <div class="mitre-summary-label">Tácticas con hallazgos</div>
           <div class="mitre-summary-value">{{ tacticas_con_hallazgos }}</div>
-          <div class="mitre-summary-help">de {{ matrix|length }} tácticas ATT&CK</div>
+          <div class="mitre-summary-help">de {{ total_tacticas_attack }} tácticas ATT&CK</div>
         </div>
 
         <div class="mitre-summary-card">
           <div class="mitre-summary-label">Técnicas identificadas</div>
           <div class="mitre-summary-value">{{ total_tecnicas }}</div>
           <div class="mitre-summary-help">mapeadas automáticamente</div>
+        </div>
+
+        <div class="mitre-summary-card">
+          <div class="mitre-summary-label">Vulnerabilidades visibles</div>
+          <div class="mitre-summary-value">{{ vulnerabilidades_representadas }}</div>
+          <div class="mitre-summary-help">sincronizadas desde el registro</div>
+        </div>
+
+        <div class="mitre-summary-card">
+          <div class="mitre-summary-label">Pendientes de mapeo</div>
+          <div class="mitre-summary-value">{{ pendientes_mitre }}</div>
+          <div class="mitre-summary-help">visibles sin asignación ATT&CK falsa</div>
         </div>
 
         <div class="mitre-summary-card">
@@ -74488,13 +75118,14 @@ def threat_model_asset_view():
         <span><i class="mitre-dot mitre-medium"></i>Medio</span>
         <span><i class="mitre-dot mitre-high"></i>Alto</span>
         <span><i class="mitre-dot mitre-critical"></i>Crítico</span>
+        <span><i class="mitre-dot mitre-pending"></i>Pendiente de mapeo</span>
         <span class="ms-auto text-muted small">Tip: desplázate horizontalmente para ver todas las tácticas.</span>
       </div>
 
       <div class="mitre-board-wrap">
         <div class="mitre-board">
           {% for tactic, items in matrix.items() %}
-            <div class="mitre-tactic-col {% if not items %}mitre-tactic-empty{% endif %}">
+            <div class="mitre-tactic-col {% if not items %}mitre-tactic-empty{% endif %} {% if tactic == pending_tactic_label %}mitre-tactic-pending{% endif %}">
               <div class="mitre-tactic-head">
                 <div class="mitre-tactic-title">{{ tactic }}</div>
                 <span class="mitre-tactic-count">{{ items|length }}</span>
@@ -74504,7 +75135,9 @@ def threat_model_asset_view():
                 {% if items %}
                   {% for item in items %}
                     {% set score = item.score or 0 %}
-                    {% if score >= 90 %}
+                    {% if item.pending %}
+                      {% set sev_class = 'pending' %}
+                    {% elif score >= 90 %}
                       {% set sev_class = 'critical' %}
                     {% elif score >= 70 %}
                       {% set sev_class = 'high' %}
@@ -74533,6 +75166,10 @@ def threat_model_asset_view():
                           <summary>Ver impacto</summary>
                           <div>{{ item.impacto }}</div>
                         </details>
+                      {% endif %}
+
+                      {% if item.pending and item.rationale %}
+                        <div class="mitre-pending-note">{{ item.rationale }}</div>
                       {% endif %}
                     </div>
                   {% endfor %}
@@ -74582,7 +75219,7 @@ def threat_model_asset_view():
 
       .mitre-summary-grid{
         display:grid;
-        grid-template-columns:repeat(3,minmax(0,1fr));
+        grid-template-columns:repeat(5,minmax(0,1fr));
         gap:12px;
         margin-bottom:14px;
       }
@@ -74652,6 +75289,7 @@ def threat_model_asset_view():
       .mitre-medium{ background:#ca8a04; }
       .mitre-high{ background:#ea580c; }
       .mitre-critical{ background:#b91c1c; }
+      .mitre-pending{ background:#64748b; }
 
       .mitre-board-wrap{
         width:100%;
@@ -74666,9 +75304,9 @@ def threat_model_asset_view():
 
       .mitre-board{
         display:grid;
-        grid-template-columns:repeat(14, minmax(245px, 1fr));
+        grid-template-columns:repeat(15, minmax(245px, 1fr));
         gap:12px;
-        min-width:3520px;
+        min-width:3775px;
         padding:8px 7px;
       }
 
@@ -74683,6 +75321,14 @@ def threat_model_asset_view():
 
       .mitre-tactic-empty{
         opacity:.78;
+      }
+
+      .mitre-tactic-pending{
+        border-color:rgba(100,116,139,.38);
+      }
+
+      .mitre-tactic-pending .mitre-tactic-head{
+        background:linear-gradient(135deg,#475569 0%,#64748b 100%);
       }
 
       .mitre-tactic-head{
@@ -74738,6 +75384,7 @@ def threat_model_asset_view():
       .mitre-tech-card.medium{ border-left-color:#ca8a04; }
       .mitre-tech-card.high{ border-left-color:#ea580c; }
       .mitre-tech-card.critical{ border-left-color:#b91c1c; }
+      .mitre-tech-card.pending{ border-left-color:#64748b; background:#f8fafc; }
 
       .mitre-tech-id{
         display:inline-flex;
@@ -74806,6 +75453,17 @@ def threat_model_asset_view():
         line-height:1.25;
       }
 
+      .mitre-pending-note{
+        margin-top:8px;
+        padding:8px;
+        border-radius:12px;
+        background:#eef2f7;
+        color:#475569;
+        font-size:.70rem;
+        font-weight:750;
+        line-height:1.3;
+      }
+
       .mitre-empty-state{
         min-height:120px;
         border:1px dashed rgba(63,134,214,.32);
@@ -74836,8 +75494,8 @@ def threat_model_asset_view():
         }
 
         .mitre-board{
-          grid-template-columns:repeat(14, minmax(230px, 1fr));
-          min-width:3340px;
+          grid-template-columns:repeat(15, minmax(230px, 1fr));
+          min-width:3575px;
         }
       }
     </style>
@@ -74850,7 +75508,11 @@ def threat_model_asset_view():
             activo=activo,
             matrix=matrix,
             total_tecnicas=total_tecnicas,
+            pendientes_mitre=pendientes_mitre,
+            vulnerabilidades_representadas=vulnerabilidades_representadas,
             tacticas_con_hallazgos=tacticas_con_hallazgos,
+            total_tacticas_attack=total_tacticas_attack,
+            pending_tactic_label=MITRE_PENDING_TACTIC,
             score_maximo=score_maximo,
             read_only=read_only,
             user=user
@@ -74875,6 +75537,8 @@ def threat_model_export_navigator():
     if user.role != 'admin' and not verificar_permiso(user, "Modelamiento de Amenazas"):
         flash("No tiene permiso para exportar la capa Navigator.", "danger")
         return redirect(url_for('menu'))
+
+    asegurar_sincronizacion_vulnerabilidades_modelamiento()
 
     activo = (request.args.get('activo') or '').strip()
 
@@ -75270,7 +75934,7 @@ def threat_model_unmapped_complementary_view():
           <label class="form-label">Herramienta</label>
           <select name="herramienta" class="form-select">
             <option value="">-- Todas --</option>
-            {% for op in ['nikto','nessus','nuclei','nmap','testssl','owasp_zap','zap'] %}
+            {% for op in ['registro_vulnerabilidades','nikto','nessus','nuclei','nmap','testssl','owasp_zap','zap'] %}
               <option value="{{ op }}" {% if filtro_herramienta == op %}selected{% endif %}>
                 {{ op|upper }}
               </option>
@@ -75769,12 +76433,21 @@ def jira_auth():
     return HTTPBasicAuth(cfg["email"], cfg["token"])
 
 def jira_buscar_usuarios_asignables(query_text=""):
+    """
+    Consulta los usuarios que Jira permite asignar al proyecto configurado.
+
+    IMPORTANTE:
+    - Si query_text está vacío, Jira devuelve todos los usuarios asignables.
+    - maxResults evita que la lista quede limitada al valor pequeño por defecto.
+    """
     cfg = jira_get_runtime_config()
 
     url = f"{cfg['base_url']}/rest/api/3/user/assignable/search"
     params = {
         "project": cfg["project_key"],
-        "query": query_text or ""
+        "query": (query_text or "").strip(),
+        "startAt": 0,
+        "maxResults": 1000
     }
 
     resp = requests.get(
@@ -75788,7 +76461,11 @@ def jira_buscar_usuarios_asignables(query_text=""):
     if resp.status_code >= 300:
         raise RuntimeError(f"Error buscando usuarios Jira: {resp.status_code} - {resp.text}")
 
-    return resp.json() or []
+    data = resp.json() or []
+    if not isinstance(data, list):
+        raise RuntimeError("Jira respondió con un formato inesperado al consultar usuarios asignables.")
+
+    return data
 
 
 def jira_normalizar_usuario_asignable(usuario):
@@ -75811,10 +76488,18 @@ def jira_resolver_nombre_usuario(account_id: str, query_text: str = "") -> str:
         return ""
 
     try:
-        usuarios = jira_buscar_usuarios_asignables(query_text or "")
-        for usuario in usuarios:
-            if usuario.get("accountId") == account_id:
-                return usuario.get("displayName") or usuario.get("emailAddress") or account_id
+        # Primero intenta con el texto sugerido y, si no aparece, consulta la lista completa.
+        consultas = []
+        query_limpia = (query_text or "").strip()
+        if query_limpia:
+            consultas.append(query_limpia)
+        consultas.append("")
+
+        for consulta in consultas:
+            usuarios = jira_buscar_usuarios_asignables(consulta)
+            for usuario in usuarios:
+                if usuario.get("accountId") == account_id:
+                    return usuario.get("displayName") or usuario.get("emailAddress") or account_id
     except Exception:
         pass
 
@@ -75822,10 +76507,49 @@ def jira_resolver_nombre_usuario(account_id: str, query_text: str = "") -> str:
 
 
 def cargar_usuarios_jira_para_formulario(query_text: str = ""):
-    """Carga usuarios asignables de Jira sin romper el formulario si Jira no está configurado."""
+    """
+    Carga TODOS los usuarios asignables de Jira para los formularios.
+
+    Antes se enviaba el responsable SGSI como filtro. Cuando el responsable era,
+    por ejemplo, "Administrador", Jira devolvía cero coincidencias y el selector
+    aparecía vacío. Ahora se consulta siempre la lista completa y, cuando existe
+    un texto de búsqueda, sus coincidencias se muestran primero sin ocultar a los
+    demás usuarios asignables.
+    """
     try:
-        usuarios = jira_buscar_usuarios_asignables(query_text or "")
-        return [jira_normalizar_usuario_asignable(u) for u in usuarios]
+        query_limpia = (query_text or "").strip()
+        usuarios_combinados = []
+
+        # Coincidencias sugeridas primero (si se recibió un responsable/nombre).
+        if query_limpia:
+            try:
+                usuarios_combinados.extend(
+                    jira_buscar_usuarios_asignables(query_limpia)
+                )
+            except Exception as e:
+                print("ADVERTENCIA: No fue posible filtrar usuarios Jira:", e)
+
+        # Siempre cargar la lista completa para que el selector nunca quede vacío
+        # solamente porque el responsable SGSI no coincide con un usuario Jira.
+        usuarios_combinados.extend(
+            jira_buscar_usuarios_asignables("")
+        )
+
+        usuarios_normalizados = []
+        account_ids_vistos = set()
+
+        for usuario in usuarios_combinados:
+            normalizado = jira_normalizar_usuario_asignable(usuario)
+            account_id = (normalizado.get("accountId") or "").strip()
+
+            if not account_id or account_id in account_ids_vistos:
+                continue
+
+            account_ids_vistos.add(account_id)
+            usuarios_normalizados.append(normalizado)
+
+        return usuarios_normalizados
+
     except Exception as e:
         print("ADVERTENCIA: No fue posible cargar usuarios Jira:", e)
         return []
@@ -78316,8 +79040,10 @@ def plan_remediacion_jira(id):
             flash(f"No se pudo crear el ticket en Jira: {str(e)}", "danger")
             return redirect(url_for('plan_remediacion_matriz'))
 
-    # GET: usuarios asignables para este punto de remediación
-    usuarios_jira = cargar_usuarios_jira_para_formulario(plan.responsable or "")
+    # GET: mostrar TODOS los usuarios asignables del proyecto Jira.
+    # No se filtra por responsable SGSI porque dicho texto puede no existir en Jira
+    # (por ejemplo, "Administrador") y dejaría el selector vacío.
+    usuarios_jira = cargar_usuarios_jira_para_formulario()
 
     html = """
     <div class="jira-shell">
@@ -107769,27 +108495,6 @@ def eval_status_from_row_item_subitem(df: pd.DataFrame, r: int, col_map: dict):
         return item_txt, sub_txt, preg_txt, True, "NO", 0, comment
 
     return item_txt, sub_txt, preg_txt, True, "SIN_MARCAR", 0, comment
-
-def enforce_app_expiration():
-    """
-    Bloquea ejecución si la fecha actual supera APP_EXPIRES_ON.
-    """
-    if not APP_EXPIRES_ON:
-        return  # sin expiración configurada
-
-    try:
-        exp_date = datetime.strptime(APP_EXPIRES_ON, "%Y-%m-%d").date()
-    except ValueError:
-        raise RuntimeError("APP_EXPIRES_ON inválida. Usa formato YYYY-MM-DD, ejemplo: 2026-03-31")
-
-    today = datetime.now(APP_TIMEZONE).date()
-
-    if today > exp_date:
-        raise RuntimeError(
-            f"Licencia expirada. Vigencia hasta {exp_date.isoformat()}. "
-            f"Fecha actual {today.isoformat()}."
-        )
-
 
 # ============================================================
 # CONTROL ID + GRUPO + AGREGACIÓN POR CONTROL
@@ -178129,15 +178834,6 @@ app.register_blueprint(soc2_madurez_bp)
 app.register_blueprint(ai_madurez_bp)
 asegurar_columnas_aprobacion_seguridad_rfc()
 
-def get_free_port(start=5000):
-    port = start
-    while True:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(('127.0.0.1', port)) != 0:
-                return port
-        port += 1
-
 if __name__ == "__main__":
-    port = get_free_port(5000)
-    print(f"🚀 Ejecutando en puerto {port}")
-    app.run(host="0.0.0.0", port=port)
+    print("🚀 Ejecutando en puerto 5002")
+    app.run(host="0.0.0.0", port=5002)
