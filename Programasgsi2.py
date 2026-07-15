@@ -1237,6 +1237,18 @@ if not app.config.get("SQLALCHEMY_BINDS"):
 
 app.config["SQLALCHEMY_BINDS"]["soc2_madurez"] = "sqlite:///" + SOC2_DB_PATH
 
+# =========================
+# CONFIG Gobierno de Firewall - DB independiente
+# =========================
+FIREWALL_GOV_DB_PATH = os.path.join(app.instance_path, "firewall_governance.db")
+app.config["SQLALCHEMY_BINDS"]["firewall_governance"] = "sqlite:///" + FIREWALL_GOV_DB_PATH
+
+# =========================
+# CONFIG Planes de Acción - DB independiente
+# =========================
+PLANES_ACCION_DB_PATH = os.path.join(app.instance_path, "planes_accion.db")
+app.config["SQLALCHEMY_BINDS"]["planes_accion"] = "sqlite:///" + PLANES_ACCION_DB_PATH
+
 madurez_bp = Blueprint("madurez", __name__, url_prefix="/madurez")
 
 # =========================
@@ -9389,7 +9401,6 @@ MENU_SECTIONS = [
                     }
                 ]
             },
-            {"label": "Planes de Acción del Sistema de Gestión (Mejora)", "href": "/mejora_menu", "icon": "bi-clipboard-check", "btn": "btn-primary", "module": "Planes de acción del SGSI"},
         ],
     },
     {
@@ -9460,13 +9471,27 @@ MENU_SECTIONS = [
                     "module": "Cumplimiento Continuo"
                 },
                 {
-                    "label": "Planes de Acción",
-                    "href": "/cumplimiento_continuo/planes",
-                    "icon": "bi-list-check",
+                    "label": "Gobierno de Firewall",
+                    "href": "/cumplimiento_continuo/firewall",
+                    "icon": "bi-bricks",
                     "btn": "btn-danger",
                     "module": "Cumplimiento Continuo"
                 },
             ],
+    },
+
+    {
+        "title": "Planes de Acción",
+        "icon": "bi-clipboard2-check",
+        "items": [
+            {
+                "label": "Matriz de Planes de Acción",
+                "href": "/planes_accion",
+                "icon": "bi-list-check",
+                "btn": "btn-primary",
+                "module": "Planes de acción del SGSI"
+            },
+        ],
     },
 
     {
@@ -9674,6 +9699,7 @@ def _sgsi_build_global_menu_html():
                 if endpoint_prefix == "cumplimiento_continuo" and resto.startswith((
                     "wazuh",
                     "sincronizacion",
+                    "firewall",
                     "estandar",
                     "evidencias",
                     "planes"
@@ -10102,6 +10128,15 @@ def _sgsi_build_global_menu_html():
                 "paths": ["/mejora_menu", "/mejora"],
                 "endpoints": ["mejora"]
             },
+            "Matriz de Planes de Acción": {
+                "paths": ["/planes_accion"],
+                "endpoints": ["planes_accion_dashboard"],
+                "exact": True
+            },
+            "Registrar Plan de Acción": {
+                "paths": ["/planes_accion/nuevo"],
+                "endpoints": ["planes_accion_new"]
+            },
 
             # Reportes
             "Reportes": {
@@ -10122,6 +10157,10 @@ def _sgsi_build_global_menu_html():
             "Sincronización": {
                 "paths": ["/cumplimiento_continuo/sincronizacion"],
                 "endpoints": ["cumplimiento_continuo_sincronizacion"]
+            },
+            "Gobierno de Firewall": {
+                "paths": ["/cumplimiento_continuo/firewall"],
+                "endpoints": ["cumplimiento_continuo_firewall", "fwgov"]
             },
             "ISO 27001": {
                 "paths": ["/cumplimiento_continuo/estandar/ISO27001"],
@@ -15360,6 +15399,15 @@ def gestion_riesgos():
                             Editar
                           </a>
 
+                          <a href="{{ url_for('planes_accion_new', riesgo_id=r.id) }}"
+                               class="risk-action-btn plan-action"
+                               title="Registrar un plan de acción para este riesgo"
+                               aria-label="Registrar plan de acción para el riesgo {{ r.codigo_riesgo or r.id }}">
+
+                              <i class="bi bi-clipboard2-plus-fill" aria-hidden="true"></i>
+                              <span>Plan de acción</span>
+                          </a>
+
                           <form action="{{ url_for('archivar_riesgo', riesgo_id=r.id) }}"
                                 method="post"
                                 onsubmit="return confirm('¿Seguro deseas archivar este riesgo?');"
@@ -15934,6 +15982,7 @@ def gestion_riesgos():
 
       .risk-action-btn.view { background: #087ab8; }
       .risk-action-btn.edit { background: #c76b00; color: #0b1220; }
+      .risk-action-btn.plan-action { background: #0f766e; color: #ffffff; }
       .risk-action-btn.archive { background: #2563eb; }
       .risk-action-btn.delete { background: #b91c1c; }
       .risk-action-btn.restore { background: #087c3d; }
@@ -104792,7 +104841,7 @@ def mejora_menu():
         flash("No tiene permiso para acceder a los planes de acción del SGSI (Mejora).", "danger")
         return redirect(url_for('menu'))
 
-    return redirect(url_for('mejora_matriz'))
+    return redirect(url_for('planes_accion_dashboard'))
 
 
 # =========================
@@ -173118,6 +173167,7 @@ class ContinuousComplianceSyncLog(db.Model):
 
 
 class ContinuousActionPlan(db.Model):
+    __bind_key__ = "planes_accion"
     __tablename__ = "continuous_action_plans"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -173135,6 +173185,109 @@ class ContinuousActionPlan(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     source_ref = db.Column(db.String(500), nullable=True)
     raw_json = db.Column(db.Text, nullable=True)
+
+
+def migrar_planes_accion_a_db_independiente():
+    """
+    Copia de forma segura los planes existentes desde la tabla histórica
+    continuous_action_plans de instance/sgsi.db hacia instance/planes_accion.db.
+
+    - No elimina la tabla anterior: queda como respaldo.
+    - INSERT OR IGNORE evita duplicar registros al reiniciar la aplicación.
+    - Solo copia columnas presentes en ambas bases para tolerar futuras ampliaciones.
+    """
+    origen_path = os.path.join(app.instance_path, "sgsi.db")
+    destino_path = PLANES_ACCION_DB_PATH
+
+    if not os.path.exists(origen_path):
+        return 0
+
+    conn_origen = None
+    conn_destino = None
+
+    try:
+        conn_origen = sqlite3.connect(origen_path)
+        conn_origen.row_factory = sqlite3.Row
+        cur_origen = conn_origen.cursor()
+
+        existe_origen = cur_origen.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='continuous_action_plans'"
+        ).fetchone()
+        if not existe_origen:
+            return 0
+
+        conn_destino = sqlite3.connect(destino_path)
+        cur_destino = conn_destino.cursor()
+
+        existe_destino = cur_destino.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='continuous_action_plans'"
+        ).fetchone()
+        if not existe_destino:
+            return 0
+
+        columnas_origen = {
+            fila[1] for fila in cur_origen.execute(
+                "PRAGMA table_info(continuous_action_plans)"
+            ).fetchall()
+        }
+        columnas_destino = {
+            fila[1] for fila in cur_destino.execute(
+                "PRAGMA table_info(continuous_action_plans)"
+            ).fetchall()
+        }
+
+        orden_columnas = [
+            "id", "origin", "standard", "control_code", "title",
+            "description", "asset", "severity", "action_type",
+            "responsible", "due_date", "status", "created_at",
+            "source_ref", "raw_json"
+        ]
+        columnas = [
+            nombre for nombre in orden_columnas
+            if nombre in columnas_origen and nombre in columnas_destino
+        ]
+
+        if "id" not in columnas or "title" not in columnas:
+            return 0
+
+        columnas_sql = ", ".join(f'"{nombre}"' for nombre in columnas)
+        placeholders = ", ".join("?" for _ in columnas)
+
+        filas = cur_origen.execute(
+            f"SELECT {columnas_sql} FROM continuous_action_plans ORDER BY id"
+        ).fetchall()
+        if not filas:
+            return 0
+
+        cambios_antes = conn_destino.total_changes
+        cur_destino.executemany(
+            f"INSERT OR IGNORE INTO continuous_action_plans ({columnas_sql}) "
+            f"VALUES ({placeholders})",
+            [tuple(fila[nombre] for nombre in columnas) for fila in filas]
+        )
+        conn_destino.commit()
+
+        migrados = conn_destino.total_changes - cambios_antes
+        if migrados:
+            print(
+                f"Planes de acción migrados a instance/planes_accion.db: {migrados}"
+            )
+        return migrados
+
+    except Exception as e:
+        if conn_destino is not None:
+            try:
+                conn_destino.rollback()
+            except Exception:
+                pass
+        print("No se pudieron migrar los planes de acción:", repr(e))
+        return 0
+
+    finally:
+        if conn_origen is not None:
+            conn_origen.close()
+        if conn_destino is not None:
+            conn_destino.close()
 
 class WazuhComplianceControl(db.Model):
     __tablename__ = "wazuh_compliance_controls"
@@ -173429,7 +173582,10 @@ def cont_comp_seed_controls():
 
 def init_continuous_compliance_db():
     with app.app_context():
+        # Crea las tablas de la base principal y de todos los binds,
+        # incluida instance/planes_accion.db.
         db.create_all()
+        migrar_planes_accion_a_db_independiente()
         cont_comp_seed_controls()
 
 
@@ -174557,6 +174713,12 @@ def cont_comp_render(
         }});
 
         document.querySelectorAll(".cc-shell a[href*='/cumplimiento_continuo']").forEach(function(link) {{
+          // Mantener visible la navegación interna de Gobierno de Firewall.
+          // El limpiador global solo debe retirar la navegación superior antigua.
+          if (link.closest("[data-keep-cumplimiento-nav='true']")) {{
+            return;
+          }}
+
           let box = link.closest("div");
 
           while (box && box.classList && !box.classList.contains("cc-shell")) {{
@@ -175052,6 +175214,17 @@ def cont_comp_dashboard():
         ContinuousComplianceSyncLog.id.desc()
     ).first()
 
+    try:
+        firewall_devices_count = FirewallGovDevice.query.count()
+        firewall_findings_count = FirewallGovFinding.query.filter_by(active=True).count()
+        firewall_critical_count = FirewallGovFinding.query.filter_by(active=True, severity="Crítica").count()
+        firewall_last_sync = FirewallGovSyncLog.query.order_by(FirewallGovSyncLog.id.desc()).first()
+    except Exception:
+        firewall_devices_count = 0
+        firewall_findings_count = 0
+        firewall_critical_count = 0
+        firewall_last_sync = None
+
     standards_keys = ["ISO27001", "SOC2", "PCIDSS", "NISTCSF"]
 
     standards = []
@@ -175182,9 +175355,25 @@ def cont_comp_dashboard():
 
     <div class="cc-card">
       <h5 class="cc-section-title">Estado de conexión</h5>
-      <p class="mb-1"><strong>Wazuh:</strong> {{ cfg.last_status if cfg else "No configurado" }}</p>
-      <p class="mb-1"><strong>Último mensaje:</strong> {{ cfg.last_message if cfg else "—" }}</p>
-      <p class="mb-1"><strong>Última sincronización:</strong> {{ last_sync.finished_at if last_sync else "Sin sincronización" }}</p>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="p-3 border rounded-4 h-100 bg-white">
+            <div class="fw-bold text-primary mb-2"><i class="bi bi-broadcast"></i> Wazuh</div>
+            <p class="mb-1"><strong>Estado:</strong> {{ cfg.last_status if cfg else "No configurado" }}</p>
+            <p class="mb-1"><strong>Último mensaje:</strong> {{ cfg.last_message if cfg else "—" }}</p>
+            <p class="mb-0"><strong>Última sincronización:</strong> {{ last_sync.finished_at if last_sync else "Sin sincronización" }}</p>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="p-3 border rounded-4 h-100 bg-white">
+            <div class="fw-bold text-primary mb-2"><i class="bi bi-bricks"></i> Gobierno de Firewall</div>
+            <p class="mb-1"><strong>Dispositivos:</strong> {{ firewall_devices_count }}</p>
+            <p class="mb-1"><strong>Hallazgos activos:</strong> {{ firewall_findings_count }} · <strong>Críticos:</strong> {{ firewall_critical_count }}</p>
+            <p class="mb-2"><strong>Última sincronización:</strong> {{ firewall_last_sync.finished_at if firewall_last_sync else "Sin sincronización" }}</p>
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('cumplimiento_continuo_firewall') }}">Abrir Gobierno de Firewall</a>
+          </div>
+        </div>
+      </div>
     </div>
     """,
     cfg=cfg,
@@ -175194,13 +175383,17 @@ def cont_comp_dashboard():
     total_no_cumple=total_no_cumple,
     total_no_monitoreado=total_no_monitoreado,
     cobertura_global=cobertura_global,
-    last_sync=last_sync)
+    last_sync=last_sync,
+    firewall_devices_count=firewall_devices_count,
+    firewall_findings_count=firewall_findings_count,
+    firewall_critical_count=firewall_critical_count,
+    firewall_last_sync=firewall_last_sync)
 
     return cont_comp_render(
         content,
         "dashboard",
         "Cumplimiento Continuo",
-        "Monitoreo automático basado únicamente en evidencias técnicas Wazuh."
+        "Monitoreo automático con Wazuh y evaluación continua de reglas de firewall."
     )
 
 
@@ -175598,43 +175791,7 @@ def cont_comp_evidences():
 @app.route("/cumplimiento_continuo/planes")
 @login_required
 def cont_comp_action_plans():
-    user, resp = cont_comp_require_read()
-    if resp:
-        return resp
-
-    status = (request.args.get("status") or "").strip()
-    q = ContinuousActionPlan.query
-    if status:
-        q = q.filter_by(status=status)
-    plans = q.order_by(ContinuousActionPlan.id.desc()).limit(500).all()
-
-    content = render_template_string("""
-    <div class="cc-card">
-      <h5 class="cc-section-title">Planes de Acción generados</h5>
-      <div class="table-responsive">
-        <table class="table cc-table table-hover">
-          <thead><tr><th>Fecha</th><th>Tipo</th><th>Estándar</th><th>Control</th><th>Título</th><th>Activo</th><th>Severidad</th><th>Estado</th><th>Acción</th></tr></thead>
-          <tbody>
-          {% for p in plans %}
-            <tr>
-              <td>{{ p.created_at }}</td>
-              <td>{{ p.action_type }}</td>
-              <td>{{ p.standard or "—" }}</td>
-              <td>{{ p.control_code or "—" }}</td>
-              <td>{{ p.title }}</td>
-              <td>{{ p.asset or "—" }}</td>
-              <td>{{ p.severity or "—" }}</td>
-              <td><span class="badge bg-info">{{ p.status }}</span></td>
-              <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('cont_comp_action_plan_edit', plan_id=p.id) }}">Gestionar</a></td>
-            </tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    """, plans=plans)
-
-    return cont_comp_render(content, "plans", "Planes de Acción", "Remediaciones, incidentes y hallazgos derivados de Wazuh.")
+    return redirect(url_for("planes_accion_dashboard"))
 
 
 @app.route("/cumplimiento_continuo/planes/<int:plan_id>", methods=["GET", "POST"])
@@ -175687,6 +175844,2888 @@ def cont_comp_action_plan_edit(plan_id):
     """, plan=plan)
 
     return cont_comp_render(content, "plans", "Gestionar Plan de Acción", "Actualice responsable, fecha objetivo, estado y descripción.")
+
+
+
+# ============================================================================================================================================
+#                         CAPÍTULO INDEPENDIENTE: PLAN DE ACCIÓN
+#                         Consolidación ISO 27001, SOC 2, PCI-DSS, NIST CSF,
+#                         Cumplimiento Continuo, Gobierno de Firewall y Riesgos
+# ============================================================================================================================================
+
+from sqlalchemy import or_ as pa_or_
+
+PLANES_ACCION_MODULE_NAME = "Planes de acción del SGSI"
+PA_STANDARD_LABELS = {
+    "ISO27001": "ISO 27001",
+    "SOC2": "SOC 2",
+    "PCIDSS": "PCI-DSS",
+    "NISTCSF": "NIST CSF 2.0",
+    "RIESGOS": "Gestión de Riesgos",
+    "MULTI": "Múltiples estándares",
+    "SGSI": "Sistema de Gestión",
+    "": "Sin clasificar",
+}
+
+
+def pa_current_user():
+    return User.query.get(session.get("user_id"))
+
+
+def pa_can_read(user):
+    if not user:
+        return False
+    if user.role in ("admin", "auditor"):
+        return True
+    return verificar_permiso(user, PLANES_ACCION_MODULE_NAME)
+
+
+def pa_can_write(user):
+    if not user or user.role == "auditor":
+        return False
+    if user.role == "admin":
+        return True
+    return verificar_permiso(user, PLANES_ACCION_MODULE_NAME)
+
+
+def pa_require_read():
+    user = pa_current_user()
+    if not pa_can_read(user):
+        flash("No tiene permiso para acceder al capítulo Plan de Acción.", "danger")
+        return None, redirect(url_for("menu"))
+    return user, None
+
+
+def pa_require_write():
+    user = pa_current_user()
+    if user and user.role == "auditor":
+        flash("El rol Auditor solo puede consultar los planes de acción.", "warning")
+        return None, redirect(url_for("planes_accion_dashboard"))
+    if not pa_can_write(user):
+        flash("No tiene permiso para registrar o modificar planes de acción.", "danger")
+        return None, redirect(url_for("menu"))
+    return user, None
+
+
+def pa_username(user):
+    if not user:
+        return "Sistema"
+    return (
+        getattr(user, "nombre_completo", None)
+        or getattr(user, "username", None)
+        or getattr(user, "email", None)
+        or "Usuario"
+    )
+
+
+def pa_standard_label(value):
+    key = (value or "").strip().upper()
+    return PA_STANDARD_LABELS.get(key, value or "Sin clasificar")
+
+
+def pa_clean_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False, indent=2)
+        except Exception:
+            return str(value)
+    text_value = str(value).strip()
+    if not text_value or text_value in ("{}", "[]", "null", "None"):
+        return ""
+    return text_value
+
+
+def pa_due_date_obj(value):
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw[:10], "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def pa_status_closed(value):
+    return (value or "").strip().lower() in {
+        "cerrado", "cancelado", "completado", "resuelto", "finalizado"
+    }
+
+
+def pa_badge_status(value):
+    status = (value or "Abierto").strip()
+    cls = {
+        "Abierto": "danger",
+        "En proceso": "warning text-dark",
+        "Cerrado": "success",
+        "Cancelado": "secondary",
+    }.get(status, "info text-dark")
+    return Markup(f'<span class="badge bg-{cls}">{escape(status)}</span>')
+
+
+def pa_badge_severity(value):
+    sev = (value or "Sin clasificar").strip()
+    cls = {
+        "Crítica": "danger",
+        "Critica": "danger",
+        "Alta": "warning text-dark",
+        "Media": "info text-dark",
+        "Baja": "success",
+    }.get(sev, "secondary")
+    return Markup(f'<span class="badge bg-{cls}">{escape(sev)}</span>')
+
+
+def pa_risk_severity(risk):
+    raw = " ".join([
+        str(getattr(risk, "riesgo_residual", "") or ""),
+        str(getattr(risk, "riesgo_inherente", "") or ""),
+    ]).lower()
+    if "extremo" in raw or "crít" in raw or "critic" in raw:
+        return "Crítica"
+    if "alto" in raw or "high" in raw:
+        return "Alta"
+    if "moder" in raw or "medio" in raw or "medium" in raw:
+        return "Media"
+    return "Baja"
+
+
+def pa_upsert_source_plan(
+    source_ref,
+    origin,
+    standard,
+    title,
+    description="",
+    control_code="",
+    asset="",
+    severity="Media",
+    action_type="Plan de cumplimiento",
+    responsible="",
+    due_date="",
+    status="Abierto",
+    raw_json=None,
+):
+    source_ref = (source_ref or "").strip()
+    if not source_ref:
+        return False
+
+    plan = ContinuousActionPlan.query.filter_by(source_ref=source_ref).first()
+    created = plan is None
+    if created:
+        plan = ContinuousActionPlan(source_ref=source_ref)
+        db.session.add(plan)
+
+    plan.origin = (origin or "Sistema").strip()
+    plan.standard = (standard or "SGSI").strip().upper()
+    plan.control_code = (control_code or "").strip()
+    plan.title = (title or "Plan de acción").strip()[:500]
+    plan.asset = (asset or "").strip()[:255]
+    plan.severity = (severity or "Media").strip()
+    plan.action_type = (action_type or "Plan de cumplimiento").strip()
+
+    # Se conserva la gestión realizada por el usuario en registros ya existentes.
+    if created or not (plan.description or "").strip():
+        plan.description = pa_clean_text(description)
+    if created or not (plan.responsible or "").strip():
+        plan.responsible = (responsible or "").strip()
+    if created or not (plan.due_date or "").strip():
+        plan.due_date = (due_date or "").strip()
+    if created:
+        plan.status = (status or "Abierto").strip()
+
+    if raw_json is not None:
+        try:
+            plan.raw_json = json.dumps(raw_json, ensure_ascii=False)
+        except Exception:
+            plan.raw_json = str(raw_json)
+
+    return created
+
+
+def pa_sync_legacy_mejora():
+    created = 0
+    for item in MejoraPlanRegistro.query.order_by(MejoraPlanRegistro.id.asc()).limit(2000).all():
+        description = "\n\n".join([
+            part for part in [
+                f"Descripción o incumplimiento: {item.descripcion_incumplimiento}" if item.descripcion_incumplimiento else "",
+                f"Causa: {item.causa}" if item.causa else "",
+                f"Plan de acción: {item.plan_accion}" if item.plan_accion else "",
+                f"Observación de eficacia: {item.observacion_eficacia}" if item.observacion_eficacia else "",
+            ] if part
+        ])
+        title = item.descripcion_incumplimiento or item.plan_accion or f"Plan de mejora #{item.id}"
+        if pa_upsert_source_plan(
+            source_ref=f"mejora-legacy:{item.id}",
+            origin="Mejora Continua",
+            standard="ISO27001",
+            title=title,
+            description=description,
+            control_code="Mejora SGSI",
+            severity="Media",
+            action_type=item.tipo_accion or "Mejora",
+            responsible=item.responsable or "",
+            due_date=item.fecha_ejecucion_propuesta or "",
+            status="Cerrado" if (item.estado_actividad or "").strip().lower() == "cerrado" else "Abierto",
+            raw_json={"legacy_mejora_id": item.id, "eficacia": item.eficacia},
+        ):
+            created += 1
+    return created
+
+
+def pa_sync_iso_maturity():
+    created = 0
+    for run in AnalysisRun.query.order_by(AnalysisRun.id.asc()).limit(1000).all():
+        plan_text = pa_clean_text(run.action_plan_json)
+        if not plan_text:
+            continue
+        if pa_upsert_source_plan(
+            source_ref=f"madurez:ISO27001:{run.id}",
+            origin="Madurez ISO 27001",
+            standard="ISO27001",
+            title=f"Plan de acción ISO 27001 - {run.company_name or 'Evaluación'}",
+            description=plan_text,
+            control_code="Evaluación de madurez",
+            asset=run.company_name or "",
+            severity="Media",
+            action_type="Plan de cumplimiento",
+            raw_json={"analysis_run_id": run.id, "filename": run.filename},
+        ):
+            created += 1
+    return created
+
+
+def pa_sync_nist_maturity():
+    created = 0
+    for run in NistMadurezRun.query.order_by(NistMadurezRun.id.asc()).limit(1000).all():
+        plan_text = pa_clean_text(run.plan_trabajo_editado or run.plan_trabajo_ai)
+        if not plan_text:
+            continue
+        if pa_upsert_source_plan(
+            source_ref=f"madurez:NISTCSF:{run.id}",
+            origin="Madurez NIST CSF 2.0",
+            standard="NISTCSF",
+            title=f"Plan de trabajo NIST CSF 2.0 - {run.consecutivo or run.id}",
+            description=plan_text,
+            control_code="Evaluación de madurez",
+            asset=run.consecutivo or "",
+            severity="Media",
+            action_type="Plan de cumplimiento",
+            raw_json={"nist_run_id": run.id, "cumplimiento": run.pct_general},
+        ):
+            created += 1
+    return created
+
+
+def pa_sync_pci_maturity():
+    created = 0
+    for run in PciAnalysisRun.query.order_by(PciAnalysisRun.id.asc()).limit(1000).all():
+        plan_text = pa_clean_text(run.plan_trabajo_editado or run.plan_trabajo_ai)
+        if not plan_text:
+            continue
+        if pa_upsert_source_plan(
+            source_ref=f"madurez:PCIDSS:{run.id}",
+            origin="Madurez PCI-DSS",
+            standard="PCIDSS",
+            title=f"Plan de trabajo PCI-DSS - {run.company_name or run.id}",
+            description=plan_text,
+            control_code="Evaluación de madurez",
+            asset=run.company_name or "",
+            severity="Alta",
+            action_type="Plan de cumplimiento",
+            raw_json={"pci_analysis_run_id": run.id, "pci_run_id": run.pci_run_id},
+        ):
+            created += 1
+    return created
+
+
+def pa_sync_soc2_maturity():
+    created = 0
+    for run in Soc2MadurezRun.query.order_by(Soc2MadurezRun.id.asc()).limit(1000).all():
+        plan_text = pa_clean_text(run.plan_trabajo_editado or run.plan_trabajo_ai)
+        if not plan_text:
+            continue
+        name = run.consecutivo or run.company_name or str(run.id)
+        if pa_upsert_source_plan(
+            source_ref=f"madurez:SOC2:{run.id}",
+            origin="Madurez SOC 2",
+            standard="SOC2",
+            title=f"Plan de trabajo SOC 2 - {name}",
+            description=plan_text,
+            control_code="Evaluación de madurez",
+            asset=run.company_name or run.consecutivo or "",
+            severity="Media",
+            action_type="Plan de cumplimiento",
+            raw_json={"soc2_run_id": run.id, "cumplimiento": run.pct_general},
+        ):
+            created += 1
+    return created
+
+
+def pa_sync_risk_existing_plans():
+    created = 0
+    for risk in Riesgo.query.order_by(Riesgo.id.asc()).limit(3000).all():
+        plan_a = pa_clean_text(getattr(risk, "plan_accion", ""))
+        plan_b = pa_clean_text(getattr(risk, "planes_accion", ""))
+        if not plan_a and not plan_b:
+            continue
+        description = "\n\n".join([
+            part for part in [
+                f"Riesgo: {risk.riesgo}" if risk.riesgo else "",
+                f"Plan de acción del control: {plan_a}" if plan_a else "",
+                f"Plan de tratamiento residual: {plan_b}" if plan_b else "",
+                f"Observaciones: {risk.observaciones}" if risk.observaciones else "",
+            ] if part
+        ])
+        if pa_upsert_source_plan(
+            source_ref=f"riesgo-existente:{risk.id}",
+            origin="Gestión de Riesgos",
+            standard="RIESGOS",
+            title=f"Tratamiento del riesgo {risk.codigo_riesgo or risk.id}",
+            description=description,
+            control_code=risk.codigo_riesgo or str(risk.id),
+            asset=risk.nombre_activo or risk.activo or "",
+            severity=pa_risk_severity(risk),
+            action_type="Tratamiento de riesgo",
+            responsible=risk.responsable or risk.propietario_riesgo or "",
+            due_date=risk.fecha_implementacion or "",
+            status="Abierto",
+            raw_json={"riesgo_id": risk.id},
+        ):
+            created += 1
+    return created
+
+
+def pa_sync_continuous_controls():
+    created = 0
+    controls = ContinuousControl.query.filter(
+        ContinuousControl.status.in_(["No cumple", "Parcial"])
+    ).order_by(ContinuousControl.id.asc()).limit(3000).all()
+
+    for control in controls:
+        severity = "Alta" if control.status == "No cumple" else "Media"
+        description = "\n\n".join([
+            part for part in [
+                f"Estado: {control.status}",
+                f"Control: {control.control_name}" if control.control_name else "",
+                f"Evidencia: {control.evidence_summary}" if control.evidence_summary else "",
+                f"Notas: {control.notes}" if control.notes else "",
+            ] if part
+        ])
+        source_ref = (
+            f"cumplimiento-control:{control.standard}:{control.control_code}:"
+            f"{control.source_type}:{control.id}"
+        )
+        if pa_upsert_source_plan(
+            source_ref=source_ref,
+            origin="Cumplimiento Continuo",
+            standard=control.standard,
+            title=f"Corregir {control.standard} {control.control_code} - {control.control_name}",
+            description=description,
+            control_code=control.control_code,
+            severity=severity,
+            action_type="Remediación de control",
+            raw_json={"continuous_control_id": control.id},
+        ):
+            created += 1
+    return created
+
+
+def pa_sync_wazuh_compliance_controls():
+    created = 0
+    rows = WazuhComplianceControl.query.filter(
+        WazuhComplianceControl.status.in_(["No cumple", "Parcial"])
+    ).order_by(WazuhComplianceControl.id.asc()).limit(5000).all()
+
+    for row in rows:
+        event_ref = row.alert_id or str(row.id)
+        source_ref = f"wazuh-control:{row.standard}:{row.control_code}:{event_ref}"
+        description = "\n\n".join([
+            part for part in [
+                f"Estado: {row.status}",
+                f"Descripción técnica: {row.rule_description}" if row.rule_description else "",
+                f"Agente: {row.agent_name}" if row.agent_name else "",
+                f"Regla Wazuh: {row.rule_id}" if row.rule_id else "",
+            ] if part
+        ])
+        if pa_upsert_source_plan(
+            source_ref=source_ref,
+            origin="Cumplimiento Continuo - Wazuh",
+            standard=row.standard,
+            title=f"Remediar incumplimiento {row.standard} {row.control_code}",
+            description=description,
+            control_code=row.control_code,
+            asset=row.agent_name or "",
+            severity=row.severity or ("Alta" if row.status == "No cumple" else "Media"),
+            action_type="Remediación de control",
+            raw_json={"wazuh_compliance_control_id": row.id, "alert_id": row.alert_id},
+        ):
+            created += 1
+    return created
+
+
+def pa_sync_all_sources():
+    created = 0
+    errors = []
+    sync_functions = [
+        ("Mejora Continua", pa_sync_legacy_mejora),
+        ("ISO 27001", pa_sync_iso_maturity),
+        ("NIST CSF 2.0", pa_sync_nist_maturity),
+        ("PCI-DSS", pa_sync_pci_maturity),
+        ("SOC 2", pa_sync_soc2_maturity),
+        ("Gestión de Riesgos", pa_sync_risk_existing_plans),
+        ("Cumplimiento Continuo", pa_sync_continuous_controls),
+        ("Wazuh", pa_sync_wazuh_compliance_controls),
+    ]
+
+    for label, function in sync_functions:
+        try:
+            new_records = int(function() or 0)
+            db.session.commit()
+            created += new_records
+        except Exception as exc:
+            db.session.rollback()
+            errors.append(f"{label}: {exc}")
+
+    return created, errors
+
+
+def pa_render_page(content):
+    return render_template_string(BASE, content=Markup(content))
+
+
+@app.route("/planes_accion")
+@login_required
+def planes_accion_dashboard():
+    user, response = pa_require_read()
+    if response:
+        return response
+
+    sync_errors = []
+    if pa_can_write(user):
+        _, sync_errors = pa_sync_all_sources()
+
+    standard = (request.args.get("standard") or "").strip().upper()
+    origin = (request.args.get("origin") or "").strip()
+    status = (request.args.get("status") or "").strip()
+    search = (request.args.get("search") or "").strip()
+
+    query = ContinuousActionPlan.query
+    if standard:
+        query = query.filter(ContinuousActionPlan.standard == standard)
+    if origin:
+        query = query.filter(ContinuousActionPlan.origin == origin)
+    if status:
+        query = query.filter(ContinuousActionPlan.status == status)
+    if search:
+        like = f"%{search}%"
+        query = query.filter(pa_or_(
+            ContinuousActionPlan.title.ilike(like),
+            ContinuousActionPlan.description.ilike(like),
+            ContinuousActionPlan.control_code.ilike(like),
+            ContinuousActionPlan.asset.ilike(like),
+            ContinuousActionPlan.responsible.ilike(like),
+        ))
+
+    plans = query.order_by(ContinuousActionPlan.id.desc()).limit(2000).all()
+    all_plans = ContinuousActionPlan.query.order_by(ContinuousActionPlan.id.desc()).limit(10000).all()
+
+    total = len(all_plans)
+    abiertos = sum(1 for p in all_plans if (p.status or "").strip() == "Abierto")
+    en_proceso = sum(1 for p in all_plans if (p.status or "").strip() == "En proceso")
+    cerrados = sum(1 for p in all_plans if (p.status or "").strip() == "Cerrado")
+    today = date.today()
+    vencidos = sum(
+        1 for p in all_plans
+        if pa_due_date_obj(p.due_date)
+        and pa_due_date_obj(p.due_date) < today
+        and not pa_status_closed(p.status)
+    )
+
+    counts = {key: 0 for key in ["ISO27001", "SOC2", "PCIDSS", "NISTCSF", "RIESGOS", "MULTI"]}
+    for plan in all_plans:
+        key = (plan.standard or "").strip().upper()
+        if key in counts:
+            counts[key] += 1
+
+    standards = [
+        row[0] for row in db.session.query(ContinuousActionPlan.standard)
+        .filter(ContinuousActionPlan.standard.isnot(None))
+        .filter(ContinuousActionPlan.standard != "")
+        .distinct().order_by(ContinuousActionPlan.standard.asc()).all()
+    ]
+    origins = [
+        row[0] for row in db.session.query(ContinuousActionPlan.origin)
+        .filter(ContinuousActionPlan.origin.isnot(None))
+        .filter(ContinuousActionPlan.origin != "")
+        .distinct().order_by(ContinuousActionPlan.origin.asc()).all()
+    ]
+
+    html = r'''
+    <div class="pa-shell">
+      <section class="pa-hero">
+        <div class="pa-hero-icon"><i class="bi bi-clipboard2-check"></i></div>
+        <div>
+          <span class="pa-kicker">SGSI · Gestión transversal</span>
+          <h1>Planes de Acción</h1>
+          <p>Consolidación de acciones de ISO 27001, SOC 2, PCI-DSS, NIST CSF 2.0, Cumplimiento Continuo, Gobierno de Firewall y Gestión de Riesgos.</p>
+        </div>
+      </section>
+
+      {% if sync_errors %}
+      <div class="alert alert-warning small">
+        Algunas fuentes no pudieron sincronizarse: {{ sync_errors|join(' · ') }}
+      </div>
+      {% endif %}
+
+      <div class="pa-actions">
+        {% if can_write %}
+        <a href="{{ url_for('planes_accion_new') }}" class="pa-btn pa-btn-primary">
+          <i class="bi bi-plus-circle"></i> Registrar plan de acción
+        </a>
+        <form method="post" action="{{ url_for('planes_accion_sync') }}" class="m-0">
+          <button class="pa-btn pa-btn-light" type="submit">
+            <i class="bi bi-arrow-repeat"></i> Actualizar fuentes
+          </button>
+        </form>
+        {% endif %}
+      </div>
+
+      <div class="pa-kpi-grid">
+        <div class="pa-kpi"><strong>{{ total }}</strong><span>Total de planes</span></div>
+        <div class="pa-kpi"><strong>{{ abiertos }}</strong><span>Abiertos</span></div>
+        <div class="pa-kpi"><strong>{{ en_proceso }}</strong><span>En proceso</span></div>
+        <div class="pa-kpi"><strong>{{ cerrados }}</strong><span>Cerrados</span></div>
+        <div class="pa-kpi danger"><strong>{{ vencidos }}</strong><span>Vencidos</span></div>
+      </div>
+
+      <div class="pa-standard-grid">
+        <div><b>{{ counts.ISO27001 }}</b><span>ISO 27001</span></div>
+        <div><b>{{ counts.SOC2 }}</b><span>SOC 2</span></div>
+        <div><b>{{ counts.PCIDSS }}</b><span>PCI-DSS</span></div>
+        <div><b>{{ counts.NISTCSF }}</b><span>NIST CSF 2.0</span></div>
+        <div><b>{{ counts.RIESGOS }}</b><span>Gestión de Riesgos</span></div>
+        <div><b>{{ counts.MULTI }}</b><span>Multiestándar</span></div>
+      </div>
+
+      <section class="pa-card">
+        <form method="get" class="row g-2 align-items-end">
+          <div class="col-lg-2 col-md-4">
+            <label>Estándar / fuente</label>
+            <select name="standard" class="form-select">
+              <option value="">Todos</option>
+              {% for value in standards %}
+              <option value="{{ value }}" {% if standard == value %}selected{% endif %}>{{ standard_label(value) }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-lg-3 col-md-4">
+            <label>Origen</label>
+            <select name="origin" class="form-select">
+              <option value="">Todos</option>
+              {% for value in origins %}
+              <option value="{{ value }}" {% if origin == value %}selected{% endif %}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-lg-2 col-md-4">
+            <label>Estado</label>
+            <select name="status" class="form-select">
+              <option value="">Todos</option>
+              {% for value in ['Abierto','En proceso','Cerrado','Cancelado'] %}
+              <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-lg-3 col-md-8">
+            <label>Buscar</label>
+            <input name="search" class="form-control" value="{{ search }}" placeholder="Título, control, activo o responsable">
+          </div>
+          <div class="col-lg-1 col-md-2"><button class="btn btn-primary w-100">Filtrar</button></div>
+          <div class="col-lg-1 col-md-2"><a class="btn btn-outline-secondary w-100" href="{{ url_for('planes_accion_dashboard') }}">Limpiar</a></div>
+        </form>
+      </section>
+
+      <section class="pa-card pa-table-card">
+        <div class="table-responsive">
+          <table class="table table-hover align-middle pa-table">
+            <thead>
+              <tr>
+                <th>ID</th><th>Origen</th><th>Estándar</th><th>Control / riesgo</th>
+                <th>Plan de acción</th><th>Tipo</th><th>Severidad</th>
+                <th>Responsable</th><th>Fecha objetivo</th><th>Estado</th><th>Acción</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in plans %}
+              <tr>
+                <td>{{ p.id }}</td>
+                <td><span class="pa-origin">{{ p.origin or '—' }}</span></td>
+                <td><span class="pa-standard">{{ standard_label(p.standard) }}</span></td>
+                <td>{{ p.control_code or '—' }}</td>
+                <td class="pa-plan-cell">
+                  <strong>{{ p.title }}</strong>
+                  {% if p.description %}<small>{{ p.description[:180] }}{% if p.description|length > 180 %}…{% endif %}</small>{% endif %}
+                  {% if p.asset %}<em>Activo: {{ p.asset }}</em>{% endif %}
+                </td>
+                <td>{{ p.action_type or '—' }}</td>
+                <td>{{ severity_badge(p.severity)|safe }}</td>
+                <td>{{ p.responsible or '—' }}</td>
+                <td>
+                  {% set due = due_date_obj(p.due_date) %}
+                  <span class="{% if due and due < today and not status_closed(p.status) %}text-danger fw-bold{% endif %}">
+                    {{ p.due_date or '—' }}
+                  </span>
+                </td>
+                <td>{{ status_badge(p.status)|safe }}</td>
+                <td>
+                  <a href="{{ url_for('planes_accion_edit', plan_id=p.id) }}" class="btn btn-sm btn-outline-primary">
+                    {% if can_write %}Gestionar{% else %}Ver{% endif %}
+                  </a>
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="11" class="text-center text-muted py-5">No hay planes de acción para los filtros seleccionados.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <style>
+      body{background:#f3f7fb;}
+      .pa-shell{width:96%;max-width:1750px;margin:22px auto 30px;}
+      .pa-hero{display:flex;align-items:center;gap:14px;padding:17px 22px;border-radius:19px;color:#fff;background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);box-shadow:0 14px 30px rgba(15,23,42,.24);margin-bottom:14px;}
+      .pa-hero-icon{width:56px;height:56px;min-width:56px;border-radius:15px;background:#fff;color:#0b4a8f;display:flex;align-items:center;justify-content:center;font-size:1.55rem;box-shadow:0 8px 18px rgba(0,0,0,.2);}
+      .pa-kicker{display:inline-block;padding:3px 10px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.14);border-radius:999px;font-size:.66rem;font-weight:900;}
+      .pa-hero h1{font-size:1.45rem!important;margin:4px 0 2px!important;color:#fff!important;font-weight:950;}
+      .pa-hero p{margin:0;color:rgba(255,255,255,.92);font-size:.82rem;}
+      .pa-actions{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 14px;}
+      .pa-btn{display:inline-flex;align-items:center;gap:8px;text-decoration:none;border:none;border-radius:11px;padding:9px 15px;font-size:.82rem;font-weight:900;box-shadow:0 7px 16px rgba(15,23,42,.12);}
+      .pa-btn-primary{background:linear-gradient(135deg,#086df0,#2487ff);color:#fff;}
+      .pa-btn-light{background:#fff;color:#0b4a8f;border:1px solid #cedbea;}
+      .pa-kpi-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:11px;margin-bottom:11px;}
+      .pa-kpi{background:#fff;border:1px solid #dde7f2;border-radius:16px;padding:13px 15px;box-shadow:0 9px 20px rgba(15,23,42,.10);display:flex;flex-direction:column;}
+      .pa-kpi strong{font-size:1.45rem;color:#0b4a8f;line-height:1;}.pa-kpi span{font-size:.72rem;color:#526173;font-weight:850;margin-top:5px}.pa-kpi.danger strong{color:#b42318;}
+      .pa-standard-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin-bottom:13px;}
+      .pa-standard-grid div{background:#eaf3ff;border:1px solid #cfe0f5;border-radius:13px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;gap:8px;}
+      .pa-standard-grid b{color:#0b4a8f;font-size:1.05rem}.pa-standard-grid span{font-size:.69rem;color:#334155;font-weight:850;text-align:right;}
+      .pa-card{background:rgba(255,255,255,.98);border:1px solid #dce6f1;border-radius:18px;padding:14px 16px;box-shadow:0 11px 24px rgba(15,23,42,.12);margin-bottom:14px;}
+      .pa-card label{font-size:.75rem;font-weight:900;color:#334155;margin-bottom:4px}.pa-card .form-control,.pa-card .form-select{min-height:36px;border-radius:10px;font-size:.78rem;border:1px solid #cfdbea;}
+      .pa-table-card{padding:0;overflow:hidden}.pa-table{margin:0;min-width:1500px;font-size:.76rem}.pa-table thead th{background:#eaf3ff;color:#062b55;font-weight:950;text-align:center;white-space:nowrap;padding:9px 7px}.pa-table td{padding:7px;vertical-align:middle;border-color:#e5edf6}.pa-plan-cell{min-width:320px;max-width:470px}.pa-plan-cell strong,.pa-plan-cell small,.pa-plan-cell em{display:block}.pa-plan-cell small{color:#475569;margin-top:3px;white-space:pre-line}.pa-plan-cell em{font-size:.68rem;color:#64748b;margin-top:3px}.pa-origin,.pa-standard{display:inline-block;border-radius:999px;padding:4px 8px;background:#eef4fb;color:#0b4a8f;font-weight:850;white-space:nowrap;}
+      @media(max-width:1050px){.pa-kpi-grid{grid-template-columns:repeat(2,1fr)}.pa-standard-grid{grid-template-columns:repeat(2,1fr)}}
+    </style>
+    '''
+
+    inner = render_template_string(
+        html,
+        plans=plans,
+        total=total,
+        abiertos=abiertos,
+        en_proceso=en_proceso,
+        cerrados=cerrados,
+        vencidos=vencidos,
+        counts=counts,
+        standards=standards,
+        origins=origins,
+        standard=standard,
+        origin=origin,
+        status=status,
+        search=search,
+        sync_errors=sync_errors,
+        can_write=pa_can_write(user),
+        standard_label=pa_standard_label,
+        status_badge=pa_badge_status,
+        severity_badge=pa_badge_severity,
+        due_date_obj=pa_due_date_obj,
+        status_closed=pa_status_closed,
+        today=today,
+    )
+    return pa_render_page(inner)
+
+
+@app.route("/planes_accion/sincronizar", methods=["POST"])
+@login_required
+def planes_accion_sync():
+    user, response = pa_require_write()
+    if response:
+        return response
+    created, errors = pa_sync_all_sources()
+    if errors:
+        flash(f"Sincronización terminada con observaciones. Nuevos planes: {created}. " + " | ".join(errors), "warning")
+    else:
+        flash(f"Fuentes actualizadas correctamente. Nuevos planes incorporados: {created}.", "success")
+    registrar_log(pa_username(user), f"Sincronizó las fuentes del capítulo Plan de Acción. Nuevos registros: {created}.")
+    return redirect(url_for("planes_accion_dashboard"))
+
+
+@app.route("/planes_accion/nuevo", methods=["GET", "POST"])
+@login_required
+def planes_accion_new():
+    user, response = pa_require_write()
+    if response:
+        return response
+
+    risk_id = request.values.get("riesgo_id", type=int)
+    risk = Riesgo.query.get(risk_id) if risk_id else None
+
+    defaults = {
+        "origin": "Gestión de Riesgos" if risk else "Registro manual",
+        "standard": "RIESGOS" if risk else "SGSI",
+        "control_code": (risk.codigo_riesgo or str(risk.id)) if risk else "",
+        "title": f"Tratamiento del riesgo {risk.codigo_riesgo or risk.id}" if risk else "",
+        "description": "",
+        "asset": (risk.nombre_activo or risk.activo or "") if risk else "",
+        "severity": pa_risk_severity(risk) if risk else "Media",
+        "action_type": "Tratamiento de riesgo" if risk else "Correctiva",
+        "responsible": (risk.responsable or risk.propietario_riesgo or "") if risk else "",
+        "due_date": (risk.fecha_implementacion or "") if risk else "",
+        "status": "Abierto",
+    }
+
+    if risk:
+        defaults["description"] = "\n\n".join([
+            part for part in [
+                f"Riesgo: {risk.riesgo}" if risk.riesgo else "",
+                f"Amenaza: {risk.amenaza}" if risk.amenaza else "",
+                f"Vulnerabilidad: {risk.vulnerabilidad}" if risk.vulnerabilidad else "",
+                f"Riesgo inherente: {risk.riesgo_inherente}" if risk.riesgo_inherente else "",
+                f"Riesgo residual: {risk.riesgo_residual}" if risk.riesgo_residual else "",
+                f"Tratamiento definido: {risk.tratamiento_riesgo}" if risk.tratamiento_riesgo else "",
+                f"Plan existente: {risk.planes_accion or risk.plan_accion}" if (risk.planes_accion or risk.plan_accion) else "",
+            ] if part
+        ])
+
+    if request.method == "POST":
+        title = (request.form.get("title") or "").strip()
+        if not title:
+            flash("El título del plan de acción es obligatorio.", "danger")
+        else:
+            source_ref = (
+                f"riesgo-manual:{risk_id}:{uuid.uuid4().hex}"
+                if risk_id else f"manual:{uuid.uuid4().hex}"
+            )
+            plan = ContinuousActionPlan(
+                origin=(request.form.get("origin") or defaults["origin"]).strip(),
+                standard=(request.form.get("standard") or defaults["standard"]).strip().upper(),
+                control_code=(request.form.get("control_code") or "").strip(),
+                title=title[:500],
+                description=(request.form.get("description") or "").strip(),
+                asset=(request.form.get("asset") or "").strip(),
+                severity=(request.form.get("severity") or "Media").strip(),
+                action_type=(request.form.get("action_type") or "Correctiva").strip(),
+                responsible=(request.form.get("responsible") or "").strip(),
+                due_date=(request.form.get("due_date") or "").strip(),
+                status=(request.form.get("status") or "Abierto").strip(),
+                source_ref=source_ref,
+                raw_json=json.dumps({"riesgo_id": risk_id, "creado_por": pa_username(user)}, ensure_ascii=False),
+            )
+            db.session.add(plan)
+            db.session.commit()
+            registrar_log(pa_username(user), f"Registró el plan de acción {plan.id}: {plan.title}.")
+            flash("Plan de acción registrado correctamente.", "success")
+            return redirect(url_for("planes_accion_dashboard"))
+
+    html = r'''
+    <div class="pa-form-shell">
+      <div class="pa-form-hero">
+        <div><span>SGSI · Plan de Acción</span><h1>Registrar plan de acción</h1><p>Defina la actividad, su origen, responsable, fecha objetivo y estado de seguimiento.</p></div>
+      </div>
+      <div class="pa-form-actions"><a href="{{ url_for('planes_accion_dashboard') }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Volver</a></div>
+      {% if risk %}
+      <div class="alert alert-info"><strong>Riesgo asociado:</strong> {{ risk.codigo_riesgo or risk.id }} · {{ risk.riesgo }}</div>
+      {% endif %}
+      <form method="post" class="pa-form-card">
+        <input type="hidden" name="riesgo_id" value="{{ risk.id if risk else '' }}">
+        <div class="row g-3">
+          <div class="col-md-3"><label>Origen</label><input class="form-control" name="origin" value="{{ defaults.origin }}" required></div>
+          <div class="col-md-3"><label>Estándar / ámbito</label><select class="form-select" name="standard">{% for value,label in standards %}<option value="{{ value }}" {% if defaults.standard == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+          <div class="col-md-3"><label>Control / código de riesgo</label><input class="form-control" name="control_code" value="{{ defaults.control_code }}"></div>
+          <div class="col-md-3"><label>Activo relacionado</label><input class="form-control" name="asset" value="{{ defaults.asset }}"></div>
+          <div class="col-12"><label>Título del plan</label><input class="form-control" name="title" value="{{ defaults.title }}" required></div>
+          <div class="col-12"><label>Descripción y actividades</label><textarea class="form-control" name="description" rows="8">{{ defaults.description }}</textarea></div>
+          <div class="col-md-3"><label>Tipo de acción</label><select class="form-select" name="action_type">{% for value in ['Correctiva','Mejora','Remediación','Tratamiento de riesgo','Plan de cumplimiento','Incidente','Hallazgo'] %}<option {% if defaults.action_type == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>
+          <div class="col-md-2"><label>Severidad</label><select class="form-select" name="severity">{% for value in ['Crítica','Alta','Media','Baja'] %}<option {% if defaults.severity == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>
+          <div class="col-md-3"><label>Responsable</label><input class="form-control" name="responsible" value="{{ defaults.responsible }}"></div>
+          <div class="col-md-2"><label>Fecha objetivo</label><input type="date" class="form-control" name="due_date" value="{{ defaults.due_date }}"></div>
+          <div class="col-md-2"><label>Estado</label><select class="form-select" name="status">{% for value in ['Abierto','En proceso','Cerrado','Cancelado'] %}<option {% if defaults.status == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>
+        </div>
+        <div class="mt-4"><button class="btn btn-primary px-4"><i class="bi bi-save"></i> Guardar plan de acción</button></div>
+      </form>
+    </div>
+    <style>
+      body{background:#f3f7fb}.pa-form-shell{width:94%;max-width:1250px;margin:22px auto 30px}.pa-form-hero{background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);color:#fff;border-radius:18px;padding:17px 23px;box-shadow:0 14px 28px rgba(15,23,42,.22)}.pa-form-hero span{font-size:.67rem;font-weight:900;background:rgba(255,255,255,.16);border-radius:999px;padding:3px 9px}.pa-form-hero h1{color:#fff!important;font-size:1.4rem!important;margin:5px 0 2px!important}.pa-form-hero p{margin:0;font-size:.82rem;color:rgba(255,255,255,.92)}.pa-form-actions{margin:12px 0}.pa-form-card{background:#fff;border:1px solid #dce6f1;border-radius:18px;padding:20px;box-shadow:0 12px 25px rgba(15,23,42,.12)}.pa-form-card label{font-size:.77rem;font-weight:900;color:#334155;margin-bottom:4px}.pa-form-card .form-control,.pa-form-card .form-select{border-radius:10px;border:1px solid #cfdbea;font-size:.82rem}
+    </style>
+    '''
+    inner = render_template_string(
+        html,
+        risk=risk,
+        defaults=defaults,
+        standards=[
+            ("SGSI", "Sistema de Gestión"), ("ISO27001", "ISO 27001"),
+            ("SOC2", "SOC 2"), ("PCIDSS", "PCI-DSS"),
+            ("NISTCSF", "NIST CSF 2.0"), ("RIESGOS", "Gestión de Riesgos"),
+            ("MULTI", "Múltiples estándares"),
+        ],
+    )
+    return pa_render_page(inner)
+
+
+@app.route("/planes_accion/<int:plan_id>/editar", methods=["GET", "POST"])
+@login_required
+def planes_accion_edit(plan_id):
+    user, response = pa_require_read()
+    if response:
+        return response
+    plan = ContinuousActionPlan.query.get_or_404(plan_id)
+    can_write = pa_can_write(user)
+
+    if request.method == "POST":
+        if not can_write:
+            flash("El rol actual solo puede consultar el plan de acción.", "warning")
+            return redirect(url_for("planes_accion_edit", plan_id=plan.id))
+        plan.origin = (request.form.get("origin") or plan.origin or "").strip()
+        plan.standard = (request.form.get("standard") or plan.standard or "SGSI").strip().upper()
+        plan.control_code = (request.form.get("control_code") or "").strip()
+        plan.title = (request.form.get("title") or plan.title or "Plan de acción").strip()[:500]
+        plan.description = (request.form.get("description") or "").strip()
+        plan.asset = (request.form.get("asset") or "").strip()
+        plan.severity = (request.form.get("severity") or "Media").strip()
+        plan.action_type = (request.form.get("action_type") or "Correctiva").strip()
+        plan.responsible = (request.form.get("responsible") or "").strip()
+        plan.due_date = (request.form.get("due_date") or "").strip()
+        plan.status = (request.form.get("status") or "Abierto").strip()
+        db.session.commit()
+        registrar_log(pa_username(user), f"Actualizó el plan de acción {plan.id}: {plan.title}.")
+        flash("Plan de acción actualizado correctamente.", "success")
+        return redirect(url_for("planes_accion_dashboard"))
+
+    html = r'''
+    <div class="pa-edit-shell">
+      <div class="pa-edit-hero"><span>SGSI · Seguimiento</span><h1>Gestionar plan de acción #{{ plan.id }}</h1><p>{{ standard_label(plan.standard) }} · {{ plan.origin }}</p></div>
+      <div class="my-3"><a href="{{ url_for('planes_accion_dashboard') }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Volver</a></div>
+      <form method="post" class="pa-edit-card">
+        <div class="row g-3">
+          <div class="col-md-3"><label>Origen</label><input class="form-control" name="origin" value="{{ plan.origin or '' }}" {% if not can_write %}disabled{% endif %}></div>
+          <div class="col-md-3"><label>Estándar / ámbito</label><select class="form-select" name="standard" {% if not can_write %}disabled{% endif %}>{% for value,label in standards %}<option value="{{ value }}" {% if plan.standard == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+          <div class="col-md-3"><label>Control / riesgo</label><input class="form-control" name="control_code" value="{{ plan.control_code or '' }}" {% if not can_write %}disabled{% endif %}></div>
+          <div class="col-md-3"><label>Activo</label><input class="form-control" name="asset" value="{{ plan.asset or '' }}" {% if not can_write %}disabled{% endif %}></div>
+          <div class="col-12"><label>Título</label><input class="form-control" name="title" value="{{ plan.title }}" {% if not can_write %}disabled{% endif %}></div>
+          <div class="col-12"><label>Descripción y actividades</label><textarea class="form-control" rows="10" name="description" {% if not can_write %}disabled{% endif %}>{{ plan.description or '' }}</textarea></div>
+          <div class="col-md-3"><label>Tipo</label><select class="form-select" name="action_type" {% if not can_write %}disabled{% endif %}>{% for value in ['Correctiva','Mejora','Remediación','Tratamiento de riesgo','Plan de cumplimiento','Remediación de control','Incidente','Hallazgo'] %}<option {% if plan.action_type == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>
+          <div class="col-md-2"><label>Severidad</label><select class="form-select" name="severity" {% if not can_write %}disabled{% endif %}>{% for value in ['Crítica','Alta','Media','Baja'] %}<option {% if plan.severity == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>
+          <div class="col-md-3"><label>Responsable</label><input class="form-control" name="responsible" value="{{ plan.responsible or '' }}" {% if not can_write %}disabled{% endif %}></div>
+          <div class="col-md-2"><label>Fecha objetivo</label><input type="date" class="form-control" name="due_date" value="{{ plan.due_date or '' }}" {% if not can_write %}disabled{% endif %}></div>
+          <div class="col-md-2"><label>Estado</label><select class="form-select" name="status" {% if not can_write %}disabled{% endif %}>{% for value in ['Abierto','En proceso','Cerrado','Cancelado'] %}<option {% if plan.status == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>
+        </div>
+        {% if can_write %}<div class="mt-4"><button class="btn btn-primary px-4"><i class="bi bi-save"></i> Guardar cambios</button></div>{% endif %}
+      </form>
+    </div>
+    <style>
+      body{background:#f3f7fb}.pa-edit-shell{width:94%;max-width:1250px;margin:22px auto 30px}.pa-edit-hero{background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);color:#fff;border-radius:18px;padding:17px 23px;box-shadow:0 14px 28px rgba(15,23,42,.22)}.pa-edit-hero span{font-size:.67rem;font-weight:900;background:rgba(255,255,255,.16);border-radius:999px;padding:3px 9px}.pa-edit-hero h1{color:#fff!important;font-size:1.4rem!important;margin:5px 0 2px!important}.pa-edit-hero p{margin:0;font-size:.82rem;color:rgba(255,255,255,.92)}.pa-edit-card{background:#fff;border:1px solid #dce6f1;border-radius:18px;padding:20px;box-shadow:0 12px 25px rgba(15,23,42,.12)}.pa-edit-card label{font-size:.77rem;font-weight:900;color:#334155;margin-bottom:4px}.pa-edit-card .form-control,.pa-edit-card .form-select{border-radius:10px;border:1px solid #cfdbea;font-size:.82rem}
+    </style>
+    '''
+    inner = render_template_string(
+        html,
+        plan=plan,
+        can_write=can_write,
+        standard_label=pa_standard_label,
+        standards=[
+            ("SGSI", "Sistema de Gestión"), ("ISO27001", "ISO 27001"),
+            ("SOC2", "SOC 2"), ("PCIDSS", "PCI-DSS"),
+            ("NISTCSF", "NIST CSF 2.0"), ("RIESGOS", "Gestión de Riesgos"),
+            ("MULTI", "Múltiples estándares"),
+        ],
+    )
+    return pa_render_page(inner)
+
+# ============================================================================================================================================
+#                         FIN CAPÍTULO INDEPENDIENTE: PLAN DE ACCIÓN
+# ============================================================================================================================================
+
+
+# ============================================================================================================================================
+#                         MÓDULO GOBIERNO DE FIREWALL - CUMPLIMIENTO CONTINUO
+#                         Conector OPNsense API + análisis + DB independiente firewall_governance.db
+# ============================================================================================================================================
+
+from sqlalchemy import or_
+
+FIREWALL_GOV_VENDOR_OPNSENSE = "OPNsense"
+FIREWALL_GOV_DEFAULT_URL = "https://192.168.100.10"
+FIREWALL_GOV_SEVERITY_ORDER = {"Crítica": 4, "Alta": 3, "Media": 2, "Baja": 1, "Informativa": 0}
+FIREWALL_GOV_SEVERITY_SCORE = {"Crítica": 25, "Alta": 15, "Media": 8, "Baja": 3, "Informativa": 0}
+
+
+class FirewallGovDevice(db.Model):
+    __tablename__ = "firewall_gov_devices"
+    __bind_key__ = "firewall_governance"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    vendor = db.Column(db.String(80), nullable=False, default=FIREWALL_GOV_VENDOR_OPNSENSE)
+    base_url = db.Column(db.String(500), nullable=False, default=FIREWALL_GOV_DEFAULT_URL)
+    api_key_encrypted = db.Column(db.Text, nullable=True)
+    api_secret_encrypted = db.Column(db.Text, nullable=True)
+    verify_ssl = db.Column(db.Boolean, nullable=False, default=False)
+    timeout_seconds = db.Column(db.Integer, nullable=False, default=30)
+    search_phrase = db.Column(db.String(255), nullable=True, default="GRAC-")
+    category_filter = db.Column(db.String(255), nullable=True, default="GRAC_LAB")
+    enabled = db.Column(db.Boolean, nullable=False, default=True)
+    last_status = db.Column(db.String(50), nullable=True, default="No probado")
+    last_message = db.Column(db.Text, nullable=True)
+    last_test_at = db.Column(db.DateTime, nullable=True)
+    last_sync_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class FirewallGovRule(db.Model):
+    __tablename__ = "firewall_gov_rules"
+    __bind_key__ = "firewall_governance"
+
+    id = db.Column(db.Integer, primary_key=True)
+    device_id = db.Column(db.Integer, db.ForeignKey("firewall_gov_devices.id"), nullable=False, index=True)
+    external_id = db.Column(db.String(255), nullable=False, index=True)
+    name = db.Column(db.String(500), nullable=True)
+    description = db.Column(db.Text, nullable=True)
+    enabled = db.Column(db.Boolean, nullable=False, default=True)
+    action = db.Column(db.String(50), nullable=True)
+    quick = db.Column(db.Boolean, nullable=False, default=True)
+    interface = db.Column(db.String(255), nullable=True)
+    direction = db.Column(db.String(50), nullable=True)
+    ip_version = db.Column(db.String(50), nullable=True)
+    protocol = db.Column(db.String(100), nullable=True)
+    source = db.Column(db.Text, nullable=True)
+    source_port = db.Column(db.String(255), nullable=True)
+    destination = db.Column(db.Text, nullable=True)
+    destination_port = db.Column(db.String(255), nullable=True)
+    gateway = db.Column(db.String(255), nullable=True)
+    schedule = db.Column(db.String(255), nullable=True)
+    logging_enabled = db.Column(db.Boolean, nullable=False, default=False)
+    category = db.Column(db.String(255), nullable=True)
+    sequence = db.Column(db.Integer, nullable=True)
+    sort_order = db.Column(db.Float, nullable=True)
+    owner = db.Column(db.String(255), nullable=True)
+    ticket = db.Column(db.String(255), nullable=True)
+    review_date = db.Column(db.String(20), nullable=True)
+    expiration_date = db.Column(db.String(20), nullable=True)
+    justification = db.Column(db.Text, nullable=True)
+    fingerprint = db.Column(db.String(64), nullable=True, index=True)
+    raw_json = db.Column(db.Text, nullable=True)
+    active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    first_seen_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_seen_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("device_id", "external_id", name="uq_firewall_gov_rule_device_external"),
+    )
+
+
+class FirewallGovFinding(db.Model):
+    __tablename__ = "firewall_gov_findings"
+    __bind_key__ = "firewall_governance"
+
+    id = db.Column(db.Integer, primary_key=True)
+    device_id = db.Column(db.Integer, db.ForeignKey("firewall_gov_devices.id"), nullable=False, index=True)
+    rule_id = db.Column(db.Integer, db.ForeignKey("firewall_gov_rules.id"), nullable=True, index=True)
+    finding_key = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    finding_code = db.Column(db.String(120), nullable=False, index=True)
+    severity = db.Column(db.String(30), nullable=False, default="Media", index=True)
+    title = db.Column(db.String(500), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    recommendation = db.Column(db.Text, nullable=True)
+    control_mapping = db.Column(db.Text, nullable=True)
+    rule_external_id = db.Column(db.String(255), nullable=True)
+    rule_name = db.Column(db.String(500), nullable=True)
+    related_rule_external_id = db.Column(db.String(255), nullable=True)
+    technical_detail = db.Column(db.Text, nullable=True)
+    risk_score = db.Column(db.Integer, nullable=False, default=0)
+    status = db.Column(db.String(50), nullable=False, default="Abierto", index=True)
+    assigned_to = db.Column(db.String(255), nullable=True)
+    management_comment = db.Column(db.Text, nullable=True)
+    active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    first_detected_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_detected_at = db.Column(db.DateTime, default=datetime.utcnow)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class FirewallGovSyncLog(db.Model):
+    __tablename__ = "firewall_gov_sync_logs"
+    __bind_key__ = "firewall_governance"
+
+    id = db.Column(db.Integer, primary_key=True)
+    device_id = db.Column(db.Integer, db.ForeignKey("firewall_gov_devices.id"), nullable=False, index=True)
+    started_at = db.Column(db.DateTime, default=datetime.utcnow)
+    finished_at = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(50), nullable=False, default="En proceso")
+    message = db.Column(db.Text, nullable=True)
+    endpoint_used = db.Column(db.String(500), nullable=True)
+    rules_received = db.Column(db.Integer, default=0)
+    rules_active = db.Column(db.Integer, default=0)
+    findings_active = db.Column(db.Integer, default=0)
+    critical_findings = db.Column(db.Integer, default=0)
+    compliance_score = db.Column(db.Float, default=100)
+    executed_by = db.Column(db.String(255), nullable=True)
+
+
+def fwgov_init_db():
+    """
+    Inicializa exclusivamente las tablas del módulo Gobierno de Firewall
+    dentro de instance/firewall_governance.db.
+
+    No crea ni modifica estas tablas en la base principal sgsi.db.
+    """
+    try:
+        os.makedirs(app.instance_path, exist_ok=True)
+        with app.app_context():
+            try:
+                # Flask-SQLAlchemy 3.x
+                db.create_all(bind_key="firewall_governance")
+            except TypeError:
+                # Compatibilidad con Flask-SQLAlchemy 2.x
+                db.create_all(bind="firewall_governance")
+    except Exception as exc:
+        print("No se pudo inicializar Gobierno de Firewall en", FIREWALL_GOV_DB_PATH, ":", repr(exc))
+
+
+fwgov_init_db()
+
+
+def fwgov_current_username(user=None):
+    return (
+        getattr(user, "username", None)
+        or session.get("username")
+        or "Sistema"
+    )
+
+
+def fwgov_get_fernet():
+    env_key = (os.getenv("FIREWALL_GOV_FERNET_KEY") or "").strip()
+    if env_key:
+        try:
+            return Fernet(env_key.encode("utf-8"))
+        except Exception as exc:
+            raise RuntimeError("FIREWALL_GOV_FERNET_KEY no contiene una clave Fernet válida.") from exc
+
+    os.makedirs(app.instance_path, exist_ok=True)
+    key_path = os.path.join(app.instance_path, "firewall_governance.key")
+
+    if os.path.exists(key_path):
+        with open(key_path, "rb") as fh:
+            key = fh.read().strip()
+    else:
+        key = Fernet.generate_key()
+        with open(key_path, "wb") as fh:
+            fh.write(key)
+        try:
+            os.chmod(key_path, 0o600)
+        except Exception:
+            pass
+
+    return Fernet(key)
+
+
+def fwgov_encrypt(value):
+    value = (value or "").strip()
+    if not value:
+        return None
+    return fwgov_get_fernet().encrypt(value.encode("utf-8")).decode("utf-8")
+
+
+def fwgov_decrypt(value):
+    value = (value or "").strip()
+    if not value:
+        return ""
+    try:
+        return fwgov_get_fernet().decrypt(value.encode("utf-8")).decode("utf-8")
+    except (InvalidToken, ValueError, TypeError):
+        return ""
+
+
+def fwgov_bool(value):
+    return str(value or "").strip().lower() in ("1", "true", "yes", "si", "sí", "on", "enabled", "enable")
+
+
+def fwgov_clean_url(value):
+    url = (value or "").strip().rstrip("/")
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise ValueError("La URL del firewall debe iniciar con http:// o https:// e incluir un host válido.")
+    return url
+
+
+def fwgov_safe_int(value, default=0, minimum=None, maximum=None):
+    try:
+        number = int(float(value))
+    except Exception:
+        number = default
+    if minimum is not None:
+        number = max(minimum, number)
+    if maximum is not None:
+        number = min(maximum, number)
+    return number
+
+
+def fwgov_safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def fwgov_parse_date(value):
+    text_value = (value or "").strip()
+    if not text_value or text_value.upper() in ("NONE", "N/A", "NA", "NO APLICA", "SIN VENCIMIENTO"):
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(text_value, fmt).date()
+        except Exception:
+            continue
+    return "INVALID"
+
+
+def fwgov_parse_metadata(description):
+    description = (description or "").strip()
+    result = {
+        "name": "",
+        "owner": "",
+        "ticket": "",
+        "review": "",
+        "expires": "",
+        "justification": "",
+    }
+    if not description:
+        return result
+
+    parts = [p.strip() for p in description.split("|")]
+    result["name"] = parts[0].strip()
+
+    patterns = {
+        "owner": r"^OWNER\s*=\s*(.+)$",
+        "ticket": r"^TICKET\s*=\s*(.+)$",
+        "review": r"^REVIEW\s*=\s*(.+)$",
+        "expires": r"^EXPIRES\s*=\s*(.+)$",
+        "justification": r"^JUSTIFICATION\s*=\s*(.+)$",
+    }
+
+    for part in parts[1:]:
+        for key, pattern in patterns.items():
+            match = re.match(pattern, part, flags=re.IGNORECASE)
+            if match:
+                result[key] = match.group(1).strip()
+                break
+
+    return result
+
+
+def fwgov_is_any(value):
+    text_value = (value or "").strip().lower()
+    return text_value in ("", "any", "*", "all", "0.0.0.0/0", "::/0")
+
+
+def fwgov_normalize_port(value):
+    text_value = str(value or "").strip().lower().replace(" ", "")
+    if text_value in ("", "any", "*", "all"):
+        return "any"
+    named = {
+        "ssh": "22",
+        "telnet": "23",
+        "http": "80",
+        "https": "443",
+        "rdp": "3389",
+        "ms-rdp": "3389",
+        "microsoft-ds": "445",
+        "smb": "445",
+        "mysql": "3306",
+        "postgresql": "5432",
+        "domain": "53",
+    }
+    return named.get(text_value, text_value)
+
+
+def fwgov_port_interval(value):
+    text_value = fwgov_normalize_port(value)
+    if text_value == "any":
+        return (1, 65535)
+
+    if "," in text_value:
+        return None
+
+    match = re.match(r"^(\d+)(?:-|:)(\d+)$", text_value)
+    if match:
+        start = int(match.group(1))
+        end = int(match.group(2))
+        if start > end:
+            start, end = end, start
+        return (max(0, start), min(65535, end))
+
+    if text_value.isdigit():
+        port = int(text_value)
+        return (port, port)
+
+    return None
+
+
+def fwgov_port_contains(value, port):
+    interval = fwgov_port_interval(value)
+    return bool(interval and interval[0] <= int(port) <= interval[1])
+
+
+def fwgov_port_covers(earlier, later):
+    earlier_interval = fwgov_port_interval(earlier)
+    later_interval = fwgov_port_interval(later)
+    if earlier_interval and later_interval:
+        return earlier_interval[0] <= later_interval[0] and earlier_interval[1] >= later_interval[1]
+    return fwgov_normalize_port(earlier) == fwgov_normalize_port(later)
+
+
+def fwgov_net_covers(earlier, later):
+    if fwgov_is_any(earlier):
+        return True
+    if (earlier or "").strip().lower() == (later or "").strip().lower():
+        return True
+
+    try:
+        earlier_net = ipaddress.ip_network(str(earlier).strip(), strict=False)
+        later_net = ipaddress.ip_network(str(later).strip(), strict=False)
+        return later_net.subnet_of(earlier_net)
+    except Exception:
+        return False
+
+
+def fwgov_protocol_covers(earlier, later):
+    earlier_value = (earlier or "any").strip().lower()
+    later_value = (later or "any").strip().lower()
+    return earlier_value in ("", "any", "*") or earlier_value == later_value
+
+
+def fwgov_action_is_allow(action):
+    return (action or "").strip().lower() in ("pass", "allow", "permit", "accept")
+
+
+def fwgov_rule_fingerprint(rule_data):
+    technical = {
+        "enabled": bool(rule_data.get("enabled")),
+        "action": (rule_data.get("action") or "").lower(),
+        "quick": bool(rule_data.get("quick")),
+        "interface": (rule_data.get("interface") or "").lower(),
+        "direction": (rule_data.get("direction") or "").lower(),
+        "ip_version": (rule_data.get("ip_version") or "").lower(),
+        "protocol": (rule_data.get("protocol") or "").lower(),
+        "source": (rule_data.get("source") or "").lower(),
+        "source_port": fwgov_normalize_port(rule_data.get("source_port")),
+        "destination": (rule_data.get("destination") or "").lower(),
+        "destination_port": fwgov_normalize_port(rule_data.get("destination_port")),
+        "gateway": (rule_data.get("gateway") or "").lower(),
+        "schedule": (rule_data.get("schedule") or "").lower(),
+        "logging_enabled": bool(rule_data.get("logging_enabled")),
+    }
+    payload = json.dumps(technical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def fwgov_normalize_opnsense_rule(raw_rule):
+    raw_rule = raw_rule or {}
+    description = (raw_rule.get("description") or "").strip()
+    metadata = fwgov_parse_metadata(description)
+    external_id = (
+        raw_rule.get("uuid")
+        or raw_rule.get("id")
+        or hashlib.sha256(json.dumps(raw_rule, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:32]
+    )
+
+    normalized = {
+        "external_id": str(external_id),
+        "name": metadata.get("name") or description or f"Regla {external_id}",
+        "description": description,
+        "enabled": fwgov_bool(raw_rule.get("enabled", "1")),
+        "action": str(raw_rule.get("action") or raw_rule.get("%action") or "").strip(),
+        "quick": fwgov_bool(raw_rule.get("quick", "1")),
+        "interface": str(raw_rule.get("%interface") or raw_rule.get("interface") or "").strip(),
+        "direction": str(raw_rule.get("%direction") or raw_rule.get("direction") or "").strip(),
+        "ip_version": str(raw_rule.get("%ipprotocol") or raw_rule.get("ipprotocol") or "").strip(),
+        "protocol": str(raw_rule.get("protocol") or "any").strip(),
+        "source": str(raw_rule.get("%source_net") or raw_rule.get("source_net") or "any").strip(),
+        "source_port": fwgov_normalize_port(raw_rule.get("source_port")),
+        "destination": str(raw_rule.get("%destination_net") or raw_rule.get("destination_net") or "any").strip(),
+        "destination_port": fwgov_normalize_port(raw_rule.get("destination_port")),
+        "gateway": str(raw_rule.get("gateway") or "").strip(),
+        "schedule": str(raw_rule.get("sched") or raw_rule.get("schedule") or "").strip(),
+        "logging_enabled": fwgov_bool(raw_rule.get("log", "0")),
+        "category": str(raw_rule.get("%categories") or raw_rule.get("categories") or "").strip(),
+        "sequence": fwgov_safe_int(raw_rule.get("sequence"), default=0),
+        "sort_order": fwgov_safe_float(raw_rule.get("sort_order"), default=0.0),
+        "owner": metadata.get("owner") or "",
+        "ticket": metadata.get("ticket") or "",
+        "review_date": metadata.get("review") or "",
+        "expiration_date": metadata.get("expires") or "",
+        "justification": metadata.get("justification") or "",
+        "raw_json": json.dumps(raw_rule, ensure_ascii=False, default=str),
+    }
+    normalized["fingerprint"] = fwgov_rule_fingerprint(normalized)
+    return normalized
+
+
+def fwgov_api_credentials(device):
+    api_key = fwgov_decrypt(device.api_key_encrypted)
+    api_secret = fwgov_decrypt(device.api_secret_encrypted)
+    if not api_key or not api_secret:
+        raise RuntimeError("El dispositivo no tiene una API key/secret válida configurada.")
+    return api_key, api_secret
+
+
+def fwgov_api_get(device, endpoint, params=None):
+    if (device.vendor or "").strip().lower() != FIREWALL_GOV_VENDOR_OPNSENSE.lower():
+        raise RuntimeError(f"El conector para {device.vendor} todavía no está implementado.")
+
+    api_key, api_secret = fwgov_api_credentials(device)
+    url = fwgov_clean_url(device.base_url) + endpoint
+    response = requests.get(
+        url,
+        auth=HTTPBasicAuth(api_key, api_secret),
+        params=params or {},
+        verify=bool(device.verify_ssl),
+        timeout=fwgov_safe_int(device.timeout_seconds, 30, 5, 120),
+        headers={"Accept": "application/json"},
+    )
+    response.raise_for_status()
+    try:
+        return response.json() or {}, url
+    except ValueError as exc:
+        raise RuntimeError("La API respondió, pero el contenido no es JSON válido.") from exc
+
+
+def fwgov_fetch_opnsense_rules(device, only_test=False):
+    endpoints = (
+        "/api/firewall/filter/searchRule",
+        "/api/firewall/filter/search_rule",
+    )
+    last_error = None
+    row_count = 1 if only_test else 500
+
+    for endpoint in endpoints:
+        try:
+            all_rows = []
+            current_page = 1
+            endpoint_url = ""
+
+            while True:
+                data, endpoint_url = fwgov_api_get(
+                    device,
+                    endpoint,
+                    params={
+                        "current": current_page,
+                        "rowCount": row_count,
+                        "searchPhrase": (device.search_phrase or "").strip(),
+                    },
+                )
+
+                rows = data.get("rows") if isinstance(data, dict) else None
+                if rows is None and isinstance(data, dict):
+                    rows = data.get("data", {}).get("rows") if isinstance(data.get("data"), dict) else None
+                rows = rows if isinstance(rows, list) else []
+
+                if only_test:
+                    total = fwgov_safe_int(data.get("total"), len(rows)) if isinstance(data, dict) else len(rows)
+                    return rows, total, endpoint_url
+
+                all_rows.extend(rows)
+                total = fwgov_safe_int(data.get("total"), len(all_rows)) if isinstance(data, dict) else len(all_rows)
+
+                if not rows or len(all_rows) >= total or current_page >= 20:
+                    break
+                current_page += 1
+
+            category_filter = (device.category_filter or "").strip().lower()
+            if category_filter:
+                filtered = []
+                for row in all_rows:
+                    category_text = str(row.get("%categories") or row.get("categories") or "").lower()
+                    if category_filter in category_text:
+                        filtered.append(row)
+                all_rows = filtered
+
+            return all_rows, len(all_rows), endpoint_url
+
+        except requests.HTTPError as exc:
+            last_error = exc
+            if getattr(exc.response, "status_code", None) == 404:
+                continue
+            raise
+        except Exception as exc:
+            last_error = exc
+            break
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("No se encontró un endpoint compatible para consultar reglas.")
+
+
+def fwgov_test_device(device):
+    try:
+        rows, total, endpoint = fwgov_fetch_opnsense_rules(device, only_test=True)
+        device.last_status = "Online"
+        device.last_message = f"Conexión exitosa. La API reportó {total} regla(s)."
+        device.last_test_at = datetime.utcnow()
+        db.session.commit()
+        return True, device.last_message, endpoint
+    except Exception as exc:
+        db.session.rollback()
+        device = FirewallGovDevice.query.get(device.id)
+        device.last_status = "Error"
+        device.last_message = str(exc)[:1000]
+        device.last_test_at = datetime.utcnow()
+        db.session.commit()
+        return False, device.last_message, ""
+
+
+def fwgov_sync_rule_rows(device, raw_rows):
+    now = datetime.utcnow()
+    FirewallGovRule.query.filter_by(device_id=device.id).update({"active": False}, synchronize_session=False)
+
+    active_rule_ids = []
+    for raw_row in raw_rows:
+        normalized = fwgov_normalize_opnsense_rule(raw_row)
+        rule = FirewallGovRule.query.filter_by(
+            device_id=device.id,
+            external_id=normalized["external_id"],
+        ).first()
+
+        if not rule:
+            rule = FirewallGovRule(
+                device_id=device.id,
+                external_id=normalized["external_id"],
+                first_seen_at=now,
+            )
+            db.session.add(rule)
+
+        for field in (
+            "name", "description", "enabled", "action", "quick", "interface", "direction",
+            "ip_version", "protocol", "source", "source_port", "destination", "destination_port",
+            "gateway", "schedule", "logging_enabled", "category", "sequence", "sort_order",
+            "owner", "ticket", "review_date", "expiration_date", "justification", "fingerprint",
+            "raw_json",
+        ):
+            setattr(rule, field, normalized.get(field))
+
+        rule.active = True
+        rule.last_seen_at = now
+        db.session.flush()
+        active_rule_ids.append(rule.id)
+
+    db.session.commit()
+    return active_rule_ids
+
+
+def fwgov_finding_key(device_id, rule_external_id, finding_code, related_external_id=""):
+    raw = f"{device_id}|{rule_external_id or ''}|{finding_code or ''}|{related_external_id or ''}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def fwgov_add_finding(device, rule, code, severity, title, description, recommendation, control_mapping, related_rule=None, technical_detail=""):
+    now = datetime.utcnow()
+    related_external_id = related_rule.external_id if related_rule else ""
+    key = fwgov_finding_key(device.id, rule.external_id if rule else "", code, related_external_id)
+    finding = FirewallGovFinding.query.filter_by(finding_key=key).first()
+
+    if not finding:
+        finding = FirewallGovFinding(
+            device_id=device.id,
+            rule_id=rule.id if rule else None,
+            finding_key=key,
+            finding_code=code,
+            first_detected_at=now,
+            status="Abierto",
+        )
+        db.session.add(finding)
+    elif finding.status in ("Resuelto automáticamente", "Resuelto"):
+        finding.status = "Abierto"
+        finding.resolved_at = None
+
+    finding.rule_id = rule.id if rule else None
+    finding.severity = severity
+    finding.title = title
+    finding.description = description
+    finding.recommendation = recommendation
+    finding.control_mapping = control_mapping
+    finding.rule_external_id = rule.external_id if rule else ""
+    finding.rule_name = rule.name if rule else ""
+    finding.related_rule_external_id = related_external_id
+    finding.technical_detail = technical_detail
+    finding.risk_score = FIREWALL_GOV_SEVERITY_SCORE.get(severity, 0)
+    finding.active = True
+    finding.last_detected_at = now
+    finding.updated_at = now
+    return finding
+
+
+def fwgov_rule_subsumes(earlier, later):
+    if not earlier.quick or not earlier.enabled:
+        return False
+    if (earlier.interface or "").lower() != (later.interface or "").lower():
+        return False
+    if (earlier.direction or "").lower() != (later.direction or "").lower():
+        return False
+    if not fwgov_protocol_covers(earlier.protocol, later.protocol):
+        return False
+    if not fwgov_net_covers(earlier.source, later.source):
+        return False
+    if not fwgov_net_covers(earlier.destination, later.destination):
+        return False
+    if not fwgov_port_covers(earlier.source_port, later.source_port):
+        return False
+    if not fwgov_port_covers(earlier.destination_port, later.destination_port):
+        return False
+    return True
+
+
+def fwgov_analyze_device(device):
+    now = datetime.utcnow()
+    today = date.today()
+
+    FirewallGovFinding.query.filter_by(device_id=device.id).update(
+        {"active": False}, synchronize_session=False
+    )
+
+    rules = FirewallGovRule.query.filter_by(device_id=device.id, active=True).order_by(
+        FirewallGovRule.sort_order.asc(),
+        FirewallGovRule.sequence.asc(),
+        FirewallGovRule.id.asc(),
+    ).all()
+
+    for rule in rules:
+        allow = fwgov_action_is_allow(rule.action)
+        source_any = fwgov_is_any(rule.source)
+        destination_any = fwgov_is_any(rule.destination)
+        protocol_any = (rule.protocol or "").strip().lower() in ("", "any", "*")
+        destination_port_any = fwgov_normalize_port(rule.destination_port) == "any"
+        port_interval = fwgov_port_interval(rule.destination_port)
+
+        if not (rule.description or "").strip():
+            fwgov_add_finding(
+                device, rule, "MISSING_DESCRIPTION", "Baja",
+                "Regla sin nombre o descripción",
+                "La regla no contiene una descripción que permita identificar su propósito.",
+                "Asignar un nombre, propósito, propietario y referencia de cambio.",
+                "ISO 27001 A.5.2, NIST CSF GV.PO",
+            )
+
+        if allow and source_any and destination_any and protocol_any and destination_port_any:
+            fwgov_add_finding(
+                device, rule, "ANY_ANY_ALLOW", "Crítica",
+                "Regla completamente permisiva ANY-ANY",
+                "La regla permite tráfico desde cualquier origen hacia cualquier destino, sin restringir protocolo ni servicio.",
+                "Eliminar la regla o limitar origen, destino, protocolo y puertos al mínimo necesario.",
+                "ISO 27001 A.8.20; NIST CSF PR.PS; PCI DSS 1.2.1",
+                technical_detail=f"{rule.source} -> {rule.destination} | {rule.protocol} | {rule.destination_port}",
+            )
+        elif allow and ((source_any and destination_any) or (destination_any and destination_port_any)):
+            fwgov_add_finding(
+                device, rule, "BROAD_ALLOW", "Alta",
+                "Regla de acceso excesivamente amplia",
+                "La combinación de origen, destino o servicio permite un alcance mayor al necesario.",
+                "Aplicar mínimo privilegio y sustituir valores Any por redes, hosts y servicios específicos.",
+                "ISO 27001 A.8.20; NIST CSF PR.AA; PCI DSS 1.2",
+                technical_detail=f"Origen={rule.source}; Destino={rule.destination}; Puerto={rule.destination_port}",
+            )
+
+        if allow and not rule.logging_enabled:
+            fwgov_add_finding(
+                device, rule, "LOGGING_DISABLED", "Media",
+                "Logging desactivado en regla permisiva",
+                "La regla permite tráfico, pero no registra los eventos asociados.",
+                "Habilitar logging y definir retención, revisión y alertamiento de eventos.",
+                "ISO 27001 A.8.15; NIST CSF DE.CM; PCI DSS 10.2",
+            )
+
+        if allow and port_interval and not destination_port_any:
+            width = port_interval[1] - port_interval[0] + 1
+            if width > 20 or port_interval[0] <= 1:
+                fwgov_add_finding(
+                    device, rule, "EXCESSIVE_PORT_RANGE", "Alta",
+                    "Rango de puertos excesivamente amplio",
+                    f"La regla permite el rango {rule.destination_port}, equivalente a {width} puertos.",
+                    "Definir únicamente los puertos requeridos. Verificar si el rango fue creado por error.",
+                    "ISO 27001 A.8.20; NIST CSF PR.PS; PCI DSS 1.2.5",
+                    technical_detail=f"Rango detectado: {rule.destination_port}",
+                )
+
+        if allow and (fwgov_port_contains(rule.destination_port, 21) or fwgov_port_contains(rule.destination_port, 23)):
+            fwgov_add_finding(
+                device, rule, "INSECURE_CLEAR_TEXT_SERVICE", "Alta",
+                "Servicio inseguro en texto claro permitido",
+                "La regla permite FTP o Telnet, protocolos que pueden exponer credenciales y datos sin cifrado.",
+                "Reemplazar por SFTP/SSH o protocolos cifrados y limitar estrictamente el origen.",
+                "ISO 27001 A.8.24; NIST CSF PR.DS; PCI DSS 4.2",
+            )
+
+        if allow and source_any and any(fwgov_port_contains(rule.destination_port, p) for p in (22, 443, 8443, 3389, 5900)):
+            fwgov_add_finding(
+                device, rule, "ADMIN_SERVICE_ANY_SOURCE", "Alta",
+                "Servicio administrativo expuesto desde cualquier origen",
+                "La regla permite acceso a un puerto administrativo desde un origen no restringido.",
+                "Restringir a una red de administración, VPN o bastión y aplicar MFA cuando corresponda.",
+                "ISO 27001 A.5.15/A.8.20; NIST CSF PR.AA; PCI DSS 8.2",
+            )
+
+        if allow and source_any and fwgov_port_contains(rule.destination_port, 445):
+            fwgov_add_finding(
+                device, rule, "SMB_ANY_SOURCE", "Alta",
+                "SMB permitido desde cualquier origen",
+                "El puerto 445 está accesible desde un origen amplio, incrementando el riesgo de movimiento lateral y explotación remota.",
+                "Limitar SMB a segmentos autorizados y bloquearlo desde redes no confiables.",
+                "ISO 27001 A.8.20; NIST CSF PR.PS; CIS Control 12",
+            )
+
+        if allow and source_any and any(fwgov_port_contains(rule.destination_port, p) for p in (1433, 1521, 3306, 5432, 6379, 9200, 27017)):
+            fwgov_add_finding(
+                device, rule, "DATABASE_ANY_SOURCE", "Alta",
+                "Servicio de base de datos accesible desde cualquier origen",
+                "La regla permite conectividad hacia un servicio de datos sin restringir el origen.",
+                "Autorizar únicamente servidores de aplicación o administración definidos y registrar las conexiones.",
+                "ISO 27001 A.8.20/A.8.21; NIST CSF PR.DS; PCI DSS 1.3",
+            )
+
+        if not rule.owner:
+            fwgov_add_finding(
+                device, rule, "MISSING_OWNER", "Media",
+                "Regla sin propietario definido",
+                "No se identificó OWNER en la descripción de la regla.",
+                "Asignar un propietario responsable de revisar, justificar y retirar la regla.",
+                "ISO 27001 A.5.2; NIST CSF GV.RR",
+            )
+
+        if not rule.ticket:
+            fwgov_add_finding(
+                device, rule, "MISSING_CHANGE_TICKET", "Media",
+                "Regla sin ticket de cambio",
+                "No se identificó TICKET en la descripción de la regla.",
+                "Relacionar la regla con una solicitud de cambio aprobada y evidencia de autorización.",
+                "ISO 27001 A.8.32; NIST CSF PR.PS; PCI DSS 6.5",
+            )
+
+        if not rule.justification:
+            fwgov_add_finding(
+                device, rule, "MISSING_JUSTIFICATION", "Media",
+                "Regla sin justificación",
+                "La descripción no documenta la necesidad de negocio o seguridad de la regla.",
+                "Registrar una justificación verificable y el alcance autorizado.",
+                "ISO 27001 A.5.2/A.8.20; PCI DSS 1.2.7",
+            )
+
+        parsed_review = fwgov_parse_date(rule.review_date)
+        if not rule.review_date:
+            fwgov_add_finding(
+                device, rule, "MISSING_REVIEW_DATE", "Media",
+                "Regla sin fecha de revisión",
+                "No se identificó REVIEW en la descripción.",
+                "Definir una fecha de última revisión y establecer revisiones periódicas.",
+                "ISO 27001 A.8.20; NIST CSF GV.OV; PCI DSS 1.2.7",
+            )
+        elif parsed_review == "INVALID":
+            fwgov_add_finding(
+                device, rule, "INVALID_REVIEW_DATE", "Media",
+                "Fecha de revisión inválida",
+                f"El valor REVIEW={rule.review_date} no tiene un formato de fecha reconocido.",
+                "Usar el formato YYYY-MM-DD.",
+                "ISO 27001 A.8.20; NIST CSF GV.OV",
+            )
+        elif isinstance(parsed_review, date) and (today - parsed_review).days > 365:
+            fwgov_add_finding(
+                device, rule, "STALE_REVIEW", "Media",
+                "Revisión de regla vencida",
+                f"La última revisión registrada fue hace {(today - parsed_review).days} días.",
+                "Revalidar necesidad, alcance, propietario y servicios autorizados.",
+                "ISO 27001 A.8.20; NIST CSF GV.OV; PCI DSS 1.2.7",
+            )
+
+        parsed_expiration = fwgov_parse_date(rule.expiration_date)
+        if parsed_expiration == "INVALID":
+            fwgov_add_finding(
+                device, rule, "INVALID_EXPIRATION_DATE", "Media",
+                "Fecha de expiración inválida",
+                f"El valor EXPIRES={rule.expiration_date} no tiene un formato de fecha reconocido.",
+                "Usar YYYY-MM-DD o EXPIRES=NONE cuando la regla no sea temporal.",
+                "ISO 27001 A.8.20; NIST CSF GV.OV",
+            )
+        elif rule.enabled and isinstance(parsed_expiration, date) and parsed_expiration < today:
+            fwgov_add_finding(
+                device, rule, "EXPIRED_ENABLED_RULE", "Alta",
+                "Regla vencida todavía habilitada",
+                f"La regla expiró el {parsed_expiration.isoformat()} y continúa activa.",
+                "Deshabilitarla, eliminarla o tramitar una renovación formal antes de reactivarla.",
+                "ISO 27001 A.5.15/A.8.20; NIST CSF PR.AA; PCI DSS 1.2.7",
+            )
+
+        if not rule.enabled:
+            fwgov_add_finding(
+                device, rule, "DISABLED_RULE", "Baja",
+                "Regla deshabilitada pendiente de depuración",
+                "La regla continúa en la configuración aunque está deshabilitada.",
+                "Validar su retención y eliminarla si ya no es necesaria.",
+                "ISO 27001 A.8.9/A.8.20; NIST CSF PR.PS",
+            )
+
+    fingerprint_groups = defaultdict(list)
+    for rule in rules:
+        fingerprint_groups[rule.fingerprint or ""].append(rule)
+
+    for fingerprint, duplicated_rules in fingerprint_groups.items():
+        if not fingerprint or len(duplicated_rules) < 2:
+            continue
+        canonical = duplicated_rules[0]
+        for duplicate in duplicated_rules[1:]:
+            fwgov_add_finding(
+                device, duplicate, "DUPLICATE_RULE", "Media",
+                "Regla duplicada",
+                f"La regla es técnicamente equivalente a {canonical.name}.",
+                "Consolidar las reglas y conservar una única entrada autorizada y trazable.",
+                "ISO 27001 A.8.9/A.8.20; NIST CSF PR.PS",
+                related_rule=canonical,
+                technical_detail=f"Fingerprint: {fingerprint}",
+            )
+
+    for later_index, later in enumerate(rules):
+        if not later.enabled:
+            continue
+        for earlier in rules[:later_index]:
+            if earlier.fingerprint == later.fingerprint:
+                continue
+            if not fwgov_rule_subsumes(earlier, later):
+                continue
+
+            if (earlier.action or "").lower() != (later.action or "").lower():
+                fwgov_add_finding(
+                    device, later, "SHADOWED_RULE", "Alta",
+                    "Regla potencialmente ocultada por una regla anterior",
+                    f"La regla {earlier.name} aparece antes, cubre el mismo tráfico y aplica una acción diferente.",
+                    "Reordenar o restringir la regla anterior para que la política específica pueda evaluarse.",
+                    "ISO 27001 A.8.20; NIST CSF PR.PS; PCI DSS 1.2",
+                    related_rule=earlier,
+                    technical_detail=f"Regla anterior: {earlier.external_id}; orden={earlier.sort_order}",
+                )
+            else:
+                fwgov_add_finding(
+                    device, later, "REDUNDANT_RULE", "Media",
+                    "Regla redundante cubierta por una regla anterior",
+                    f"La regla {earlier.name} cubre el tráfico de esta regla con la misma acción.",
+                    "Consolidar reglas para reducir complejidad y riesgo operativo.",
+                    "ISO 27001 A.8.9/A.8.20; NIST CSF PR.PS",
+                    related_rule=earlier,
+                )
+            break
+
+    stale_findings = FirewallGovFinding.query.filter_by(device_id=device.id, active=False).all()
+    for finding in stale_findings:
+        if finding.status not in ("Falso positivo", "Riesgo aceptado"):
+            finding.status = "Resuelto automáticamente"
+            finding.resolved_at = now
+        finding.updated_at = now
+
+    db.session.commit()
+
+    active_findings = FirewallGovFinding.query.filter_by(device_id=device.id, active=True).all()
+    effective_findings = [f for f in active_findings if f.status not in ("Falso positivo", "Resuelto", "Resuelto automáticamente")]
+    total_penalty = sum(FIREWALL_GOV_SEVERITY_SCORE.get(f.severity, 0) for f in effective_findings)
+    compliance_score = max(0, round(100 - min(100, total_penalty), 1))
+    critical = len([f for f in effective_findings if f.severity == "Crítica"])
+
+    return {
+        "rules": len(rules),
+        "findings": len(active_findings),
+        "critical": critical,
+        "score": compliance_score,
+    }
+
+
+def fwgov_sync_device(device, executed_by):
+    sync_log = FirewallGovSyncLog(
+        device_id=device.id,
+        status="En proceso",
+        message="Sincronización iniciada.",
+        executed_by=executed_by,
+    )
+    db.session.add(sync_log)
+    db.session.commit()
+    log_id = sync_log.id
+
+    try:
+        raw_rows, total, endpoint = fwgov_fetch_opnsense_rules(device, only_test=False)
+        fwgov_sync_rule_rows(device, raw_rows)
+        analysis = fwgov_analyze_device(device)
+
+        device = FirewallGovDevice.query.get(device.id)
+        device.last_status = "Online"
+        device.last_message = f"Sincronización completada: {analysis['rules']} reglas y {analysis['findings']} hallazgos."
+        device.last_sync_at = datetime.utcnow()
+        device.last_test_at = datetime.utcnow()
+
+        sync_log = FirewallGovSyncLog.query.get(log_id)
+        sync_log.finished_at = datetime.utcnow()
+        sync_log.status = "Completado"
+        sync_log.message = device.last_message
+        sync_log.endpoint_used = endpoint
+        sync_log.rules_received = total
+        sync_log.rules_active = analysis["rules"]
+        sync_log.findings_active = analysis["findings"]
+        sync_log.critical_findings = analysis["critical"]
+        sync_log.compliance_score = analysis["score"]
+        db.session.commit()
+        return analysis
+
+    except Exception as exc:
+        db.session.rollback()
+        device = FirewallGovDevice.query.get(device.id)
+        if device:
+            device.last_status = "Error"
+            device.last_message = str(exc)[:1500]
+            device.last_test_at = datetime.utcnow()
+
+        sync_log = FirewallGovSyncLog.query.get(log_id)
+        if sync_log:
+            sync_log.finished_at = datetime.utcnow()
+            sync_log.status = "Error"
+            sync_log.message = str(exc)[:2000]
+        db.session.commit()
+        raise
+
+
+def fwgov_severity_badge(severity):
+    classes = {
+        "Crítica": "danger",
+        "Alta": "warning text-dark",
+        "Media": "primary",
+        "Baja": "secondary",
+        "Informativa": "info text-dark",
+    }
+    css = classes.get(severity or "", "secondary")
+    return Markup(f'<span class="badge bg-{css}">{escape(severity or "N/A")}</span>')
+
+
+def fwgov_status_badge(status):
+    classes = {
+        "Abierto": "danger",
+        "En tratamiento": "warning text-dark",
+        "Riesgo aceptado": "info text-dark",
+        "Falso positivo": "secondary",
+        "Resuelto": "success",
+        "Resuelto automáticamente": "success",
+    }
+    css = classes.get(status or "", "secondary")
+    return Markup(f'<span class="badge bg-{css}">{escape(status or "N/A")}</span>')
+
+
+def fwgov_device_status_badge(status):
+    status = status or "No probado"
+    css = "success" if status == "Online" else ("danger" if status == "Error" else "secondary")
+    return Markup(f'<span class="badge bg-{css}">{escape(status)}</span>')
+
+
+def fwgov_dashboard_metrics(device_id=None):
+    rule_query = FirewallGovRule.query.filter_by(active=True)
+    finding_query = FirewallGovFinding.query.filter_by(active=True)
+    if device_id:
+        rule_query = rule_query.filter_by(device_id=device_id)
+        finding_query = finding_query.filter_by(device_id=device_id)
+
+    rules = rule_query.all()
+    findings = finding_query.all()
+    effective = [
+        f for f in findings
+        if f.status not in ("Falso positivo", "Resuelto", "Resuelto automáticamente")
+    ]
+    penalty = sum(FIREWALL_GOV_SEVERITY_SCORE.get(f.severity, 0) for f in effective)
+
+    return {
+        "rules": len(rules),
+        "enabled_rules": len([r for r in rules if r.enabled]),
+        "findings": len(effective),
+        "critical": len([f for f in effective if f.severity == "Crítica"]),
+        "high": len([f for f in effective if f.severity == "Alta"]),
+        "medium": len([f for f in effective if f.severity == "Media"]),
+        "low": len([f for f in effective if f.severity == "Baja"]),
+        "score": max(0, round(100 - min(100, penalty), 1)),
+    }
+
+
+FIREWALL_GOV_EXTRA_CSS = """
+<style>
+  .fwgov-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px}
+  .fwgov-device-card{border:1px solid #d8e3f3;border-radius:16px;padding:14px;background:#fff;height:100%}
+  .fwgov-device-card.active{border:2px solid #1d5fae;box-shadow:0 8px 18px rgba(29,95,174,.14)}
+  .fwgov-small{font-size:.76rem;color:#64748b}
+  .fwgov-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:.74rem}
+  .fwgov-truncate{max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .fwgov-scroll{max-height:580px;overflow:auto}
+  .fwgov-score{font-size:2rem;font-weight:950;color:#0b4a8f;line-height:1}
+  .fwgov-secret-state{font-size:.75rem;font-weight:800;color:#166534}
+
+  .fwgov-action-grid{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:14px;
+    margin:14px 0;
+  }
+  .fwgov-action-card{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    min-height:92px;
+    padding:16px 18px;
+    border:1px solid #d7e4f5;
+    border-radius:18px;
+    background:linear-gradient(145deg,#ffffff 0%,#f4f8fe 100%);
+    box-shadow:0 8px 22px rgba(15,67,125,.08);
+    color:#173a63;
+    text-decoration:none!important;
+    transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease;
+  }
+  .fwgov-action-card:hover{
+    transform:translateY(-2px);
+    box-shadow:0 13px 28px rgba(15,67,125,.14);
+    border-color:#8eb6e8;
+    color:#0b4a8f;
+  }
+  .fwgov-action-icon{
+    width:52px;
+    height:52px;
+    min-width:52px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:15px;
+    background:linear-gradient(135deg,#154f91,#2f7ac5);
+    color:#fff;
+    font-size:1.35rem;
+    box-shadow:0 8px 18px rgba(21,79,145,.24);
+  }
+  .fwgov-action-copy{min-width:0;flex:1}
+  .fwgov-action-title{font-size:.94rem;font-weight:900;line-height:1.18;margin-bottom:4px}
+  .fwgov-action-text{font-size:.76rem;color:#64748b;line-height:1.25}
+  .fwgov-action-arrow{font-size:1.1rem;color:#2f6fae}
+
+  .fwgov-back-row{display:flex;align-items:center;margin:0 0 12px 0}
+  .fwgov-back-button{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:9px 14px;
+    border:1px solid #cadcf1;
+    border-radius:12px;
+    background:#fff;
+    color:#174f8f;
+    text-decoration:none!important;
+    font-size:.82rem;
+    font-weight:850;
+    box-shadow:0 5px 14px rgba(15,67,125,.07);
+    transition:all .18s ease;
+  }
+  .fwgov-back-button:hover{background:#edf5ff;border-color:#8eb6e8;color:#0b4a8f;transform:translateX(-2px)}
+
+  .fwgov-config-shortcuts{margin:14px 0 4px 0}
+  .fwgov-config-shortcuts .fwgov-action-card{min-height:80px;padding:13px 16px}
+  .fwgov-config-shortcuts .fwgov-action-icon{width:44px;height:44px;min-width:44px;font-size:1.1rem}
+
+  .fwgov-kpi-grid{
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:12px;
+    margin-top:14px;
+  }
+  .fwgov-kpi-card{
+    position:relative;
+    overflow:hidden;
+    display:flex;
+    align-items:center;
+    gap:12px;
+    min-height:82px;
+    padding:14px 15px;
+    border:1px solid #dce7f4;
+    border-radius:17px;
+    background:#fff;
+    box-shadow:0 7px 18px rgba(15,67,125,.07);
+  }
+  .fwgov-kpi-card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:#2f6fae}
+  .fwgov-kpi-icon{width:42px;height:42px;min-width:42px;border-radius:13px;display:flex;align-items:center;justify-content:center;background:#edf5ff;color:#1b5b9f;font-size:1.15rem}
+  .fwgov-kpi-number{font-size:1.45rem;font-weight:950;line-height:1;color:#123e70}
+  .fwgov-kpi-label{font-size:.75rem;color:#64748b;font-weight:760;margin-top:5px;line-height:1.15}
+  .fwgov-kpi-critical:before{background:#b42318}.fwgov-kpi-critical .fwgov-kpi-icon{background:#fff0ef;color:#b42318}
+  .fwgov-kpi-high:before{background:#d97706}.fwgov-kpi-high .fwgov-kpi-icon{background:#fff7e8;color:#b45309}
+  .fwgov-kpi-medium:before{background:#ca8a04}.fwgov-kpi-medium .fwgov-kpi-icon{background:#fffbea;color:#a16207}
+  .fwgov-kpi-low:before{background:#15803d}.fwgov-kpi-low .fwgov-kpi-icon{background:#edfdf3;color:#15803d}
+  .fwgov-kpi-score:before{background:#6d28d9}.fwgov-kpi-score .fwgov-kpi-icon{background:#f4efff;color:#6d28d9}
+
+  @media(max-width:1100px){.fwgov-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media(max-width:768px){.fwgov-action-grid{grid-template-columns:1fr}.fwgov-kpi-grid{grid-template-columns:1fr}}
+  @media(max-width:992px){.fwgov-grid{display:block}.fwgov-device-card{margin-bottom:12px}}
+</style>
+"""
+
+
+def fwgov_page_selection(allow_new=False):
+    """Obtiene los firewalls y conserva el dispositivo seleccionado entre pantallas."""
+    devices = FirewallGovDevice.query.order_by(FirewallGovDevice.name.asc()).all()
+    selected_device_id = request.args.get("device_id", type=int)
+    new_mode = bool(allow_new and request.args.get("new") == "1")
+    selected_device = FirewallGovDevice.query.get(selected_device_id) if selected_device_id else None
+
+    if not selected_device and devices and not new_mode:
+        selected_device = devices[0]
+
+    return devices, selected_device, new_mode
+
+
+def fwgov_main_actions(selected_device=None):
+    """Accesos principales visibles únicamente en la pantalla de hallazgos."""
+    params = {"device_id": selected_device.id} if selected_device else {}
+    actions = [
+        (
+            "bi-gear-wide-connected",
+            "Configuración del conector",
+            "Administre credenciales, URL, filtros y parámetros de conexión.",
+            url_for("fwgov_connector_config", **params),
+        ),
+        (
+            "bi-list-check",
+            "Inventario normalizado de reglas",
+            "Consulte la vista técnica estandarizada de las reglas sincronizadas.",
+            url_for("fwgov_rules_inventory", **params),
+        ),
+    ]
+    return Markup(render_template_string("""
+    <div class="fwgov-action-grid" data-keep-cumplimiento-nav="true">
+      {% for icon, title, text, href in actions %}
+      <a class="fwgov-action-card" href="{{ href }}">
+        <span class="fwgov-action-icon"><i class="bi {{ icon }}"></i></span>
+        <span class="fwgov-action-copy">
+          <span class="fwgov-action-title d-block">{{ title }}</span>
+          <span class="fwgov-action-text d-block">{{ text }}</span>
+        </span>
+        <i class="bi bi-arrow-right fwgov-action-arrow"></i>
+      </a>
+      {% endfor %}
+    </div>
+    """, actions=actions))
+
+
+def fwgov_back_button(selected_device=None, destination="findings"):
+    """Botón único de regreso para las pantallas secundarias."""
+    params = {"device_id": selected_device.id} if selected_device else {}
+    destinations = {
+        "findings": (
+            "Volver a Hallazgos de Gobierno de Firewall",
+            url_for("cumplimiento_continuo_firewall", **params),
+        ),
+        "config": (
+            "Volver a Configuración del conector",
+            url_for("fwgov_connector_config", **params),
+        ),
+    }
+    label, href = destinations.get(destination, destinations["findings"])
+    return Markup(render_template_string("""
+    <div class="fwgov-back-row" data-keep-cumplimiento-nav="true">
+      <a class="fwgov-back-button" href="{{ href }}">
+        <i class="bi bi-arrow-left"></i> {{ label }}
+      </a>
+    </div>
+    """, label=label, href=href))
+
+
+def fwgov_config_shortcuts(selected_device=None):
+    """Accesos subordinados disponibles dentro de Configuración del conector."""
+    params = {"device_id": selected_device.id} if selected_device else {}
+    actions = [
+        (
+            "bi-hdd-network",
+            "Firewalls registrados",
+            "Revise conectores, estado de conexión y acciones de sincronización.",
+            url_for("fwgov_firewalls_registered", **params),
+        ),
+        (
+            "bi-clock-history",
+            "Historial de sincronización",
+            "Consulte la trazabilidad de ejecuciones, resultados y puntajes.",
+            url_for("fwgov_sync_history", **params),
+        ),
+    ]
+    return Markup(render_template_string("""
+    <div class="fwgov-action-grid fwgov-config-shortcuts" data-keep-cumplimiento-nav="true">
+      {% for icon, title, text, href in actions %}
+      <a class="fwgov-action-card" href="{{ href }}">
+        <span class="fwgov-action-icon"><i class="bi {{ icon }}"></i></span>
+        <span class="fwgov-action-copy">
+          <span class="fwgov-action-title d-block">{{ title }}</span>
+          <span class="fwgov-action-text d-block">{{ text }}</span>
+        </span>
+        <i class="bi bi-arrow-right fwgov-action-arrow"></i>
+      </a>
+      {% endfor %}
+    </div>
+    """, actions=actions))
+
+
+@app.route("/cumplimiento_continuo/firewall")
+@login_required
+def cumplimiento_continuo_firewall():
+    """Pantalla principal: indicadores y hallazgos de Gobierno de Firewall."""
+    user, resp = cont_comp_require_read()
+    if resp:
+        return resp
+
+    devices, selected_device, _ = fwgov_page_selection()
+    q = (request.args.get("q") or "").strip()
+    severity_filter = (request.args.get("severity") or "").strip()
+    status_filter = (request.args.get("status") or "").strip()
+
+    findings_query = FirewallGovFinding.query.filter_by(active=True)
+    if selected_device:
+        findings_query = findings_query.filter_by(device_id=selected_device.id)
+
+    if q:
+        like = f"%{q}%"
+        findings_query = findings_query.filter(or_(
+            FirewallGovFinding.rule_name.ilike(like),
+            FirewallGovFinding.rule_external_id.ilike(like),
+            FirewallGovFinding.title.ilike(like),
+            FirewallGovFinding.description.ilike(like),
+            FirewallGovFinding.finding_code.ilike(like),
+        ))
+    if severity_filter:
+        findings_query = findings_query.filter_by(severity=severity_filter)
+    if status_filter:
+        findings_query = findings_query.filter_by(status=status_filter)
+
+    findings = findings_query.all()
+    findings.sort(key=lambda f: (
+        -FIREWALL_GOV_SEVERITY_ORDER.get(f.severity, 0),
+        -(f.last_detected_at.timestamp() if f.last_detected_at else 0),
+    ))
+    findings = findings[:500]
+
+    metrics = fwgov_dashboard_metrics(selected_device.id if selected_device else None)
+    read_only = not cont_comp_can_write(user)
+    selected_device_id = selected_device.id if selected_device else None
+
+    content = render_template_string("""
+    {{ extra_css|safe }}
+
+    <div class="cc-card">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+        <div>
+          <h5 class="cc-section-title mb-1">Hallazgos de Gobierno de Firewall</h5>
+          <div class="cc-muted">Vista principal para priorizar riesgos, responsables, tratamientos y planes de acción.</div>
+        </div>
+        {% if devices %}
+        <form method="get" class="d-flex gap-2 align-items-end">
+          <div>
+            <label class="fwgov-small d-block mb-1">Firewall</label>
+            <select class="form-select form-select-sm" name="device_id" onchange="this.form.submit()">
+              {% for d in devices %}
+              <option value="{{ d.id }}" {% if selected_device and selected_device.id == d.id %}selected{% endif %}>{{ d.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <noscript><button class="btn btn-sm btn-outline-primary">Aplicar</button></noscript>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+
+    {{ main_actions|safe }}
+
+    <div class="fwgov-kpi-grid">
+      <div class="fwgov-kpi-card"><div class="fwgov-kpi-icon"><i class="bi bi-list-check"></i></div><div><div class="fwgov-kpi-number">{{ metrics.rules }}</div><div class="fwgov-kpi-label">Reglas sincronizadas</div></div></div>
+      <div class="fwgov-kpi-card"><div class="fwgov-kpi-icon"><i class="bi bi-toggle-on"></i></div><div><div class="fwgov-kpi-number">{{ metrics.enabled_rules }}</div><div class="fwgov-kpi-label">Reglas habilitadas</div></div></div>
+      <div class="fwgov-kpi-card"><div class="fwgov-kpi-icon"><i class="bi bi-exclamation-triangle"></i></div><div><div class="fwgov-kpi-number">{{ metrics.findings }}</div><div class="fwgov-kpi-label">Hallazgos activos</div></div></div>
+      <div class="fwgov-kpi-card fwgov-kpi-critical"><div class="fwgov-kpi-icon"><i class="bi bi-x-octagon"></i></div><div><div class="fwgov-kpi-number">{{ metrics.critical }}</div><div class="fwgov-kpi-label">Críticos</div></div></div>
+      <div class="fwgov-kpi-card fwgov-kpi-high"><div class="fwgov-kpi-icon"><i class="bi bi-shield-exclamation"></i></div><div><div class="fwgov-kpi-number">{{ metrics.high }}</div><div class="fwgov-kpi-label">Altos</div></div></div>
+      <div class="fwgov-kpi-card fwgov-kpi-medium"><div class="fwgov-kpi-icon"><i class="bi bi-exclamation-circle"></i></div><div><div class="fwgov-kpi-number">{{ metrics.medium }}</div><div class="fwgov-kpi-label">Medios</div></div></div>
+      <div class="fwgov-kpi-card fwgov-kpi-low"><div class="fwgov-kpi-icon"><i class="bi bi-info-circle"></i></div><div><div class="fwgov-kpi-number">{{ metrics.low }}</div><div class="fwgov-kpi-label">Bajos</div></div></div>
+      <div class="fwgov-kpi-card fwgov-kpi-score"><div class="fwgov-kpi-icon"><i class="bi bi-speedometer2"></i></div><div><div class="fwgov-kpi-number">{{ metrics.score }}%</div><div class="fwgov-kpi-label">Score de gobierno</div></div></div>
+    </div>
+
+    <div class="cc-card mt-3">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+          <h5 class="cc-section-title mb-1">Matriz de hallazgos</h5>
+          <div class="cc-muted">Mínimo privilegio, puertos de riesgo, logging, trazabilidad, vencimiento, duplicidad, redundancia y sombreado.</div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+          <form method="get" class="d-flex flex-wrap gap-2">
+            {% if selected_device_id %}<input type="hidden" name="device_id" value="{{ selected_device_id }}">{% endif %}
+            <input class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="Buscar regla o hallazgo">
+            <select class="form-select form-select-sm" name="severity">
+              <option value="">Todas las severidades</option>
+              {% for sev in ['Crítica','Alta','Media','Baja'] %}<option value="{{ sev }}" {% if severity_filter == sev %}selected{% endif %}>{{ sev }}</option>{% endfor %}
+            </select>
+            <select class="form-select form-select-sm" name="status">
+              <option value="">Todos los estados</option>
+              {% for st in ['Abierto','En tratamiento','Riesgo aceptado','Falso positivo','Resuelto','Resuelto automáticamente'] %}<option value="{{ st }}" {% if status_filter == st %}selected{% endif %}>{{ st }}</option>{% endfor %}
+            </select>
+            <button class="btn btn-sm btn-outline-primary" data-no-progress="true">Filtrar</button>
+          </form>
+          <a class="btn btn-sm btn-outline-success" href="{{ url_for('fwgov_export_csv', device_id=selected_device_id) }}" data-no-progress="true"><i class="bi bi-file-earmark-spreadsheet"></i> Exportar CSV</a>
+        </div>
+      </div>
+
+      <div class="table-responsive fwgov-scroll mt-3">
+        <table class="table cc-table table-hover align-middle">
+          <thead><tr><th>Severidad</th><th>Regla</th><th>Hallazgo</th><th>Detalle</th><th>Control</th><th>Estado</th><th>Gestión</th></tr></thead>
+          <tbody>
+          {% for f in findings %}
+            <tr>
+              <td>{{ severity_badge(f.severity) }}</td>
+              <td><div class="fw-bold">{{ f.rule_name or f.rule_external_id }}</div><div class="fwgov-code">{{ f.rule_external_id }}</div></td>
+              <td><div class="fw-bold">{{ f.title }}</div><div class="fwgov-code">{{ f.finding_code }}</div></td>
+              <td style="min-width:280px"><div>{{ f.description }}</div><div class="fwgov-small mt-1"><strong>Recomendación:</strong> {{ f.recommendation }}</div>{% if f.related_rule_external_id %}<div class="fwgov-small"><strong>Relacionada:</strong> {{ f.related_rule_external_id }}</div>{% endif %}</td>
+              <td class="fwgov-small">{{ f.control_mapping }}</td>
+              <td>{{ status_badge(f.status) }}<div class="fwgov-small mt-1">{{ f.assigned_to or 'Sin responsable' }}</div></td>
+              <td style="min-width:250px">
+                {% if not read_only %}
+                <form method="post" action="{{ url_for('fwgov_update_finding', finding_id=f.id) }}" class="d-grid gap-1">
+                  <select class="form-select form-select-sm" name="status">
+                    {% for st in ['Abierto','En tratamiento','Riesgo aceptado','Falso positivo','Resuelto'] %}<option value="{{ st }}" {% if f.status == st %}selected{% endif %}>{{ st }}</option>{% endfor %}
+                  </select>
+                  <input class="form-control form-control-sm" name="assigned_to" value="{{ f.assigned_to or '' }}" placeholder="Responsable">
+                  <input class="form-control form-control-sm" name="management_comment" value="{{ f.management_comment or '' }}" placeholder="Comentario de gestión">
+                  <button class="btn btn-sm btn-outline-primary">Actualizar</button>
+                </form>
+                <form method="post" action="{{ url_for('fwgov_create_plan', finding_id=f.id) }}" class="mt-1">
+                  <button class="btn btn-sm btn-outline-danger w-100">Crear plan de acción</button>
+                </form>
+                {% else %}
+                <span class="fwgov-small">Solo lectura</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="7" class="cc-empty">No hay hallazgos. Sincronice un firewall o ajuste los filtros.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    """,
+    extra_css=Markup(FIREWALL_GOV_EXTRA_CSS),
+    main_actions=fwgov_main_actions(selected_device),
+    devices=devices,
+    selected_device=selected_device,
+    selected_device_id=selected_device_id,
+    metrics=metrics,
+    findings=findings,
+    q=q,
+    severity_filter=severity_filter,
+    status_filter=status_filter,
+    read_only=read_only,
+    severity_badge=fwgov_severity_badge,
+    status_badge=fwgov_status_badge,
+    )
+
+    return cont_comp_render(
+        content,
+        "firewall",
+        "Hallazgos de Gobierno de Firewall",
+        "Indicadores ejecutivos, priorización de hallazgos y gestión de planes de acción.",
+    )
+
+
+@app.route("/cumplimiento_continuo/firewall/registrados")
+@login_required
+def fwgov_firewalls_registered():
+    """Pantalla exclusiva para administrar los firewalls registrados."""
+    user, resp = cont_comp_require_read()
+    if resp:
+        return resp
+
+    devices, selected_device, _ = fwgov_page_selection()
+    read_only = not cont_comp_can_write(user)
+
+    content = render_template_string("""
+    {{ extra_css|safe }}
+    {{ back_button|safe }}
+
+    <div class="cc-card">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+          <h5 class="cc-section-title mb-1">Firewalls registrados</h5>
+          <div class="cc-muted">Conectores registrados para inventariar reglas y ejecutar evaluaciones de gobierno.</div>
+        </div>
+        {% if not read_only %}
+        <a class="btn btn-primary" href="{{ url_for('fwgov_connector_config', new=1) }}"><i class="bi bi-plus-circle"></i> Registrar firewall</a>
+        {% endif %}
+      </div>
+
+      {% if devices %}
+      <div class="row g-3 mt-1">
+        {% for d in devices %}
+        <div class="col-xl-4 col-md-6">
+          <div class="fwgov-device-card {% if selected_device and selected_device.id == d.id %}active{% endif %}">
+            <div class="d-flex justify-content-between align-items-start gap-2">
+              <div>
+                <div class="fw-bold text-primary">{{ d.name }}</div>
+                <div class="fwgov-small">{{ d.vendor }} · {{ d.base_url }}</div>
+              </div>
+              {{ device_status_badge(d.last_status) }}
+            </div>
+            <div class="fwgov-small mt-2"><strong>Última prueba:</strong> {{ d.last_test_at or 'Sin prueba' }}</div>
+            <div class="fwgov-small"><strong>Última sincronización:</strong> {{ d.last_sync_at or 'Sin sincronización' }}</div>
+            {% if d.last_message %}<div class="fwgov-small mt-2">{{ d.last_message }}</div>{% endif %}
+            <div class="d-flex flex-wrap gap-2 mt-3">
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('fwgov_connector_config', device_id=d.id) }}">Configurar</a>
+              {% if not read_only %}
+              <form method="post" action="{{ url_for('fwgov_test_device_route', device_id=d.id) }}">
+                <button class="btn btn-sm btn-outline-success" data-progress-text="Probando conexión con el firewall...">Probar</button>
+              </form>
+              <form method="post" action="{{ url_for('fwgov_sync_device_route', device_id=d.id) }}">
+                <button class="btn btn-sm btn-warning" data-progress-text="Sincronizando y evaluando reglas...">Sincronizar</button>
+              </form>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="cc-empty mt-3">No hay firewalls registrados.</div>
+      {% endif %}
+    </div>
+    """,
+    extra_css=Markup(FIREWALL_GOV_EXTRA_CSS),
+    back_button=fwgov_back_button(selected_device, "config"),
+    devices=devices,
+    selected_device=selected_device,
+    read_only=read_only,
+    device_status_badge=fwgov_device_status_badge,
+    )
+
+    return cont_comp_render(
+        content,
+        "firewall",
+        "Firewalls registrados",
+        "Inventario de conectores, estado de conexión y acciones de sincronización.",
+    )
+
+
+@app.route("/cumplimiento_continuo/firewall/configuracion")
+@login_required
+def fwgov_connector_config():
+    """Pantalla exclusiva para crear o editar la configuración del conector."""
+    user, resp = cont_comp_require_read()
+    if resp:
+        return resp
+
+    devices, selected_device, new_mode = fwgov_page_selection(allow_new=True)
+    read_only = not cont_comp_can_write(user)
+    secret_configured = bool(selected_device and fwgov_decrypt(selected_device.api_secret_encrypted))
+    key_configured = bool(selected_device and fwgov_decrypt(selected_device.api_key_encrypted))
+
+    content = render_template_string("""
+    {{ extra_css|safe }}
+    {{ back_button|safe }}
+
+    <div class="cc-card">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+          <h5 class="cc-section-title mb-1">Configuración del conector</h5>
+          <div class="cc-muted">Credenciales, URL, filtros y parámetros de comunicación con OPNsense.</div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+          {% if devices %}
+          <form method="get">
+            <select class="form-select form-select-sm" name="device_id" onchange="this.form.submit()">
+              <option value="">Seleccionar firewall</option>
+              {% for d in devices %}<option value="{{ d.id }}" {% if selected_device and selected_device.id == d.id %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
+            </select>
+          </form>
+          {% endif %}
+          {% if not read_only %}<a class="btn btn-sm btn-outline-primary" href="{{ url_for('fwgov_connector_config', new=1) }}">Nuevo registro</a>{% endif %}
+        </div>
+      </div>
+
+      {{ config_shortcuts|safe }}
+
+      <div class="alert alert-info py-2 small mt-3">
+        La versión local/One-Premise puede conectarse directamente a una IP privada. Una versión alojada en nube requiere VPN, túnel o una API alcanzable y restringida.
+      </div>
+
+      {% if read_only %}
+      <div class="alert alert-secondary">El rol actual tiene acceso de solo lectura.</div>
+      {% else %}
+      <form method="post" action="{{ url_for('fwgov_save_device') }}" class="cc-form">
+        <input type="hidden" name="device_id" value="{{ selected_device.id if selected_device else '' }}">
+        <div class="row g-3">
+          <div class="col-md-3">
+            <label>Nombre del firewall</label>
+            <input class="form-control" name="name" required value="{{ selected_device.name if selected_device else 'OPNsense Laboratorio GRAC' }}">
+          </div>
+          <div class="col-md-2">
+            <label>Fabricante</label>
+            <select class="form-select" name="vendor"><option value="OPNsense" selected>OPNsense</option></select>
+          </div>
+          <div class="col-md-4">
+            <label>URL base API</label>
+            <input class="form-control" name="base_url" required value="{{ selected_device.base_url if selected_device else default_url }}" placeholder="https://192.168.100.10">
+          </div>
+          <div class="col-md-3">
+            <label>Timeout (segundos)</label>
+            <input class="form-control" type="number" min="5" max="120" name="timeout_seconds" value="{{ selected_device.timeout_seconds if selected_device else 30 }}">
+          </div>
+
+          <div class="col-md-6">
+            <label>API key {% if key_configured %}<span class="fwgov-secret-state">· configurada</span>{% endif %}</label>
+            <input class="form-control" type="password" name="api_key" autocomplete="new-password" placeholder="Dejar vacío para conservar la actual">
+          </div>
+          <div class="col-md-6">
+            <label>API secret {% if secret_configured %}<span class="fwgov-secret-state">· configurado</span>{% endif %}</label>
+            <input class="form-control" type="password" name="api_secret" autocomplete="new-password" placeholder="Dejar vacío para conservar el actual">
+          </div>
+
+          <div class="col-md-4">
+            <label>Texto de búsqueda API</label>
+            <input class="form-control" name="search_phrase" value="{{ selected_device.search_phrase if selected_device else 'GRAC-' }}" placeholder="Vacío para todas las reglas">
+          </div>
+          <div class="col-md-4">
+            <label>Filtro local de categoría</label>
+            <input class="form-control" name="category_filter" value="{{ selected_device.category_filter if selected_device else 'GRAC_LAB' }}" placeholder="Vacío para todas las categorías">
+          </div>
+          <div class="col-md-2 d-flex align-items-end">
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" name="verify_ssl" value="1" id="fwVerifySsl" {% if selected_device and selected_device.verify_ssl %}checked{% endif %}>
+              <label class="form-check-label" for="fwVerifySsl">Validar certificado TLS</label>
+            </div>
+          </div>
+          <div class="col-md-2 d-flex align-items-end">
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" name="enabled" value="1" id="fwEnabled" {% if not selected_device or selected_device.enabled %}checked{% endif %}>
+              <label class="form-check-label" for="fwEnabled">Conector habilitado</label>
+            </div>
+          </div>
+        </div>
+        <div class="d-flex gap-2 mt-3">
+          <button class="btn btn-primary" data-progress-text="Guardando configuración del firewall..."><i class="bi bi-save"></i> Guardar configuración</button>
+        </div>
+      </form>
+      {% endif %}
+    </div>
+    """,
+    extra_css=Markup(FIREWALL_GOV_EXTRA_CSS),
+    back_button=fwgov_back_button(selected_device, "findings"),
+    config_shortcuts=fwgov_config_shortcuts(selected_device),
+    devices=devices,
+    selected_device=selected_device,
+    new_mode=new_mode,
+    read_only=read_only,
+    key_configured=key_configured,
+    secret_configured=secret_configured,
+    default_url=FIREWALL_GOV_DEFAULT_URL,
+    )
+
+    return cont_comp_render(
+        content,
+        "firewall",
+        "Configuración del conector",
+        "Administración segura de la conexión API con el firewall.",
+    )
+
+
+@app.route("/cumplimiento_continuo/firewall/inventario")
+@login_required
+def fwgov_rules_inventory():
+    """Pantalla exclusiva para el inventario normalizado de reglas."""
+    user, resp = cont_comp_require_read()
+    if resp:
+        return resp
+
+    devices, selected_device, _ = fwgov_page_selection()
+    q = (request.args.get("q") or "").strip()
+
+    rules_query = FirewallGovRule.query.filter_by(active=True)
+    if selected_device:
+        rules_query = rules_query.filter_by(device_id=selected_device.id)
+    if q:
+        like = f"%{q}%"
+        rules_query = rules_query.filter(or_(
+            FirewallGovRule.name.ilike(like),
+            FirewallGovRule.description.ilike(like),
+            FirewallGovRule.source.ilike(like),
+            FirewallGovRule.destination.ilike(like),
+            FirewallGovRule.protocol.ilike(like),
+            FirewallGovRule.destination_port.ilike(like),
+        ))
+
+    rules = rules_query.order_by(
+        FirewallGovRule.sort_order.asc(), FirewallGovRule.sequence.asc(), FirewallGovRule.id.asc()
+    ).limit(1000).all()
+
+    finding_counts = defaultdict(int)
+    max_severity = {}
+    findings_query = FirewallGovFinding.query.filter_by(active=True)
+    if selected_device:
+        findings_query = findings_query.filter_by(device_id=selected_device.id)
+    for finding in findings_query.all():
+        if finding.rule_id:
+            finding_counts[finding.rule_id] += 1
+            current = max_severity.get(finding.rule_id)
+            if FIREWALL_GOV_SEVERITY_ORDER.get(finding.severity, 0) > FIREWALL_GOV_SEVERITY_ORDER.get(current, -1):
+                max_severity[finding.rule_id] = finding.severity
+
+    content = render_template_string("""
+    {{ extra_css|safe }}
+    {{ back_button|safe }}
+
+    <div class="cc-card">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+          <h5 class="cc-section-title mb-1">Inventario normalizado de reglas</h5>
+          <div class="cc-muted">Vista técnica estandarizada de las reglas sincronizadas desde el firewall.</div>
+        </div>
+        <form method="get" class="d-flex flex-wrap gap-2">
+          {% if devices %}
+          <select class="form-select form-select-sm" name="device_id">
+            {% for d in devices %}<option value="{{ d.id }}" {% if selected_device and selected_device.id == d.id %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
+          </select>
+          {% endif %}
+          <input class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="Buscar regla, origen, destino o puerto">
+          <button class="btn btn-sm btn-outline-primary" data-no-progress="true">Filtrar</button>
+        </form>
+      </div>
+
+      <div class="table-responsive fwgov-scroll mt-3">
+        <table class="table cc-table table-hover align-middle">
+          <thead><tr><th>Orden</th><th>Estado</th><th>Nombre</th><th>Acción</th><th>Interfaz</th><th>Protocolo</th><th>Origen</th><th>Destino</th><th>Puerto</th><th>Log</th><th>Gobierno</th><th>Hallazgos</th></tr></thead>
+          <tbody>
+          {% for r in rules %}
+            <tr>
+              <td>{{ r.sequence or '-' }}</td>
+              <td>{% if r.enabled %}<span class="badge bg-success">Habilitada</span>{% else %}<span class="badge bg-secondary">Deshabilitada</span>{% endif %}</td>
+              <td><div class="fw-bold fwgov-truncate" title="{{ r.description }}">{{ r.name }}</div><div class="fwgov-code">{{ r.external_id }}</div></td>
+              <td><span class="badge {% if r.action|lower in ['pass','allow','permit'] %}bg-success{% else %}bg-danger{% endif %}">{{ r.action }}</span></td>
+              <td>{{ r.interface }} / {{ r.direction }}</td>
+              <td>{{ r.ip_version }} · {{ r.protocol }}</td>
+              <td>{{ r.source }}{% if r.source_port and r.source_port != 'any' %}:{{ r.source_port }}{% endif %}</td>
+              <td>{{ r.destination }}</td>
+              <td><span class="fwgov-code">{{ r.destination_port or 'any' }}</span></td>
+              <td>{% if r.logging_enabled %}<span class="badge bg-success">Sí</span>{% else %}<span class="badge bg-warning text-dark">No</span>{% endif %}</td>
+              <td class="fwgov-small">OWNER={{ r.owner or '—' }}<br>TICKET={{ r.ticket or '—' }}<br>REVIEW={{ r.review_date or '—' }}<br>EXPIRES={{ r.expiration_date or '—' }}</td>
+              <td>{% if finding_counts.get(r.id) %}{{ severity_badge(max_severity.get(r.id)) }} <strong>{{ finding_counts.get(r.id) }}</strong>{% else %}<span class="badge bg-success">0</span>{% endif %}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="12" class="cc-empty">No hay reglas sincronizadas.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    """,
+    extra_css=Markup(FIREWALL_GOV_EXTRA_CSS),
+    back_button=fwgov_back_button(selected_device, "findings"),
+    devices=devices,
+    selected_device=selected_device,
+    rules=rules,
+    q=q,
+    finding_counts=finding_counts,
+    max_severity=max_severity,
+    severity_badge=fwgov_severity_badge,
+    )
+
+    return cont_comp_render(
+        content,
+        "firewall",
+        "Inventario normalizado de reglas",
+        "Reglas normalizadas, metadatos de gobierno y relación con hallazgos.",
+    )
+
+
+@app.route("/cumplimiento_continuo/firewall/historial")
+@login_required
+def fwgov_sync_history():
+    """Pantalla exclusiva para el historial de sincronización."""
+    user, resp = cont_comp_require_read()
+    if resp:
+        return resp
+
+    devices, selected_device, _ = fwgov_page_selection()
+    logs_query = FirewallGovSyncLog.query
+    if selected_device:
+        logs_query = logs_query.filter_by(device_id=selected_device.id)
+    recent_logs = logs_query.order_by(FirewallGovSyncLog.id.desc()).limit(500).all()
+    device_names = {d.id: d.name for d in devices}
+
+    content = render_template_string("""
+    {{ extra_css|safe }}
+    {{ back_button|safe }}
+
+    <div class="cc-card">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+          <h5 class="cc-section-title mb-1">Historial de sincronización</h5>
+          <div class="cc-muted">Trazabilidad de pruebas, sincronizaciones, reglas recibidas, hallazgos y score obtenido.</div>
+        </div>
+        {% if devices %}
+        <form method="get">
+          <select class="form-select form-select-sm" name="device_id" onchange="this.form.submit()">
+            {% for d in devices %}<option value="{{ d.id }}" {% if selected_device and selected_device.id == d.id %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
+          </select>
+        </form>
+        {% endif %}
+      </div>
+
+      <div class="table-responsive mt-3">
+        <table class="table cc-table align-middle">
+          <thead><tr><th>Firewall</th><th>Inicio</th><th>Fin</th><th>Estado</th><th>Reglas recibidas</th><th>Reglas activas</th><th>Hallazgos</th><th>Críticos</th><th>Score</th><th>Ejecutado por</th><th>Mensaje</th></tr></thead>
+          <tbody>
+          {% for log in recent_logs %}
+            <tr>
+              <td>{{ device_names.get(log.device_id, log.device_id) }}</td>
+              <td>{{ log.started_at }}</td>
+              <td>{{ log.finished_at or '—' }}</td>
+              <td><span class="badge {% if log.status == 'Completado' %}bg-success{% elif log.status == 'Error' %}bg-danger{% else %}bg-warning text-dark{% endif %}">{{ log.status }}</span></td>
+              <td>{{ log.rules_received }}</td>
+              <td>{{ log.rules_active }}</td>
+              <td>{{ log.findings_active }}</td>
+              <td>{{ log.critical_findings }}</td>
+              <td>{{ log.compliance_score }}%</td>
+              <td>{{ log.executed_by or 'Sistema' }}</td>
+              <td style="min-width:260px">{{ log.message }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="11" class="cc-empty">Sin historial de sincronización.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    """,
+    extra_css=Markup(FIREWALL_GOV_EXTRA_CSS),
+    back_button=fwgov_back_button(selected_device, "config"),
+    devices=devices,
+    selected_device=selected_device,
+    recent_logs=recent_logs,
+    device_names=device_names,
+    )
+
+    return cont_comp_render(
+        content,
+        "firewall",
+        "Historial de sincronización",
+        "Registro cronológico de ejecuciones y resultados del conector.",
+    )
+
+
+@app.route("/cumplimiento_continuo/firewall/dispositivo/guardar", methods=["POST"])
+@login_required
+def fwgov_save_device():
+    user, resp = cont_comp_require_write()
+    if resp:
+        return resp
+
+    device_id = request.form.get("device_id", type=int)
+    device = FirewallGovDevice.query.get(device_id) if device_id else None
+    creating = device is None
+    if creating:
+        device = FirewallGovDevice()
+        db.session.add(device)
+
+    try:
+        device.name = (request.form.get("name") or "").strip()
+        if not device.name:
+            raise ValueError("Debe indicar un nombre para el firewall.")
+        device.vendor = (request.form.get("vendor") or FIREWALL_GOV_VENDOR_OPNSENSE).strip()
+        device.base_url = fwgov_clean_url(request.form.get("base_url"))
+        device.timeout_seconds = fwgov_safe_int(request.form.get("timeout_seconds"), 30, 5, 120)
+        device.search_phrase = (request.form.get("search_phrase") or "").strip()
+        device.category_filter = (request.form.get("category_filter") or "").strip()
+        device.verify_ssl = request.form.get("verify_ssl") == "1"
+        device.enabled = request.form.get("enabled") == "1"
+
+        api_key = (request.form.get("api_key") or "").strip()
+        api_secret = (request.form.get("api_secret") or "").strip()
+        if api_key:
+            device.api_key_encrypted = fwgov_encrypt(api_key)
+        if api_secret:
+            device.api_secret_encrypted = fwgov_encrypt(api_secret)
+
+        if creating and (not device.api_key_encrypted or not device.api_secret_encrypted):
+            raise ValueError("Para registrar un firewall nuevo debe ingresar API key y API secret.")
+
+        db.session.commit()
+        registrar_log(fwgov_current_username(user), f"Configuración de Gobierno de Firewall guardada para {device.name}.")
+        flash("Configuración del firewall guardada correctamente.", "success")
+        return redirect(url_for("fwgov_connector_config", device_id=device.id))
+
+    except Exception as exc:
+        db.session.rollback()
+        flash(f"No fue posible guardar la configuración: {exc}", "danger")
+        return redirect(url_for("fwgov_connector_config", device_id=device_id) if device_id else url_for("fwgov_connector_config", new=1))
+
+
+@app.route("/cumplimiento_continuo/firewall/dispositivo/<int:device_id>/probar", methods=["POST"])
+@login_required
+def fwgov_test_device_route(device_id):
+    user, resp = cont_comp_require_write()
+    if resp:
+        return resp
+
+    device = FirewallGovDevice.query.get_or_404(device_id)
+    ok, message, endpoint = fwgov_test_device(device)
+    registrar_log(fwgov_current_username(user), f"Prueba de conexión Firewall Governance ({device.name}): {message}")
+    flash(message, "success" if ok else "danger")
+    return redirect(url_for("fwgov_firewalls_registered", device_id=device.id))
+
+
+@app.route("/cumplimiento_continuo/firewall/dispositivo/<int:device_id>/sincronizar", methods=["POST"])
+@login_required
+def fwgov_sync_device_route(device_id):
+    user, resp = cont_comp_require_write()
+    if resp:
+        return resp
+
+    device = FirewallGovDevice.query.get_or_404(device_id)
+    if not device.enabled:
+        flash("El conector está deshabilitado. Habilítelo antes de sincronizar.", "warning")
+        return redirect(url_for("fwgov_firewalls_registered", device_id=device.id))
+
+    try:
+        result = fwgov_sync_device(device, fwgov_current_username(user))
+        registrar_log(
+            fwgov_current_username(user),
+            f"Gobierno de Firewall sincronizado para {device.name}: {result['rules']} reglas, {result['findings']} hallazgos, score {result['score']}%.",
+        )
+        flash(
+            f"Sincronización completada: {result['rules']} reglas, {result['findings']} hallazgos y score {result['score']}%.",
+            "success",
+        )
+    except Exception as exc:
+        registrar_log(fwgov_current_username(user), f"Error sincronizando Gobierno de Firewall ({device.name}): {exc}")
+        flash(f"No fue posible sincronizar el firewall: {exc}", "danger")
+
+    return redirect(url_for("fwgov_firewalls_registered", device_id=device.id))
+
+
+@app.route("/cumplimiento_continuo/firewall/hallazgo/<int:finding_id>/actualizar", methods=["POST"])
+@login_required
+def fwgov_update_finding(finding_id):
+    user, resp = cont_comp_require_write()
+    if resp:
+        return resp
+
+    finding = FirewallGovFinding.query.get_or_404(finding_id)
+    allowed_statuses = {"Abierto", "En tratamiento", "Riesgo aceptado", "Falso positivo", "Resuelto"}
+    new_status = (request.form.get("status") or "Abierto").strip()
+    if new_status not in allowed_statuses:
+        new_status = "Abierto"
+
+    finding.status = new_status
+    finding.assigned_to = (request.form.get("assigned_to") or "").strip()
+    finding.management_comment = (request.form.get("management_comment") or "").strip()
+    finding.updated_at = datetime.utcnow()
+    if new_status == "Resuelto":
+        finding.resolved_at = datetime.utcnow()
+    elif new_status not in ("Resuelto", "Resuelto automáticamente"):
+        finding.resolved_at = None
+    db.session.commit()
+
+    registrar_log(
+        fwgov_current_username(user),
+        f"Hallazgo de firewall {finding.finding_code} actualizado a {finding.status}.",
+    )
+    flash("Hallazgo actualizado correctamente.", "success")
+    return redirect(url_for("cumplimiento_continuo_firewall", device_id=finding.device_id))
+
+
+@app.route("/cumplimiento_continuo/firewall/hallazgo/<int:finding_id>/crear_plan", methods=["POST"])
+@login_required
+def fwgov_create_plan(finding_id):
+    user, resp = cont_comp_require_write()
+    if resp:
+        return resp
+
+    finding = FirewallGovFinding.query.get_or_404(finding_id)
+    source_ref = f"firewall-finding:{finding.id}"
+    existing = ContinuousActionPlan.query.filter_by(source_ref=source_ref).first()
+    if existing:
+        flash("Este hallazgo ya tiene un plan de acción asociado.", "warning")
+        return redirect(url_for("cumplimiento_continuo_firewall", device_id=finding.device_id))
+
+    plan = ContinuousActionPlan(
+        origin="Firewall Governance",
+        standard="MULTI",
+        control_code=finding.finding_code,
+        title=f"Remediar: {finding.title}",
+        description=f"Regla: {finding.rule_name or finding.rule_external_id}\n\n{finding.description}\n\nRecomendación: {finding.recommendation}",
+        asset=finding.rule_name or finding.rule_external_id,
+        severity=finding.severity,
+        action_type="Remediación",
+        responsible=finding.assigned_to or fwgov_current_username(user),
+        status="Abierto",
+        source_ref=source_ref,
+        raw_json=json.dumps({
+            "finding_id": finding.id,
+            "rule_external_id": finding.rule_external_id,
+            "finding_code": finding.finding_code,
+            "control_mapping": finding.control_mapping,
+        }, ensure_ascii=False),
+    )
+    db.session.add(plan)
+    db.session.commit()
+
+    registrar_log(fwgov_current_username(user), f"Plan de acción creado desde hallazgo de firewall {finding.finding_code}.")
+    flash("Plan de acción creado en el capítulo Plan de Acción.", "success")
+    return redirect(url_for("cumplimiento_continuo_firewall", device_id=finding.device_id))
+
+
+@app.route("/cumplimiento_continuo/firewall/exportar.csv")
+@login_required
+def fwgov_export_csv():
+    user, resp = cont_comp_require_read()
+    if resp:
+        return resp
+
+    device_id = request.args.get("device_id", type=int)
+    query = FirewallGovFinding.query.filter_by(active=True)
+    if device_id:
+        query = query.filter_by(device_id=device_id)
+    findings = query.order_by(FirewallGovFinding.id.asc()).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Dispositivo", "Regla", "UUID regla", "Código", "Severidad", "Título", "Descripción",
+        "Recomendación", "Mapeo de control", "Estado", "Responsable", "Comentario", "Primera detección", "Última detección",
+    ])
+
+    device_names = {d.id: d.name for d in FirewallGovDevice.query.all()}
+    for finding in findings:
+        writer.writerow([
+            device_names.get(finding.device_id, finding.device_id),
+            finding.rule_name,
+            finding.rule_external_id,
+            finding.finding_code,
+            finding.severity,
+            finding.title,
+            finding.description,
+            finding.recommendation,
+            finding.control_mapping,
+            finding.status,
+            finding.assigned_to,
+            finding.management_comment,
+            finding.first_detected_at,
+            finding.last_detected_at,
+        ])
+
+    response = make_response("\ufeff" + output.getvalue())
+    response.headers["Content-Type"] = "text/csv; charset=utf-8"
+    response.headers["Content-Disposition"] = "attachment; filename=hallazgos_gobierno_firewall.csv"
+    return response
+
+
+# ============================================================================================================================================
+#                                      FIN MÓDULO GOBIERNO DE FIREWALL
+# ============================================================================================================================================
+
 
 # ============================================================================================================================================
 #                                            FIN MÓDULO CUMPLIMIENTO CONTINUO - WAZUH + GRAC
