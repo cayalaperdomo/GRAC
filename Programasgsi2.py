@@ -3073,6 +3073,9 @@ RISK_COLUMNS = [
 
     {"key": "control_codigo",           "label": "Código del Control",                   "td_class": "texto-corto"},
     {"key": "codigo_anexo",             "label": "Código Control Anexo ISO 27002",       "td_class": "texto-corto"},
+    {"key": "codigo_control_pci_dss",  "label": "Código Control PCI DSS",                 "td_class": "texto-corto"},
+    {"key": "codigo_control_nist_csf", "label": "Código Control NIST CSF 2.0",            "td_class": "texto-corto"},
+    {"key": "codigo_control_soc2",     "label": "Código Control SOC 2",                   "td_class": "texto-corto"},
     {"key": "descripcion_control",      "label": "Descripción del Control",              "td_class": "texto-largo"},
     {"key": "plan_accion",              "label": "Plan de Acción",                       "td_class": "texto-largo"},
     {"key": "asignacion",               "label": "Asignación",                           "td_class": "texto-medio"},
@@ -3114,14 +3117,3171 @@ RISK_COLUMNS = [
 ]
 
 # Campos que se muestran por defecto si el usuario no ha elegido nada
+
 RISK_DEFAULT_FIELDS = [
     "codigo_riesgo", "riesgo", "propietario_riesgo",
     "tipo_activo", "nombre_activo", "dimension_seguridad",
     "tipo_riesgo", "prob_inh", "imp_inh", "riesgo_inherente",
-    "control_codigo", "descripcion_control",
+    "control_codigo", "codigo_anexo",
+    "codigo_control_pci_dss", "codigo_control_nist_csf", "codigo_control_soc2",
+    "descripcion_control",
     "prob_res", "imp_res", "riesgo_residual",
     "tratamiento_riesgo", "responsable", "archivado"
 ]
+
+# ============================================================
+# CATÁLOGOS DE CONTROLES PARA GESTIÓN DE RIESGOS
+# Fuentes incorporadas:
+# - ISO/IEC 27002:2022 (catálogo integrado en la aplicación)
+# - PCI DSS (instrumento PCI requerimientos)
+# - NIST CSF 2.0 (subcategorías/controles GV.OC-01 ... RC.CO-04)
+# - SOC 2 (instrumento de preguntas SOC 2)
+#
+# Los textos se incluyen completos para que la aplicación sea
+# autocontenida y la descripción multimarco pueda generarse sin
+# depender de los archivos Excel en producción.
+# ============================================================
+ISO_27002_CONTROLES = [('5.1',
+  'Controles organizacionales\n'
+  'Políticas de seguridad de la información\n'
+  'La política de seguridad de la información y las políticas específicas deberán definirse, aprobarse por la '
+  'dirección, publicarse, comunicarse y reconocerse por el personal y las partes interesadas, y revisarse a '
+  'intervalos planificados o cuando se produzcan cambios significativos.'),
+ ('5.2',
+  'Controles organizacionales\n'
+  'Roles y responsabilidades de seguridad de la información\n'
+  'Los roles y responsabilidades de seguridad de la información deberán definirse y asignarse según las necesidades '
+  'de la organización.'),
+ ('5.3',
+  'Controles organizacionales\n'
+  'Separación de funciones\n'
+  'Las funciones conflictivas y las áreas de responsabilidad en conflicto deberán separarse.'),
+ ('5.4',
+  'Controles organizacionales\n'
+  'Responsabilidades de la dirección\n'
+  'La dirección deberá exigir que todo el personal aplique la seguridad de la información de acuerdo con la política '
+  'y los procedimientos específicos aplicables.'),
+ ('5.5',
+  'Controles organizacionales\n'
+  'Contacto con autoridades\n'
+  'La organización deberá establecer y mantener contacto con las autoridades relevantes.'),
+ ('5.6',
+  'Controles organizacionales\n'
+  'Contacto con grupos de interés especial\n'
+  'La organización deberá establecer y mantener contacto con grupos de especial interés, foros especializados y '
+  'asociaciones profesionales.'),
+ ('5.7',
+  'Controles organizacionales\n'
+  'Inteligencia de amenazas\n'
+  'Se deberá recopilar y analizar información relacionada con las amenazas para producir inteligencia sobre '
+  'amenazas.'),
+ ('5.8',
+  'Controles organizacionales\n'
+  'Seguridad de la información en la gestión de proyectos\n'
+  'La seguridad de la información deberá integrarse en la gestión de proyectos.'),
+ ('5.9',
+  'Controles organizacionales\n'
+  'Inventario de información y activos asociados\n'
+  'Se deberá desarrollar y mantener un inventario de la información y otros activos asociados, incluidos los '
+  'propietarios.'),
+ ('5.10',
+  'Controles organizacionales\n'
+  'Uso aceptable de la información y activos asociados\n'
+  'Se deberán identificar, documentar e implantar reglas y procedimientos para el uso aceptable y el manejo de la '
+  'información y otros activos asociados.'),
+ ('5.11',
+  'Controles organizacionales\n'
+  'Devolución de activos\n'
+  'El personal y otras partes interesadas deberán devolver los activos de la organización en su posesión al cambiar '
+  'o terminar su relación contractual o laboral.'),
+ ('5.12',
+  'Controles organizacionales\n'
+  'Clasificación de la información\n'
+  'La información deberá clasificarse según las necesidades de seguridad de la organización (confidencialidad, '
+  'integridad, disponibilidad) y requisitos de las partes interesadas.'),
+ ('5.13',
+  'Controles organizacionales\n'
+  'Etiquetado de la información\n'
+  'Se deberán desarrollar e implantar procedimientos apropiados para etiquetar la información según el esquema de '
+  'clasificación adoptado.'),
+ ('5.14',
+  'Controles organizacionales\n'
+  'Transferencia de información\n'
+  'Deben existir reglas, procedimientos o acuerdos para todo tipo de transferencia dentro de la organización y con '
+  'terceros.'),
+ ('5.15',
+  'Controles organizacionales\n'
+  'Control de accesos\n'
+  'Se deberán establecer e implementar reglas para controlar el acceso físico y lógico a la información y activos '
+  'asociados según requisitos de negocio y seguridad.'),
+ ('5.16',
+  'Controles organizacionales\n'
+  'Gestión de identidades\n'
+  'Deberá gestionarse el ciclo de vida completo de las identidades.'),
+ ('5.17',
+  'Controles organizacionales\n'
+  'Información de autenticación\n'
+  'La asignación y gestión de la información de autenticación deberá controlarse mediante procesos de gestión y '
+  'orientación al personal.'),
+ ('5.18',
+  'Controles organizacionales\n'
+  'Derechos de acceso\n'
+  'Los derechos de acceso deberán ser provisionados, revisados, modificados y eliminados conforme a políticas y '
+  'reglas de control de acceso.'),
+ ('5.19',
+  'Controles organizacionales\n'
+  'Seguridad de la información en relaciones con proveedores\n'
+  'Se deberán definir e implantar procesos para gestionar los riesgos de seguridad asociados al uso de productos o '
+  'servicios de proveedores.'),
+ ('5.20',
+  'Controles organizacionales\n'
+  'Seguridad en acuerdos con proveedores\n'
+  'Se establecerán y acordarán requisitos de seguridad de la información con cada proveedor según el tipo de '
+  'relación.'),
+ ('5.21',
+  'Controles organizacionales\n'
+  'Gestión de la seguridad en la cadena de suministro TIC\n'
+  'Se deberán definir e implantar procesos para gestionar los riesgos asociados con productos y servicios TIC de la '
+  'cadena de suministro.'),
+ ('5.22',
+  'Controles organizacionales\n'
+  'Monitoreo y gestión del cambio de servicios de proveedor\n'
+  'La organización deberá supervisar, revisar y gestionar cambios en prácticas de seguridad y entrega de servicios '
+  'de proveedores.'),
+ ('5.23',
+  'Controles organizacionales\n'
+  'Seguridad para uso de servicios en la nube\n'
+  'Se deberán establecer procesos para adquisición, uso, gestión y salida de servicios en la nube según requisitos '
+  'de seguridad organizacionales.'),
+ ('5.24',
+  'Controles organizacionales\n'
+  'Planificación y preparación para la gestión de incidentes\n'
+  'La organización deberá planear y prepararse para gestionar incidentes de seguridad definiendo procesos, roles y '
+  'responsabilidades.'),
+ ('5.25',
+  'Controles organizacionales\n'
+  'Evaluación y decisión sobre eventos de seguridad\n'
+  'La organización deberá evaluar los eventos de seguridad y decidir si deben categorizarse como incidentes.'),
+ ('5.26',
+  'Controles organizacionales\n'
+  'Respuesta a incidentes de seguridad\n'
+  'Los incidentes de seguridad deben responderse de acuerdo con procedimientos documentados.'),
+ ('5.27',
+  'Controles organizacionales\n'
+  'Aprendizaje de incidentes de seguridad\n'
+  'El conocimiento obtenido de incidentes debe usarse para fortalecer y mejorar los controles de seguridad.'),
+ ('5.28',
+  'Controles organizacionales\n'
+  'Recopilación de evidencias\n'
+  'Se deberán establecer procedimientos para la identificación, recolección y preservación de evidencias '
+  'relacionadas con eventos de seguridad.'),
+ ('5.29',
+  'Controles organizacionales\n'
+  'Seguridad durante la interrupción\n'
+  'La organización deberá planear cómo mantener la seguridad de la información en un nivel apropiado durante una '
+  'interrupción.'),
+ ('5.30',
+  'Controles organizacionales\n'
+  'Preparación TIC para continuidad del negocio\n'
+  'La preparación TIC para continuidad debe planearse, implementarse, mantenerse y probarse según objetivos de '
+  'continuidad.'),
+ ('5.31',
+  'Controles organizacionales\n'
+  'Requisitos legales, reglamentarios y contractuales\n'
+  'Se deberán identificar, documentar y mantener actualizados los requisitos legales y contractuales relevantes para '
+  'la seguridad de la información.'),
+ ('5.32',
+  'Controles organizacionales\n'
+  'Derechos de propiedad intelectual\n'
+  'La organización deberá implantar procedimientos apropiados para proteger la propiedad intelectual.'),
+ ('5.33',
+  'Controles organizacionales\n'
+  'Protección de registros\n'
+  'Los registros deberán protegerse contra pérdida, destrucción, falsificación, acceso no autorizado y divulgación '
+  'no autorizada.'),
+ ('5.34',
+  'Controles organizacionales\n'
+  'Privacidad y protección de datos personales (PII)\n'
+  'La organización deberá identificar y cumplir los requisitos de preservación de la privacidad y protección de PII '
+  'conforme a leyes y contratos aplicables.'),
+ ('5.35',
+  'Controles organizacionales\n'
+  'Revisión independiente de seguridad de la información\n'
+  'El enfoque de la organización para gestionar la seguridad deberá revisarse de forma independiente a intervalos '
+  'planificados o tras cambios significativos.'),
+ ('5.36',
+  'Controles organizacionales\n'
+  'Cumplimiento con políticas, reglas y estándares\n'
+  'El cumplimiento con la política de seguridad, políticas específicas, reglas y estándares deberá revisarse '
+  'regularmente.'),
+ ('5.37',
+  'Controles organizacionales\n'
+  'Procedimientos operativos documentados\n'
+  'Se deberán documentar los procedimientos operativos para las instalaciones de procesamiento de información y '
+  'ponerlos a disposición del personal que los necesite.'),
+ ('6.1',
+  'Controles de personas\n'
+  'Verificación de antecedentes (screening)\n'
+  'Se deberán efectuar verificaciones previas de antecedentes para candidatos al personal y de forma continua según '
+  'leyes, regulaciones y riesgos.'),
+ ('6.2',
+  'Controles de personas\n'
+  'Términos y condiciones de empleo\n'
+  'Los contratos de empleo deberán expresar las responsabilidades del personal y de la organización respecto a la '
+  'seguridad de la información.'),
+ ('6.3',
+  'Controles de personas\n'
+  'Concienciación, educación y formación en seguridad\n'
+  'El personal y partes interesadas relevantes deberán recibir formación y actualizaciones sobre políticas y '
+  'procedimientos de seguridad.'),
+ ('6.4',
+  'Controles de personas\n'
+  'Proceso disciplinario\n'
+  'Se deberá formalizar y comunicar un proceso disciplinario para acciones contra incumplimientos de la política de '
+  'seguridad.'),
+ ('6.5',
+  'Controles de personas\n'
+  'Responsabilidades tras terminación o cambio de empleo\n'
+  'Se deberán definir y comunicar responsabilidades de seguridad que se mantienen tras la terminación o cambio de '
+  'empleo.'),
+ ('6.6',
+  'Controles de personas\n'
+  'Acuerdos de confidencialidad (NDA)\n'
+  'Se deberán identificar, documentar, revisar y firmar acuerdos de confidencialidad según las necesidades de la '
+  'organización.'),
+ ('6.7',
+  'Controles de personas\n'
+  'Trabajo remoto\n'
+  'Se deberán implantar medidas de seguridad cuando el personal trabaje de forma remota para proteger la información '
+  'fuera de las instalaciones.'),
+ ('6.8',
+  'Controles de personas\n'
+  'Reportes de eventos de seguridad\n'
+  'La organización deberá proporcionar mecanismos para que el personal reporte incidentes observados o sospechados '
+  'de forma oportuna.'),
+ ('7.1',
+  'Controles físicos\n'
+  'Perímetros de seguridad física\n'
+  'Se deberán definir perímetros de seguridad para proteger áreas que contengan información y activos asociados.'),
+ ('7.2',
+  'Controles físicos\n'
+  'Entrada física\n'
+  'Las áreas seguras deberán protegerse mediante controles de acceso y puntos de entrada apropiados.'),
+ ('7.3',
+  'Controles físicos\n'
+  'Aseguramiento de oficinas, salas e instalaciones\n'
+  'La seguridad física de oficinas, salas e instalaciones deberá diseñarse e implementarse.'),
+ ('7.4',
+  'Controles físicos\n'
+  'Monitorización de seguridad física\n'
+  'Las instalaciones deberán ser monitorizadas para detectar accesos físicos no autorizados.'),
+ ('7.5',
+  'Controles físicos\n'
+  'Protección contra amenazas físicas y ambientales\n'
+  'Se deberán diseñar e implementar medidas contra amenazas físicas y ambientales (desastres naturales, etc.).'),
+ ('7.6',
+  'Controles físicos\n'
+  'Trabajo en áreas seguras\n'
+  'Se deberán implantar medidas de seguridad para el trabajo en áreas seguras.'),
+ ('7.7',
+  'Controles físicos\n'
+  'Escritorio y pantalla limpios\n'
+  'Se deberán definir y aplicar reglas de escritorio y pantalla limpia para proteger la información.'),
+ ('7.8', 'Controles físicos\nUbicación y protección del equipo\nEl equipo deberá ubicarse y protegerse físicamente.'),
+ ('7.9',
+  'Controles físicos\n'
+  'Seguridad de activos fuera de las instalaciones\n'
+  'Los activos fuera de las instalaciones deberán protegerse adecuadamente.'),
+ ('7.10',
+  'Controles físicos\n'
+  'Medios de almacenamiento\n'
+  'Los medios de almacenamiento deberán gestionarse durante todo su ciclo (adquisición, uso, transporte, '
+  'eliminación) conforme al esquema de clasificación.'),
+ ('7.11',
+  'Controles físicos\n'
+  'Servicios de apoyo\n'
+  'Las instalaciones de procesamiento de información deberán protegerse de fallos de servicios públicos y otras '
+  'interrupciones.'),
+ ('7.12',
+  'Controles físicos\n'
+  'Seguridad del cableado\n'
+  'Los cables que transporten energía o datos deberán protegerse contra intercepción, interferencia o daño.'),
+ ('7.13',
+  'Controles físicos\n'
+  'Mantenimiento de equipos\n'
+  'El equipo deberá mantenerse para asegurar disponibilidad, integridad y confidencialidad.'),
+ ('7.14',
+  'Controles físicos\n'
+  'Disposición segura o reutilización de equipos\n'
+  'Los equipos con medios de almacenamiento deberán verificarse para asegurar que los datos sensibles se han '
+  'eliminado o sobrescrito antes de su eliminación o reutilización.'),
+ ('8.1',
+  'Controles tecnológicos\n'
+  'Dispositivos endpoint de usuario\n'
+  'La información almacenada, procesada o accesible mediante dispositivos endpoint deberá protegerse.'),
+ ('8.2',
+  'Controles tecnológicos\n'
+  'Derechos privilegiados de acceso\n'
+  'La asignación y uso de derechos privilegiados deberá restringirse y gestionarse.'),
+ ('8.3',
+  'Controles tecnológicos\n'
+  'Restricción de acceso a la información\n'
+  'El acceso a la información y activos asociados deberá restringirse conforme a la política de control de acceso.'),
+ ('8.4',
+  'Controles tecnológicos\n'
+  'Acceso al código fuente\n'
+  'El acceso de lectura/escritura al código fuente, herramientas de desarrollo y bibliotecas deberá gestionarse '
+  'adecuadamente.'),
+ ('8.5',
+  'Controles tecnológicos\n'
+  'Autenticación segura\n'
+  'Deben implementarse tecnologías y procedimientos de autenticación segura basados en la política de control de '
+  'acceso.'),
+ ('8.6',
+  'Controles tecnológicos\n'
+  'Gestión de capacidad\n'
+  'Se deberán monitorizar y ajustar los recursos conforme a los requisitos actuales y esperados.'),
+ ('8.7',
+  'Controles tecnológicos\n'
+  'Protección contra malware\n'
+  'Deben implementarse medidas de protección contra malware y concienciación del usuario.'),
+ ('8.8',
+  'Controles tecnológicos\n'
+  'Gestión de vulnerabilidades técnicas\n'
+  'Se deberá obtener información sobre vulnerabilidades técnicas y evaluar la exposición de la organización, tomando '
+  'medidas apropiadas.'),
+ ('8.9',
+  'Controles tecnológicos\n'
+  'Gestión de configuración\n'
+  'Se deberán establecer, documentar, implementar y revisar configuraciones, incluidas las de seguridad.'),
+ ('8.10',
+  'Controles tecnológicos\n'
+  'Eliminación de información\n'
+  'La información almacenada en sistemas o medios deberá eliminarse cuando ya no sea necesaria.'),
+ ('8.11',
+  'Controles tecnológicos\n'
+  'Enmascaramiento de datos\n'
+  'Se deberá aplicar enmascaramiento de datos conforme a políticas y requisitos legales y de negocio.'),
+ ('8.12',
+  'Controles tecnológicos\n'
+  'Prevención de pérdida de datos\n'
+  'Se deberán aplicar medidas de prevención de fuga de datos a sistemas, redes y dispositivos que procesen '
+  'información sensible.'),
+ ('8.13',
+  'Controles tecnológicos\n'
+  'Copia de seguridad de la información\n'
+  'Se deberán mantener y probar regularmente copias de seguridad de información, software y sistemas conforme a la '
+  'política de backups.'),
+ ('8.14',
+  'Controles tecnológicos\n'
+  'Redundancia de instalaciones de procesamiento\n'
+  'Las instalaciones de procesamiento deberán contar con redundancia suficiente para cumplir requisitos de '
+  'disponibilidad.'),
+ ('8.15',
+  'Controles tecnológicos\n'
+  'Registro y trazabilidad (logging)\n'
+  'Deben generarse, almacenar, proteger y analizar registros que reflejen actividades, excepciones y fallos '
+  'relevantes.'),
+ ('8.16',
+  'Controles tecnológicos\n'
+  'Actividades de monitorización\n'
+  'Redes, sistemas y aplicaciones deberán monitorizarse para detectar comportamientos anómalos y evaluar posibles '
+  'incidentes.'),
+ ('8.17',
+  'Controles tecnológicos\n'
+  'Sincronización de relojes\n'
+  'Los relojes de los sistemas deberán sincronizarse con fuentes de tiempo aprobadas.'),
+ ('8.18',
+  'Controles tecnológicos\n'
+  'Uso de utilidades privilegiadas\n'
+  'El uso de programas utilitarios capaces de anular controles del sistema deberá restringirse y controlarse '
+  'estrictamente.'),
+ ('8.19',
+  'Controles tecnológicos\n'
+  'Instalación de software en sistemas operativos\n'
+  'Deben implementarse procedimientos para gestionar la instalación de software en sistemas operativos de manera '
+  'segura.'),
+ ('8.20',
+  'Controles tecnológicos\n'
+  'Seguridad de redes\n'
+  'Redes y dispositivos de red deberán protegerse, gestionarse y controlarse para salvaguardar la información.'),
+ ('8.21',
+  'Controles tecnológicos\n'
+  'Seguridad de servicios de red\n'
+  'Se deberán identificar, implementar y monitorizar mecanismos y niveles de servicio de los servicios de red.'),
+ ('8.22',
+  'Controles tecnológicos\n'
+  'Segregación en redes\n'
+  'Se deberán segregar grupos de servicios, usuarios y sistemas en las redes de la organización.'),
+ ('8.23',
+  'Controles tecnológicos\n'
+  'Filtrado web\n'
+  'El acceso a sitios externos deberá gestionarse para reducir exposición a contenido malicioso.'),
+ ('8.24',
+  'Controles tecnológicos\n'
+  'Uso de criptografía\n'
+  'Deben definirse e implantar reglas para el uso efectivo de criptografía y gestión de claves.'),
+ ('8.25',
+  'Controles tecnológicos\n'
+  'Ciclo de vida de desarrollo seguro\n'
+  'Deben establecerse y aplicarse reglas para el desarrollo seguro de software y sistemas.'),
+ ('8.26',
+  'Controles tecnológicos\n'
+  'Requisitos de seguridad de aplicaciones\n'
+  'Se deberán identificar, especificar y aprobar requisitos de seguridad al desarrollar o adquirir aplicaciones.'),
+ ('8.27',
+  'Controles tecnológicos\n'
+  'Arquitectura y principios de ingeniería seguros\n'
+  'Deben establecerse principios documentados para ingeniería de sistemas seguros en actividades de desarrollo.'),
+ ('8.28',
+  'Controles tecnológicos\n'
+  'Codificación segura\n'
+  'Deben aplicarse principios de codificación segura durante el desarrollo de software.'),
+ ('8.29',
+  'Controles tecnológicos\n'
+  'Pruebas de seguridad en desarrollo y aceptación\n'
+  'Deben definirse e implantar procesos de pruebas de seguridad dentro del ciclo de desarrollo.'),
+ ('8.30',
+  'Controles tecnológicos\n'
+  'Desarrollo externalizado\n'
+  'La organización deberá dirigir, supervisar y revisar actividades relacionadas con el desarrollo externalizado.'),
+ ('8.31',
+  'Controles tecnológicos\n'
+  'Separación de entornos (desarrollo, prueba, producción)\n'
+  'Los entornos de desarrollo, prueba y producción deberán separarse y asegurarse.'),
+ ('8.32',
+  'Controles tecnológicos\n'
+  'Gestión de cambios\n'
+  'Los cambios en instalaciones y sistemas deberán sujetarse a procedimientos de gestión de cambios.'),
+ ('8.33',
+  'Controles tecnológicos\n'
+  'Información de prueba\n'
+  'La información de prueba deberá seleccionarse, protegerse y gestionarse apropiadamente.'),
+ ('8.34',
+  'Controles tecnológicos\n'
+  'Protección de sistemas durante pruebas de auditoría\n'
+  'Las pruebas de auditoría y actividades de aseguramiento en sistemas operativos deberán planificarse y acordarse '
+  'con la dirección apropiada.')]
+
+PCI_DSS_CONTROLES = [('1.1',
+  'Los procesos y mecanismos para instalar y mantener controles de seguridad de red están definidos y comprendidos.'),
+ ('1.1.1',
+  'Todas las políticas de seguridad y procedimientos operativos identificados en el Requisito 1 son:\n'
+  '\n'
+  '- Documentados.\n'
+  '- Mantenidos actualizados.\n'
+  '- En uso.\n'
+  '- Conocidos por todas las partes afectadas.'),
+ ('1.1.2',
+  'Los roles y responsabilidades para realizar las actividades del Requisito 1 están documentados, asignados y '
+  'comprendidos.'),
+ ('1.2', 'Los controles de seguridad de red (NSC) están configurados y mantenidos.'),
+ ('1.2.1',
+  'Los estándares de configuración para los conjuntos de reglas de los NSC son:\n'
+  '\n'
+  '- Definidos.\n'
+  '- Implementados.\n'
+  '- Mantenidos.'),
+ ('1.2.2',
+  'Todos los cambios en las conexiones de red y en las configuraciones de los NSC son aprobados y gestionados '
+  'conforme al proceso de control de cambios definido en el Requisito 6.5.1.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Los cambios en conexiones de red incluyen la adición, eliminación o modificación de una conexión.\n'
+  'Los cambios en configuraciones de NSC incluyen tanto los relacionados con el componente como aquellos que afectan '
+  'cómo desempeña su función de seguridad.'),
+ ('1.2.3',
+  'Se mantiene uno o más diagramas de red precisos que muestran todas las conexiones entre el entorno de datos de '
+  'titulares de tarjeta (CDE) y otras redes, incluyendo redes inalámbricas.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Se puede utilizar un diagrama de red actualizado u otra solución técnica o topológica que identifique conexiones '
+  'y dispositivos de red.'),
+ ('1.2.4',
+  'Se mantiene uno o más diagramas precisos de flujo de datos que:\n'
+  '\n'
+  'Muestran todos los flujos de datos de cuentas a través de sistemas y redes.\n'
+  'Se actualizan según cambios en el entorno.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Se puede usar un diagrama de flujo de datos u otra solución técnica o topológica que identifique dichos flujos.'),
+ ('1.2.5',
+  'Todos los servicios, protocolos y puertos permitidos están identificados, aprobados y tienen una necesidad de '
+  'negocio definida.'),
+ ('1.2.6',
+  'Se definen e implementan controles de seguridad para todos los servicios, protocolos y puertos en uso '
+  'considerados inseguros, de modo que el riesgo sea mitigado.'),
+ ('1.2.7',
+  'Las configuraciones de los NSC se revisan al menos cada seis meses para confirmar que son relevantes y '
+  'efectivas.'),
+ ('1.2.8',
+  'Los archivos de configuración de los NSC:\n'
+  '\n'
+  '- Están protegidos contra accesos no autorizados.\n'
+  '- Se mantienen consistentes con las configuraciones activas de red.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Se considera archivo de configuración cualquier archivo o ajuste utilizado para configurar o sincronizar NSC, '
+  'incluyendo scripts, controles automatizados, infraestructura como código, parámetros respaldados o almacenados '
+  'remotamente.'),
+ ('1.3', 'El acceso de red hacia y desde el entorno de datos de titulares de tarjeta (CDE) está restringido.'),
+ ('1.3.1',
+  'El tráfico entrante al CDE se restringe de la siguiente forma:\n'
+  '\n'
+  '- Solo se permite el tráfico necesario.\n'
+  '- Todo otro tráfico se deniega explícitamente.'),
+ ('1.3.2',
+  'El tráfico saliente del CDE se restringe de la siguiente forma:\n'
+  '\n'
+  '- Solo se permite el tráfico necesario.\n'
+  '- Todo otro tráfico se deniega explícitamente.'),
+ ('1.3.3',
+  'Los NSC se implementan entre redes inalámbricas y el CDE, de manera que:\n'
+  '\n'
+  '- Todo el tráfico inalámbrico hacia el CDE se deniega por defecto.\n'
+  '- Solo se permite tráfico inalámbrico con un propósito de negocio autorizado.'),
+ ('1.4', 'Las conexiones entre redes confiables y no confiables están controladas.'),
+ ('1.4.1', 'Se implementan NSC entre redes confiables y no confiables.'),
+ ('1.4.2',
+  'El tráfico entrante desde redes no confiables a redes confiables se restringe a:\n'
+  '\n'
+  '- Comunicaciones con componentes autorizados para servicios públicos.\n'
+  '- Respuestas con estado a comunicaciones iniciadas desde redes confiables.\n'
+  '- Todo otro tráfico es denegado.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'El objetivo es controlar sesiones de comunicación, no protocolos específicos.\n'
+  'No limita el uso de UDP u otros protocolos sin conexión si el estado es gestionado por el NSC.'),
+ ('1.4.3',
+  'Se implementan medidas anti-suplantación (anti-spoofing) para detectar y bloquear direcciones IP de origen '
+  'falsificadas.'),
+ ('1.4.4',
+  'Los componentes que almacenan datos de titulares de tarjeta no son accesibles directamente desde redes no '
+  'confiables.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'No aplica a almacenamiento en memoria volátil, salvo cuando esta se usa como almacenamiento persistente (ej. RAM '
+  'disk).'),
+ ('1.4.5',
+  'La divulgación de direcciones IP internas e información de enrutamiento se limita únicamente a partes '
+  'autorizadas.'),
+ ('1.5', 'Los riesgos al CDE desde dispositivos que pueden conectarse a redes no confiables y al CDE son mitigados.'),
+ ('1.5.1',
+  'Se implementan controles de seguridad en dispositivos que se conectan tanto a redes no confiables (incluido '
+  'Internet) como al CDE:\n'
+  '\n'
+  'Se definen configuraciones específicas para prevenir amenazas.\n'
+  'Los controles de seguridad están activos.\n'
+  'No pueden ser modificados por usuarios, salvo autorización documentada y temporal.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Los controles solo pueden deshabilitarse temporalmente por necesidad técnica legítima y con autorización formal.\n'
+  'Pueden requerirse controles adicionales durante ese periodo.\n'
+  'Aplica a dispositivos corporativos y personales.'),
+ ('2.1',
+  'Los procesos y mecanismos para aplicar configuraciones seguras a todos los componentes del sistema están '
+  'definidos y comprendidos.'),
+ ('2.1.1',
+  'Todas las políticas de seguridad y procedimientos operativos identificados en el Requisito 2 son:\n'
+  '\n'
+  '- Documentados.\n'
+  '- Mantenidos actualizados.\n'
+  '- En uso.\n'
+  '- Conocidos por todas las partes afectadas.'),
+ ('2.1.2',
+  'Los roles y responsabilidades para realizar las actividades del Requisito 2 están documentados, asignados y '
+  'comprendidos.'),
+ ('2.2', 'Los componentes del sistema están configurados y gestionados de forma segura.'),
+ ('2.2.1',
+  'Los estándares de configuración se desarrollan, implementan y mantienen para:\n'
+  '\n'
+  '- Cubrir todos los componentes del sistema.\n'
+  '- Abordar todas las vulnerabilidades de seguridad conocidas.\n'
+  '- Ser consistentes con estándares de endurecimiento (hardening) aceptados por la industria o recomendaciones del '
+  'proveedor.\n'
+  '- Actualizarse cuando se identifiquen nuevas vulnerabilidades, según el Requisito 6.3.1.\n'
+  '- Aplicarse cuando se configuren nuevos sistemas y verificarse antes o inmediatamente después de que un '
+  'componente del sistema se conecte a un entorno de producción.'),
+ ('2.2.2',
+  'Las cuentas predeterminadas del proveedor se gestionan de la siguiente manera:\n'
+  '\n'
+  '- Si se utilizan, la contraseña predeterminada se cambia conforme al Requisito 8.3.6.\n'
+  '- Si no se utilizan, la cuenta se elimina o deshabilita.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Esto aplica a TODAS las cuentas y contraseñas predeterminadas de proveedores, incluyendo, entre otros:\n'
+  '\n'
+  '- Sistemas operativos\n'
+  '- Software de seguridad\n'
+  '- Cuentas de aplicaciones y sistemas\n'
+  '- Terminales POS\n'
+  '- Aplicaciones de pago\n'
+  '- Valores predeterminados de SNMP\n'
+  '\n'
+  'También aplica cuando el componente no está instalado localmente, por ejemplo, soluciones en la nube dentro del '
+  'CDE.'),
+ ('2.2.3',
+  'Las funciones principales que requieren diferentes niveles de seguridad se gestionan así:\n'
+  '\n'
+  '- Existe una sola función principal por componente del sistema,\n'
+  'O\n'
+  '- Las funciones con diferentes niveles de seguridad en el mismo componente están aisladas entre sí,\n'
+  'O\n'
+  '- Todas las funciones se aseguran al nivel requerido por la función con mayor necesidad de seguridad.'),
+ ('2.2.4',
+  'Solo se habilitan servicios, protocolos, demonios y funciones necesarios; toda funcionalidad innecesaria se '
+  'elimina o deshabilita.'),
+ ('2.2.5',
+  'Si existen servicios, protocolos o demonios inseguros:\n'
+  '\n'
+  '- Se documenta la justificación de negocio.\n'
+  '- Se implementan controles de seguridad adicionales que reduzcan el riesgo.'),
+ ('2.2.6', 'Los parámetros de seguridad del sistema se configuran para prevenir el uso indebido.'),
+ ('2.2.7',
+  'Todo acceso administrativo remoto (no por consola) está cifrado mediante criptografía fuerte.\n'
+  'Notas de aplicabilidad:\n'
+  'Incluye accesos administrativos mediante:\n'
+  '\n'
+  '- Interfaces web\n'
+  '- APIs (interfaces de programación de aplicaciones)'),
+ ('2.3', 'Los entornos inalámbricos están configurados y gestionados de forma segura.'),
+ ('2.3.1',
+  'Para entornos inalámbricos conectados al CDE o que transmiten datos de cuentas, todos los valores predeterminados '
+  'del proveedor se cambian al momento de la instalación o se verifica que sean seguros, incluyendo:\n'
+  '\n'
+  '- Claves de cifrado inalámbricas por defecto.\n'
+  '- Contraseñas de puntos de acceso inalámbricos.\n'
+  '- Valores predeterminados de SNMP.\n'
+  '- Cualquier otro valor predeterminado de seguridad inalámbrica.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Incluye, entre otros, claves, contraseñas, SNMP y configuraciones de seguridad por defecto.'),
+ ('2.3.2',
+  'Las claves de cifrado inalámbricas se cambian:\n'
+  '\n'
+  '- Cuando el personal con conocimiento de la clave deja la organización o cambia de rol.\n'
+  '- Cuando una clave se sospecha o se confirma comprometida.'),
+ ('3.1', 'Los procesos y mecanismos para realizar las actividades del Requisito 3 están definidos y comprendidos.'),
+ ('3.1.1',
+  'Todas las políticas de seguridad y procedimientos operativos identificados en el Requisito 3 son:\n'
+  '\n'
+  '- Documentados.\n'
+  '- Mantenidos actualizados.\n'
+  '- En uso.\n'
+  '- Conocidos por todas las partes afectadas.'),
+ ('3.1.2', 'Los roles y responsabilidades están documentados, asignados y comprendidos.'),
+ ('3.2', 'El almacenamiento de datos de cuentas se mantiene al mínimo'),
+ ('3.2.1',
+  'Se minimiza el almacenamiento mediante políticas y procesos que incluyen:\n'
+  '\n'
+  '- Cobertura de todas las ubicaciones donde se almacenan datos.\n'
+  '- Cobertura de datos de autenticación sensibles (SAD) antes de autorización.\n'
+  '- Limitación del almacenamiento y retención según requisitos legales o de negocio.\n'
+  '- Definición de periodos de retención con justificación documentada.\n'
+  '- Eliminación segura o irrecuperabilidad cuando ya no se necesiten.\n'
+  '- Verificación al menos trimestral de eliminación de datos fuera del periodo de retención.\n'
+  '\n'
+  'Notas:\n'
+  'Aplica también a proveedores (ej. nube).\n'
+  'El control de SAD previo a autorización será obligatorio desde 31 marzo 2025.'),
+ ('3.3', 'Los datos de autenticación sensibles (SAD) no se almacenan después de la autorización'),
+ ('3.3.1',
+  'El SAD no se almacena después de la autorización, incluso si está cifrado. Todos los datos de autenticación '
+  'sensibles recibidos se vuelven irrecuperables una vez finalizado el proceso de autorización.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  '\n'
+  'Los emisores y entidades que apoyan servicios de emisión, cuando exista una necesidad legítima y documentada, '
+  'pueden estar exentos.\n'
+  'Ver Requisito 3.3.3.\n'
+  'SAD incluye los datos definidos en 3.3.1.1 a 3.3.1.3.'),
+ ('3.3.1.1',
+  'El contenido completo de cualquier track no se almacena después de la autorización.\n'
+  '\n'
+  'Notas:\n'
+  'Se pueden conservar únicamente:\n'
+  '\n'
+  '- Nombre del titular\n'
+  '- PAN\n'
+  '- Fecha de expiración\n'
+  '- Código de servicio'),
+ ('3.3.1.2', 'El código de verificación (CVV) no se almacena.'),
+ ('3.3.1.3', 'El PIN ni el bloque PIN se almacenan.'),
+ ('3.3.2',
+  'Si el SAD se almacena antes de la autorización:\n'
+  '\n'
+  'Debe cifrarse con criptografía fuerte.\n'
+  '\n'
+  'Notas:\n'
+  '\n'
+  '- Aplica incluso si no hay PAN.\n'
+  '- Será obligatorio desde 31 marzo 2025.'),
+ ('3.3.3',
+  '(Solo emisores)\n'
+  'El almacenamiento de SAD:\n'
+  '\n'
+  '- Debe limitarse a lo necesario.\n'
+  '- Debe estar protegido.\n'
+  '- Debe cifrarse con criptografía fuerte.'),
+ ('3.4', 'El acceso al PAN completo y su copia están restringidos'),
+ ('3.4.1', 'El PAN se muestra enmascarado:\n\nMáximo BIN + últimos 4 dígitos'),
+ ('3.4.2', 'Tecnologías de acceso remoto impiden copiar o mover PAN sin autorización.'),
+ ('3.5', 'El PAN está protegido donde sea almacenado'),
+ ('3.5.1',
+  'El PAN se vuelve ilegible mediante:\n\n- Hash criptográfico\n- Truncamiento\n- Tokenización\n- Cifrado fuerte'),
+ ('3.5.1.1',
+  'Los hashes utilizados para hacer ilegible el PAN (según el primer punto del Requisito 3.5.1) son hashes '
+  'criptográficos con clave (keyed hashes) de todo el PAN, con procesos y procedimientos de gestión de claves '
+  'asociados de acuerdo con los Requisitos 3.6 y 3.7.'),
+ ('3.5.1.2',
+  'Si se utiliza cifrado a nivel de disco o de partición (en lugar de cifrado a nivel de archivo, columna o campo en '
+  'base de datos) para hacer ilegible el PAN, se implementa únicamente de la siguiente manera:\n'
+  '\n'
+  '- En medios electrónicos removibles,\n'
+  'O\n'
+  '- Si se utiliza en medios electrónicos no removibles, el PAN también se hace ilegible mediante otro mecanismo que '
+  'cumpla con el Requisito 3.5.1.\n'
+  '\n'
+  'Nota: Las implementaciones de cifrado a nivel de disco o partición también deben cumplir con todos los demás '
+  'requisitos de cifrado y gestión de claves de PCI DSS. and key-management requirements. \n'
+  'For issuers and companies that support issuing services: This requirement does not apply to PANs being accessed '
+  'for real-time transaction processing. However, it does apply to PANs stored for other purposes.\n'
+  'This requirement is a best practice until 31 March 2025, after which it will be required and must be fully '
+  'considered during a PCI DSS assessment.'),
+ ('3.5.1.3',
+  'Si se utiliza cifrado a nivel de disco o de partición (en lugar de cifrado a nivel de archivo, columna o campo de '
+  'base de datos) para hacer ilegible el PAN, se gestiona de la siguiente manera:\n'
+  '\n'
+  '- El acceso lógico se gestiona de forma separada e independiente de los mecanismos nativos de autenticación y '
+  'control de acceso del sistema operativo.\n'
+  '- Las claves de descifrado no están asociadas a cuentas de usuario.\n'
+  '- Los factores de autenticación (contraseñas, frases de paso o claves criptográficas) que permiten el acceso a '
+  'datos no cifrados se almacenan de forma segura.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Las implementaciones de cifrado a nivel de disco o partición también deben cumplir con todos los demás requisitos '
+  'de cifrado y gestión de claves de PCI DSS.'),
+ ('3.6', 'Las claves criptográficas utilizadas para proteger los datos de cuentas almacenados están protegidas'),
+ ('3.6.1',
+  'Se definen e implementan procedimientos para proteger las claves criptográficas utilizadas para proteger los '
+  'datos de cuentas almacenados contra divulgación y uso indebido, que incluyen:\n'
+  '\n'
+  '- El acceso a las claves está restringido al menor número de custodios necesario.\n'
+  '- Las claves de cifrado de claves (key-encrypting keys) son al menos tan fuertes como las claves de cifrado de '
+  'datos que protegen.\n'
+  '- Las claves de cifrado de claves se almacenan separadas de las claves de cifrado de datos.\n'
+  '- Las claves se almacenan de forma segura en el menor número posible de ubicaciones y formatos.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito aplica a:\n'
+  '\n'
+  '- Claves utilizadas para proteger datos almacenados\n'
+  '- Claves que protegen otras claves\n'
+  '\n'
+  'Debido a que una clave de cifrado de claves puede dar acceso a múltiples claves de datos, estas requieren '
+  'controles de protección más fuertes.'),
+ ('3.6.1.1',
+  '(Solo proveedores de servicio)\n'
+  '\n'
+  'Se mantiene una descripción documentada de la arquitectura criptográfica que incluye:\n'
+  '\n'
+  '- Detalles de algoritmos, protocolos y claves, incluyendo fuerza y expiración.\n'
+  '- Prevención del uso de las mismas claves en producción y pruebas (buena práctica hasta 31 marzo 2025).\n'
+  '- Uso de cada clave.\n'
+  '- Inventario de HSM, KMS y dispositivos criptográficos seguros (SCD), incluyendo tipo y ubicación.\n'
+  '\n'
+  'Notas:\n'
+  '\n'
+  '- Aplica solo a proveedores de servicio.\n'
+  '- En nube, la responsabilidad es compartida proveedor/cliente.'),
+ ('3.6.1.2',
+  'Las claves secretas y privadas se almacenan en una o más de las siguientes formas:\n'
+  '\n'
+  '- Cifradas con una clave de cifrado de claves igual o más fuerte.\n'
+  '- Dentro de un dispositivo criptográfico seguro (HSM o equivalente).\n'
+  '- Como componentes o fragmentos completos según estándar reconocido.\n'
+  '\n'
+  'Notas:\n'
+  '\n'
+  '- No aplica a claves públicas.\n'
+  '- Claves en KMS con HSM son válidas.\n'
+  '- Dividir una clave en dos partes simples NO cumple.\n'
+  '- Generación debe hacerse mediante:\n'
+  '- Generador aleatorio aprobado + SCD,\n'
+  'O\n'
+  '- ISO 19592 o equivalente.'),
+ ('3.6.1.3', 'El acceso a componentes de claves en texto claro se restringe al menor número de custodios necesario.'),
+ ('3.6.1.4', 'Las claves criptográficas se almacenan en el menor número posible de ubicaciones.'),
+ ('3.7',
+  'Cuando se utiliza criptografía para proteger los datos de cuentas almacenados, se definen e implementan procesos '
+  'y procedimientos de gestión de claves que cubren todos los aspectos del ciclo de vida de las claves.'),
+ ('3.7.1',
+  'Se implementan políticas y procedimientos de gestión de claves para incluir la generación de claves '
+  'criptográficas fuertes utilizadas para proteger los datos de cuentas almacenados.'),
+ ('3.7.2',
+  'Se implementan políticas y procedimientos de gestión de claves para incluir la distribución segura de claves '
+  'criptográficas utilizadas para proteger los datos de cuentas almacenados.'),
+ ('3.7.3',
+  'Se implementan políticas y procedimientos de gestión de claves para incluir el almacenamiento seguro de claves '
+  'criptográficas utilizadas para proteger los datos de cuentas almacenados.'),
+ ('3.7.4',
+  'Se implementan políticas y procedimientos de gestión de claves para los cambios de claves criptográficas que han '
+  'alcanzado el final de su criptoperiodo, según lo definido por el proveedor de la aplicación o el propietario de '
+  'la clave correspondiente, y con base en las mejores prácticas y lineamientos de la industria, incluyendo lo '
+  'siguiente:\n'
+  '\n'
+  '- Un criptoperiodo definido para cada tipo de clave en uso.\n'
+  '- Un proceso para el cambio de claves al final del criptoperiodo definido.'),
+ ('3.7.5',
+  'Se implementan políticas y procedimientos de gestión de claves para incluir el retiro, reemplazo o destrucción de '
+  'las claves utilizadas para proteger los datos de cuentas almacenados, según corresponda cuando:\n'
+  '\n'
+  '- La clave ha alcanzado el final de su criptoperiodo definido.\n'
+  '- La integridad de la clave se ha debilitado, incluyendo cuando el personal con conocimiento de un componente de '
+  'clave en texto claro deja la organización o cambia el rol para el cual conocía dicho componente.\n'
+  '- Se sospecha o se confirma que la clave ha sido comprometida.\n'
+  '\n'
+  '- Las claves retiradas o reemplazadas no se utilizan para operaciones de cifrado.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Si las claves criptográficas retiradas o reemplazadas necesitan conservarse, deben archivarse de forma segura '
+  '(por ejemplo, utilizando una clave de cifrado de claves).'),
+ ('3.7.6',
+  'Cuando las operaciones manuales de gestión de claves criptográficas en texto claro son realizadas por personal, '
+  'se implementan políticas y procedimientos de gestión de claves que incluyen la gestión de estas operaciones '
+  'mediante conocimiento dividido (split knowledge) y control dual.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este control aplica a operaciones manuales de gestión de claves.\n'
+  '\n'
+  '- Una clave criptográfica que simplemente se divide en dos partes no cumple con este requisito. Las claves '
+  'secretas o privadas almacenadas como componentes o fragmentos deben generarse mediante uno de los siguientes '
+  'métodos:\n'
+  '\n'
+  '- Utilizando un generador de números aleatorios aprobado y dentro de un dispositivo criptográfico seguro (SCD), '
+  'como un módulo de seguridad hardware (HSM) o un dispositivo de interacción aprobado por PTS,\n'
+  'O\n'
+  '- De acuerdo con ISO 19592 o un estándar equivalente de la industria para la generación de fragmentos de claves '
+  'secretas.'),
+ ('3.7.7',
+  'Se implementan políticas y procedimientos de gestión de claves para incluir la prevención de la sustitución no '
+  'autorizada de claves criptográficas.'),
+ ('3.7.8',
+  'Se implementan políticas y procedimientos de gestión de claves para incluir que los custodios de claves '
+  'criptográficas reconozcan formalmente (por escrito o electrónicamente) que entienden y aceptan sus '
+  'responsabilidades como custodios de claves.'),
+ ('3.7.9',
+  '(Requisito adicional solo para proveedores de servicios):\n'
+  'Cuando un proveedor de servicios comparte claves criptográficas con sus clientes para la transmisión o '
+  'almacenamiento de datos de cuentas, se documenta y distribuye a los clientes del proveedor una guía sobre la '
+  'transmisión, almacenamiento y actualización segura de dichas claves.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito aplica únicamente cuando la entidad evaluada es un proveedor de servicios.'),
+ ('4.1', 'Los procesos y mecanismos para realizar las actividades del Requisito 4 están definidos y comprendidos.'),
+ ('4.1.1',
+  'Todas las políticas de seguridad y procedimientos operativos identificados en el Requisito 4 son:\n'
+  '\n'
+  '- Documentados\n'
+  '- Mantenidos actualizados\n'
+  '- En uso\n'
+  '- Conocidos por todas las partes afectadas'),
+ ('4.1.2',
+  'Los roles y responsabilidades para realizar las actividades del Requisito 4 están documentados, asignados y '
+  'comprendidos.'),
+ ('4.2', 'El PAN está protegido con criptografía fuerte durante la transmisión.'),
+ ('4.2.1',
+  'Se implementan criptografía fuerte y protocolos de seguridad de la siguiente manera para proteger el PAN durante '
+  'su transmisión a través de redes públicas abiertas:\n'
+  '\n'
+  'Solo se aceptan claves y certificados confiables.\n'
+  'Los certificados utilizados para proteger el PAN durante la transmisión a través de redes públicas abiertas se '
+  'confirman como válidos y no están expirados ni revocados. Este punto es una buena práctica hasta su fecha de '
+  'entrada en vigor; consulte las notas de aplicabilidad a continuación para más detalles.\n'
+  'El protocolo en uso solo admite versiones o configuraciones seguras y no permite retrocesos (fallback) ni el uso '
+  'de versiones, algoritmos, tamaños de clave o implementaciones inseguras.\n'
+  'La fortaleza del cifrado es adecuada para la metodología de cifrado utilizada.\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  '\n'
+  'Un certificado autofirmado puede ser aceptable si:\n'
+  '\n'
+  '- Es emitido por una autoridad certificadora interna de la organización,\n'
+  '- Se confirma la autoría del certificado,\n'
+  '- El certificado es verificado (por ejemplo, mediante hash o firma),\n'
+  'Y no ha expirado.\n'
+  '\n'
+  'El punto anterior (validación de certificados) es una buena práctica hasta el 31 de marzo de 2025, después de lo '
+  'cual será obligatorio como parte del Requisito 4.2.1 y deberá considerarse completamente en una evaluación PCI '
+  'DSS.'),
+ ('4.2.1.1',
+  'Se mantiene un inventario de las claves y certificados confiables de la entidad.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'considerarse completamente en una evaluación PCI DSS.'),
+ ('4.2.1.2',
+  'Las redes inalámbricas que transmiten PAN o están conectadas al CDE utilizan las mejores prácticas de la '
+  'industria para implementar criptografía fuerte en la autenticación y transmisión.'),
+ ('4.2.2',
+  'El PAN se protege con criptografía fuerte siempre que se envía mediante tecnologías de mensajería de usuario '
+  'final.\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  '\n'
+  'Este requisito también aplica cuando:\n'
+  '\n'
+  '- Un cliente u otro tercero solicita que el PAN sea enviado mediante tecnologías de mensajería de usuario final.\n'
+  '\n'
+  'Puede haber casos en los que una entidad reciba datos de tarjeta de forma no solicitada a través de un canal de '
+  'comunicación inseguro que no fue diseñado para transmitir datos sensibles. En esta situación, la entidad puede:\n'
+  '\n'
+  '- Incluir el canal dentro del alcance de su CDE y asegurarlo conforme a PCI DSS,\n'
+  'O\n'
+  '- Eliminar los datos del titular de tarjeta e implementar controles para evitar que el canal vuelva a utilizarse '
+  'para este propósito.'),
+ ('5.1',
+  'Los procesos y mecanismos para proteger todos los sistemas y redes contra software malicioso están definidos y '
+  'comprendidos.'),
+ ('5.1.1',
+  'Todas las políticas de seguridad y procedimientos operativos identificados en el Requisito 5 son:\n'
+  '\n'
+  '- Documentados\n'
+  '- Mantenidos actualizados\n'
+  '- En uso\n'
+  '- Conocidos por todas las partes afectadas'),
+ ('5.1.2',
+  'Los roles y responsabilidades para realizar las actividades del Requisito 5 están documentados, asignados y '
+  'comprendidos.'),
+ ('5.2', 'El software malicioso (malware) es prevenido, o detectado y gestionado.'),
+ ('5.2.1',
+  'Se implementa una o más soluciones anti-malware en todos los componentes del sistema, excepto en aquellos '
+  'identificados mediante evaluaciones periódicas según el Requisito 5.2.3 que concluyan que dichos componentes no '
+  'están en riesgo de malware.'),
+ ('5.2.2',
+  'Las soluciones anti-malware implementadas:\n'
+  '\n'
+  '- Detectan todos los tipos conocidos de malware.\n'
+  '- Eliminan, bloquean o contienen todos los tipos conocidos de malware.'),
+ ('5.2.3',
+  'Los componentes del sistema que no están en riesgo de malware se evalúan periódicamente para incluir lo '
+  'siguiente:\n'
+  '\n'
+  '- Una lista documentada de todos los componentes que no están en riesgo de malware.\n'
+  '- Identificación y evaluación de amenazas de malware emergentes para dichos componentes.\n'
+  '- Confirmación de que estos componentes continúan sin requerir protección anti-malware.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Aplica a componentes donde no se implementa anti-malware según 5.2.1.'),
+ ('5.2.3.1',
+  'La frecuencia de estas evaluaciones periódicas se define en el análisis de riesgos dirigido de la entidad, '
+  'conforme al Requisito 12.3.1.\n'
+  '\n'
+  'Notas:\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después será obligatorio.'),
+ ('5.3', 'Los mecanismos y procesos anti-malware están activos, mantenidos y monitoreados.'),
+ ('5.3.1', 'Las soluciones anti-malware se mantienen actualizadas mediante actualizaciones automáticas.'),
+ ('5.3.2',
+  'Las soluciones anti-malware:\n'
+  '\n'
+  '- Realizan análisis periódicos y análisis activos o en tiempo real,\n'
+  'O\n'
+  '- Realizan análisis continuo del comportamiento de sistemas o procesos.'),
+ ('5.3.2.1',
+  'Si se realizan análisis periódicos, su frecuencia se define en el análisis de riesgos dirigido conforme al '
+  'Requisito 12.3.1.\n'
+  '\n'
+  'Notas:\n'
+  'Aplica a entidades que usan escaneos periódicos.\n'
+  'Será obligatorio después del 31 de marzo de 2025.'),
+ ('5.3.3',
+  'Para medios electrónicos removibles, las soluciones anti-malware:\n'
+  '\n'
+  '- Realizan análisis automáticos cuando el medio es insertado, conectado o montado lógicamente,\n'
+  'O\n'
+  '- Realizan análisis continuo del comportamiento cuando el medio es insertado, conectado o montado.\n'
+  '\n'
+  'Notas:\n'
+  'Este requisito será obligatorio después del 31 de marzo de 2025.'),
+ ('5.3.4',
+  'Los registros de auditoría de las soluciones anti-malware están habilitados y se conservan conforme al Requisito '
+  '10.5.1.'),
+ ('5.3.5',
+  'Los mecanismos anti-malware no pueden ser deshabilitados o modificados por usuarios, salvo que esté documentado y '
+  'autorizado por la gerencia de forma puntual y por un periodo limitado.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  '\n'
+  '- Solo se permite deshabilitar temporalmente por necesidad técnica legítima.\n'
+  '- Debe existir autorización formal.\n'
+  '- Deben implementarse controles compensatorios durante ese periodo.'),
+ ('5.4', 'Los mecanismos anti-phishing protegen a los usuarios contra ataques de phishing.'),
+ ('5.4.1',
+  'Se implementan procesos y mecanismos automatizados para detectar y proteger al personal contra ataques de '
+  'phishing.\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  '- Este requisito se enfoca en proteger al personal con acceso a sistemas dentro del alcance PCI DSS.\n'
+  '- No reemplaza los requisitos de capacitación en concienciación de seguridad (Requisito 12.6.3.1).\n'
+  '- Son controles complementarios, no equivalentes.\n'
+  '\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser considerado completamente en una evaluación PCI DSS.'),
+ ('6.1',
+  'Los procesos y mecanismos para desarrollar y mantener sistemas y software seguros están definidos y '
+  'comprendidos.'),
+ ('6.1.1',
+  'Todas las políticas de seguridad y procedimientos operativos identificados en el Requisito 6 son:\n'
+  '\n'
+  '- Documentados.\n'
+  '- Mantenidos actualizados.\n'
+  '- En uso.\n'
+  '- Conocidos por todas las partes afectadas.'),
+ ('6.1.2',
+  'Los roles y responsabilidades para realizar las actividades del Requisito 6 están documentados, asignados y '
+  'comprendidos.\n'
+  '\n'
+  'Nuevo requisito – vigente inmediatamente'),
+ ('6.2', 'El software propio y personalizado se desarrolla de forma segura.'),
+ ('6.2.1',
+  'El software propio y personalizado se desarrolla de forma segura, de la siguiente manera:\n'
+  '\n'
+  '- Basado en estándares de la industria y/o mejores prácticas de desarrollo seguro.\n'
+  '- De acuerdo con PCI DSS (por ejemplo, autenticación segura y registros).\n'
+  '- Incorporando la consideración de aspectos de seguridad de la información en cada etapa del ciclo de vida del '
+  'desarrollo de software.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Aplica a todo software desarrollado por o para la entidad para su propio uso. No aplica a software de terceros.'),
+ ('6.2.2',
+  'El personal de desarrollo recibe capacitación al menos una vez cada 12 meses en:\n'
+  '\n'
+  '- Seguridad de software relevante a su función.\n'
+  '- Diseño seguro y codificación segura.\n'
+  '- Uso de herramientas de pruebas de seguridad (si aplica).\n'
+  '\n'
+  'Notas:\n'
+  '\n'
+  '- Aplica a revisiones de código.\n'
+  '- Incluye aplicaciones internas y públicas.\n'
+  '- Puede ser manual o automatizado.'),
+ ('6.2.3',
+  'El software se revisa antes de producción para identificar vulnerabilidades:\n'
+  '\n'
+  '- Cumplimiento de codificación segura.\n'
+  '- Identificación de vulnerabilidades existentes y emergentes.\n'
+  '- Correcciones aplicadas antes del despliegue.'),
+ ('6.2.3.1',
+  'Si se realizan revisiones manuales de código para software propio y personalizado antes de su liberación a '
+  'producción, los cambios de código:\n'
+  '\n'
+  '- Son revisados por personas distintas al autor original del código y que poseen conocimientos en técnicas de '
+  'revisión de código y prácticas de codificación segura.\n'
+  '- Son revisados y aprobados por la gerencia antes de su liberación.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Las revisiones manuales de código pueden ser realizadas por personal interno con conocimientos o por terceros '
+  'especializados.\n'
+  'Una persona a la que se le haya asignado formalmente la responsabilidad del control de liberación y que no sea ni '
+  'el autor original del código ni el revisor, cumple con el criterio de ser la gerencia.'),
+ ('6.2.4',
+  'Se definen y utilizan técnicas de ingeniería de software u otros métodos por parte del personal de desarrollo '
+  'para prevenir o mitigar ataques comunes de software y vulnerabilidades relacionadas para software propio y '
+  'personalizado, incluyendo, entre otros, los siguientes:\n'
+  '\n'
+  '- Ataques de inyección, incluyendo SQL, LDAP, XPath u otros comandos, parámetros, objetos, fallas o '
+  'vulnerabilidades de tipo inyección.\n'
+  '- Ataques sobre datos y estructuras de datos, incluyendo intentos de manipular buffers, punteros, datos de '
+  'entrada o datos compartidos.\n'
+  '- Ataques al uso de criptografía, incluyendo intentos de explotar implementaciones criptográficas débiles, '
+  'inseguras o inapropiadas, algoritmos, suites de cifrado o modos de operación.\n'
+  '- Ataques a la lógica de negocio, incluyendo intentos de abusar o eludir funcionalidades de la aplicación '
+  'mediante la manipulación de APIs, protocolos y canales de comunicación, funcionalidades del lado del cliente u '
+  'otras funciones y recursos del sistema/aplicación. Esto incluye cross-site scripting (XSS) y cross-site request '
+  'forgery (CSRF).\n'
+  '- Ataques a mecanismos de control de acceso, incluyendo intentos de evadir o abusar de mecanismos de '
+  'identificación, autenticación o autorización, o de explotar debilidades en su implementación.\n'
+  '- Ataques mediante cualquier vulnerabilidad de “alto riesgo” identificada en el proceso de identificación de '
+  'vulnerabilidades, según lo definido en el Requisito 6.3.1.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Aplica a todo software desarrollado por o para la entidad para su propio uso. Incluye software propio y '
+  'personalizado. No aplica a software de terceros.'),
+ ('6.3', 'Las vulnerabilidades de seguridad son identificadas y gestionadas.'),
+ ('6.3.1',
+  'Las vulnerabilidades de seguridad se identifican y gestionan de la siguiente manera:\n'
+  '\n'
+  '- Las nuevas vulnerabilidades se identifican utilizando fuentes reconocidas por la industria, incluyendo alertas '
+  'de equipos de respuesta a emergencias informáticas (CERT).\n'
+  '- Las vulnerabilidades se clasifican según un nivel de riesgo basado en mejores prácticas de la industria y su '
+  'impacto potencial.\n'
+  '- Las clasificaciones de riesgo identifican, como mínimo, todas las vulnerabilidades consideradas de alto riesgo '
+  'o críticas para el entorno.\n'
+  '- Se cubren vulnerabilidades en software propio, personalizado y de terceros (por ejemplo, sistemas operativos y '
+  'bases de datos).\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito es adicional a los escaneos de vulnerabilidades (Requisitos 11.3.1 y 11.3.2).\n'
+  'Requiere monitoreo continuo de fuentes de vulnerabilidades y evaluación de riesgos por parte de la entidad.'),
+ ('6.3.2',
+  'Se mantiene un inventario de software propio, personalizado y de componentes de terceros integrados, para '
+  'facilitar la gestión de vulnerabilidades y parches.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('6.3.3',
+  'Todos los componentes del sistema están protegidos contra vulnerabilidades conocidas mediante la instalación de '
+  'parches o actualizaciones de seguridad, de la siguiente manera:\n'
+  '\n'
+  '- Los parches para vulnerabilidades críticas se instalan dentro de un mes desde su liberación.\n'
+  '- Los demás parches se instalan dentro de un plazo apropiado según la evaluación de criticidad del riesgo '
+  'realizada por la entidad conforme al Requisito 6.3.1.'),
+ ('6.4', 'Las aplicaciones web públicas están protegidas contra ataques.'),
+ ('6.4.1',
+  'Para aplicaciones web públicas, se gestionan continuamente nuevas amenazas y vulnerabilidades, y se protegen '
+  'contra ataques conocidos mediante:\n'
+  '\n'
+  '- Revisión mediante herramientas o métodos manuales o automatizados de evaluación de seguridad:\n'
+  '   - Al menos una vez cada 12 meses y después de cambios significativos.\n'
+  '   - Por una entidad especializada en seguridad de aplicaciones.\n'
+  '   - Incluyendo, como mínimo, los ataques definidos en el Requisito 6.2.4.\n'
+  '   - Todas las vulnerabilidades se clasifican según el Requisito 6.3.1.\n'
+  '   - Todas las vulnerabilidades se corrigen.\n'
+  '   - La aplicación se reevalúa después de las correcciones.\n'
+  '\n'
+  'O\n'
+  '\n'
+  '- Implementación de una solución técnica automatizada que:\n'
+  '   - Se ubica frente a las aplicaciones web públicas.\n'
+  '   - Detecta y previene ataques web.\n'
+  '   - Está activa y actualizada.\n'
+  '   - Genera registros de auditoría.\n'
+  '   - Bloquea ataques o genera alertas para investigación inmediata.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'No equivale a escaneos de vulnerabilidades (Req. 11.3).\n'
+  'Será reemplazado por el Requisito 6.4.2 después del 31 de marzo de 2025.'),
+ ('6.4.2',
+  'Para aplicaciones web de cara al público, se implementa una solución técnica automatizada que detecta y previene '
+  'continuamente ataques basados en web, con al menos lo siguiente:\n'
+  '\n'
+  '- Está instalada frente a las aplicaciones web de cara al público y está configurada para detectar y prevenir '
+  'ataques basados en web.\n'
+  '- Está en ejecución activa y actualizada según corresponda.\n'
+  '- Genera registros de auditoría.\n'
+  '- Está configurada para bloquear ataques basados en web o generar una alerta que sea investigada de inmediato.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este nuevo requisito reemplazará al Requisito 6.4.1 una vez que entre en vigor su fecha efectiva.\n'
+  '\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('6.4.3',
+  'Todos los scripts de páginas de pago que se cargan y ejecutan en el navegador del consumidor se gestionan de la '
+  'siguiente manera:\n'
+  '\n'
+  '- Se implementa un método para confirmar que cada script está autorizado.\n'
+  '- Se implementa un método para garantizar la integridad de cada script.\n'
+  '- Se mantiene un inventario de todos los scripts con una justificación de negocio o técnica por escrito que '
+  'explique por qué cada uno es necesario.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito aplica a todos los scripts cargados desde el entorno de la entidad y a los scripts cargados desde '
+  'terceros y cuartos proveedores.\n'
+  '\n'
+  'Este requisito también aplica a scripts en las páginas web de la entidad que incluyen una página/formulario de '
+  'pago embebido de un TPSP/procesador de pagos (por ejemplo, uno o más marcos en línea o iframes).\n'
+  '\n'
+  'Este requisito no aplica a una entidad para scripts en una página/formulario de pago embebido de un '
+  'TPSP/procesador de pagos (por ejemplo, uno o más iframes), cuando la entidad incluye una página/formulario de '
+  'pago de un TPSP/procesador de pagos en su sitio web.\n'
+  '\n'
+  'Los scripts en la página/formulario de pago embebido del TPSP/procesador de pagos son responsabilidad del '
+  'TPSP/procesador de pagos para gestionarlos de acuerdo con este requisito.\n'
+  '\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('6.5', 'Los cambios a todos los componentes del sistema se gestionan de forma segura.'),
+ ('6.5.1',
+  'Los cambios a todos los componentes del sistema en el entorno de producción se realizan de acuerdo con '
+  'procedimientos establecidos que incluyen:\n'
+  '\n'
+  '- Razón y descripción del cambio.\n'
+  '- Documentación del impacto en la seguridad.\n'
+  '- Aprobación documentada del cambio por partes autorizadas.\n'
+  '- Pruebas para verificar que el cambio no afecte negativamente la seguridad del sistema.\n'
+  '- Para cambios en software propio y personalizado, todas las actualizaciones se prueban para verificar el '
+  'cumplimiento con el Requisito 6.2.4 antes de ser desplegadas en producción.\n'
+  '- Procedimientos para abordar fallos y retornar a un estado seguro.'),
+ ('6.5.2',
+  'Tras la finalización de un cambio significativo, se confirma que todos los requisitos PCI DSS aplicables están '
+  'implementados en todos los sistemas y redes nuevos o modificados, y la documentación se actualiza según '
+  'corresponda.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Estos cambios significativos también deben ser capturados y reflejados en la actividad anual de confirmación del '
+  'alcance PCI DSS de la entidad conforme al Requisito 12.5.2.'),
+ ('6.5.3',
+  'Los entornos de preproducción están separados de los entornos de producción y la separación se aplica mediante '
+  'controles de acceso.'),
+ ('6.5.4',
+  'Los roles y funciones están separados entre los entornos de producción y preproducción para proporcionar '
+  'responsabilidad, de modo que solo se desplieguen cambios revisados y aprobados?\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'En entornos con personal limitado donde los individuos desempeñan múltiples roles o funciones, este mismo '
+  'objetivo puede lograrse mediante controles procedimentales adicionales que proporcionen responsabilidad. Por '
+  'ejemplo, un desarrollador también puede ser un administrador que utiliza una cuenta de nivel administrador con '
+  'privilegios elevados en el entorno de desarrollo y, para su rol de desarrollador, utiliza una cuenta separada con '
+  'acceso a nivel de usuario en el entorno de producción.'),
+ ('6.5.5',
+  'Los PAN reales no se utilizan en entornos de preproducción, excepto cuando dichos entornos están incluidos dentro '
+  'del CDE y protegidos de acuerdo con todos los requisitos PCI DSS aplicables?'),
+ ('6.5.6',
+  'Los datos de prueba y las cuentas de prueba se eliminan de los componentes del sistema antes de que el sistema '
+  'pase a producción?'),
+ ('7.1',
+  'Los procesos y mecanismos para restringir el acceso a los componentes del sistema y a los datos de titulares de '
+  'tarjeta según la necesidad de conocimiento del negocio están definidos y comprendidos.'),
+ ('7.1.1',
+  'Todas las políticas de seguridad y procedimientos operativos identificados en el Requisito 7 son:\n'
+  '\n'
+  '- Documentados,\n'
+  '- Mantenidos actualizados,\n'
+  '- En uso,\n'
+  '- Conocidos por todas las partes afectadas.'),
+ ('7.1.2',
+  'Los roles y responsabilidades para realizar las actividades del Requisito 7 están documentados, asignados y '
+  'comprendidos?'),
+ ('7.2', 'El acceso a los componentes del sistema y a los datos está apropiadamente definido y asignado.'),
+ ('7.2.1',
+  'Se define un modelo de control de acceso que incluye la concesión de acceso de la siguiente manera:\n'
+  '\n'
+  '- Acceso apropiado según las necesidades del negocio y de acceso de la entidad.\n'
+  '- Acceso a componentes del sistema y recursos de datos basado en la clasificación y funciones laborales de los '
+  'usuarios.\n'
+  '- Los privilegios mínimos necesarios (por ejemplo, usuario, administrador) para realizar una función laboral.'),
+ ('7.2.2',
+  'El acceso se asigna a los usuarios, incluyendo usuarios privilegiados, con base en:\n'
+  '\n'
+  '- Clasificación y función laboral.\n'
+  '- Los privilegios mínimos necesarios para realizar sus responsabilidades.'),
+ ('7.2.3', 'Los privilegios requeridos son aprobados por personal autorizado?'),
+ ('7.2.4',
+  'Todas las cuentas de usuario y privilegios de acceso asociados, incluyendo cuentas de terceros/proveedores, se '
+  'revisan de la siguiente manera:\n'
+  '\n'
+  '- Al menos una vez cada seis meses\n'
+  '- Para asegurar que las cuentas y accesos siguen siendo apropiados según la función laboral\n'
+  '- Cualquier acceso inapropiado es corregido\n'
+  '- La gerencia reconoce que el acceso sigue siendo apropiado\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito aplica a todas las cuentas de usuario y privilegios de acceso asociados, incluyendo:\n'
+  '\n'
+  '- Personal interno\n'
+  '- Terceros/proveedores\n'
+  '- Cuentas utilizadas para acceder a servicios en la nube de terceros\n'
+  '\n'
+  'Ver Requisitos 7.2.5, 7.2.5.1 y 8.6.1 a 8.6.3 para controles de cuentas de aplicaciones y sistemas.\n'
+  '\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('7.2.5',
+  'Todas las cuentas de aplicaciones y sistemas y sus privilegios asociados se asignan y gestionan de la siguiente '
+  'manera:\n'
+  '\n'
+  '- Basados en los privilegios mínimos necesarios para la operatividad del sistema o aplicación.\n'
+  '- El acceso se limita a los sistemas, aplicaciones o procesos que específicamente requieren su uso.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio.'),
+ ('7.2.5.1',
+  'Todo el acceso de cuentas de aplicaciones y sistemas y sus privilegios asociados se revisa de la siguiente '
+  'manera:\n'
+  '\n'
+  '- Periódicamente (según la frecuencia definida en el análisis de riesgo dirigido de la entidad conforme al '
+  'Requisito 12.3.1)\n'
+  '- El acceso de la aplicación/sistema sigue siendo apropiado para la función que se realiza\n'
+  '- Cualquier acceso inapropiado es corregido\n'
+  'La gerencia reconoce que el acceso sigue siendo apropiado\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio.'),
+ ('7.2.6',
+  'Todo el acceso de usuarios a repositorios de consulta de datos de titulares de tarjeta almacenados se restringe '
+  'de la siguiente manera:\n'
+  '\n'
+  '- A través de aplicaciones u otros métodos programáticos, con acceso y acciones permitidas basadas en roles de '
+  'usuario y privilegios mínimos\n'
+  '- Solo los administradores responsables pueden acceder o consultar directamente los repositorios de datos de '
+  'titulares de tarjeta almacenados (CHD)\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito aplica a controles de acceso para consultas de repositorios de datos de titulares de tarjeta '
+  'almacenados.\n'
+  '\n'
+  'Ver Requisitos 7.2.5, 7.2.5.1 y 8.6.1 a 8.6.3 para controles de cuentas de aplicaciones y sistemas.'),
+ ('7.3',
+  'El acceso lógico a los componentes del sistema y a los datos se gestiona mediante sistemas de control de acceso.'),
+ ('7.3.1',
+  'Se implementa un sistema de control de acceso que restringe el acceso según la necesidad de conocimiento del '
+  'usuario y cubre todos los componentes del sistema?'),
+ ('7.3.2',
+  'El sistema de control de acceso está configurado para aplicar los privilegios asignados a individuos, '
+  'aplicaciones y sistemas según la clasificación y función laboral?'),
+ ('7.3.3', 'El sistema de control de acceso está configurado con un enfoque de “denegar todo” por defecto?'),
+ ('8.1', 'Los procesos y mecanismos para realizar las actividades del Requisito 8 están definidos y comprendidos.'),
+ ('8.1.1',
+  'Todas las políticas de seguridad y procedimientos operativos identificados en el Requisito 8 son:\n'
+  '\n'
+  '- Documentados.\n'
+  '- Mantenidos actualizados.\n'
+  '- En uso.\n'
+  '- Conocidos por todas las partes afectadas.'),
+ ('8.1.2',
+  'Los roles y responsabilidades para realizar las actividades del Requisito 8 están documentados, asignados y '
+  'comprendidos?'),
+ ('8.2',
+  'La identificación de usuarios y las cuentas relacionadas para usuarios y administradores se gestionan '
+  'estrictamente a lo largo del ciclo de vida de la cuenta'),
+ ('8.2.1',
+  'A todos los usuarios se les asigna un identificador único (ID) antes de que se permita el acceso a los '
+  'componentes del sistema o a los datos de titulares de tarjeta.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito no está destinado a aplicarse a cuentas de usuario en terminales de punto de venta (POS) que '
+  'tienen acceso a un solo número de tarjeta a la vez para facilitar una única transacción.'),
+ ('8.2.2',
+  'Los identificadores de grupo, compartidos o genéricos, u otras credenciales de autenticación compartidas, solo se '
+  'utilizan cuando sea necesario de manera excepcional, y se gestionan de la siguiente forma:\n'
+  '\n'
+  '- Se evita el uso del ID a menos que sea necesario para una circunstancia excepcional.\n'
+  '- Su uso se limita al tiempo necesario para dicha circunstancia.\n'
+  '- Se documenta la justificación de negocio para su uso.\n'
+  '- Su uso es aprobado explícitamente por la gerencia.\n'
+  '- La identidad del usuario individual se confirma antes de otorgar acceso a la cuenta.\n'
+  '- Cada acción realizada es atribuible a un usuario individual.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito no está destinado a aplicarse a cuentas de usuario en terminales POS con acceso a un solo número '
+  'de tarjeta por transacción.'),
+ ('8.2.3',
+  '(Requisito adicional solo para proveedores de servicios):\n'
+  'Los proveedores de servicios con acceso remoto a instalaciones de clientes utilizan factores de autenticación '
+  'únicos para cada instalación de cliente?\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  '\n'
+  'Aplica solo cuando la entidad evaluada es un proveedor de servicios.\n'
+  'No aplica a proveedores accediendo a sus propios entornos compartidos.\n'
+  'Si empleados del proveedor usan factores compartidos, estos deben ser únicos por cliente y gestionados conforme '
+  'al Requisito 8.2.2.'),
+ ('8.2.4',
+  'La adición, eliminación y modificación de IDs de usuario, factores de autenticación y otros objetos de '
+  'identificación se gestionan de la siguiente manera:\n'
+  '\n'
+  '- Autorizados con la aprobación correspondiente.\n'
+  '- Implementados únicamente con los privilegios especificados en la aprobación documentada.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Aplica a todas las cuentas de usuario, incluyendo empleados, contratistas, consultores, trabajadores temporales y '
+  'proveedores externos.'),
+ ('8.2.5', 'El acceso de usuarios terminados es revocado inmediatamente?'),
+ ('8.2.6', 'Las cuentas de usuario inactivas se eliminan o deshabilitan dentro de los 90 días de inactividad?'),
+ ('8.2.7',
+  'Las cuentas utilizadas por terceros para acceder, dar soporte o mantener componentes del sistema mediante acceso '
+  'remoto se gestionan de la siguiente manera:\n'
+  '\n'
+  '- Se habilitan únicamente durante el periodo necesario y se deshabilitan cuando no están en uso.\n'
+  '- Su uso es monitoreado para detectar actividad inesperada.'),
+ ('8.2.8',
+  'Si una sesión de usuario ha estado inactiva durante más de 15 minutos, se requiere que el usuario vuelva a '
+  'autenticarse para reactivar el terminal o la sesión?\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito no está destinado a aplicarse a cuentas en terminales POS que acceden a un solo número de tarjeta '
+  'por transacción.\n'
+  '\n'
+  'Este requisito no pretende impedir actividades legítimas cuando la consola o el PC estén desatendidos.'),
+ ('8.3', 'La autenticación fuerte para usuarios y administradores está establecida y gestionada.'),
+ ('8.3.1',
+  'Todo el acceso de usuarios a los componentes del sistema para usuarios y administradores se autentica mediante al '
+  'menos uno de los siguientes factores de autenticación:\n'
+  '\n'
+  '- Algo que conoces, como una contraseña o frase de paso.\n'
+  '- Algo que tienes, como un dispositivo token o una tarjeta inteligente.\n'
+  '- Algo que eres, como un elemento biométrico.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito no está destinado a aplicarse a cuentas de usuario en terminales de punto de venta que tienen '
+  'acceso a un solo número de tarjeta a la vez para facilitar una única transacción.\n'
+  'Este requisito no reemplaza los requisitos de autenticación multifactor (MFA), sino que aplica a aquellos '
+  'sistemas dentro del alcance que no están sujetos a MFA.\n'
+  'Un certificado digital es una opción válida para “algo que tienes” si es único para un usuario en particular.'),
+ ('8.3.2',
+  'Se utiliza criptografía fuerte para hacer ilegibles todos los factores de autenticación durante la transmisión y '
+  'el almacenamiento en todos los componentes del sistema.'),
+ ('8.3.3', 'La identidad del usuario se verifica antes de modificar cualquier factor de autenticación.'),
+ ('8.3.4',
+  'Los intentos de autenticación inválidos se limitan mediante:\n'
+  '\n'
+  '- Bloqueo del ID de usuario después de no más de 10 intentos.\n'
+  '- Establecer la duración del bloqueo en un mínimo de 30 minutos o hasta que se confirme la identidad del '
+  'usuario.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito no está destinado a aplicarse a cuentas de usuario en terminales POS que tienen acceso a un solo '
+  'número de tarjeta por transacción.'),
+ ('8.3.5',
+  'Si las contraseñas/frases de paso se utilizan como factores de autenticación para cumplir con el Requisito 8.3.1, '
+  'se establecen y restablecen para cada usuario de la siguiente manera:\n'
+  '\n'
+  '- Se configuran con un valor único para el primer uso y al restablecerse.\n'
+  '- Se obliga a cambiarlas inmediatamente después del primer uso.'),
+ ('8.3.6',
+  'Si las contraseñas/frases de paso se utilizan como factores de autenticación, deben cumplir el siguiente nivel '
+  'mínimo de complejidad:\n'
+  '\n'
+  '- Longitud mínima de 12 caracteres (o, si el sistema no lo soporta, mínimo 8 caracteres).\n'
+  '- Contener caracteres numéricos y alfabéticos.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito no aplica a:\n'
+  '\n'
+  '- Cuentas POS con acceso a un solo número de tarjeta por transacción.\n'
+  '- Cuentas de aplicación o sistema (ver sección 8.6).\n'
+  '\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después será obligatorio.\n'
+  'Hasta esa fecha, las contraseñas deben tener mínimo 7 caracteres según PCI DSS v3.2.1.'),
+ ('8.3.7',
+  'No se permite reutilizar una contraseña/frase de paso igual a cualquiera de las últimas cuatro utilizadas?\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'No aplica a cuentas POS de un solo uso por transacción.'),
+ ('8.3.8',
+  'Las políticas y procedimientos de autenticación se documentan y comunican a todos los usuarios, incluyendo:\n'
+  '\n'
+  '- Guía para seleccionar factores de autenticación fuertes.\n'
+  '- Guía para protegerlos.\n'
+  '- Instrucciones de no reutilizar contraseñas.\n'
+  '- Instrucciones para cambiar contraseñas en caso de compromiso y cómo reportarlo.'),
+ ('8.3.9',
+  'Si las contraseñas/frases de paso se utilizan como el único factor de autenticación para el acceso de usuarios '
+  '(es decir, en cualquier implementación de autenticación de un solo factor), entonces:\n'
+  '\n'
+  '- Las contraseñas/frases de paso se cambian al menos una vez cada 90 días,\n'
+  'O\n'
+  '- La postura de seguridad de las cuentas se analiza dinámicamente y el acceso en tiempo real a los recursos se '
+  'determina automáticamente en consecuencia.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito no aplica a componentes del sistema dentro del alcance donde se utiliza MFA.\n'
+  'Este requisito no está destinado a aplicarse a cuentas de usuario en terminales de punto de venta que tienen '
+  'acceso a un solo número de tarjeta a la vez para facilitar una única transacción.\n'
+  'Este requisito no aplica a cuentas de clientes de proveedores de servicios, pero sí aplica a cuentas del personal '
+  'del proveedor de servicios.'),
+ ('8.3.10',
+  'Requisito adicional solo para proveedores de servicios:\n'
+  '\n'
+  '- Si las contraseñas/frases de paso se utilizan como el único factor de autenticación para el acceso de usuarios '
+  'clientes a datos de titulares de tarjeta (es decir, en cualquier implementación de autenticación de un solo '
+  'factor), entonces se proporciona orientación a los usuarios clientes incluyendo:\n'
+  '\n'
+  '- Orientación para que los clientes cambien periódicamente sus contraseñas/frases de paso.\n'
+  '- Orientación sobre cuándo y bajo qué circunstancias deben cambiarse las contraseñas/frases de paso.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito aplica solo cuando la entidad evaluada es un proveedor de servicios.\n'
+  'Este requisito no aplica a cuentas de usuarios consumidores que acceden a su propia información de tarjeta de '
+  'pago.\n'
+  'Este requisito para proveedores de servicios será reemplazado por el Requisito 8.3.10.1 una vez que el 8.3.10.1 '
+  'entre en vigor.'),
+ ('8.3.10.1',
+  'Requisito adicional solo para proveedores de servicios:\n'
+  '\n'
+  'Si las contraseñas/frases de paso se utilizan como el único factor de autenticación para el acceso de usuarios '
+  'clientes (es decir, en cualquier implementación de autenticación de un solo factor), entonces:\n'
+  '\n'
+  '- Las contraseñas/frases de paso se cambian al menos una vez cada 90 días,\n'
+  'O\n'
+  '- La postura de seguridad de las cuentas se analiza dinámicamente y el acceso en tiempo real a los recursos se '
+  'determina automáticamente en consecuencia.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito aplica solo cuando la entidad evaluada es un proveedor de servicios.\n'
+  'Este requisito no aplica a cuentas de usuarios consumidores que acceden a su propia información de tarjeta de '
+  'pago.\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.\n'
+  'Hasta que este requisito entre en vigor el 31 de marzo de 2025, los proveedores de servicios pueden cumplir ya '
+  'sea el Requisito 8.3.10 o el 8.3.10.1.'),
+ ('8.3.11',
+  'Cuando se utilizan factores de autenticación como tokens de seguridad físicos o lógicos, tarjetas inteligentes o '
+  'certificados:\n'
+  '\n'
+  '- Los factores se asignan a un usuario individual y no se comparten entre múltiples usuarios.\n'
+  '- Los controles físicos y/o lógicos garantizan que solo el usuario previsto pueda usar ese factor para obtener '
+  'acceso.'),
+ ('8.4', 'Los sistemas de autenticación multifactor (MFA) están configurados para prevenir el uso indebido.'),
+ ('8.4.1',
+  'Se implementa MFA para todo acceso no por consola al CDE para el personal con acceso administrativo?\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'El requisito de MFA para acceso administrativo no por consola aplica a todo el personal con privilegios elevados '
+  'o aumentados que accede al CDE mediante una conexión no por consola, es decir, mediante acceso lógico que ocurre '
+  'a través de una interfaz de red en lugar de una conexión física directa.'),
+ ('8.4.2',
+  'Se implementa MFA para todo acceso no por consola al CDE?\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  '\n'
+  'Este requisito no aplica a:\n'
+  '\n'
+  'Cuentas de aplicaciones o sistemas que realizan funciones automatizadas.\n'
+  'Cuentas de usuario en terminales de punto de venta que tienen acceso a un solo número de tarjeta a la vez para '
+  'facilitar una única transacción.\n'
+  'Cuentas de usuario que solo están autenticadas con factores de autenticación resistentes a phishing.\n'
+  '\n'
+  'Se requiere MFA para ambos tipos de acceso especificados en los Requisitos 8.4.2 y 8.4.3. Por lo tanto, aplicar '
+  'MFA a un tipo de acceso no reemplaza la necesidad de aplicar otra instancia de MFA al otro tipo de acceso. Si un '
+  'individuo primero se conecta a la red de la entidad mediante acceso remoto y luego inicia una conexión al CDE '
+  'desde dentro de la red, según este requisito el individuo deberá autenticarse usando MFA dos veces, una al '
+  'conectarse remotamente a la red de la entidad y otra al conectarse desde la red de la entidad al CDE.\n'
+  '\n'
+  'Los requisitos de MFA aplican a todos los tipos de componentes del sistema, incluyendo nube, sistemas alojados, '
+  'aplicaciones on-premise, dispositivos de seguridad de red, estaciones de trabajo, servidores y endpoints, e '
+  'incluyen acceso directo a las redes o sistemas de una entidad, así como acceso basado en web a una aplicación o '
+  'función.\n'
+  '\n'
+  'MFA para el acceso al CDE puede implementarse a nivel de red o de sistema/aplicación; no tiene que aplicarse en '
+  'ambos niveles. Por ejemplo, si se utiliza MFA cuando un usuario se conecta a la red del CDE, no tiene que '
+  'utilizarse cuando el usuario inicia sesión en cada sistema o aplicación dentro del CDE.\n'
+  '\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('8.4.3',
+  'Se implementa MFA para todo acceso remoto de red originado desde fuera de la red de la entidad que pueda acceder '
+  'o impactar el CDE?\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  '\n'
+  'El requisito de MFA para acceso remoto desde fuera de la red de la entidad aplica a todas las cuentas de usuario '
+  'que pueden acceder remotamente a la red, cuando dicho acceso remoto conduce o puede conducir a acceso al CDE. '
+  'Esto incluye todo acceso remoto por parte de personal (usuarios y administradores) y terceros (incluyendo, pero '
+  'no limitado a, proveedores, suministradores, prestadores de servicios y clientes).\n'
+  '\n'
+  'Si el acceso remoto es a una parte de la red de la entidad que está correctamente segmentada del CDE, de manera '
+  'que los usuarios remotos no pueden acceder ni impactar el CDE, no se requiere MFA para ese acceso remoto. Sin '
+  'embargo, MFA es requerido para cualquier acceso remoto a redes con acceso al CDE y se recomienda para todo acceso '
+  'remoto a las redes de la entidad.\n'
+  '\n'
+  'Los requisitos de MFA aplican a todos los tipos de componentes del sistema, incluyendo nube, sistemas alojados, '
+  'aplicaciones on-premise, dispositivos de seguridad de red, estaciones de trabajo, servidores y endpoints, e '
+  'incluyen acceso directo a las redes o sistemas de una entidad así como acceso basado en web a una aplicación o '
+  'función.'),
+ ('8.5', 'La autenticación multifactor se implementa para asegurar el acceso al CDE.'),
+ ('8.5.1',
+  'Los sistemas MFA se implementan de la siguiente manera:\n'
+  '\n'
+  '- El sistema MFA no es susceptible a ataques de repetición (replay attacks).\n'
+  '- Los sistemas MFA no pueden ser eludidos por ningún usuario, incluyendo usuarios administrativos, a menos que '
+  'esté específicamente documentado y autorizado por la gerencia en base a excepciones y por un periodo limitado.\n'
+  '- Se utilizan al menos dos tipos diferentes de factores de autenticación.\n'
+  '- Se requiere el éxito de todos los factores de autenticación antes de otorgar acceso.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('8.6',
+  'El uso de cuentas de aplicaciones y sistemas y los factores de autenticación asociados se gestionan '
+  'estrictamente.'),
+ ('8.6.1',
+  'Si las cuentas utilizadas por sistemas o aplicaciones pueden ser usadas para inicio de sesión interactivo, se '
+  'gestionan de la siguiente manera:\n'
+  '\n'
+  '- El uso interactivo se evita salvo que sea necesario para una circunstancia excepcional.\n'
+  '- El uso interactivo se limita al tiempo necesario para dicha circunstancia.\n'
+  '- Se documenta la justificación de negocio.\n'
+  '- El uso interactivo es aprobado explícitamente por la gerencia.\n'
+  '- La identidad del usuario individual se confirma antes de otorgar acceso a la cuenta.\n'
+  '- Cada acción realizada es atribuible a un usuario individual.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('8.6.2',
+  'Las contraseñas/frases de paso para cualquier cuenta de aplicación o sistema que pueda ser utilizada para inicio '
+  'de sesión interactivo no están codificadas de forma rígida (hardcoded) en scripts, archivos de '
+  'configuración/propiedades o código fuente propio o personalizado?\n'
+  '\n'
+  'Nota: Las contraseñas almacenadas deben estar cifradas conforme al Requisito 8.3.2.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Las contraseñas almacenadas deben estar cifradas conforme al Requisito 8.3.2.\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('8.6.3',
+  'Las contraseñas/frases de paso para cuentas de aplicaciones y sistemas están protegidas contra uso indebido de la '
+  'siguiente manera:\n'
+  '\n'
+  '- Se cambian periódicamente (según el análisis de riesgo dirigido conforme al Requisito 12.3.1) y cuando exista '
+  'sospecha o confirmación de compromiso.\n'
+  '- Se construyen con complejidad suficiente acorde a la frecuencia de cambio.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('9.1', 'Los procesos y mecanismos para realizar las actividades del Requisito 9 están definidos y comprendidos.'),
+ ('9.1.1',
+  'Todas las políticas de seguridad y procedimientos operativos identificados en el Requisito 9 son:\n'
+  '\n'
+  '- Documentados.\n'
+  '- Mantenidos actualizados.\n'
+  '- En uso.\n'
+  '- Conocidos por todas las partes afectadas.'),
+ ('9.1.2',
+  'Los roles y responsabilidades para realizar las actividades del Requisito 9 están documentados, asignados y '
+  'comprendidos?'),
+ ('9.2', 'Los controles de acceso físico gestionan la entrada al entorno de datos de titulares de tarjeta (CDE).'),
+ ('9.2.1',
+  'Se implementan controles adecuados de acceso a instalaciones para restringir el acceso físico a los sistemas '
+  'dentro del CDE?\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito no aplica a ubicaciones que sean accesibles públicamente por consumidores (titulares de tarjeta).'),
+ ('9.2.1.1',
+  'El acceso físico individual a áreas sensibles dentro del CDE es monitoreado mediante cámaras de video o '
+  'mecanismos de control de acceso físico (o ambos) de la siguiente manera:\n'
+  '\n'
+  '- Los puntos de entrada y salida hacia/desde áreas sensibles dentro del CDE son monitoreados.\n'
+  '- Los dispositivos o mecanismos de monitoreo están protegidos contra manipulación o desactivación.\n'
+  '- Los datos recopilados son revisados y correlacionados con otros registros.\n'
+  '- Los datos recopilados se almacenan durante al menos tres meses, salvo restricción legal.'),
+ ('9.2.2',
+  'Se implementan controles físicos y/o lógicos para restringir el uso de puntos de red accesibles públicamente '
+  'dentro de la instalación?'),
+ ('9.2.3',
+  'El acceso físico a puntos de acceso inalámbricos, gateways, hardware de red/comunicaciones y líneas de '
+  'telecomunicaciones dentro de la instalación está restringido?'),
+ ('9.2.4', 'El acceso a consolas en áreas sensibles está restringido mediante bloqueo cuando no están en uso?'),
+ ('9.3', 'El acceso físico al CDE para personal y visitantes es autorizado y gestionado.'),
+ ('9.3.1',
+  'Se implementan procedimientos para autorizar y gestionar el acceso físico del personal al CDE, incluyendo:\n'
+  '\n'
+  '- Identificación del personal.\n'
+  '- Gestión de cambios en los requisitos de acceso físico individual.\n'
+  '- Revocación o terminación de identificaciones de personal.\n'
+  '- Limitación del acceso al proceso o sistema de identificación solo a personal autorizado.'),
+ ('9.3.1.1',
+  'El acceso físico a áreas sensibles dentro del CDE para el personal se controla de la siguiente manera:\n'
+  '\n'
+  '- El acceso es autorizado y basado en la función laboral individual.\n'
+  '- El acceso es revocado inmediatamente tras la terminación.\n'
+  '- Todos los mecanismos de acceso físico (llaves, tarjetas, etc.) son devueltos o deshabilitados tras la '
+  'terminación.'),
+ ('9.3.2',
+  'Se implementan procedimientos para autorizar y gestionar el acceso de visitantes al CDE, incluyendo:\n'
+  '\n'
+  '- Los visitantes son autorizados antes de ingresar.\n'
+  '- Los visitantes son acompañados en todo momento.\n'
+  '- Los visitantes son claramente identificados y reciben una credencial o identificación con expiración.\n'
+  '- Las credenciales de visitantes distinguen visualmente a los visitantes del personal.'),
+ ('9.3.3',
+  'Las credenciales de visitantes son devueltas o desactivadas antes de que los visitantes abandonen la instalación '
+  'o en la fecha de expiración?'),
+ ('9.3.4',
+  'Se utilizan registros de visitantes para mantener un registro físico de la actividad, incluyendo:\n'
+  '\n'
+  '- Nombre del visitante y organización representada.\n'
+  '- Fecha y hora de la visita.\n'
+  '- Nombre del personal que autorizó el acceso.\n'
+  '- Retención del registro por al menos tres meses, salvo restricción legal.'),
+ ('9.4',
+  'Los medios con datos de titulares de tarjeta se almacenan, acceden, distribuyen y destruyen de forma segura.'),
+ ('9.4.1', 'Todos los medios con datos de titulares de tarjeta están físicamente protegidos?'),
+ ('9.4.1.1',
+  'Las copias de respaldo fuera de línea con datos de titulares de tarjeta se almacenan en ubicaciones seguras?'),
+ ('9.4.1.2', 'La seguridad de las ubicaciones de respaldo fuera de línea se revisa al menos una vez cada 12 meses?'),
+ ('9.4.2', 'Todos los medios con datos de titulares de tarjeta se clasifican según la sensibilidad de los datos?'),
+ ('9.4.3',
+  'Los medios enviados fuera de la instalación se protegen de la siguiente manera:\n'
+  '\n'
+  '- Se registra el envío.\n'
+  '- Se utiliza mensajería segura o métodos rastreables.\n'
+  '- Se mantiene registro de ubicación del medio.'),
+ ('9.4.4',
+  'La gerencia aprueba todos los medios con datos de titulares de tarjeta que se trasladan fuera de la instalación?\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'La aprobación debe ser realizada por personal con autoridad adecuada, sin necesidad de que el cargo sea “gerente” '
+  'formalmente.'),
+ ('9.4.5', 'Se mantienen inventarios de todos los medios electrónicos con datos de titulares de tarjeta?'),
+ ('9.4.5.1',
+  'Se realizan inventarios de los medios electrónicos con datos de titulares de tarjeta al menos una vez cada 12 '
+  'meses?'),
+ ('9.4.6',
+  'Los materiales en formato físico (hard-copy) con datos de titulares de tarjeta se destruyen cuando ya no son '
+  'necesarios por razones de negocio o legales, de la siguiente manera:\n'
+  '\n'
+  '- Los materiales se trituran con corte cruzado, se incineran o se convierten en pulpa, de forma que los datos de '
+  'titulares de tarjeta no puedan ser reconstruidos.\n'
+  '- Los materiales se almacenan en contenedores de almacenamiento seguros antes de su destrucción.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Estos requisitos para la destrucción de medios cuando dichos medios ya no son necesarios por razones de negocio o '
+  'legales son separados y distintos del Requisito 3.2.1 de PCI DSS, el cual trata sobre la eliminación segura de '
+  'datos de titulares de tarjeta cuando ya no son necesarios según las políticas de retención de datos de la '
+  'entidad.'),
+ ('9.4.7',
+  'Los medios electrónicos con datos de titulares de tarjeta se destruyen cuando ya no son necesarios por razones de '
+  'negocio o legales mediante uno de los siguientes métodos:\n'
+  '\n'
+  '- El medio electrónico es destruido.\n'
+  '- Los datos de titulares de tarjeta se vuelven irrecuperables de modo que no puedan ser reconstruidos.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Estos requisitos para la destrucción de medios cuando dichos medios ya no son necesarios por razones de negocio o '
+  'legales son separados y distintos del Requisito 3.2.1 de PCI DSS, el cual trata sobre la eliminación segura de '
+  'datos de titulares de tarjeta cuando ya no son necesarios según las políticas de retención de datos de la '
+  'entidad.'),
+ ('9.5',
+  'Los dispositivos de punto de interacción (POI) están protegidos contra manipulación y sustitución no autorizada.'),
+ ('9.5.1',
+  'Los dispositivos POI que capturan datos de tarjetas de pago mediante interacción física directa con el factor de '
+  'forma de la tarjeta están protegidos contra manipulación y sustitución no autorizada, incluyendo lo siguiente:\n'
+  '\n'
+  '- Mantener una lista de dispositivos POI.\n'
+  '- Inspeccionar periódicamente los dispositivos POI para detectar manipulación o sustitución no autorizada.\n'
+  '- Capacitar al personal para que esté atento a comportamientos sospechosos y para reportar la manipulación o '
+  'sustitución no autorizada de dispositivos.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Estos requisitos aplican a dispositivos POI desplegados utilizados en transacciones con tarjeta presente (es '
+  'decir, cuando el factor de forma de la tarjeta es una tarjeta que se desliza, se aproxima o se inserta).\n'
+  '\n'
+  'Estos requisitos no aplican a:\n'
+  '\n'
+  '- Componentes utilizados únicamente para la entrada manual del PAN.\n'
+  '- Dispositivos comerciales estándar (COTS), por ejemplo, teléfonos inteligentes o tabletas, que son dispositivos '
+  'móviles propiedad del comerciante diseñados para distribución masiva.'),
+ ('9.5.1.1',
+  'Se mantiene una lista actualizada de dispositivos POI, que incluye:\n'
+  '\n'
+  '- Marca y modelo del dispositivo.\n'
+  '- Ubicación del dispositivo.\n'
+  '- Número de serie del dispositivo u otros métodos de identificación única.'),
+ ('9.5.1.2',
+  'Las superficies de los dispositivos POI se inspeccionan periódicamente para detectar manipulación y sustitución '
+  'no autorizada?'),
+ ('9.5.1.2.1',
+  'La frecuencia de las inspecciones periódicas de los dispositivos POI y el tipo de inspecciones realizadas se '
+  'define en el análisis de riesgo dirigido de la entidad, el cual se realiza conforme a todos los elementos '
+  'especificados en el Requisito 12.3.1.?\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('9.5.1.3',
+  'Se proporciona capacitación al personal en entornos POI para que esté atento a intentos de manipulación o '
+  'sustitución de dispositivos POI, e incluye:\n'
+  '\n'
+  '- Verificar la identidad de cualquier persona externa que afirme ser personal de reparación o mantenimiento antes '
+  'de otorgarle acceso para modificar o solucionar problemas en los dispositivos.\n'
+  '- Procedimientos para asegurar que los dispositivos no sean instalados, reemplazados o devueltos sin '
+  'verificación.\n'
+  '- Estar atento a comportamientos sospechosos alrededor de los dispositivos.\n'
+  '- Reportar comportamientos sospechosos e indicaciones de manipulación o sustitución de dispositivos al personal '
+  'correspondiente.'),
+ ('10.1', 'Los procesos y mecanismos para realizar las actividades del Requisito 10 están definidos y comprendidos.'),
+ ('10.1.1',
+  'Todas las políticas de seguridad y procedimientos operativos identificados en el Requisito 10 son:\n'
+  '\n'
+  '- Documentados.\n'
+  '- Mantenidos actualizados.\n'
+  'En uso.\n'
+  '- Conocidos por todas las partes afectadas.'),
+ ('10.1.2',
+  'Los roles y responsabilidades para realizar las actividades del Requisito 10 están documentados, asignados y '
+  'comprendidos?'),
+ ('10.2',
+  'Los registros de auditoría se implementan para apoyar la detección de anomalías y actividad sospechosa, y el '
+  'análisis forense de eventos.'),
+ ('10.2.1',
+  'Los registros de auditoría están habilitados y activos para todos los componentes del sistema y los datos de '
+  'titulares de tarjeta?'),
+ ('10.2.1.1',
+  'Los registros de auditoría capturan todo acceso individual de usuario a los datos de titulares de tarjeta?'),
+ ('10.2.1.2',
+  'Los registros de auditoría capturan todas las acciones realizadas por cualquier individuo con acceso '
+  'administrativo, incluyendo cualquier uso interactivo de cuentas de aplicación o sistema?'),
+ ('10.2.1.3', 'Los registros de auditoría capturan todo acceso a los registros de auditoría?'),
+ ('10.2.1.4', 'Los registros de auditoría capturan todos los intentos inválidos de acceso lógico?'),
+ ('10.2.1.5',
+  'Los registros de auditoría capturan todos los cambios en credenciales de identificación y autenticación '
+  'incluyendo, pero no limitados a:\n'
+  '\n'
+  '- Creación de nuevas cuentas.\n'
+  '- Elevación de privilegios.\n'
+  '- Todos los cambios, adiciones o eliminaciones en cuentas con acceso administrativo.'),
+ ('10.2.1.6',
+  'Los registros de auditoría capturan lo siguiente:\n'
+  '\n'
+  '- Toda inicialización de nuevos registros de auditoría, y\n'
+  '- Todo inicio, detención o pausa de los registros de auditoría existentes.'),
+ ('10.2.1.7', 'Los registros de auditoría capturan toda creación y eliminación de objetos a nivel de sistema?'),
+ ('10.2.2',
+  'Los registros de auditoría registran los siguientes detalles para cada evento auditable:\n'
+  '\n'
+  '- Identificación del usuario.\n'
+  '- Tipo de evento.\n'
+  '- Fecha y hora.\n'
+  '- Indicación de éxito o fallo.\n'
+  '- Origen del evento.\n'
+  '- Identidad o nombre de los datos, componente del sistema, recurso o servicio afectado (por ejemplo, nombre y '
+  'protocolo).'),
+ ('10.3', 'Los registros de auditoría están protegidos contra destrucción y modificaciones no autorizadas.'),
+ ('10.3.1',
+  'El acceso de lectura a los archivos de registros de auditoría está limitado a aquellos con una necesidad '
+  'relacionada con su función laboral?'),
+ ('10.3.2',
+  'Los archivos de registros de auditoría están protegidos para prevenir modificaciones por parte de individuos?'),
+ ('10.3.3',
+  'Los archivos de registros de auditoría, incluyendo aquellos de tecnologías expuestas externamente, se respaldan '
+  'oportunamente en un servidor central interno seguro de registros u otros medios que sean difíciles de modificar?'),
+ ('10.3.4',
+  'Se utilizan mecanismos de monitoreo de integridad de archivos o detección de cambios sobre los registros de '
+  'auditoría para asegurar que los datos existentes no puedan ser modificados sin generar alertas?'),
+ ('10.4', 'Los registros de auditoría son revisados para identificar anomalías o actividad sospechosa.'),
+ ('10.4.1',
+  'Los siguientes registros de auditoría se revisan al menos una vez al día:\n'
+  '\n'
+  '- Todos los eventos de seguridad.\n'
+  '- Registros de todos los componentes del sistema que almacenan, procesan o transmiten CHD y/o SAD.\n'
+  '- Registros de todos los componentes críticos del sistema.\n'
+  '- Registros de todos los servidores y componentes que realizan funciones de seguridad (por ejemplo, controles de '
+  'seguridad de red, sistemas IDS/IPS, servidores de autenticación).'),
+ ('10.4.1.1',
+  'Se utilizan mecanismos automatizados para realizar la revisión de los registros de auditoría?\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('10.4.2',
+  'Los registros de todos los demás componentes del sistema (no especificados en el Requisito 10.4.1) se revisan '
+  'periódicamente?\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Aplica a todos los demás componentes dentro del alcance no incluidos en 10.4.1.'),
+ ('10.4.2.1',
+  'La frecuencia de revisión periódica de estos registros se define en el análisis de riesgo dirigido de la entidad, '
+  'conforme al Requisito 12.3.1.?\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('10.4.3', 'Las excepciones y anomalías identificadas durante el proceso de revisión son abordadas?'),
+ ('10.5', 'El historial de registros de auditoría se conserva y está disponible para análisis.'),
+ ('10.5.1',
+  'Se conserva el historial de registros de auditoría por al menos 12 meses, con al menos los últimos tres meses '
+  'disponibles inmediatamente para análisis?'),
+ ('10.6',
+  'Los mecanismos de sincronización de tiempo soportan configuraciones de tiempo consistentes en todos los '
+  'sistemas.'),
+ ('10.6.1',
+  'Los relojes del sistema y el tiempo se sincronizan utilizando tecnología de sincronización de tiempo?\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Mantener esta tecnología actualizada incluye la gestión de vulnerabilidades y parches conforme a los Requisitos '
+  '6.3.1 y 6.3.3.'),
+ ('10.6.2',
+  'Los sistemas están configurados con hora correcta y consistente de la siguiente manera:\n'
+  '\n'
+  '- Se utilizan uno o más servidores de tiempo designados.\n'
+  '- Solo los servidores centrales designados reciben tiempo de fuentes externas.\n'
+  '- El tiempo recibido se basa en Tiempo Atómico Internacional o UTC.\n'
+  '- Los servidores de tiempo solo aceptan actualizaciones de fuentes externas aprobadas.\n'
+  '- Si hay más de un servidor, estos se sincronizan entre sí.\n'
+  '- Los sistemas internos reciben tiempo solo de servidores centrales designados.'),
+ ('10.6.3',
+  'La configuración y datos de sincronización de tiempo están protegidos de la siguiente manera:\n'
+  '\n'
+  '- El acceso está restringido solo a personal con necesidad de negocio.\n'
+  '- Los cambios en sistemas críticos son registrados, monitoreados y revisados- .'),
+ ('10.7',
+  'Las fallas de los sistemas de control de seguridad críticos son detectadas, reportadas y atendidas '
+  'oportunamente.'),
+ ('10.7.1',
+  '(Solo proveedores de servicios)\n'
+  '\n'
+  'Las fallas de los controles críticos son detectadas, alertadas y atendidas rápidamente, incluyendo:\n'
+  '\n'
+  '- Controles de seguridad de red\n'
+  '- IDS/IPS\n'
+  '- FIM\n'
+  '- Anti-malware\n'
+  '- Controles de acceso físico\n'
+  '- Controles de acceso lógico\n'
+  '- Registros de auditoría\n'
+  '- Controles de segmentación\n'
+  '\n'
+  'Notas:\n'
+  'Aplica solo a proveedores de servicio.\n'
+  'Será reemplazado por 10.7.2.'),
+ ('10.7.2',
+  'Las fallas de los sistemas de control de seguridad críticos son detectadas, alertadas y atendidas rápidamente, '
+  'incluyendo:\n'
+  '\n'
+  '- Controles de seguridad de red\n'
+  '- IDS/IPS\n'
+  '- Mecanismos de detección de cambios\n'
+  '- Anti-malware\n'
+  '- Controles físicos\n'
+  '- Controles lógicos\n'
+  '- Logs\n'
+  '- Segmentación\n'
+  '- Revisión de logs\n'
+  '- Herramientas automáticas de seguridad\n'
+  '\n'
+  'Notas:\n'
+  'Aplica a todas las entidades.\n'
+  'Reemplaza 10.7.1.\n'
+  'Es buena práctica hasta el 31 de marzo de 2025.'),
+ ('10.7.3',
+  'Las fallas de los sistemas críticos se gestionan incluyendo:\n'
+  '\n'
+  '- Restaurar funciones de seguridad\n'
+  '- Documentar duración del incidente\n'
+  '- Identificar causa\n'
+  '- Aplicar remediación\n'
+  '- Evaluar impactos\n'
+  '- Implementar controles preventivos\n'
+  '- Reanudar monitoreo\n'
+  '\n'
+  'Notas:\n'
+  'Actualmente aplica solo a proveedores (v3.2.1), pero será obligatorio para todos.'),
+ ('11.1', 'Los procesos y mecanismos para realizar las actividades del Requisito 11 están definidos y comprendidos.'),
+ ('11.1.1',
+  'Todas las políticas de seguridad y procedimientos operativos identificados en el Requisito 11 son:\n'
+  '\n'
+  '- Documentados.\n'
+  '- Mantenidos actualizados.\n'
+  '- En uso.\n'
+  '- Conocidos por todas las partes afectadas.'),
+ ('11.1.2',
+  'Los roles y responsabilidades para realizar las actividades del Requisito 11 están documentados, asignados y '
+  'comprendidos?'),
+ ('11.2',
+  'Los puntos de acceso inalámbricos son identificados y monitoreados, y los accesos inalámbricos no autorizados son '
+  'gestionados.'),
+ ('11.2.1',
+  'Los puntos de acceso inalámbricos autorizados y no autorizados se gestionan de la siguiente manera:\n'
+  '\n'
+  '- Se prueba la presencia de puntos de acceso inalámbricos (Wi-Fi).\n'
+  '- Se detectan e identifican todos los puntos de acceso inalámbricos autorizados y no autorizados.\n'
+  '- Las pruebas, detección e identificación se realizan al menos una vez cada tres meses.\n'
+  '- Si se utiliza monitoreo automatizado, el personal es notificado mediante alertas generadas.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito aplica incluso cuando existe una política que prohíbe el uso de tecnología inalámbrica.\n'
+  'Los métodos utilizados deben ser suficientes para detectar e identificar tanto dispositivos autorizados como no '
+  'autorizados, incluyendo dispositivos no autorizados conectados a dispositivos autorizados.'),
+ ('11.2.2',
+  'Se mantiene un inventario de puntos de acceso inalámbricos autorizados, incluyendo una justificación de negocio '
+  'documentada?'),
+ ('11.3', 'Las vulnerabilidades internas y externas son identificadas, priorizadas y gestionadas regularmente.'),
+ ('11.3.1',
+  'Los escaneos internos de vulnerabilidades se realizan de la siguiente manera:\n'
+  '\n'
+  '- Al menos una vez cada tres meses.\n'
+  '- Las vulnerabilidades que sean de alto riesgo o críticas (según la clasificación de riesgos de vulnerabilidades '
+  'de la entidad definida en el Requisito 6.3.1) se corrigen.\n'
+  '- Se realizan reescaneos que confirman que todas las vulnerabilidades de alto riesgo y - todas las críticas (como '
+  'se indicó anteriormente) han sido corregidas.\n'
+  '- La herramienta de escaneo se mantiene actualizada con la información más reciente de vulnerabilidades.\n'
+  '- Los escaneos son realizados por personal calificado y existe independencia organizacional del evaluador.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'No es obligatorio utilizar un QSA o ASV para realizar escaneos internos de vulnerabilidades.\n'
+  'Los escaneos internos de vulnerabilidades pueden ser realizados por personal interno calificado que sea '
+  'razonablemente independiente de los componentes del sistema que se están escaneando (por ejemplo, un '
+  'administrador de red no debería ser responsable de escanear la red), o la entidad puede optar por que los '
+  'escaneos internos sean realizados por una empresa especializada en escaneo de vulnerabilidades.'),
+ ('11.3.1.1',
+  'Todas las demás vulnerabilidades aplicables (aquellas que no están clasificadas como de alto riesgo o críticas '
+  'según la clasificación de riesgos de vulnerabilidades de la entidad definida en el Requisito 6.3.1) se gestionan '
+  'de la siguiente manera:\n'
+  '\n'
+  '- Se abordan con base en el riesgo definido en el análisis de riesgo dirigido de la entidad, el cual se realiza '
+  'conforme a todos los elementos especificados en el Requisito 12.3.1.\n'
+  '- Se realizan reescaneos según sea necesario.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'El plazo para abordar vulnerabilidades de menor riesgo está sujeto a los resultados de un análisis de riesgo '
+  'según el Requisito 12.3.1 que incluye (como mínimo) la identificación de los activos protegidos, las amenazas y '
+  'la probabilidad y/o impacto de que una amenaza se materialice.\n'
+  '\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('11.3.1.2',
+  'Los escaneos internos de vulnerabilidades se realizan mediante escaneo autenticado de la siguiente manera:\n'
+  '\n'
+  '- Los sistemas que no pueden aceptar credenciales para escaneo autenticado están documentados.\n'
+  '- Se utilizan privilegios suficientes para aquellos sistemas que aceptan credenciales para escaneo.\n'
+  '- Si las cuentas utilizadas para escaneo autenticado pueden usarse para inicio de sesión interactivo, se '
+  'gestionan de acuerdo con el Requisito 8.2.2.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Las herramientas de escaneo autenticado pueden ser basadas en host o en red.\n'
+  '“Privilegios suficientes” son aquellos necesarios para acceder a los recursos del sistema de manera que se pueda '
+  'realizar un escaneo completo que detecte vulnerabilidades conocidas.\n'
+  '\n'
+  'Este requisito no aplica a componentes del sistema que no pueden aceptar credenciales para escaneo. Ejemplos '
+  'incluyen algunos dispositivos de red y seguridad, mainframes y contenedores.\n'
+  '\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('11.3.1.3',
+  'Los escaneos internos de vulnerabilidades se realizan después de cualquier cambio significativo de la siguiente '
+  'manera:\n'
+  '\n'
+  '- Las vulnerabilidades que sean de alto riesgo o críticas (según la clasificación de riesgos de vulnerabilidades '
+  'de la entidad definida en el Requisito 6.3.1) se corrigen.\n'
+  '- Se realizan reescaneos según sea necesario.\n'
+  '- Los escaneos son realizados por personal calificado y existe independencia organizacional del evaluador (no es '
+  'obligatorio que sea un QSA o ASV).\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'El escaneo interno autenticado de vulnerabilidades según el Requisito 11.3.1.2 no es obligatorio para escaneos '
+  'realizados después de cambios significativos..'),
+ ('11.3.2',
+  'Los escaneos externos de vulnerabilidades se realizan de la siguiente manera:\n'
+  '\n'
+  '- Al menos una vez cada tres meses.\n'
+  '- Por un proveedor de escaneo aprobado por PCI SSC (ASV).\n'
+  '- Las vulnerabilidades se corrigen y se cumplen los requisitos de la Guía del Programa ASV para un escaneo '
+  'aprobado.\n'
+  '- Se realizan reescaneos según sea necesario para confirmar que las vulnerabilidades se han corregido conforme a '
+  'la Guía del Programa ASV.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Para la evaluación inicial PCI DSS de este requisito, no es obligatorio que se hayan completado cuatro escaneos '
+  'aprobados dentro de 12 meses si el evaluador verifica:\n'
+  '\n'
+  'que el resultado del escaneo más reciente fue aprobado,\n'
+  'que la entidad tiene políticas y procedimientos documentados que requieren escaneos al menos cada tres meses, y\n'
+  'que las vulnerabilidades detectadas en los resultados de escaneo han sido corregidas como se demuestra en '
+  'reescaneos.\n'
+  '\n'
+  'Sin embargo, para años posteriores a la evaluación inicial PCI DSS, deben haberse realizado escaneos aprobados al '
+  'menos cada tres meses.\n'
+  '\n'
+  'Las herramientas ASV pueden escanear una amplia variedad de redes y topologías. Cualquier especificidad del '
+  'entorno objetivo (por ejemplo, balanceadores de carga, proveedores terceros, ISPs, configuraciones específicas, '
+  'protocolos en uso, interferencias de escaneo) debe acordarse entre el ASV y el cliente.\n'
+  '\n'
+  'Consultar la Guía del Programa ASV publicada en el sitio web del PCI SSC para responsabilidades del cliente, '
+  'preparación del escaneo, etc.'),
+ ('11.3.2.1',
+  'Los escaneos externos de vulnerabilidades se realizan después de cualquier cambio significativo de la siguiente '
+  'manera:\n'
+  '\n'
+  '- Las vulnerabilidades con puntuación de 4.0 o superior según CVSS se corrigen.\n'
+  '- Se realizan reescaneos según sea necesario.\n'
+  '- Los escaneos son realizados por personal calificado y existe independencia organizacional del evaluador (no es '
+  'obligatorio que sea un QSA o ASV).'),
+ ('11.4',
+  'Se realizan pruebas de penetración internas y externas regularmente, y las vulnerabilidades explotables y '
+  'debilidades de seguridad se corrigen.'),
+ ('11.4.1',
+  'Se define, documenta e implementa una metodología de pruebas de penetración que incluye:\n'
+  '\n'
+  '- Enfoques de pruebas de penetración aceptados por la industria.\n'
+  '- Cobertura de todo el perímetro del CDE y sistemas críticos.\n'
+  '- Pruebas desde dentro y fuera de la red.\n'
+  '- Pruebas para validar controles de segmentación y reducción de alcance.\n'
+  '- Pruebas a nivel de aplicación para identificar, como mínimo, las vulnerabilidades del Requisito 6.2.4.\n'
+  '- Pruebas a nivel de red que abarquen todos los componentes que soportan funciones de red y sistemas operativos.\n'
+  '- Revisión de amenazas y vulnerabilidades de los últimos 12 meses.\n'
+  '- Enfoque documentado para evaluar y gestionar riesgos.\n'
+  '- Retención de resultados por al menos 12 meses.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Las pruebas internas implican evaluar desde dentro del CDE y redes internas.\n'
+  'Las pruebas externas implican evaluar el perímetro expuesto y sistemas accesibles públicamente.'),
+ ('11.4.2',
+  'Las pruebas de penetración internas se realizan:\n'
+  '\n'
+  '- Según la metodología definida por la entidad.\n'
+  '- Al menos una vez cada 12 meses.\n'
+  '- Después de cualquier actualización o cambio significativo en la infraestructura o aplicación.\n'
+  '- Por un recurso interno calificado o un tercero externo calificado.\n'
+  '- Existe independencia organizacional del evaluador (no es obligatorio que sea un QSA o ASV).'),
+ ('11.4.3',
+  'Las pruebas de penetración externas se realizan:\n'
+  '\n'
+  '- Según la metodología definida por la entidad.\n'
+  '- Al menos una vez cada 12 meses.\n'
+  '- Después de cualquier actualización o cambio significativo en la infraestructura o aplicación.\n'
+  '- Por un recurso interno calificado o un tercero externo calificado.\n'
+  '- Existe independencia organizacional del evaluador (no es obligatorio que sea un QSA o ASV).'),
+ ('11.4.4',
+  'Las vulnerabilidades explotables y debilidades de seguridad encontradas durante las pruebas de penetración se '
+  'corrigen de la siguiente manera:\n'
+  '\n'
+  '- De acuerdo con la evaluación de la entidad sobre el riesgo planteado por el problema de seguridad según lo '
+  'definido en el Requisito 6.3.1.\n'
+  '- Las pruebas de penetración se repiten para verificar las correcciones.'),
+ ('11.4.5',
+  'Si se utiliza segmentación para aislar el CDE de otras redes, se realizan pruebas de penetración sobre los '
+  'controles de segmentación de la siguiente manera:\n'
+  '\n'
+  '- Al menos una vez cada 12 meses y después de cualquier cambio en los controles/métodos de segmentación.\n'
+  '- Cubriendo todos los controles/métodos de segmentación en uso.\n'
+  '- De acuerdo con la metodología de pruebas de penetración definida por la entidad.\n'
+  '- Confirmando que los controles/métodos de segmentación son operacionales y efectivos, y aíslan el CDE de todos '
+  'los sistemas fuera de alcance.\n'
+  '- Confirmando la efectividad de cualquier uso de aislamiento para separar sistemas con diferentes niveles de '
+  'seguridad (ver Requisito 2.2.3).\n'
+  '- Realizadas por un recurso interno calificado o un tercero externo calificado.\n'
+  '- Existe independencia organizacional del evaluador (no es obligatorio que sea un QSA o ASV).'),
+ ('11.4.6',
+  'Requisito adicional solo para proveedores de servicios:\n'
+  '\n'
+  'Si se utiliza segmentación para aislar el CDE de otras redes, se realizan pruebas de penetración sobre los '
+  'controles de segmentación de la siguiente manera:\n'
+  '\n'
+  '- Al menos una vez cada seis meses y después de cualquier cambio en los controles/métodos de segmentación.\n'
+  '- Cubriendo todos los controles/métodos de segmentación en uso.\n'
+  '- De acuerdo con la metodología de pruebas de penetración definida por la entidad.\n'
+  '- Confirmando que los controles/métodos de segmentación son operacionales y efectivos, y aíslan el CDE de todos '
+  'los sistemas fuera de alcance.\n'
+  '- Confirmando la efectividad de cualquier uso de aislamiento para separar sistemas con diferentes niveles de '
+  'seguridad (ver Requisito 2.2.3).\n'
+  '- Realizadas por un recurso interno calificado o un tercero externo calificado.\n'
+  '- Existe independencia organizacional del evaluador (no es obligatorio que sea un QSA o ASV).\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito aplica únicamente cuando la entidad evaluada es un proveedor de servicios.'),
+ ('11.4.7',
+  'Requisito adicional solo para proveedores de servicios de hosting/cloud de terceros:\n'
+  '\n'
+  '- Los proveedores de servicios de hosting/cloud de terceros brindan soporte a sus clientes para pruebas de '
+  'penetración externas según los Requisitos 11.4.3 y 11.4.4.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito aplica únicamente cuando la entidad evaluada es un proveedor de servicios multi-tenant.\n'
+  '\n'
+  'Para cumplir con este requisito, los proveedores multi-tenant pueden:\n'
+  '\n'
+  'Proporcionar evidencia a sus clientes que demuestre que las pruebas de penetración se han realizado conforme a '
+  'los Requisitos 11.4.3 y 11.4.4 en la infraestructura suscrita por los clientes,\n'
+  'O\n'
+  'Proporcionar acceso oportuno a cada uno de sus clientes para que puedan realizar sus propias pruebas de '
+  'penetración.\n'
+  '\n'
+  'La evidencia proporcionada a los clientes puede incluir resultados de pruebas de penetración redactados, pero '
+  'debe incluir información suficiente para demostrar que todos los elementos de los Requisitos 11.4.3 y 11.4.4 se '
+  'han cumplido en nombre del cliente.\n'
+  '\n'
+  'Consultar también el Apéndice A1: Requisitos adicionales de PCI DSS para proveedores de servicios multi-tenant.\n'
+  '\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('11.5', 'Las intrusiones de red y los cambios inesperados en archivos son detectados y respondidos.'),
+ ('11.5.1',
+  'Se utilizan técnicas de detección y/o prevención de intrusiones para detectar y/o prevenir intrusiones en la red '
+  'de la siguiente manera:\n'
+  '\n'
+  '- Todo el tráfico es monitoreado en el perímetro del CDE.\n'
+  '- Todo el tráfico es monitoreado en puntos críticos dentro del CDE.\n'
+  '- El personal es alertado sobre posibles compromisos.\n'
+  '- Todos los motores, líneas base y firmas de detección y prevención de intrusiones se mantienen actualizados.'),
+ ('11.5.1.1',
+  'Requisito adicional solo para proveedores de servicios:\n'
+  '\n'
+  '- Las técnicas de detección y/o prevención de intrusiones detectan, alertan sobre, previenen y gestionan canales '
+  'encubiertos de comunicación de malware.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito aplica únicamente cuando la entidad evaluada es un proveedor de servicios.\n'
+  '\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('11.5.2',
+  'Se implementa un mecanismo de detección de cambios (por ejemplo, herramientas de monitoreo de integridad de '
+  'archivos) de la siguiente manera:\n'
+  '\n'
+  '- Para alertar al personal sobre modificaciones no autorizadas (incluyendo cambios, adiciones y eliminaciones) de '
+  'archivos críticos.\n'
+  '- Para realizar comparaciones de archivos críticos al menos una vez por semana.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Para propósitos de detección de cambios, los archivos críticos suelen ser aquellos que no cambian regularmente, '
+  'pero cuya modificación podría indicar un compromiso del sistema o riesgo de compromiso.\n'
+  '\n'
+  'Los mecanismos de detección de cambios, como las herramientas de monitoreo de integridad de archivos, '
+  'generalmente vienen preconfigurados con archivos críticos para el sistema operativo correspondiente.\n'
+  '\n'
+  'Otros archivos críticos, como los de aplicaciones personalizadas, deben ser evaluados y definidos por la entidad '
+  '(es decir, el comerciante o proveedor de servicios).'),
+ ('11.6', 'Los cambios no autorizados en páginas de pago son detectados y respondidos.'),
+ ('11.6.1',
+  'Se implementa un mecanismo de detección de cambios y manipulación de la siguiente manera:\n'
+  '\n'
+  '- Para alertar al personal sobre modificaciones no autorizadas (incluyendo indicadores de compromiso, cambios, '
+  'adiciones y eliminaciones) en los encabezados HTTP que impactan la seguridad y en el contenido de los scripts de '
+  'las páginas de pago tal como son recibidos por el navegador del consumidor.\n'
+  '- El mecanismo está configurado para evaluar los encabezados HTTP y las páginas de pago recibidas.\n'
+  '- Las funciones del mecanismo se realizan de la siguiente manera:\n'
+  '- Al menos una vez por semana,\n'
+  'O\n'
+  '- Periódicamente (según la frecuencia definida en el análisis de riesgo dirigido de la entidad, realizado '
+  'conforme al Requisito 12.3.1).\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito también aplica a entidades con páginas web que incluyen formularios/páginas de pago embebidas de '
+  'un TPSP/procesador de pagos (por ejemplo, uno o más iframes).\n'
+  '\n'
+  'Este requisito no aplica a una entidad para scripts dentro de un formulario/página de pago embebida de un '
+  'TPSP/procesador de pagos (por ejemplo, iframes), donde la entidad incluye el formulario/página de pago del TPSP '
+  'en su sitio web.\n'
+  '\n'
+  'Los scripts en el formulario/página de pago embebida del TPSP/procesador de pagos son responsabilidad del '
+  'TPSP/procesador de pagos de gestionar conforme a este requisito.\n'
+  '\n'
+  'La intención de este requisito no es que la entidad instale software en los sistemas o navegadores de sus '
+  'consumidores, sino que la entidad utilice técnicas como las descritas en los Ejemplos de la Guía PCI DSS para '
+  'prevenir y detectar actividades inesperadas de scripts.\n'
+  '\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('12.1',
+  'Una política integral de seguridad de la información que gobierna y proporciona dirección para la protección de '
+  'los activos de información de la entidad es conocida y está vigente.'),
+ ('12.1.1',
+  'Una política general de seguridad de la información es:\n'
+  '\n'
+  '- Establecida.\n'
+  '- Publicada.\n'
+  '- Mantenida.\n'
+  '- Difundida a todo el personal relevante, así como a proveedores y socios comerciales relevantes.'),
+ ('12.1.2',
+  'La política de seguridad de la información es:\n'
+  '\n'
+  '- Revisada al menos una vez cada 12 meses.\n'
+  '- Actualizada según sea necesario para reflejar cambios en los objetivos del negocio o riesgos del entorno.'),
+ ('12.1.3',
+  'La política de seguridad define claramente los roles y responsabilidades de seguridad de la información para todo '
+  'el personal, y todo el personal está consciente y reconoce sus responsabilidades en materia de seguridad de la '
+  'información?'),
+ ('12.1.4',
+  'La responsabilidad de la seguridad de la información se asigna formalmente a un Director de Seguridad de la '
+  'Información (CISO) u otro miembro de la alta dirección con conocimiento en seguridad de la información?'),
+ ('12.2', 'Las políticas de uso aceptable para tecnologías de usuario final están definidas e implementadas.'),
+ ('12.2.1',
+  'Las políticas de uso aceptable para tecnologías de usuario final están documentadas e implementadas, incluyendo:\n'
+  '\n'
+  '- Aprobación explícita por partes autorizadas.\n'
+  '- Usos aceptables de la tecnología.\n'
+  '- Lista de productos aprobados por la empresa para uso de los empleados, incluyendo hardware y software.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Ejemplos de tecnologías de usuario final para las cuales se esperan políticas de uso aceptable incluyen, pero no '
+  'se limitan a, acceso remoto y tecnologías inalámbricas, portátiles, tabletas, teléfonos móviles y medios '
+  'electrónicos removibles, uso de correo electrónico y uso de Internet.'),
+ ('12.3',
+  'Los riesgos dirigidos al entorno de datos de titulares de tarjeta son identificados, evaluados y gestionados '
+  'formalmente.'),
+ ('12.3.1',
+  'Para cada requisito PCI DSS que especifica la realización de un análisis de riesgo dirigido, el análisis se '
+  'documenta e incluye:\n'
+  '\n'
+  '- Identificación de los activos que se están protegiendo.\n'
+  '- Identificación de las amenazas contra las cuales el requisito protege.\n'
+  '- Identificación de los factores que contribuyen a la probabilidad y/o impacto de que una amenaza se '
+  'materialice.\n'
+  '- Análisis resultante que determina, e incluye justificación, de cómo la frecuencia o procesos definidos por la '
+  'entidad para cumplir el requisito minimizan la probabilidad y/o impacto de que la amenaza se materialice.\n'
+  '- Revisión de cada análisis de riesgo dirigido al menos una vez cada 12 meses para determinar si los resultados '
+  'siguen siendo válidos o si se requiere una actualización.\n'
+  '- Realización de análisis de riesgo actualizados cuando sea necesario, según lo determine la revisión anual.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('12.3.2',
+  'Se realiza un análisis de riesgo dirigido para cada requisito PCI DSS que la entidad cumple mediante el enfoque '
+  'personalizado, incluyendo:\n'
+  '\n'
+  '- Evidencia documentada que detalle cada elemento especificado en el Apéndice B: Guía e instrucciones para el uso '
+  'del enfoque personalizado (incluyendo, como mínimo, una matriz de controles y análisis de riesgo).\n'
+  '- Aprobación de la evidencia documentada por la alta dirección.\n'
+  '- Realización del análisis de riesgo dirigido al menos una vez cada 12 meses.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Esto aplica únicamente a entidades que utilizan un Enfoque Personalizado.'),
+ ('12.3.3',
+  'Las suites de cifrado criptográfico y protocolos en uso están documentados y se revisan al menos una vez cada 12 '
+  'meses, incluyendo al menos lo siguiente:\n'
+  '\n'
+  '- Un inventario actualizado de todas las suites de cifrado y protocolos criptográficos en uso, incluyendo su '
+  'propósito y dónde se utilizan.\n'
+  '- Monitoreo activo de tendencias de la industria respecto a la viabilidad continua de todas las suites de cifrado '
+  'y protocolos criptográficos en uso.\n'
+  '- Documentación de un plan para responder a cambios anticipados en vulnerabilidades criptográficas.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito aplica a todas las suites de cifrado y protocolos utilizados para cumplir con PCI DSS, incluyendo, '
+  'pero no limitado a, aquellos usados para hacer ilegible el PAN en almacenamiento y transmisión, para proteger '
+  'contraseñas y como parte de la autenticación de acceso.\n'
+  '\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('12.3.4',
+  'Las tecnologías de hardware y software en uso se revisan al menos una vez cada 12 meses, incluyendo al menos lo '
+  'siguiente:\n'
+  '\n'
+  '- Análisis que verifique que las tecnologías continúan recibiendo correcciones de seguridad de los proveedores de '
+  'manera oportuna.\n'
+  '- Análisis que verifique que las tecnologías continúan soportando (y no impiden) el cumplimiento de PCI DSS de la '
+  'entidad.\n'
+  '- Documentación de cualquier anuncio o tendencia de la industria relacionada con una tecnología, como cuando un '
+  'proveedor ha anunciado planes de “fin de vida” para una tecnología.\n'
+  '- Documentación de un plan, aprobado por la alta dirección, para remediar tecnologías obsoletas, incluyendo '
+  'aquellas para las cuales los proveedores han anunciado planes de “fin de vida”.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('12.4', 'El cumplimiento de PCI DSS es gestionado.'),
+ ('12.4.1',
+  'Requisito adicional solo para proveedores de servicios:\n'
+  '\n'
+  '- La responsabilidad es establecida por la alta dirección para la protección de los datos de titulares de tarjeta '
+  'y un programa de cumplimiento PCI DSS que incluye:\n'
+  '- Responsabilidad general por mantener el cumplimiento de PCI DSS.\n'
+  'Definir un marco (charter) para un programa de cumplimiento PCI DSS y su comunicación a la alta dirección.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito aplica únicamente cuando la entidad evaluada es un proveedor de servicios.\n'
+  '\n'
+  'La alta dirección puede incluir cargos de nivel C, junta directiva o equivalente. Los títulos específicos '
+  'dependerán de la estructura organizacional.\n'
+  '\n'
+  'La responsabilidad del programa de cumplimiento PCI DSS puede asignarse a roles individuales y/o a unidades de '
+  'negocio dentro de la organización.'),
+ ('12.4.2',
+  'Requisito adicional solo para proveedores de servicios:\n'
+  '\n'
+  '- Se realizan revisiones al menos una vez cada tres meses para confirmar que el personal está desempeñando sus '
+  'tareas conforme a todas las políticas de seguridad y procedimientos operativos.\n'
+  '- Las revisiones son realizadas por personal distinto al responsable de ejecutar las tareas e incluyen, pero no '
+  'se limitan a, lo siguiente:\n'
+  '- Revisiones diarias de logs.\n'
+  '- Revisiones de configuración de controles de seguridad de red.\n'
+  '- Aplicación de estándares de configuración a nuevos sistemas.\n'
+  '- Respuesta a alertas de seguridad.\n'
+  '- Procesos de gestión de cambios.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito aplica únicamente cuando la entidad evaluada es un proveedor de servicios.'),
+ ('12.4.2.1',
+  'Requisito adicional solo para proveedores de servicios:\n'
+  '\n'
+  '- Las revisiones realizadas conforme al Requisito 12.4.2 se documentan e incluyen:- \n'
+  '- Resultados de las revisiones.\n'
+  '- Acciones de remediación documentadas para tareas que no se realizaron conforme al Requisito 12.4.2.\n'
+  '- Revisión y aprobación (firma) de los resultados por personal responsable del programa de cumplimiento PCI DSS.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito aplica únicamente cuando la entidad evaluada es un proveedor de servicios.'),
+ ('12.5', 'El alcance de PCI DSS está documentado y validado.'),
+ ('12.5.1',
+  'Se mantiene y actualiza un inventario de los componentes del sistema dentro del alcance de PCI DSS, incluyendo '
+  'una descripción de su función/uso?'),
+ ('12.5.2',
+  'El alcance de PCI DSS es documentado y confirmado por la entidad al menos una vez cada 12 meses y tras cambios '
+  'significativos en el entorno dentro del alcance.\n'
+  '\n'
+  'Como mínimo, la validación del alcance incluye:\n'
+  '\n'
+  '- Identificar todos los flujos de datos en las distintas etapas del pago (por ejemplo, autorización, captura, '
+  'liquidación, contracargos y reembolsos) y canales de aceptación (por ejemplo, tarjeta presente, tarjeta no '
+  'presente y comercio electrónico).\n'
+  '- Actualizar todos los diagramas de flujo de datos conforme al Requisito 1.2.4.\n'
+  '- Identificar todas las ubicaciones donde los datos de cuenta se almacenan, procesan y transmiten, incluyendo '
+  'pero no limitado a:\n'
+  '  - ubicaciones fuera del CDE definido,\n'
+  '  - aplicaciones que procesan CHD,\n'
+  '  - transmisiones entre sistemas y redes,\n'
+  '  - copias de respaldo.\n'
+  '- Identificar todos los componentes del sistema en el CDE, conectados al CDE o que puedan afectar su seguridad.\n'
+  '- Identificar todos los controles de segmentación y los entornos desde los cuales el CDE está segmentado, '
+  'incluyendo justificación de entornos fuera de alcance.\n'
+  '- Identificar todas las conexiones de terceros con acceso al CDE.\n'
+  '- Confirmar que todos los flujos de datos, datos de cuenta, componentes, controles de segmentación y conexiones '
+  'de terceros están incluidos en el alcance.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Esta confirmación anual del alcance PCI DSS es responsabilidad de la entidad evaluada y no sustituye la '
+  'validación realizada por el evaluador.'),
+ ('12.5.2.1',
+  'Requisito adicional solo para proveedores de servicios:\n'
+  '\n'
+  'El alcance PCI DSS es documentado y confirmado al menos cada seis meses y tras cambios significativos.\n'
+  'Incluye todos los elementos del Requisito 12.5.2.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Aplica solo a proveedores de servicios.\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después será obligatorio.'),
+ ('12.5.3',
+  'Requisito adicional solo para proveedores de servicios:\n'
+  '\n'
+  '- Cambios significativos en la estructura organizacional generan una revisión documentada del impacto sobre el '
+  'alcance PCI DSS y la aplicabilidad de controles, comunicando resultados a la alta dirección.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Aplica solo a proveedores de servicios.\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025.'),
+ ('12.6', 'La concienciación en seguridad es una actividad continua.'),
+ ('12.6.1',
+  'Se implementa un programa formal de concienciación en seguridad para que todo el personal conozca la política de '
+  'seguridad de la información y su rol en la protección de los datos de titulares de tarjeta?'),
+ ('12.6.2',
+  'El programa de concienciación en seguridad es:\n'
+  '\n'
+  '- Revisado al menos una vez cada 12 meses.\n'
+  '- Actualizado según sea necesario para abordar nuevas amenazas y vulnerabilidades que puedan afectar la seguridad '
+  'de los datos de titulares de tarjeta y/o datos de autenticación sensibles, o la información proporcionada al '
+  'personal.\n'
+  '\n'
+  'Notas de aplicabilidad:\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025.'),
+ ('12.6.3',
+  'El personal recibe capacitación en concienciación de seguridad de la siguiente manera:\n'
+  '\n'
+  '- Al momento de contratación y al menos una vez cada 12 meses.\n'
+  '- Se utilizan múltiples métodos de comunicación.\n'
+  '- El personal reconoce al menos una vez cada 12 meses que ha leído y entendido la política y procedimientos de '
+  'seguridad de la información.'),
+ ('12.6.3.1',
+  'La capacitación en concienciación de seguridad incluye concienciación sobre amenazas y vulnerabilidades que '
+  'podrían impactar la seguridad de los datos de titulares de tarjeta y/o datos de autenticación sensibles, '
+  'incluyendo pero no limitado a:\n'
+  '\n'
+  '- Phishing y ataques relacionados.\n'
+  '- Ingeniería social.\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  'Ver el Requisito 5.4.1 para orientación sobre la diferencia entre controles técnicos y automatizados para '
+  'detectar y proteger a los usuarios contra ataques de phishing, y este requisito para proporcionar capacitación de '
+  'concienciación en seguridad a los usuarios sobre phishing e ingeniería social. Estos son dos requisitos separados '
+  'y distintos, y uno no se cumple implementando los controles requeridos por el otro.\n'
+  '\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('12.6.3.2',
+  'La capacitación en concienciación de seguridad incluye concienciación sobre el uso aceptable de tecnologías de '
+  'usuario final de acuerdo con el Requisito 12.2.1?\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('12.7', 'El personal es evaluado para reducir los riesgos derivados de amenazas internas.'),
+ ('12.7.1',
+  'El personal potencial que tendrá acceso al CDE es evaluado, dentro de las restricciones de las leyes locales, '
+  'antes de la contratación para minimizar el riesgo de ataques provenientes de fuentes internas?\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  'Para el personal potencial que será contratado para posiciones como cajeros de tienda, que solo tienen acceso a '
+  'un número de tarjeta a la vez al facilitar una transacción, este requisito es solo una recomendación.'),
+ ('12.8',
+  'El riesgo para los activos de información asociado con relaciones con proveedores de servicios de terceros (TPSP) '
+  'es gestionado.'),
+ ('12.8.2',
+  'Se mantienen acuerdos escritos con los TPSP de la siguiente manera:\n'
+  '\n'
+  '- Se mantienen acuerdos escritos con todos los TPSP con los cuales se comparten datos de cuenta o que podrían '
+  'afectar la seguridad del CDE.\n'
+  '- Los acuerdos escritos incluyen reconocimientos por parte de los TPSP de que los TPSP son responsables de la '
+  'seguridad de los datos de cuenta que poseen o que almacenan, procesan o transmiten en nombre de la entidad, o en '
+  'la medida en que el TPSP pueda impactar la seguridad de los datos de titulares de tarjeta de la entidad y/o datos '
+  'de autenticación sensibles.\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  'La redacción exacta de un acuerdo dependerá de los detalles del servicio proporcionado y de las responsabilidades '
+  'asignadas a cada parte. El acuerdo no tiene que incluir exactamente la redacción proporcionada en este '
+  'requisito.\n'
+  '\n'
+  'El reconocimiento escrito del TPSP es una confirmación que establece que el TPSP es responsable de la seguridad '
+  'de los datos de cuenta que pueda almacenar, procesar o transmitir en nombre del cliente o en la medida en que el '
+  'TPSP pueda impactar la seguridad de los datos de titulares de tarjeta de un cliente y/o datos de autenticación '
+  'sensibles.\n'
+  '\n'
+  'La evidencia de que un TPSP cumple con los requisitos PCI DSS no es lo mismo que el reconocimiento escrito '
+  'especificado en este requisito. Por ejemplo, una Attestation of Compliance (AOC) de PCI DSS, una declaración en '
+  'el sitio web de una empresa, una política, una matriz de responsabilidades u otra evidencia que no esté incluida '
+  'en un acuerdo escrito no constituye un reconocimiento escrito.'),
+ ('12.8.3',
+  'Se implementa un proceso establecido para la contratación de TPSP, incluyendo la debida diligencia adecuada antes '
+  'de la contratación?'),
+ ('12.8.4',
+  'Se implementa un programa para monitorear el estado de cumplimiento PCI DSS de los TPSP al menos una vez cada 12 '
+  'meses?\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  'Cuando una entidad tiene un acuerdo con un TPSP para cumplir requisitos PCI DSS en nombre de la entidad (por '
+  'ejemplo, mediante un servicio de firewall), la entidad debe trabajar con el TPSP para asegurarse de que se '
+  'cumplan los requisitos PCI DSS aplicables. Si el TPSP no cumple con esos requisitos aplicables, entonces dichos '
+  'requisitos también se consideran “no implementados” para la entidad.'),
+ ('12.8.5',
+  'Se mantiene información sobre qué requisitos PCI DSS son gestionados por cada TPSP, cuáles son gestionados por la '
+  'entidad y cuáles son compartidos entre el TPSP y la entidad?'),
+ ('12.9', 'Los proveedores de servicios de terceros (TPSP) apoyan el cumplimiento PCI DSS de sus clientes.'),
+ ('12.9.1',
+  'Requisito adicional solo para proveedores de servicios:\n'
+  '\n'
+  'Los TPSP proporcionan acuerdos escritos a los clientes que incluyen reconocimientos de que los TPSP son '
+  'responsables de la seguridad de los datos de cuenta que el TPSP posee o de otra manera almacena, procesa o '
+  'transmite en nombre del cliente, o en la medida en que el TPSP pueda impactar la seguridad de los datos de '
+  'titulares de tarjeta del cliente y/o datos de autenticación sensibles.\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  'Este requisito aplica únicamente cuando la entidad evaluada es un proveedor de servicios.\n'
+  '\n'
+  'La redacción exacta de un acuerdo dependerá de los detalles del servicio que se esté proporcionando y de las '
+  'responsabilidades asignadas a cada parte. El acuerdo no tiene que incluir exactamente la redacción proporcionada '
+  'en este requisito.\n'
+  '\n'
+  'El reconocimiento escrito del TPSP es una confirmación que establece que el TPSP es responsable de la seguridad '
+  'de los datos de cuenta que pueda almacenar, procesar o transmitir en nombre del cliente o en la medida en que el '
+  'TPSP pueda impactar la seguridad de los datos de titulares de tarjeta de un cliente y/o datos de autenticación '
+  'sensibles.\n'
+  '\n'
+  'La evidencia de que un TPSP cumple con los requisitos PCI DSS no es lo mismo que un acuerdo escrito especificado '
+  'en este requisito. Por ejemplo, una Attestation of Compliance (AOC) de PCI DSS, una declaración en el sitio web '
+  'de una empresa, una política, una matriz de responsabilidades u otra evidencia que no esté incluida en un acuerdo '
+  'escrito no constituye un reconocimiento escrito.'),
+ ('12.9.2',
+  'Requisito adicional solo para proveedores de servicios:\n'
+  '\n'
+  'Los TPSP apoyan las solicitudes de información de sus clientes para cumplir con los Requisitos 12.8.4 y 12.8.5 '
+  'proporcionando lo siguiente cuando el cliente lo solicite:\n'
+  '\n'
+  '- Información sobre el estado de cumplimiento PCI DSS (Requisito 12.8.4).\n'
+  '- Información sobre qué requisitos PCI DSS son responsabilidad del TPSP y cuáles son responsabilidad del cliente, '
+  'incluyendo cualquier responsabilidad compartida (Requisito 12.8.5), para cualquier servicio que el TPSP '
+  'proporcione que cumpla un requisito PCI DSS en nombre de los clientes o que pueda impactar la seguridad de los '
+  'datos de titulares de tarjeta de los clientes y/o datos de autenticación sensibles.\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  'Este requisito aplica únicamente cuando la entidad evaluada es un proveedor de servicios.'),
+ ('12.10',
+  'Los incidentes de seguridad sospechosos y confirmados que podrían impactar el CDE son respondidos '
+  'inmediatamente.'),
+ ('12.10.1',
+  'Existe un plan de respuesta a incidentes y está listo para activarse en caso de un incidente de seguridad '
+  'sospechoso o confirmado. El plan incluye, pero no se limita a:\n'
+  '\n'
+  '- Roles, responsabilidades y estrategias de comunicación y contacto en caso de un incidente de seguridad '
+  'sospechoso o confirmado, incluyendo notificación a las marcas de pago y adquirentes, como mínimo.\n'
+  '- Procedimientos de respuesta a incidentes con actividades específicas de contención y mitigación para diferentes '
+  'tipos de incidentes.\n'
+  '- Procedimientos de recuperación y continuidad del negocio.\n'
+  '- Procesos de respaldo de datos.\n'
+  '- Análisis de requisitos legales para reportar compromisos de seguridad.\n'
+  '- Cobertura y respuesta de todos los componentes críticos del sistema.\n'
+  '- Referencia o inclusión de procedimientos de respuesta a incidentes de las marcas de pago.'),
+ ('12.10.2',
+  'Al menos una vez cada 12 meses, el plan de respuesta a incidentes de seguridad es:\n'
+  '- Revisado y su contenido actualizado según sea necesario.\n'
+  '- Probado, incluyendo todos los elementos listados en el Requisito 12.10.1.'),
+ ('12.10.3',
+  'Se designa personal específico para estar disponible las 24 horas del día, los 7 días de la semana, para '
+  'responder a incidentes de seguridad sospechosos o confirmados?'),
+ ('12.10.4',
+  'El personal responsable de responder a incidentes de seguridad sospechosos y confirmados está capacitado de '
+  'manera adecuada y periódica en sus responsabilidades de respuesta a incidentes?'),
+ ('12.10.4.1',
+  'La frecuencia de la capacitación periódica para el personal de respuesta a incidentes se define en el análisis de '
+  'riesgo dirigido de la entidad, el cual se realiza conforme a todos los elementos especificados en el Requisito '
+  '12.3.1.?\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('12.10.5',
+  'El plan de respuesta a incidentes de seguridad incluye monitoreo y respuesta a alertas de sistemas de monitoreo '
+  'de seguridad, incluyendo pero no limitado a:\n'
+  '\n'
+  '- Sistemas de detección y prevención de intrusiones.\n'
+  '- Controles de seguridad de red.\n'
+  '- Mecanismos de detección de cambios para archivos críticos.\n'
+  '- El mecanismo de detección de cambios y manipulación para páginas de pago. Este punto es una buena práctica '
+  'hasta su fecha de entrada en vigor; consultar las Notas de Aplicabilidad a continuación para más detalles.\n'
+  '- Detección de puntos de acceso inalámbricos no autorizados.\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  'El punto anterior (para el monitoreo y respuesta a alertas de un mecanismo de detección de cambios y manipulación '
+  'para páginas de pago) es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio '
+  'como parte del Requisito 12.10.5 y deberá ser completamente considerado durante una evaluación PCI DSS.'),
+ ('12.10.6',
+  'El plan de respuesta a incidentes de seguridad se modifica y evoluciona de acuerdo con las lecciones aprendidas y '
+  'para incorporar desarrollos de la industria?'),
+ ('12.10.7',
+  'Existen procedimientos de respuesta a incidentes que se inician ante la detección de PAN almacenado en cualquier '
+  'lugar donde no se espera, e incluyen:\n'
+  '\n'
+  '- Determinar qué hacer si se descubre PAN fuera del CDE, incluyendo su recuperación, eliminación segura y/o '
+  'migración al CDE actualmente definido, según corresponda.\n'
+  '- Identificar si los datos de autenticación sensibles están almacenados junto con el PAN.\n'
+  '- Determinar de dónde provienen los datos de cuenta y cómo terminaron en un lugar donde no se esperaban.\n'
+  '- Remediar fugas de datos o fallas de procesos que resultaron en que los datos de cuenta estuvieran donde no se '
+  'esperaban.\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('A1.1',
+  'Los proveedores de servicios multi-tenant protegen y segregan todos los entornos y datos de los clientes.'),
+ ('A1.1.1',
+  'La separación lógica se implementa de la siguiente manera:\n'
+  '\n'
+  '- El proveedor no puede acceder a los entornos de sus clientes sin autorización.\n'
+  '- Los clientes no pueden acceder al entorno del proveedor sin autorización.\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('A1.1.2',
+  'Se implementan controles de tal manera que cada cliente solo tenga permiso para acceder a sus propios datos de '
+  'titulares de tarjeta y al CDE?'),
+ ('A1.1.3',
+  'Se implementan controles de tal manera que cada cliente solo pueda acceder a los recursos asignados a ellos?'),
+ ('A1.1.4',
+  'La efectividad de los controles de separación lógica utilizados para separar los entornos de los clientes se '
+  'confirma al menos una vez cada seis meses mediante pruebas de penetración?\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  'Las pruebas de separación adecuada entre clientes en un entorno de proveedor de servicios multi-tenant son '
+  'adicionales a las pruebas de penetración especificadas en el Requisito 11.4.6.\n'
+  '\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('A1.2',
+  'Los proveedores de servicios multi-tenant facilitan el registro y la respuesta a incidentes para todos los '
+  'clientes.'),
+ ('A1.2.1',
+  'La capacidad de registros de auditoría está habilitada para el entorno de cada cliente de manera consistente con '
+  'el Requisito 10 de PCI DSS, incluyendo:\n'
+  '\n'
+  '- Los registros están habilitados para aplicaciones comunes de terceros.\n'
+  '- Los registros están activos por defecto.\n'
+  '- Los registros están disponibles para revisión únicamente por el cliente propietario.\n'
+  '- Las ubicaciones de los registros se comunican claramente al cliente propietario.\n'
+  '- Los datos de registro y su disponibilidad son consistentes con el Requisito 10 de PCI DSS.'),
+ ('A1.2.2',
+  'Se implementan procesos o mecanismos para apoyar y/o facilitar investigaciones forenses oportunas en caso de un '
+  'incidente de seguridad sospechoso o confirmado para cualquier cliente?'),
+ ('A1.2.3',
+  'Se implementan procesos o mecanismos para reportar y abordar incidentes de seguridad sospechosos o confirmados y '
+  'vulnerabilidades, incluyendo:\n'
+  '\n'
+  '- Los clientes pueden reportar de manera segura incidentes de seguridad y vulnerabilidades al proveedor.\n'
+  '- El proveedor aborda y remedia los incidentes de seguridad sospechosos o confirmados y las vulnerabilidades de '
+  'acuerdo con el Requisito 6.3.1.\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  'Este requisito es una buena práctica hasta el 31 de marzo de 2025, después de lo cual será obligatorio y deberá '
+  'ser completamente considerado durante una evaluación PCI DSS.'),
+ ('A2.1.1',
+  'Cuando los terminales POS POI en el comercio o en la ubicación de aceptación de pagos utilizan SSL y/o TLS '
+  'temprano, la entidad confirma que los dispositivos no son susceptibles a ningún exploit conocido para esos '
+  'protocolos?\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  'Este requisito está destinado a aplicarse a la entidad que posee el terminal POS POI, como un comerciante. Este '
+  'requisito no está destinado a proveedores de servicios que actúan como punto de terminación o conexión para esos '
+  'terminales POS POI. Los Requisitos A2.1.2 y A2.1.3 aplican a los proveedores de servicios de POS POI.\n'
+  '\n'
+  'La autorización para terminales POS POI que actualmente no son susceptibles a exploits se basa en los riesgos '
+  'conocidos actualmente. Si se introducen nuevos exploits a los cuales los terminales POS POI sean susceptibles, '
+  'los terminales POS POI deberán ser actualizados inmediatamente.'),
+ ('A2.1.2',
+  'Requisito adicional solo para proveedores de servicios:\n'
+  '\n'
+  'Todos los proveedores de servicios con puntos de conexión existentes a terminales POS POI que utilizan SSL y/o '
+  'TLS temprano según lo definido en A2.1 deben contar con un Plan formal de Mitigación de Riesgos y Migración que '
+  'incluya:\n'
+  '\n'
+  '- Descripción del uso, incluyendo qué datos se están transmitiendo, tipos y número de sistemas que utilizan y/o '
+  'soportan SSL/TLS temprano, y tipo de entorno.\n'
+  '- Resultados de la evaluación de riesgos y controles de reducción de riesgos implementados.\n'
+  '- Descripción de los procesos para monitorear nuevas vulnerabilidades asociadas con SSL/TLS temprano.\n'
+  '- Descripción de los procesos de control de cambios que se implementan para asegurar que SSL/TLS temprano no se '
+  'implemente en nuevos entornos.\n'
+  '- Resumen del plan del proyecto de migración para reemplazar SSL/TLS temprano en una fecha futura.\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  'Este requisito aplica únicamente cuando la entidad evaluada es un proveedor de servicios.'),
+ ('A2.1.3',
+  'Requisito adicional solo para proveedores de servicios:\n'
+  'Todos los proveedores de servicios ofrecen un servicio seguro?\n'
+  '\n'
+  'Notas de aplicabilidad\n'
+  'Este requisito aplica únicamente cuando la entidad evaluada es un proveedor de servicios.')]
+
+# Catálogo oficial utilizado en Gestión de Riesgos.
+# Fuente: archivo suministrado "NIST CSF V2.0 controls.xlsx" (106 controles).
+NIST_CSF_20_CONTROLES = [('GV.OC-01',
+  'Se comprende la misión de la organización y se informa sobre la gestión de riesgos de seguridad cibernética.'),
+ ('GV.OC-02',
+  'Las partes interesadas internas y externas son comprendidas, y sus necesidades y expectativas con respecto a la '
+  'gestión de riesgos de seguridad cibernética son comprendidas y consideradas.'),
+ ('GV.OC-03',
+  'Se comprenden y gestionan los requisitos legales, normativos y contractuales relativos a la seguridad cibernética, '
+  'incluidas las obligaciones en materia de privacidad y libertades civiles.'),
+ ('GV.OC-04',
+  'Se comprenden y comunican los objetivos, las capacidades y los servicios críticos de los que dependen las partes '
+  'interesadas externas o que esperan de la organización'),
+ ('GV.OC-05', 'Se comprenden y comunican los resultados, capacidades y servicios de los que depende la organización'),
+ ('GV.RM-01',
+  'Los objetivos de la gestión de riesgos son establecidos y acordados por las partes interesadas de la organización'),
+ ('GV.RM-02',
+  'Se establecen, se comunican y se mantienen las declaraciones sobre el apetito de riesgo y la tolerancia al riesgo'),
+ ('GV.RM-03',
+  'Las actividades y los resultados de la gestión de riesgos de seguridad cibernética se incluyen en los procesos de '
+  'gestión de riesgos de la empresa'),
+ ('GV.RM-04',
+  'Se establece y comunica una dirección estratégica que describa las opciones adecuadas de respuesta al riesgo.'),
+ ('GV.RM-05',
+  'Se establecen líneas de comunicación en toda la organización para los riesgos de seguridad cibernética, lo que '
+  'incluye a los riesgos de proveedores y otros terceros.'),
+ ('GV.RM-06',
+  'Se establece y comunica un método estandarizado para calcular, documentar, categorizar y priorizar los riesgos de '
+  'seguridad cibernética.'),
+ ('GV.RM-07',
+  'Se caracterizan las oportunidades estratégicas (es decir, los riesgos positivos) y se incluyen en las discusiones '
+  'sobre riesgos de seguridad cibernética de la organización.'),
+ ('GV.RR-01',
+  'El liderazgo organizativo es responsable de los riesgos de seguridad cibernética y fomenta una cultura consciente '
+  'de los riesgos, ética y de mejora continua.'),
+ ('GV.RR-02',
+  'Se establecen, comunican, comprenden y aplican las funciones, responsabilidades y autoridades relacionadas con la '
+  'gestión de riesgos de seguridad cibernética.'),
+ ('GV.RR-03',
+  'Se asignan recursos adecuados de acuerdo con la estrategia de riesgos de seguridad cibernética, las funciones, las '
+  'responsabilidades y las políticas.'),
+ ('GV.RR-04', 'La seguridad cibernética se incluye en las prácticas de recursos humanos'),
+ ('GV.PO-01',
+  'La política de gestión de riesgos de seguridad cibernética se establece en base al contexto organizativo, la '
+  'estrategia de seguridad cibernética y las prioridades, y es comunicada y aplicada'),
+ ('GV.PO-02',
+  'La política de gestión de riesgos de seguridad cibernética se revisa, actualiza, comunica y aplica para reflejar '
+  'los cambios en los requisitos, las amenazas, la tecnología y la misión de la organización'),
+ ('GV.OV-01',
+  'Los resultados de la estrategia de gestión de riesgos de seguridad cibernética se revisan para informar y ajustar '
+  'la estrategia y la dirección'),
+ ('GV.OV-02',
+  'La estrategia de gestión de riesgos de seguridad cibernética se revisa y ajusta para garantizar la cobertura de los '
+  'requisitos y riesgos de la organización'),
+ ('GV.OV-03',
+  'El rendimiento de la gestión de riesgos de seguridad cibernética de la organización se evalúa y revisa para '
+  'realizar los ajustes necesarios'),
+ ('GV.SC-01',
+  'Las partes interesadas de la organización establecen y acuerdan un programa, estrategia, objetivos, políticas y '
+  'procesos de gestión de riesgos de seguridad cibernética en la cadena de suministro'),
+ ('GV.SC-02',
+  'Se establecen, comunican y coordinan interna y externamente las funciones y responsabilidades de seguridad '
+  'cibernética para proveedores, clientes y colaboradores'),
+ ('GV.SC-03',
+  'La gestión de riesgos de la cadena de suministro de seguridad cibernética está integrada en la seguridad '
+  'cibernética y la gestión de riesgos empresariales, la evaluación de riesgos y los procesos de mejora'),
+ ('GV.SC-04', 'Los proveedores son conocidos y priorizados por criticidad'),
+ ('GV.SC-05',
+  'Los requisitos para abordar los riesgos de seguridad cibernética en las cadenas de suministro se establecen, '
+  'priorizan e integran en contratos y otros tipos de acuerdos con proveedores y otras terceras partes pertinentes'),
+ ('GV.SC-06',
+  'Se llevan a cabo la planificación y la diligencia debida para reducir los riesgos antes de entablar relaciones '
+  'formales con proveedores u otros terceros'),
+ ('GV.SC-07',
+  'Los riesgos planteados por un proveedor, sus productos y servicios y otros terceros se comprenden, registran, '
+  'priorizan, evalúan, responden y monitorean a lo largo de la relación'),
+ ('GV.SC-08',
+  'Los proveedores pertinentes y otros terceros se incluyen en las actividades de planificación, respuesta y '
+  'recuperación de incidentes'),
+ ('GV.SC-09',
+  'Las prácticas de seguridad de la cadena de suministro se integran en los programas de seguridad cibernética y de '
+  'gestión de riesgos empresariales, y su rendimiento se monitorea a lo largo del ciclo de vida de los productos y '
+  'servicios tecnológicos'),
+ ('GV.SC-10',
+  'Los planes de gestión de riesgos de la cadena de suministro de seguridad cibernética incluyen disposiciones para '
+  'las actividades que ocurren después de la conclusión de un acuerdo de colaboración o servicio'),
+ ('ID.AM-01', 'Se mantienen inventarios del hardware gestionado por la organización'),
+ ('ID.AM-02', 'Se mantienen inventarios de software, servicios y sistemas gestionados por la organización'),
+ ('ID.AM-03',
+  'Se mantienen representaciones de la comunicación de red autorizada de la organización y de los flujos de datos de '
+  'red internos y externos'),
+ ('ID.AM-04', 'Se mantienen inventarios de los servicios prestados por los proveedores'),
+ ('ID.AM-05', 'Se priorizan los activos en función de su clasificación, criticidad, recursos e impacto en la misión'),
+ ('ID.AM-07', 'Se mantienen inventarios de datos y los metadatos correspondientes para los tipos de datos designados'),
+ ('ID.AM-08',
+  'Los sistemas, el hardware, el software, los servicios y los datos se gestionan durante todo su ciclo de vida'),
+ ('ID.RA-01', 'Se identifican, validan y registran las vulnerabilidades de los activos'),
+ ('ID.RA-02', 'Se recibe información sobre amenazas cibernéticas de foros y fuentes de intercambio de información'),
+ ('ID.RA-03', 'Se identifican y registran las amenazas internas y externas a la organización'),
+ ('ID.RA-04',
+  'Se identifican y registran los impactos potenciales y las probabilidades de que las amenazas exploten las '
+  'vulnerabilidades'),
+ ('ID.RA-05',
+  'Las amenazas, las vulnerabilidades, las probabilidades y los impactos se utilizan para comprender el riesgo '
+  'inherente e informar sobre la priorización de la respuesta al riesgo'),
+ ('ID.RA-06', 'Se eligen, priorizan, planifican, controlan y comunican las respuestas al riesgo'),
+ ('ID.RA-07',
+  'Se gestionan los cambios y las excepciones, se evalúa su impacto en el riesgo, se registran y se realiza su '
+  'seguimiento'),
+ ('ID.RA-08', 'Se establecen procesos para recibir, analizar y responder a las divulgaciones de vulnerabilidades'),
+ ('ID.RA-09', 'Se evalúa la autenticidad e integridad del hardware y software antes de su adquisición y uso'),
+ ('ID.RA-10', 'Se evalúan los proveedores críticos antes de su adquisición'),
+ ('ID.IM-01', 'Las mejoras se identifican a partir de evaluaciones'),
+ ('ID.IM-02',
+  'Las mejoras se identifican a partir de pruebas y ejercicios de seguridad, lo que incluye a los realizados en '
+  'coordinación con proveedores y terceros pertinentes'),
+ ('ID.IM-03',
+  'Las mejoras se identifican a partir de la ejecución de procesos, procedimientos y actividades operativos'),
+ ('ID.IM-04',
+  'Se establecen, comunican, mantienen y mejoran los planes de respuesta a incidentes y otros planes de seguridad '
+  'cibernética que afectan a las operaciones.'),
+ ('PR.AA-01',
+  'La organización gestiona las identidades y credenciales de los usuarios, servicios y equipos autorizados'),
+ ('PR.AA-02',
+  'Las identidades están comprobadas y vinculadas a credenciales basadas en el contexto de las interacciones'),
+ ('PR.AA-03', 'Los usuarios, servicios y hardware están autenticados'),
+ ('PR.AA-04', 'Las afirmaciones de identidad se protegen, transmiten y verifican'),
+ ('PR.AA-05',
+  'Los permisos de acceso, los derechos y las autorizaciones se definen en una política, se gestionan, se aplican y se '
+  'revisan, e incorporan los principios de privilegio mínimo y separación de funciones'),
+ ('PR.AA-06', 'El acceso físico a los activos se gestiona, supervisa y aplica de forma proporcional al riesgo'),
+ ('PR.AT-01',
+  'Se sensibiliza y capacita al personal para que disponga de los conocimientos y habilidades necesarios para realizar '
+  'tareas generales teniendo en cuenta los riesgos de seguridad cibernética'),
+ ('PR.AT-02',
+  'Se sensibiliza y capacita a las personas que desempeñan funciones especializadas para que posean los conocimientos '
+  'y aptitudes necesarios para realizar las tareas pertinentes teniendo en cuenta los riesgos de seguridad '
+  'cibernética'),
+ ('PR.DS-01', 'La confidencialidad, la integridad y la disponibilidad de los datos en reposo están protegidas'),
+ ('PR.DS-02', 'La confidencialidad, la integridad y la disponibilidad de los datos en tránsito están protegidas'),
+ ('PR.DS-10', 'La confidencialidad, la integridad y la disponibilidad de los datos en uso están protegidas'),
+ ('PR.DS-11', 'Se crean, protegen, mantienen y comprueban copias de seguridad de los datos'),
+ ('PR.PS-01', 'Se establecen y aplican prácticas de gestión de la configuración'),
+ ('PR.PS-02', 'Se mantiene, sustituye y elimina el software en función del riesgo'),
+ ('PR.PS-03', 'Se mantiene, sustituye y elimina el hardware en función del riesgo'),
+ ('PR.PS-04', 'Se generen registros y se pongan a disposición para una supervisión continua'),
+ ('PR.PS-05', 'Se impide la instalación y la ejecución de software no autorizado'),
+ ('PR.PS-06',
+  'Se integran prácticas seguras de desarrollo de software y se supervisa su rendimiento durante todo el ciclo de vida '
+  'de desarrollo del software'),
+ ('PR.IR-01', 'Las redes y los entornos están protegidos contra el acceso lógico y el uso no autorizados'),
+ ('PR.IR-02', 'Los activos tecnológicos de la organización están protegidos de las amenazas del entorno'),
+ ('PR.IR-03', 'Se implementan mecanismos para lograr los requisitos de resiliencia en situaciones normales y adversas'),
+ ('PR.IR-04', 'Se mantiene una capacidad de recursos adecuada para garantizar la disponibilidad'),
+ ('DE.CM-01', 'Las redes y los servicios de red se monitorean para detectar acontecimientos potencialmente adversos'),
+ ('DE.CM-02', 'Se monitorea el entorno físico para detectar posibles acontecimientos adversos'),
+ ('DE.CM-03',
+  'Se monitorea la actividad del personal y el uso de la tecnología para detectar posibles acontecimientos adversos'),
+ ('DE.CM-06',
+  'Se monitorean las actividades y los servicios de los proveedores de servicios externos para detectar '
+  'acontecimientos potencialmente adversos.'),
+ ('DE.CM-09',
+  'Se monitorean el hardware y el software informáticos, los entornos de ejecución y sus datos para detectar posibles '
+  'acontecimientos adversos'),
+ ('DE.AE-02',
+  'Los acontecimientos potencialmente adversos se analizan para comprender mejor las actividades asociadas'),
+ ('DE.AE-03', 'Se correlaciona la información procedente de diversas fuentes'),
+ ('DE.AE-04', 'Se comprende el impacto estimado y el alcance de los acontecimientos adversos'),
+ ('DE.AE-06',
+  'La información sobre acontecimientos adversos se proporciona al personal y a las herramientas autorizadas'),
+ ('DE.AE-07', 'La inteligencia sobre amenazas cibernéticas y otra información contextual se integran en el análisis'),
+ ('DE.AE-08',
+  'Se declaran incidentes cuando los acontecimientos adversos cumplen con los criterios de incidente definidos'),
+ ('RS.MA-01',
+  'Se ejecuta el plan de respuesta a incidentes en coordinación con los terceros pertinentes una vez que se declara un '
+  'incidente'),
+ ('RS.MA-02', 'Se clasifican y validan los informes de incidentes'),
+ ('RS.MA-03', 'Se clasifican y priorizan los incidentes'),
+ ('RS.MA-04', 'Se escalan o elevan los incidentes según sea necesario'),
+ ('RS.MA-05', 'Se aplican los criterios para iniciar la recuperación de incidentes'),
+ ('RS.AN-03', 'Se realizan análisis para determinar lo que ocurrió durante un incidente y la causa raíz del mismo'),
+ ('RS.AN-06',
+  'Se registran las acciones realizadas durante una investigación y se preservan la integridad y la procedencia de los '
+  'registros'),
+ ('RS.AN-07', 'Se recopilan los datos y metadatos del incidente y se preservan su integridad y su procedencia'),
+ ('RS.AN-08', 'Se estima y valida la magnitud de un incidente.'),
+ ('RS.CO-02', 'Se notifican los incidentes a las partes interesadas internas y externas'),
+ ('RS.CO-03', 'La información se comparte con las partes interesadas internas y externas designadas'),
+ ('RS.MI-01', 'Se contienen los incidentes'),
+ ('RS.MI-02', 'Se erradican los incidentes'),
+ ('RC.RP-01',
+  'La parte de recuperación del plan de respuesta a incidentes se ejecuta una vez que se inicia desde el proceso de '
+  'respuesta a incidentes'),
+ ('RC.RP-02', 'Se seleccionan, delimitan, priorizan y llevan a cabo las acciones de recuperación'),
+ ('RC.RP-03',
+  'Se verifica la integridad de las copias de seguridad y otros activos de restauración antes de usarlos para la '
+  'restauración'),
+ ('RC.RP-04',
+  'Se tienen en cuenta las funciones críticas de la misión y la gestión de riesgos de seguridad cibernética para '
+  'establecer normas operativas posteriores al incidente'),
+ ('RC.RP-05',
+  'Se verifica la integridad de los activos restaurados, se restauran los sistemas y servicios y se confirma el estado '
+  'operativo normal'),
+ ('RC.RP-06',
+  'Se declara el fin de la recuperación del incidente sobre la base de criterios y se completa la documentación '
+  'relacionada con el incidente'),
+ ('RC.CO-03',
+  'Las actividades de recuperación y los progresos en el restablecimiento de las capacidades operativas se comunican a '
+  'las partes interesadas internas y externas designadas'),
+ ('RC.CO-04',
+  'Las actualizaciones públicas sobre la recuperación del incidente se comparten mediante el uso de métodos y mensajes '
+  'aprobados')]
+
+SOC2_CONTROLES = [('CC1.0', 'CRITERIOS COMUNES RELACIONADOS CON EL ENTORNO DE CONTROL'),
+ ('CC1.1', 'Principio 1 de COSO: La entidad demuestra un compromiso con la integridad y los valores éticos'),
+ ('CC1.2',
+  'Principio 2 de COSO: La junta directiva demuestra independencia de la administración y ejerce la supervisión del '
+  'desarrollo y el desempeño del control interno.'),
+ ('CC1.3',
+  'Principio 3 de COSO: La gerencia establece, con supervisión de la junta directiva, estructuras, líneas de reporte '
+  'y autoridades y responsabilidades apropiadas en la búsqueda de objetivos.'),
+ ('CC1.4',
+  'Principio 4 de COSO: La entidad demuestra un compromiso para atraer, desarrollar y retener a individuos '
+  'competentes en alineación con los objetivos'),
+ ('CC2.0', 'Criterios comunes relacionados con la comunicación y la información .'),
+ ('CC2.1',
+  'Principio 13 de COSO: La entidad obtiene o genera y utiliza información relevante y de calidad para respaldar el '
+  'funcionamiento del control interno.'),
+ ('CC2.2',
+  'Principio 14 de COSO: La entidad comunica internamente la información, incluidos los objetivos y '
+  'responsabilidades de control interno, necesarios para respaldar el funcionamiento del control interno.'),
+ ('CC2.3',
+  'Principio 15 de COSO: La entidad se comunica con partes externas con respecto a asuntos que afectan el '
+  'funcionamiento del control interno.'),
+ ('CC3.0', 'Criterios comunes relacionados con la evaluación de riesgos'),
+ ('CC3.1',
+  'Principio 6 de COSO: La entidad especifica objetivos con suficiente claridad para permitir la identificación y '
+  'evaluación de los riesgos relacionados con los objetivos.'),
+ ('CC3.2',
+  'Principio 7 de COSO: la entidad identifica los riesgos para el logro de sus objetivos en toda la entidad y '
+  'analiza los riesgos como una base para determinar cómo deben gestionarse los riesgos?'),
+ ('CC3.3',
+  'Principio 8 de COSO: La entidad considera el potencial de fraude al evaluar los riesgos para el logro de los '
+  'objetivos.'),
+ ('CC3.4',
+  'Principio 9 de COSO: La entidad identifica y evalúa los cambios que podrían afectar significativamente el sistema '
+  'de control interno'),
+ ('CC4.0', 'Criterios comunes relacionados con los controles de monitoreo'),
+ ('CC4.1',
+  'Principio 16 de COSO: La entidad selecciona, desarrolla y realiza evaluaciones continuas y / o separadas para '
+  'determinar si los componentes del control interno están presentes y en funcionamiento.'),
+ ('CC4.2',
+  'Principio 17 de COSO: La entidad evalúa y comunica las deficiencias de control interno de manera oportuna a las '
+  'partes responsables de tomar medidas correctivas, incluida la administración superior y el consejo de '
+  'administración, según corresponda.'),
+ ('CC5.0', 'Criterios comunes relacionados con las actividades de control.'),
+ ('CC5.1',
+  'Principio 11 de COSO: La entidad selecciona y desarrolla actividades de control que contribuyan a la mitigación '
+  'de riesgos para el logro de los objetivos a niveles aceptables.'),
+ ('CC5.2',
+  'Principio 11 de COSO: La entidad también selecciona y desarrolla actividades de control general sobre la '
+  'tecnología para apoyar el logro de los objetivos.'),
+ ('CC5.3',
+  'Principio 12 de COSO: La entidad implementa actividades de control a través de políticas que establecen lo que se '
+  'espera y en procedimientos que las ponen en acción.'),
+ ('CC6.0', 'Criterios comunes relacionados con los controles de acceso lógico y físico'),
+ ('CC6.1',
+  'La entidad implementa software de seguridad de acceso lógico, infraestructura y arquitecturas sobre activos de '
+  'información protegidos para protegerlos de eventos de seguridad para cumplir con los objetivos de la entidad.'),
+ ('CC6.2',
+  'Antes de emitir las credenciales del sistema y otorgar acceso al sistema, la entidad registra y autoriza a los '
+  'nuevos usuarios internos y externos cuyo acceso es administrado por la entidad. Para aquellos usuarios cuyo '
+  'acceso es administrado por la entidad, las credenciales del sistema de usuario se eliminan cuando el acceso de '
+  'usuario ya no está autorizado.'),
+ ('CC6.3',
+  'La entidad autoriza, modifica o elimina el acceso a datos, software, funciones y otros activos de información '
+  'protegidos en función de los roles, responsabilidades o el diseño y los cambios del sistema, teniendo en cuenta '
+  'los conceptos de privilegio mínimo y la separación de funciones, para cumplir con los requisitos y objetivos de '
+  'la entidad.'),
+ ('CC6.4',
+  'La entidad descontinúa las protecciones lógicas y físicas sobre los activos físicos solo después de que la '
+  'capacidad de leer o recuperar datos y software de esos activos haya disminuido y ya no sea necesario cumplir con '
+  'los objetivos de la entidad.'),
+ ('CC6.5',
+  'La entidad implementa medidas de seguridad de acceso lógico para protegerse contra amenazas de fuentes fuera de '
+  'los límites de su sistema.'),
+ ('CC6.6',
+  'La entidad restringe la transmisión, el movimiento y la eliminación de información a usuarios y procesos internos '
+  'y externos autorizados, y la protege durante la transmisión, el movimiento o la eliminación para cumplir con los '
+  'objetivos de la entidad.'),
+ ('CC6.7',
+  'La entidad implementa controles para prevenir o detectar y actuar sobre la introducción de software no autorizado '
+  'o malicioso para cumplir con los objetivos de la entidad. .'),
+ ('CC7.0', 'Criterios comunes relacionados con las operaciones del sistema.'),
+ ('CC7.1',
+  'Para cumplir con sus objetivos, la entidad utiliza procedimientos de detección y monitoreo para identificar (1) '
+  'cambios en las configuraciones que resultan en la introducción de nuevas vulnerabilidades, y (2) '
+  'susceptibilidades a las vulnerabilidades recién descubiertas.'),
+ ('CC7.2',
+  'La entidad supervisa los componentes del sistema y el funcionamiento de dichos componentes en busca de anomalías '
+  'que sean indicativas de actos maliciosos, desastres naturales y errores que afecten la capacidad de la entidad '
+  'para cumplir sus objetivos; Se analizan las anomalías para determinar si representan eventos de seguridad.'),
+ ('CC7.3',
+  'La entidad evalúa los eventos de seguridad para determinar si podrían o han resultado en una falla de la entidad '
+  'para cumplir con sus objetivos (incidentes de seguridad) y, de ser así, toma medidas para prevenir o abordar '
+  'dichos fallos.'),
+ ('CC7.4',
+  'La entidad responde a los incidentes de seguridad identificados mediante la ejecución de un programa de respuesta '
+  'a incidentes definido para comprender, contener, remediar y comunicar los incidentes de seguridad, según '
+  'corresponda'),
+ ('CC8.0', 'Criterios comunes relacionados con la gestión del cambio'),
+ ('CC8.1',
+  'La entidad autoriza, diseña, desarrolla o adquiere, configura, documenta, prueba, aprueba e implementa cambios en '
+  'infraestructura, datos, software y procedimientos para cumplir con sus objetivos.'),
+ ('CC9.0', 'Criterios comunes relacionados con la mitigación de riesgos'),
+ ('CC9.1',
+  'La entidad identifica, selecciona y desarrolla actividades de mitigación de riesgos para los riesgos que surgen '
+  'de posibles interrupciones del negocio'),
+ ('CC9.2', 'La entidad evalúa y gestiona los riesgos asociados con vendedores y socios comerciales'),
+ ('A1.0', 'Criterios relacionados con la disponibilidad'),
+ ('A1.1',
+  'La entidad mantiene, monitorea y evalúa la capacidad de procesamiento actual y el uso de los componentes del '
+  'sistema (infraestructura, datos y software) para administrar la demanda de capacidad y permitir la implementación '
+  'de capacidad adicional para ayudar a cumplir sus objetivos.ponentes del sistema (infraestructura, datos y '
+  'software) para administrar la demanda de capacidad y permitir la implementación de capacidad adicional para '
+  'ayudar a cumplir sus objetivos.'),
+ ('A1.2',
+  'La entidad autoriza, diseña, desarrolla o adquiere, implementa, opera, aprueba, mantiene y monitorea protecciones '
+  'ambientales, software, procesos de respaldo de datos e infraestructura de recuperación para cumplir con sus '
+  'objetivos.'),
+ ('A1.3',
+  'La entidad prueba los procedimientos del plan de recuperación que respaldan la recuperación del sistema para '
+  'cumplir sus objetivos.'),
+ ('C1.0', 'Criterios relacionados con la confidencialidad'),
+ ('C1.1',
+  'La entidad identifica y mantiene información confidencial para cumplir con los objetivos de la entidad '
+  'relacionados con la confidencialidad'),
+ ('C1.2',
+  'La entidad dispone de información confidencial para cumplir con los objetivos de la entidad relacionados con la '
+  'confidencialidad'),
+ ('C1.3',
+  'La entidad se comunica con partes externas sobre asuntos que afectan el funcionamiento del control interno.'),
+ ('C1.14',
+  'La entidad autoriza, diseña, desarrolla o adquiere, configura, documenta, prueba, aprueba e implementa cambios a '
+  'la infraestructura, datos, software y procedimientos para cumplir con sus objetivos.'),
+ ('P1.0', 'Criterios de Privacidad Relatados al Aviso y Comunicación de Objetivos Relacionados con la Privacidad'),
+ ('P1.1', 'Revisar y mantener actualizado el aviso de privacidad.'),
+ ('P1.2', 'Versionamiento de los documentos del sistema de protección de datos personales.'),
+ ('P2.0', 'Criterios de privacidad relacionados con la elección y el consentimiento'),
+ ('P3.0', 'Criterios de privacidad relacionados con la recopilación'),
+ ('P3.3',
+  'Para la información que requiere consentimiento explícito, la entidad comunica la necesidad de dicho '
+  'consentimiento, así como las consecuencias de la falta de consentimiento para la solicitud de información '
+  'personal, y obtiene el consentimiento antes de la recopilación de la información para cumplir con los requisitos. '
+  'los objetivos de la entidad relacionados con la privacidad.'),
+ ('P4.0', 'Criterios de privacidad relacionados con el uso, la retención y la eliminación.'),
+ ('P4.1', 'Atención de requerimientos quejas, reclamos – Protección de Datos, Usuarios & Clientes'),
+ ('P4.2',
+  'La entidad retiene información personal consistente con los objetivos de la entidad relacionados con la '
+  'privacidad.'),
+ ('P5.0', 'Criterios de privacidad relacionados con el acceso'),
+ ('P6.0', 'Criterios de privacidad relacionados con la divulgación y notificación'),
+ ('P6.1', 'Procedimientos para registro de Incidentes y PQRs.')]
+def construir_opciones_control(catalogo, valor_actual=""):
+    """
+    Construye opciones HTML para los catálogos de controles.
+    Guarda solo el código, muestra código + descripción e incorpora
+    el texto completo en data-descripcion para el formulario.
+    """
+    actual = str(valor_actual or "").strip()
+    opciones = ['<option value="">Seleccione un control...</option>']
+    codigos_catalogo = set()
+
+    for codigo, descripcion in catalogo:
+        codigo_txt = str(codigo or "").strip()
+        descripcion_txt = str(descripcion or "").strip()
+        if not codigo_txt:
+            continue
+
+        codigos_catalogo.add(codigo_txt)
+        etiqueta = f"{codigo_txt} - {descripcion_txt}" if descripcion_txt else codigo_txt
+        seleccionado = " selected" if codigo_txt == actual else ""
+        descripcion_attr = html.escape(descripcion_txt, quote=True).replace("\n", "&#10;")
+
+        opciones.append(
+            f'<option value="{html.escape(codigo_txt, quote=True)}" '
+            f'data-descripcion="{descripcion_attr}"{seleccionado}>'
+            f'{html.escape(etiqueta)}</option>'
+        )
+
+    if actual and actual not in codigos_catalogo:
+        opciones.insert(
+            1,
+            f'<option value="{html.escape(actual, quote=True)}" selected '
+            f'data-descripcion="">'
+            f'{html.escape(actual)} - Código conservado de un catálogo anterior</option>'
+        )
+
+    return Markup("\n".join(opciones))
+
+
+def _descripcion_de_catalogo(catalogo, codigo):
+    codigo_txt = str(codigo or "").strip()
+    if not codigo_txt:
+        return ""
+
+    for codigo_item, descripcion in catalogo:
+        if str(codigo_item or "").strip() == codigo_txt:
+            return str(descripcion or "").strip()
+
+    return ""
+
+
+def construir_descripcion_controles_multimarco(
+    codigo_iso="",
+    codigo_pci="",
+    codigo_nist="",
+    codigo_soc2=""
+):
+    """
+    Consolida en un único campo la descripción completa de cada control
+    seleccionado de ISO/IEC 27002, PCI DSS, NIST CSF 2.0 y SOC 2.
+
+    El contenido se reconstruye desde los catálogos del servidor para
+    impedir que un marco sobrescriba la descripción de los demás.
+    """
+    seleccionados = [
+        ("ISO/IEC 27002:2022", codigo_iso, ISO_27002_CONTROLES),
+        ("PCI DSS", codigo_pci, PCI_DSS_CONTROLES),
+        ("NIST CSF 2.0", codigo_nist, NIST_CSF_20_CONTROLES),
+        ("SOC 2", codigo_soc2, SOC2_CONTROLES),
+    ]
+
+    bloques = []
+
+    for marco, codigo, catalogo in seleccionados:
+        codigo_txt = str(codigo or "").strip()
+        if not codigo_txt:
+            continue
+
+        descripcion = _descripcion_de_catalogo(catalogo, codigo_txt)
+        encabezado = f"{marco} — {codigo_txt}"
+
+        if descripcion:
+            bloques.append(f"{encabezado}\n{descripcion}")
+        else:
+            bloques.append(encabezado)
+
+    return "\n\n".join(bloques).strip()
 
 #                               -----------  Matriz de Proveedores ------------ 
 
@@ -14786,7 +17946,10 @@ class Riesgo(db.Model):
     # Campos de control
     control_codigo = db.Column(db.String(50))
     codigo_anexo = db.Column(db.String(50))
-    descripcion_control = db.Column(db.String(255))
+    codigo_control_pci_dss = db.Column(db.String(50))
+    codigo_control_nist_csf = db.Column(db.String(50))
+    codigo_control_soc2 = db.Column(db.String(50))
+    descripcion_control = db.Column(db.Text)
     plan_accion = db.Column(db.String(255))
     asignacion = db.Column(db.String(255))
     cargo = db.Column(db.String(255))
@@ -14845,6 +18008,44 @@ class Riesgo(db.Model):
     @property
     def tipo_riesgo(self):
         return self.tipo_riesgo_rel.nombre if self.tipo_riesgo_rel else ""
+
+
+def asegurar_columnas_marcos_controles_riesgo():
+    """
+    Agrega las columnas multimarco a instalaciones existentes.
+    En bases nuevas, db.create_all() las crea directamente desde el modelo.
+    """
+    try:
+        inspector = inspect(db.engine)
+        if "riesgo" not in inspector.get_table_names():
+            return
+
+        columnas_actuales = {
+            columna.get("name")
+            for columna in inspector.get_columns("riesgo")
+        }
+
+        columnas_requeridas = {
+            "codigo_control_pci_dss": "VARCHAR(50)",
+            "codigo_control_nist_csf": "VARCHAR(50)",
+            "codigo_control_soc2": "VARCHAR(50)",
+        }
+
+        cambios = 0
+        for nombre_columna, tipo_sql in columnas_requeridas.items():
+            if nombre_columna not in columnas_actuales:
+                db.session.execute(
+                    text(f"ALTER TABLE riesgo ADD COLUMN {nombre_columna} {tipo_sql}")
+                )
+                cambios += 1
+
+        if cambios:
+            db.session.commit()
+            print(f"✅ Gestión de Riesgos: {cambios} columna(s) multimarco agregada(s).")
+
+    except Exception as e:
+        db.session.rollback()
+        print("⚠️ No se pudieron asegurar las columnas multimarco de Riesgo:", repr(e))
 
 
 class TipoRiesgo(db.Model):
@@ -14996,8 +18197,16 @@ def gestion_riesgos():
             impacto=impacto,
             riesgo_inherente=riesgo_inherente,
             control_codigo=control_codigo,
-            codigo_anexo=codigo_anexo,
-            descripcion_control=descripcion_control,
+            codigo_anexo=(request.form.get('codigo_anexo') or request.form.get('cod_anexo')),
+            codigo_control_pci_dss=request.form.get('codigo_control_pci_dss'),
+            codigo_control_nist_csf=request.form.get('codigo_control_nist_csf'),
+            codigo_control_soc2=request.form.get('codigo_control_soc2'),
+            descripcion_control=construir_descripcion_controles_multimarco(
+                codigo_iso=(request.form.get('codigo_anexo') or request.form.get('cod_anexo')),
+                codigo_pci=request.form.get('codigo_control_pci_dss'),
+                codigo_nist=request.form.get('codigo_control_nist_csf'),
+                codigo_soc2=request.form.get('codigo_control_soc2')
+            ),
             plan_accion=plan_accion,
             asignacion=asignacion,
             cargo=cargo,
@@ -16493,6 +19702,22 @@ def agregar_riesgo():
 
         tipo_riesgo_id = request.form.get("tipo_riesgo_id")
 
+        codigo_anexo_seleccionado = (
+            request.form.get('cod_anexo')
+            or request.form.get('codigo_anexo')
+            or ''
+        ).strip()
+        codigo_pci_seleccionado = (request.form.get('codigo_control_pci_dss') or '').strip()
+        codigo_nist_seleccionado = (request.form.get('codigo_control_nist_csf') or '').strip()
+        codigo_soc2_seleccionado = (request.form.get('codigo_control_soc2') or '').strip()
+
+        descripcion_control_multimarco = construir_descripcion_controles_multimarco(
+            codigo_iso=codigo_anexo_seleccionado,
+            codigo_pci=codigo_pci_seleccionado,
+            codigo_nist=codigo_nist_seleccionado,
+            codigo_soc2=codigo_soc2_seleccionado
+        )
+
         obs_final = (request.form.get('observaciones') or '').strip()
         if origen.lower() == 'proveedor':
             traza = (
@@ -16520,8 +19745,11 @@ def agregar_riesgo():
             imp_inh=request.form.get('imp_inh'),
             riesgo_inherente=request.form.get('riesgo_inherente'),
             control_codigo=request.form.get('control_codigo'),
-            codigo_anexo=request.form.get('cod_anexo'),
-            descripcion_control=request.form.get('descripcion_control'),
+            codigo_anexo=codigo_anexo_seleccionado,
+            codigo_control_pci_dss=codigo_pci_seleccionado,
+            codigo_control_nist_csf=codigo_nist_seleccionado,
+            codigo_control_soc2=codigo_soc2_seleccionado,
+            descripcion_control=descripcion_control_multimarco,
             plan_accion=request.form.get('plan_accion'),
             asignacion=request.form.get('asignacion'),
             cargo=request.form.get('cargo'),
@@ -16733,9 +19961,30 @@ def agregar_riesgo():
                 <option value="">Seleccione un control...</option>
               </select>
             </div>
-            <div class="col-md-6">
-              <label class="form-label">Descripción del Control</label>
-              <textarea class="form-control" name="descripcion_control"></textarea>
+            <div class="col-md-3">
+              <label class="form-label">Código Control PCI DSS</label>
+              <select id="codigo_pci_dss" name="codigo_control_pci_dss" class="form-control">
+                {{ pci_options|safe }}
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Código Control NIST CSF 2.0</label>
+              <select id="codigo_nist_csf" name="codigo_control_nist_csf" class="form-control">
+                {{ nist_options|safe }}
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Código Control SOC 2</label>
+              <select id="codigo_soc2" name="codigo_control_soc2" class="form-control">
+                {{ soc2_options|safe }}
+              </select>
+            </div>
+            <div class="col-md-12">
+              <label class="form-label">Descripción consolidada de los controles seleccionados</label>
+              <textarea class="form-control" name="descripcion_control" rows="12" readonly></textarea>
+              <div class="form-text">
+                Se genera automáticamente con el texto completo de ISO 27002, PCI DSS, NIST CSF 2.0 y SOC 2 seleccionados.
+              </div>
             </div>
 
             <div class="col-12">
@@ -17094,21 +20343,50 @@ def agregar_riesgo():
 
           window.addEventListener('DOMContentLoaded', () => {
             const selectISO = document.getElementById('codigo_iso');
+            const selectPCI = document.getElementById('codigo_pci_dss');
+            const selectNIST = document.getElementById('codigo_nist_csf');
+            const selectSOC2 = document.getElementById('codigo_soc2');
+            const descripcion = document.querySelector('textarea[name="descripcion_control"]');
 
             FULL_SOA.forEach(ctrl => {
               const option = document.createElement('option');
               option.value = ctrl.nr;
               option.textContent = `${ctrl.nr} - ${ctrl.topic}`;
+              option.dataset.descripcion = [
+                ctrl.chapter,
+                ctrl.topic,
+                ctrl.control_text
+              ].filter(Boolean).join('\\n');
               selectISO.appendChild(option);
             });
 
-            selectISO.addEventListener('change', () => {
-              const seleccion = FULL_SOA.find(c => c.nr === selectISO.value);
-              const descISO = document.querySelector('textarea[name="descripcion_control"]');
-              if (descISO) {
-                descISO.value = seleccion ? `${seleccion.chapter}\\n${seleccion.control_text}` : "";
-              }
+            function bloqueSeleccionado(select, marco) {
+              if (!select || !select.value) return "";
+              const option = select.options[select.selectedIndex];
+              const texto = option?.dataset?.descripcion || "";
+              return texto
+                ? `${marco} — ${select.value}\\n${texto}`
+                : `${marco} — ${select.value}`;
+            }
+
+            function actualizarDescripcionControles() {
+              if (!descripcion) return;
+
+              const bloques = [
+                bloqueSeleccionado(selectISO, "ISO/IEC 27002:2022"),
+                bloqueSeleccionado(selectPCI, "PCI DSS"),
+                bloqueSeleccionado(selectNIST, "NIST CSF 2.0"),
+                bloqueSeleccionado(selectSOC2, "SOC 2")
+              ].filter(Boolean);
+
+              descripcion.value = bloques.join('\\n\\n');
+            }
+
+            [selectISO, selectPCI, selectNIST, selectSOC2].forEach(select => {
+              if (select) select.addEventListener('change', actualizarDescripcionControles);
             });
+
+            actualizarDescripcionControles();
           });
         </script>
 
@@ -17588,7 +20866,10 @@ def agregar_riesgo():
         dimension_prefill=dimension_prefill,
         observaciones_prefill=observaciones_prefill,
         planes_accion_prefill=planes_accion_prefill,
-        responsable_prefill=responsable_prefill
+        responsable_prefill=responsable_prefill,
+        pci_options=construir_opciones_control(PCI_DSS_CONTROLES),
+        nist_options=construir_opciones_control(NIST_CSF_20_CONTROLES),
+        soc2_options=construir_opciones_control(SOC2_CONTROLES)
     )
 
     return render_template_string(BASE, content=Markup(form_rendered))
@@ -20144,6 +23425,18 @@ def riesgo_detalle(riesgo_id):
               <label class="form-label">Código Control Anexo ISO 27002</label>
               <input class="form-control" value="{{ riesgo.codigo_anexo or '' }}" readonly>
             </div>
+            <div class="col-md-3">
+              <label class="form-label">Código Control PCI DSS</label>
+              <input class="form-control" value="{{ riesgo.codigo_control_pci_dss or '' }}" readonly>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Código Control NIST CSF 2.0</label>
+              <input class="form-control" value="{{ riesgo.codigo_control_nist_csf or '' }}" readonly>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Código Control SOC 2</label>
+              <input class="form-control" value="{{ riesgo.codigo_control_soc2 or '' }}" readonly>
+            </div>
 
             <div class="col-md-12">
               <label class="form-label">Descripción del Control</label>
@@ -20824,8 +24117,16 @@ def editar_riesgo(id):
 
         # Campos de control
         riesgo.control_codigo = request.form.get('control_codigo')
-        riesgo.codigo_anexo = request.form.get('codigo_anexo')
-        riesgo.descripcion_control = request.form.get('descripcion_control')
+        riesgo.codigo_anexo = (request.form.get('codigo_anexo') or '').strip()
+        riesgo.codigo_control_pci_dss = (request.form.get('codigo_control_pci_dss') or '').strip()
+        riesgo.codigo_control_nist_csf = (request.form.get('codigo_control_nist_csf') or '').strip()
+        riesgo.codigo_control_soc2 = (request.form.get('codigo_control_soc2') or '').strip()
+        riesgo.descripcion_control = construir_descripcion_controles_multimarco(
+            codigo_iso=riesgo.codigo_anexo,
+            codigo_pci=riesgo.codigo_control_pci_dss,
+            codigo_nist=riesgo.codigo_control_nist_csf,
+            codigo_soc2=riesgo.codigo_control_soc2
+        )
         riesgo.asignacion = request.form.get('asignacion')
         riesgo.cargo = request.form.get('cargo')
         riesgo.tipo_control = request.form.get('tipo_control')
@@ -21161,6 +24462,19 @@ def editar_riesgo(id):
 
     tipos_riesgo = TipoRiesgo.query.filter_by(activo=True).order_by(TipoRiesgo.nombre.asc()).all()
 
+    pci_options_html = construir_opciones_control(
+        PCI_DSS_CONTROLES,
+        riesgo.codigo_control_pci_dss
+    )
+    nist_options_html = construir_opciones_control(
+        NIST_CSF_20_CONTROLES,
+        riesgo.codigo_control_nist_csf
+    )
+    soc2_options_html = construir_opciones_control(
+        SOC2_CONTROLES,
+        riesgo.codigo_control_soc2
+    )
+
     html_editar = f"""
     <div class="riskedit-shell">
 
@@ -21298,10 +24612,31 @@ def editar_riesgo(id):
                 <option value="">Seleccione un control...</option>
               </select>
             </div>
+            <div class="col-md-3">
+              <label class="form-label">Código Control PCI DSS</label>
+              <select id="codigo_pci_dss" name="codigo_control_pci_dss" class="form-control">
+                {pci_options_html}
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Código Control NIST CSF 2.0</label>
+              <select id="codigo_nist_csf" name="codigo_control_nist_csf" class="form-control">
+                {nist_options_html}
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Código Control SOC 2</label>
+              <select id="codigo_soc2" name="codigo_control_soc2" class="form-control">
+                {soc2_options_html}
+              </select>
+            </div>
 
             <div class="col-md-12">
-              <label class="form-label">Descripción del Control</label>
-              <textarea class="form-control" name="descripcion_control">{riesgo.descripcion_control or ""}</textarea>
+              <label class="form-label">Descripción consolidada de los controles seleccionados</label>
+              <textarea class="form-control" name="descripcion_control" rows="12" readonly>{riesgo.descripcion_control or ""}</textarea>
+              <div class="form-text">
+                Se genera automáticamente con el texto completo de ISO 27002, PCI DSS, NIST CSF 2.0 y SOC 2 seleccionados.
+              </div>
             </div>
 
             <div class="col-12">
@@ -21458,23 +24793,52 @@ def editar_riesgo(id):
 
           window.addEventListener('DOMContentLoaded', () => {{
               const selectISO = document.getElementById('codigo_iso');
-              const descISO = document.querySelector('textarea[name="descripcion_control"]');
+              const selectPCI = document.getElementById('codigo_pci_dss');
+              const selectNIST = document.getElementById('codigo_nist_csf');
+              const selectSOC2 = document.getElementById('codigo_soc2');
+              const descripcion = document.querySelector('textarea[name="descripcion_control"]');
               const valorActual = "{riesgo.codigo_anexo or ''}";
 
               FULL_SOA.forEach(ctrl => {{
                   const option = document.createElement('option');
                   option.value = ctrl.nr;
                   option.textContent = `${{ctrl.nr}} - ${{ctrl.topic}}`;
+                  option.dataset.descripcion = [
+                    ctrl.chapter,
+                    ctrl.topic,
+                    ctrl.control_text
+                  ].filter(Boolean).join('\\n');
                   if (ctrl.nr === valorActual) option.selected = true;
                   selectISO.appendChild(option);
               }});
 
-              selectISO.addEventListener('change', () => {{
-                  const seleccion = FULL_SOA.find(c => c.nr === selectISO.value);
-                  if (descISO) {{
-                    descISO.value = seleccion ? `${{seleccion.chapter}}\\n${{seleccion.control_text}}` : "";
-                  }}
+              function bloqueSeleccionado(select, marco) {{
+                if (!select || !select.value) return "";
+                const option = select.options[select.selectedIndex];
+                const texto = option?.dataset?.descripcion || "";
+                return texto
+                  ? `${{marco}} — ${{select.value}}\\n${{texto}}`
+                  : `${{marco}} — ${{select.value}}`;
+              }}
+
+              function actualizarDescripcionControles() {{
+                if (!descripcion) return;
+
+                const bloques = [
+                  bloqueSeleccionado(selectISO, "ISO/IEC 27002:2022"),
+                  bloqueSeleccionado(selectPCI, "PCI DSS"),
+                  bloqueSeleccionado(selectNIST, "NIST CSF 2.0"),
+                  bloqueSeleccionado(selectSOC2, "SOC 2")
+                ].filter(Boolean);
+
+                descripcion.value = bloques.join('\\n\\n');
+              }}
+
+              [selectISO, selectPCI, selectNIST, selectSOC2].forEach(select => {{
+                if (select) select.addEventListener('change', actualizarDescripcionControles);
               }});
+
+              actualizarDescripcionControles();
           }});
         </script>
 
@@ -181862,6 +185226,7 @@ def allowed_file(filename: str) -> bool:
 
 with app.app_context():
     db.create_all()
+    asegurar_columnas_marcos_controles_riesgo()
     init_soc2_madurez_db()
 
 app.register_blueprint(madurez_bp)
