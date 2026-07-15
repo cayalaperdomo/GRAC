@@ -9404,13 +9404,6 @@ MENU_SECTIONS = [
         ],
     },
     {
-        "title": "Reportes",
-        "icon": "bi-mortarboard",
-        "items": [
-             {"label": "Reportes", "href": "/reportes", "icon": "bi-printer-fill", "btn": "btn-outline-danger", "module": "Reportes"},
-         ],
-     },
-    {
     "title": "Cumplimiento Continuo",
             "icon": "bi-shield-lock",
             "items": [
@@ -9493,7 +9486,13 @@ MENU_SECTIONS = [
             },
         ],
     },
-
+    {
+        "title": "Reportes",
+        "icon": "bi-mortarboard",
+        "items": [
+             {"label": "Reportes", "href": "/reportes", "icon": "bi-printer-fill", "btn": "btn-outline-danger", "module": "Reportes"},
+         ],
+     },
     {
         "title": "Administración",
         "icon": "bi-gear",
