@@ -1249,6 +1249,12 @@ app.config["SQLALCHEMY_BINDS"]["firewall_governance"] = "sqlite:///" + FIREWALL_
 PLANES_ACCION_DB_PATH = os.path.join(app.instance_path, "planes_accion.db")
 app.config["SQLALCHEMY_BINDS"]["planes_accion"] = "sqlite:///" + PLANES_ACCION_DB_PATH
 
+# =========================
+# CONFIG Superficie de Ataque y Escenarios - DB independiente
+# =========================
+ATTACK_SURFACE_DB_PATH = os.path.join(app.instance_path, "superficie_amenazas.db")
+app.config["SQLALCHEMY_BINDS"]["attack_surface"] = "sqlite:///" + ATTACK_SURFACE_DB_PATH
+
 madurez_bp = Blueprint("madurez", __name__, url_prefix="/madurez")
 
 # =========================
@@ -9318,6 +9324,7 @@ MODULES = [
     "Registro de Vulnerabilidades",
     "Pruebas SAST",
     "Modelamiento de Amenazas",
+    "Superficie de Ataque y Escenarios",
     "Plan de Remediación",
     "Plan de Competencias",
     "Contexto Interno",
@@ -12429,6 +12436,7 @@ MENU_SECTIONS = [
             {"label": "Registro de Incidentes", "href": "/incidentes", "icon": "bi-exclamation-triangle", "btn": "btn-danger", "module": "Registro de Incidentes"},
             {"label": "Registro de Vulnerabilidades", "href": "/vulnerabilidades_menu", "icon": "bi-bug", "btn": "btn-danger", "module": "Registro de Vulnerabilidades"},
             {"label": "Modelamiento de Amenazas", "href": "/modelamiento_amenazas", "icon": "bi-diagram-3", "btn": "btn-dark", "module": "Modelamiento de Amenazas"},
+            {"label": "Superficie de Ataque y Escenarios", "href": "/superficie_ataque", "icon": "bi-bullseye", "btn": "btn-primary", "module": "Superficie de Ataque y Escenarios"},
             {"label": "Plan de Remediación", "href": "/plan_remediacion_menu", "icon": "bi-tools", "btn": "btn-primary", "module": "Plan de Remediación"},
         ],
     },
@@ -13105,6 +13113,10 @@ def _sgsi_build_global_menu_html():
             "Modelamiento de Amenazas": {
                 "paths": ["/modelamiento_amenazas", "/vulnerabilidades/threat_model"],
                 "endpoints": ["threat_model"]
+            },
+            "Superficie de Ataque y Escenarios": {
+                "paths": ["/superficie_ataque"],
+                "endpoints": ["attack_auto"]
             },
             "Plan de Remediación": {
                 "paths": ["/plan_remediacion_menu", "/plan_remediacion"],
@@ -185209,6 +185221,1626 @@ def sast_download_json(name):
 
 # ============================================================================================================================================
 #                                                   FIN MÓDULO PRUEBAS SAST - OLLAMA LOCAL
+# ============================================================================
+# SUPERFICIE DE ATAQUE Y ESCENARIOS
+# Generación automática multi-fuente, IA opcional e histórico por períodos.
+# Base independiente: instance/superficie_amenazas.db
+# ============================================================================
+
+ATTACK_AUTO_MODULE = "Superficie de Ataque y Escenarios"
+ATTACK_AUTO_SOURCE_LABELS = {
+    "MITRE": "MITRE ATT&CK",
+    "VULNERABILIDAD": "Vulnerabilidades",
+    "INCIDENTE": "Incidentes",
+    "TPRM": "Cadena de suministro (TPRM)",
+    "WAZUH_MITRE": "Wazuh + MITRE",
+    "WAZUH_VULN": "Wazuh Vulnerabilidades",
+    "FIREWALL": "Gobierno de Firewall",
+}
+
+
+class AttackAutoScenario(db.Model):
+    __bind_key__ = "attack_surface"
+    __tablename__ = "attack_auto_scenarios"
+
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(50), nullable=False, unique=True, index=True)
+    source_type = db.Column(db.String(40), nullable=False, index=True)
+    source_ref = db.Column(db.String(255), nullable=False)
+    source_label = db.Column(db.String(255), nullable=True)
+    source_date = db.Column(db.String(40), nullable=True)
+    source_count = db.Column(db.Integer, nullable=False, default=1)
+    source_snapshot = db.Column(db.Text, nullable=True)
+
+    name = db.Column(db.String(500), nullable=False)
+    asset_name = db.Column(db.String(255), nullable=True)
+    asset_type = db.Column(db.String(120), nullable=True)
+    scope = db.Column(db.Text, nullable=True)
+    description = db.Column(db.Text, nullable=True)
+    exposure_channel = db.Column(db.String(255), nullable=True)
+    internet_exposed = db.Column(db.Boolean, nullable=False, default=False)
+    threat_actor = db.Column(db.String(255), nullable=True)
+    threat_event = db.Column(db.Text, nullable=True)
+    vulnerability = db.Column(db.Text, nullable=True)
+    consequences = db.Column(db.Text, nullable=True)
+    security_dimensions = db.Column(db.String(120), nullable=True)
+    existing_controls = db.Column(db.Text, nullable=True)
+    control_weaknesses = db.Column(db.Text, nullable=True)
+    evidence = db.Column(db.Text, nullable=True)
+    severity = db.Column(db.String(20), nullable=False, default="Media")
+
+    exposure_level = db.Column(db.Integer, nullable=False, default=3)
+    exploitability = db.Column(db.Integer, nullable=False, default=3)
+    detected_activity = db.Column(db.Integer, nullable=False, default=1)
+    control_weakness_level = db.Column(db.Integer, nullable=False, default=3)
+    asset_criticality = db.Column(db.Integer, nullable=False, default=3)
+    inherent_probability = db.Column(db.Integer, nullable=False, default=3)
+    inherent_impact = db.Column(db.Integer, nullable=False, default=3)
+    inherent_score = db.Column(db.Integer, nullable=False, default=9)
+    inherent_level = db.Column(db.String(20), nullable=False, default="Medio")
+    control_effectiveness = db.Column(db.Integer, nullable=False, default=25)
+    residual_probability = db.Column(db.Integer, nullable=False, default=2)
+    residual_impact = db.Column(db.Integer, nullable=False, default=3)
+    residual_score = db.Column(db.Integer, nullable=False, default=6)
+    residual_level = db.Column(db.String(20), nullable=False, default="Medio")
+
+    risk_appetite = db.Column(db.String(50), nullable=True, default="Fuera de apetito")
+    treatment = db.Column(db.String(80), nullable=True, default="Mitigar")
+    status = db.Column(db.String(50), nullable=False, default="En análisis", index=True)
+    owner = db.Column(db.String(255), nullable=True)
+
+    supplier_id = db.Column(db.Integer, nullable=True)
+    supplier_name = db.Column(db.String(255), nullable=True)
+    supplier_relationship = db.Column(db.String(255), nullable=True)
+    supply_chain_details = db.Column(db.Text, nullable=True)
+
+    risk_id = db.Column(db.Integer, nullable=True, index=True)
+    risk_code = db.Column(db.String(50), nullable=True)
+    manually_edited = db.Column(db.Boolean, nullable=False, default=False)
+    ai_status = db.Column(db.String(40), nullable=False, default="No solicitado")
+    ai_provider = db.Column(db.String(40), nullable=True)
+    ai_justification = db.Column(db.Text, nullable=True)
+    ai_enriched_at = db.Column(db.DateTime, nullable=True)
+    created_by = db.Column(db.String(120), nullable=True)
+    generated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    techniques = db.relationship(
+        "AttackAutoTechnique",
+        backref="scenario",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="AttackAutoTechnique.id",
+    )
+    evaluations = db.relationship(
+        "AttackAutoEvaluation",
+        backref="scenario",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="AttackAutoEvaluation.period_start.desc()",
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint("source_type", "source_ref", name="uq_attack_auto_source"),
+    )
+
+
+class AttackAutoTechnique(db.Model):
+    __bind_key__ = "attack_surface"
+    __tablename__ = "attack_auto_techniques"
+
+    id = db.Column(db.Integer, primary_key=True)
+    scenario_id = db.Column(
+        db.Integer,
+        db.ForeignKey("attack_auto_scenarios.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    technique_id = db.Column(db.String(40), nullable=False)
+    technique_name = db.Column(db.String(255), nullable=False)
+    tactic_id = db.Column(db.String(40), nullable=True)
+    tactic_name = db.Column(db.String(120), nullable=True)
+    rationale = db.Column(db.Text, nullable=True)
+    confidence = db.Column(db.Integer, nullable=False, default=60)
+    origin = db.Column(db.String(30), nullable=False, default="Automático")
+
+    __table_args__ = (
+        db.UniqueConstraint("scenario_id", "technique_id", "tactic_id", name="uq_attack_auto_technique"),
+    )
+
+
+class AttackAutoEvaluation(db.Model):
+    __bind_key__ = "attack_surface"
+    __tablename__ = "attack_auto_evaluations"
+
+    id = db.Column(db.Integer, primary_key=True)
+    scenario_id = db.Column(
+        db.Integer,
+        db.ForeignKey("attack_auto_scenarios.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    period_start = db.Column(db.String(10), nullable=False)
+    period_end = db.Column(db.String(10), nullable=False)
+    evaluation_date = db.Column(db.String(10), nullable=False)
+    evaluator = db.Column(db.String(255), nullable=True)
+    methodology = db.Column(db.String(120), nullable=False, default="Matriz 5x5 GRAC")
+    exposure_level = db.Column(db.Integer, nullable=False, default=3)
+    exploitability = db.Column(db.Integer, nullable=False, default=3)
+    detected_activity = db.Column(db.Integer, nullable=False, default=1)
+    control_weakness_level = db.Column(db.Integer, nullable=False, default=3)
+    asset_criticality = db.Column(db.Integer, nullable=False, default=3)
+    inherent_probability = db.Column(db.Integer, nullable=False, default=3)
+    inherent_impact = db.Column(db.Integer, nullable=False, default=3)
+    inherent_score = db.Column(db.Integer, nullable=False, default=9)
+    inherent_level = db.Column(db.String(20), nullable=False, default="Medio")
+    control_effectiveness = db.Column(db.Integer, nullable=False, default=25)
+    residual_probability = db.Column(db.Integer, nullable=False, default=2)
+    residual_impact = db.Column(db.Integer, nullable=False, default=3)
+    residual_score = db.Column(db.Integer, nullable=False, default=6)
+    residual_level = db.Column(db.String(20), nullable=False, default="Medio")
+    risk_appetite = db.Column(db.String(50), nullable=True)
+    treatment = db.Column(db.String(80), nullable=True)
+    justification = db.Column(db.Text, nullable=True)
+    controls_reviewed = db.Column(db.Text, nullable=True)
+    observations = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(50), nullable=False, default="Vigente")
+    origin = db.Column(db.String(30), nullable=False, default="Manual")
+    risk_id = db.Column(db.Integer, nullable=True)
+    risk_code = db.Column(db.String(50), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("scenario_id", "period_start", "period_end", name="uq_attack_auto_period"),
+    )
+
+
+class AttackAutoGenerationLog(db.Model):
+    __bind_key__ = "attack_surface"
+    __tablename__ = "attack_auto_generation_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    started_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    finished_at = db.Column(db.DateTime, nullable=True)
+    executed_by = db.Column(db.String(120), nullable=True)
+    status = db.Column(db.String(40), nullable=False, default="En proceso")
+    created_count = db.Column(db.Integer, nullable=False, default=0)
+    updated_count = db.Column(db.Integer, nullable=False, default=0)
+    unchanged_count = db.Column(db.Integer, nullable=False, default=0)
+    ai_enriched_count = db.Column(db.Integer, nullable=False, default=0)
+    error_count = db.Column(db.Integer, nullable=False, default=0)
+    source_counts = db.Column(db.Text, nullable=True)
+    error_detail = db.Column(db.Text, nullable=True)
+
+
+def ensure_attack_auto_db():
+    """Crea solamente las tablas del módulo en su base SQLite independiente."""
+    os.makedirs(app.instance_path, exist_ok=True)
+    db.create_all(bind_key="attack_surface")
+
+
+def attack_auto_user():
+    return User.query.get(session.get("user_id"))
+
+
+def attack_auto_guard(write=False):
+    user = attack_auto_user()
+    if not user:
+        flash("No fue posible identificar el usuario autenticado.", "danger")
+        return None, redirect(url_for("login"))
+    if not verificar_permiso(user, ATTACK_AUTO_MODULE):
+        flash("No tiene permiso para acceder a Superficie de Ataque y Escenarios.", "danger")
+        return user, redirect(url_for("menu"))
+    if write and auditor_is_read_only(user):
+        flash("El rol Auditor tiene acceso de solo lectura.", "warning")
+        return user, redirect(url_for("attack_auto"))
+    return user, None
+
+
+def attack_auto_clamp(value, minimum=1, maximum=5, default=3):
+    try:
+        return max(minimum, min(maximum, int(float(value))))
+    except Exception:
+        return default
+
+
+def attack_auto_yes(value):
+    return str(value or "").strip().lower() in {"1", "true", "sí", "si", "yes", "s", "on"}
+
+
+def attack_auto_clean(value, limit=None):
+    text_value = re.sub(r"\s+", " ", str(value or "")).strip()
+    return text_value[:limit] if limit else text_value
+
+
+def attack_auto_normalize_severity(value):
+    text_value = tm_normalize_text(value or "")
+    if any(x in text_value for x in ("critical", "critica", "critico", "urgent")):
+        return "Crítica"
+    if any(x in text_value for x in ("high", "alta", "alto")):
+        return "Alta"
+    if any(x in text_value for x in ("low", "baja", "bajo")):
+        return "Baja"
+    return "Media"
+
+
+def attack_auto_level(score):
+    score = int(score or 0)
+    if score >= 17:
+        return "Crítico"
+    if score >= 10:
+        return "Alto"
+    if score >= 5:
+        return "Medio"
+    return "Bajo"
+
+
+def attack_auto_score_from_severity(value):
+    return {"Crítica": 5, "Alta": 4, "Media": 3, "Baja": 2}.get(
+        attack_auto_normalize_severity(value), 3
+    )
+
+
+def attack_auto_factor_values(record):
+    severity_factor = attack_auto_score_from_severity(record.get("severity"))
+    source_type = record.get("source_type")
+    internet = bool(record.get("internet_exposed"))
+    detected_default = 5 if source_type in {"INCIDENTE", "WAZUH_MITRE"} else 2
+    exposure_default = 5 if internet else (4 if source_type in {"FIREWALL", "TPRM"} else 3)
+    exploit_default = max(2, severity_factor)
+    weakness_default = max(2, severity_factor)
+    criticality_default = max(3, severity_factor)
+    control_default = int(record.get("control_effectiveness") or 25)
+
+    exposure = attack_auto_clamp(record.get("exposure_level"), default=exposure_default)
+    exploitability = attack_auto_clamp(record.get("exploitability"), default=exploit_default)
+    detected = attack_auto_clamp(record.get("detected_activity"), default=detected_default)
+    weakness = attack_auto_clamp(record.get("control_weakness_level"), default=weakness_default)
+    criticality = attack_auto_clamp(record.get("asset_criticality"), default=criticality_default)
+    effectiveness = max(0, min(100, control_default))
+    probability = attack_auto_clamp(round((exposure + exploitability + detected + weakness) / 4), default=3)
+    impact = attack_auto_clamp(round((criticality + severity_factor) / 2), default=3)
+    inherent_score = probability * impact
+    residual_probability = attack_auto_clamp(round(probability * (1 - effectiveness / 125)), default=probability)
+    residual_impact = attack_auto_clamp(round(impact * (1 - effectiveness / 200)), default=impact)
+    residual_score = residual_probability * residual_impact
+
+    return {
+        "exposure_level": exposure,
+        "exploitability": exploitability,
+        "detected_activity": detected,
+        "control_weakness_level": weakness,
+        "asset_criticality": criticality,
+        "inherent_probability": probability,
+        "inherent_impact": impact,
+        "inherent_score": inherent_score,
+        "inherent_level": attack_auto_level(inherent_score),
+        "control_effectiveness": effectiveness,
+        "residual_probability": residual_probability,
+        "residual_impact": residual_impact,
+        "residual_score": residual_score,
+        "residual_level": attack_auto_level(residual_score),
+    }
+
+
+def attack_auto_mitre_map(title, description, evidence, severity, cve="", service=""):
+    mappings = tm_map_finding_to_mitre({
+        "titulo": title or "",
+        "descripcion": description or "",
+        "evidencia": evidence or "",
+        "recomendacion_base": "",
+        "servicio": service or "",
+        "severidad": severity or "",
+        "cve": cve or "",
+    })
+    return [{
+        "technique_id": item.get("technique_id") or "T1190",
+        "technique_name": item.get("technique_name") or "Exploit Public-Facing Application",
+        "tactic_id": item.get("tactic_id") or "TA0001",
+        "tactic_name": item.get("tactic_name") or "Initial Access",
+        "rationale": item.get("rationale") or "Correlación automática con MITRE ATT&CK",
+        "confidence": int(item.get("confidence") or item.get("score") or 60),
+    } for item in mappings]
+
+
+def attack_auto_default_technique():
+    return [{
+        "technique_id": "T1190",
+        "technique_name": "Exploit Public-Facing Application",
+        "tactic_id": "TA0001",
+        "tactic_name": "Initial Access",
+        "rationale": "Mapeo preventivo pendiente de validación por el analista.",
+        "confidence": 40,
+    }]
+
+
+def attack_auto_base_record(source_type, source_ref, name, asset_name, severity):
+    return {
+        "source_type": source_type,
+        "source_ref": str(source_ref),
+        "source_label": ATTACK_AUTO_SOURCE_LABELS.get(source_type, source_type),
+        "source_count": 1,
+        "name": attack_auto_clean(name, 500) or "Escenario de amenaza",
+        "asset_name": attack_auto_clean(asset_name, 255) or "Activo no especificado",
+        "asset_type": "Activo de información",
+        "scope": "Alcance derivado automáticamente de la evidencia registrada.",
+        "description": "",
+        "exposure_channel": "Canal por validar",
+        "internet_exposed": False,
+        "threat_actor": "Actor de amenaza externo o interno por determinar",
+        "threat_event": attack_auto_clean(name),
+        "vulnerability": "Debilidad pendiente de validación",
+        "consequences": "Afectación potencial de la confidencialidad, integridad o disponibilidad.",
+        "security_dimensions": "Confidencialidad, Integridad, Disponibilidad",
+        "existing_controls": "Controles existentes pendientes de validar",
+        "control_weaknesses": "Efectividad de controles pendiente de validar",
+        "evidence": "",
+        "severity": attack_auto_normalize_severity(severity),
+        "risk_appetite": "Fuera de apetito" if attack_auto_score_from_severity(severity) >= 4 else "Por evaluar",
+        "treatment": "Mitigar",
+        "status": "En análisis",
+        "techniques": [],
+    }
+
+
+def attack_auto_collect_threat_models():
+    records = []
+    for entry in ThreatModelEntry.query.order_by(ThreatModelEntry.id.asc()).all():
+        record = attack_auto_base_record(
+            "MITRE", entry.id,
+            "Explotación de {} en {}".format(entry.vulnerabilidad, entry.activo),
+            entry.activo, entry.severidad,
+        )
+        record.update({
+            "source_date": (entry.updated_at or entry.created_at or datetime.utcnow()).isoformat(),
+            "asset_type": "Activo tecnológico",
+            "description": entry.descripcion or entry.vulnerabilidad,
+            "exposure_channel": entry.herramienta or "Modelamiento de amenazas",
+            "internet_exposed": any(x in tm_normalize_text(entry.herramienta, entry.descripcion) for x in ("nikto", "nuclei", "web", "http", "extern")),
+            "threat_event": "Uso de técnicas MITRE ATT&CK para explotar {}".format(entry.vulnerabilidad),
+            "vulnerability": entry.vulnerabilidad,
+            "consequences": entry.impacto or "Compromiso potencial del activo identificado.",
+            "evidence": "Modelamiento MITRE #{}; herramienta {}; confianza {}%.".format(entry.id, entry.herramienta or "N/D", entry.confianza or 0),
+            "source_snapshot": json.dumps({"entry_id": entry.id, "tool": entry.herramienta, "severity": entry.severidad}, ensure_ascii=False),
+        })
+        record["techniques"] = [{
+            "technique_id": tech.mitre_technique_id,
+            "technique_name": tech.mitre_technique_name,
+            "tactic_id": tech.mitre_tactic_id,
+            "tactic_name": tech.mitre_tactic_name,
+            "rationale": tech.rationale or "Mapeo registrado en Modelamiento de Amenazas",
+            "confidence": int(tech.score or entry.confianza or 60),
+        } for tech in entry.tecnicas]
+        if not record["techniques"]:
+            record["techniques"] = attack_auto_mitre_map(entry.vulnerabilidad, entry.descripcion, "", entry.severidad)
+        records.append(record)
+    return records
+
+
+def attack_auto_collect_vulnerabilities():
+    mapped_ids = {
+        row[0] for row in db.session.query(ThreatModelEntry.vulnerabilidad_registro_id).filter(
+            ThreatModelEntry.vulnerabilidad_registro_id.isnot(None)
+        ).all()
+    }
+    records = []
+    for vuln in VulnerabilidadRegistro.query.order_by(VulnerabilidadRegistro.id.asc()).all():
+        if vuln.id in mapped_ids:
+            continue
+        severity = "Media"
+        try:
+            cvss = float(str(vuln.cvss or "0").replace(",", "."))
+            severity = "Crítica" if cvss >= 9 else "Alta" if cvss >= 7 else "Media" if cvss >= 4 else "Baja"
+        except Exception:
+            pass
+        record = attack_auto_base_record(
+            "VULNERABILIDAD", vuln.id,
+            "Explotación de vulnerabilidad {} sobre {}".format(vuln.codigo, vuln.activo),
+            vuln.activo, severity,
+        )
+        is_closed = tm_normalize_text(vuln.estado) in {"cerrado", "cerrada", "resuelto", "resuelta"}
+        record.update({
+            "source_date": str(vuln.fecha_identificacion or ""),
+            "description": vuln.descripcion_vulnerabilidad,
+            "vulnerability": "{}{}".format(vuln.descripcion_vulnerabilidad, " / " + vuln.cve if vuln.cve else ""),
+            "threat_event": "Explotación de la vulnerabilidad registrada {}".format(vuln.codigo),
+            "existing_controls": vuln.riesgo_residual or "Plan de remediación y controles técnicos por confirmar",
+            "control_weaknesses": "Vulnerabilidad cerrada, validar eficacia" if is_closed else "Vulnerabilidad abierta o tratamiento pendiente",
+            "control_effectiveness": 70 if is_closed else 20,
+            "owner": vuln.responsable,
+            "evidence": "Vulnerabilidad #{}; código {}; CVE {}; CVSS {}; estado {}.".format(vuln.id, vuln.codigo, vuln.cve or "N/D", vuln.cvss or "N/D", vuln.estado),
+            "source_snapshot": json.dumps({"id": vuln.id, "code": vuln.codigo, "cve": vuln.cve, "state": vuln.estado}, ensure_ascii=False),
+        })
+        record["techniques"] = attack_auto_mitre_map(
+            vuln.descripcion_vulnerabilidad, vuln.descripcion_vulnerabilidad,
+            record["evidence"], severity, vuln.cve,
+        ) or attack_auto_default_technique()
+        records.append(record)
+    return records
+
+
+def attack_auto_collect_incidents():
+    records = []
+    conn = get_incidentes_db_connection()
+    try:
+        rows = conn.execute("SELECT * FROM registro_incidentes ORDER BY id ASC").fetchall()
+        for row in rows:
+            item = dict(row)
+            priority = item.get("prioridad") or item.get("clasificacion_incidente") or "Media"
+            asset = item.get("nombre_recurso_id") or "Recurso afectado no especificado"
+            title = item.get("nombre_alerta") or item.get("id_incidente") or "Incidente de seguridad"
+            record = attack_auto_base_record("INCIDENTE", item.get("id"), "Escenario observado: {}".format(title), asset, priority)
+            closed = tm_normalize_text(item.get("estado")) in {"cerrado", "cerrada", "resuelto", "resuelta"}
+            record.update({
+                "source_date": item.get("fecha_alerta") or "",
+                "asset_type": item.get("tipo_recurso_afectado") or "Activo afectado por incidente",
+                "description": item.get("descripcion_alerta") or title,
+                "exposure_channel": item.get("ubicacion_atacante") or "Canal evidenciado en incidente",
+                "internet_exposed": bool(item.get("ubicacion_atacante") or item.get("atacante")),
+                "threat_actor": item.get("atacante") or "Actor observado no identificado",
+                "threat_event": title,
+                "vulnerability": item.get("descripcion_alerta") or "Condición que permitió el incidente por determinar",
+                "consequences": item.get("descripcion_cierre") or "Impacto evidenciado en el incidente y posible recurrencia.",
+                "security_dimensions": item.get("principio") or "Confidencialidad, Integridad, Disponibilidad",
+                "existing_controls": "; ".join(filter(None, [item.get("descripcion_contencion"), item.get("descripcion_recuperacion")])) or "Contención y recuperación pendientes de documentar",
+                "control_weaknesses": "Validar causa raíz y prevención de recurrencia",
+                "control_effectiveness": 65 if closed else 20,
+                "detected_activity": 5,
+                "owner": item.get("cargo_responsable"),
+                "evidence": "Incidente interno {}; estado {}; clasificación {}; fecha {}.".format(item.get("id_incidente") or item.get("id"), item.get("estado") or "N/D", item.get("clasificacion_incidente") or "N/D", item.get("fecha_alerta") or "N/D"),
+                "source_snapshot": json.dumps({"id": item.get("id"), "incident": item.get("id_incidente"), "state": item.get("estado")}, ensure_ascii=False),
+            })
+            record["techniques"] = attack_auto_mitre_map(title, item.get("descripcion_alerta"), record["evidence"], priority) or attack_auto_default_technique()
+            records.append(record)
+    finally:
+        conn.close()
+    return records
+
+
+def attack_auto_collect_tprm():
+    records = []
+    for supplier in ProveedorEvaluacion.query.order_by(ProveedorEvaluacion.id.asc()).all():
+        criticality = int(supplier.criticidad_pct or 0)
+        severity = "Crítica" if criticality >= 76 else "Alta" if criticality >= 51 else "Media" if criticality >= 26 else "Baja"
+        service = supplier.desc_producto_servicio or "servicio contratado"
+        record = attack_auto_base_record(
+            "TPRM", supplier.id,
+            "Compromiso de cadena de suministro a través de {}".format(supplier.nombre_proveedor or "proveedor"),
+            supplier.nombre_proveedor or "Proveedor no especificado", severity,
+        )
+        approved = tm_normalize_text(supplier.resultado_evaluacion) in {"aprobado", "aprobada"}
+        gaps = []
+        if not attack_auto_yes(supplier.tiene_plan_cont): gaps.append("sin plan de continuidad confirmado")
+        if not attack_auto_yes(supplier.tiene_plan_rec): gaps.append("sin plan de recuperación confirmado")
+        if not attack_auto_yes(supplier.existen_alternativas): gaps.append("sin proveedor alternativo confirmado")
+        if not attack_auto_yes(supplier.existe_plan_migracion): gaps.append("sin plan de migración confirmado")
+        record.update({
+            "source_date": supplier.fecha_eval_seguridad or "",
+            "asset_type": "Tercero / Cadena de suministro",
+            "scope": "Servicio de tercero: {}. País origen: {}. País servicio: {}.".format(service, supplier.pais_origen or "N/D", supplier.pais_servicio or "N/D"),
+            "description": "Un compromiso, indisponibilidad o acceso indebido en el proveedor puede propagarse al entorno de la organización.",
+            "exposure_channel": "Relación de confianza y servicio de tercero",
+            "internet_exposed": bool(attack_auto_yes(supplier.procesa_info_nube) or attack_auto_yes(supplier.procesa_info_sensible)),
+            "threat_actor": "Atacante de la cadena de suministro o personal del tercero",
+            "threat_event": "Compromiso del proveedor, de sus accesos o de la entrega del servicio",
+            "vulnerability": "; ".join(gaps) or "Dependencia y relación de confianza con el tercero",
+            "consequences": "Interrupción del servicio, exposición de información y propagación del compromiso a la organización.",
+            "existing_controls": "Evaluación TPRM: {}; resultado: {}; certificaciones: {}.".format(supplier.estado_evaluacion or "N/D", supplier.resultado_evaluacion or "N/D", supplier.nombre_certificaciones or "N/D"),
+            "control_weaknesses": "; ".join(gaps) or "Validar periódicamente controles contractuales, técnicos y de continuidad",
+            "control_effectiveness": 70 if approved else 35,
+            "asset_criticality": 5 if criticality >= 76 else 4 if criticality >= 51 else 3,
+            "owner": supplier.responsable_area_nombre or supplier.nombre_cargo_evaluador,
+            "supplier_id": supplier.id,
+            "supplier_name": supplier.nombre_proveedor,
+            "supplier_relationship": service,
+            "supply_chain_details": supplier.observaciones or "Escenario TPRM generado desde la evaluación del proveedor.",
+            "evidence": "TPRM #{}; criticidad {}% ({}); evaluación {}; estado {}.".format(supplier.id, criticality, supplier.criticidad_texto or "N/D", supplier.resultado_evaluacion or "N/D", supplier.estatus_proveedor or "N/D"),
+            "source_snapshot": json.dumps({"id": supplier.id, "criticality": criticality, "result": supplier.resultado_evaluacion}, ensure_ascii=False),
+            "techniques": [
+                {"technique_id": "T1195", "technique_name": "Supply Chain Compromise", "tactic_id": "TA0001", "tactic_name": "Initial Access", "rationale": "Escenario generado desde una relación de cadena de suministro.", "confidence": 90},
+                {"technique_id": "T1199", "technique_name": "Trusted Relationship", "tactic_id": "TA0001", "tactic_name": "Initial Access", "rationale": "El proveedor mantiene una relación de confianza o presta un servicio a la organización.", "confidence": 85},
+            ],
+        })
+        records.append(record)
+    return records
+
+
+def attack_auto_collect_wazuh_mitre():
+    grouped = {}
+    for event in WazuhMitreEvent.query.order_by(WazuhMitreEvent.id.asc()).all():
+        key = "{}|{}".format(event.agent_id or event.agent_name or "sin-agente", event.technique_id or event.technique or "sin-tecnica")
+        group = grouped.setdefault(key, {"events": [], "max_level": 0, "last": None})
+        group["events"].append(event)
+        group["max_level"] = max(group["max_level"], int(event.rule_level or 0))
+        group["last"] = event
+    records = []
+    for key, group in grouped.items():
+        event = group["last"]
+        severity = "Crítica" if group["max_level"] >= 13 else "Alta" if group["max_level"] >= 10 else "Media"
+        record = attack_auto_base_record("WAZUH_MITRE", key, "Actividad MITRE {} detectada en {}".format(event.technique_id or event.technique or "N/D", event.agent_name or event.agent_id or "agente"), event.agent_name or event.agent_id, severity)
+        record.update({
+            "source_date": event.timestamp or "",
+            "source_count": len(group["events"]),
+            "asset_type": "Endpoint monitoreado por Wazuh",
+            "description": event.description or "Actividad correlacionada con MITRE ATT&CK en Wazuh.",
+            "exposure_channel": "Telemetría Wazuh",
+            "threat_event": event.description or event.technique or "Actividad adversaria detectada",
+            "vulnerability": "Condición de exposición o control a investigar a partir de la alerta",
+            "consequences": "Posible progresión del atacante en la cadena MITRE ATT&CK.",
+            "existing_controls": "Monitoreo y detección Wazuh",
+            "control_weaknesses": "La actividad fue observada; validar contención, causa raíz y cobertura preventiva",
+            "detected_activity": 5,
+            "control_effectiveness": 35,
+            "evidence": "{} evento(s) Wazuh; nivel máximo {}; última observación {}.".format(len(group["events"]), group["max_level"], event.timestamp or "N/D"),
+            "source_snapshot": json.dumps({"key": key, "count": len(group["events"]), "max_level": group["max_level"]}, ensure_ascii=False),
+            "techniques": [{"technique_id": event.technique_id or "MITRE-PENDIENTE", "technique_name": event.technique or "Técnica detectada por Wazuh", "tactic_id": "", "tactic_name": event.tactic or "Táctica MITRE", "rationale": "Técnica reportada directamente por la telemetría Wazuh.", "confidence": 95}],
+        })
+        records.append(record)
+    return records
+
+
+def attack_auto_collect_wazuh_vulnerabilities():
+    records = []
+    for vuln in WazuhVulnerability.query.order_by(WazuhVulnerability.id.asc()).all():
+        severity = attack_auto_normalize_severity(vuln.severity)
+        if severity not in {"Crítica", "Alta"}:
+            continue
+        ref = vuln.unique_key or vuln.id
+        record = attack_auto_base_record("WAZUH_VULN", ref, "Explotación de {} en {}".format(vuln.cve or vuln.title or "vulnerabilidad", vuln.agent_name or vuln.agent_id or "agente"), vuln.agent_name or vuln.agent_id, severity)
+        closed = tm_normalize_text(vuln.status) in {"cerrado", "cerrada", "resuelto", "resuelta", "solved"}
+        record.update({
+            "source_date": vuln.synced_at.isoformat() if vuln.synced_at else "",
+            "asset_type": "Endpoint monitoreado por Wazuh",
+            "description": vuln.title or vuln.condition or vuln.cve,
+            "exposure_channel": "Paquete {} {}".format(vuln.package_name or "N/D", vuln.package_version or ""),
+            "threat_event": "Explotación de vulnerabilidad crítica/alta detectada por Wazuh",
+            "vulnerability": "{} - {}".format(vuln.cve or "CVE N/D", vuln.title or vuln.condition or "Vulnerabilidad"),
+            "existing_controls": "Agente Wazuh y gestión de vulnerabilidades",
+            "control_weaknesses": "Vulnerabilidad cerrada; verificar parche" if closed else "Parcheo o mitigación pendiente",
+            "control_effectiveness": 70 if closed else 20,
+            "evidence": "Wazuh vuln #{}; CVE {}; CVSS {}; paquete {}; estado {}.".format(vuln.id, vuln.cve or "N/D", vuln.cvss or "N/D", vuln.package_name or "N/D", vuln.status or "N/D"),
+            "source_snapshot": json.dumps({"id": vuln.id, "cve": vuln.cve, "state": vuln.status}, ensure_ascii=False),
+        })
+        record["techniques"] = attack_auto_mitre_map(vuln.title, vuln.condition, record["evidence"], severity, vuln.cve, vuln.package_name) or attack_auto_default_technique()
+        records.append(record)
+    return records
+
+
+def attack_auto_collect_firewall():
+    records = []
+    devices = {item.id: item for item in FirewallGovDevice.query.all()}
+    for finding in FirewallGovFinding.query.filter_by(active=True).order_by(FirewallGovFinding.id.asc()).all():
+        device = devices.get(finding.device_id)
+        asset = device.name if device else "Firewall #{}".format(finding.device_id)
+        record = attack_auto_base_record("FIREWALL", finding.id, "Explotación de exposición de firewall: {}".format(finding.title), asset, finding.severity)
+        record.update({
+            "source_date": (finding.last_detected_at or finding.first_detected_at or datetime.utcnow()).isoformat(),
+            "asset_type": "Firewall / Perímetro",
+            "description": finding.description or finding.title,
+            "exposure_channel": finding.rule_name or finding.rule_external_id or "Regla de firewall",
+            "internet_exposed": True,
+            "threat_event": "Aprovechamiento de configuración o regla de firewall expuesta",
+            "vulnerability": finding.title,
+            "consequences": finding.technical_detail or "Acceso no autorizado, movimiento lateral o exposición del perímetro.",
+            "existing_controls": finding.control_mapping or "Firewall y revisión de reglas",
+            "control_weaknesses": finding.recommendation or "Corregir el hallazgo de gobierno de firewall",
+            "control_effectiveness": 20 if tm_normalize_text(finding.status) not in {"resuelto", "cerrado"} else 70,
+            "owner": finding.assigned_to,
+            "evidence": "Hallazgo firewall #{}; código {}; regla {}; puntaje {}; estado {}.".format(finding.id, finding.finding_code, finding.rule_external_id or "N/D", finding.risk_score or 0, finding.status),
+            "source_snapshot": json.dumps({"id": finding.id, "code": finding.finding_code, "state": finding.status}, ensure_ascii=False),
+        })
+        record["techniques"] = attack_auto_mitre_map(finding.title, finding.description, finding.technical_detail, finding.severity, service=finding.rule_name) or attack_auto_default_technique()
+        records.append(record)
+    return records
+
+
+ATTACK_AUTO_COLLECTORS = (
+    ("MITRE", attack_auto_collect_threat_models),
+    ("VULNERABILIDAD", attack_auto_collect_vulnerabilities),
+    ("INCIDENTE", attack_auto_collect_incidents),
+    ("TPRM", attack_auto_collect_tprm),
+    ("WAZUH_MITRE", attack_auto_collect_wazuh_mitre),
+    ("WAZUH_VULN", attack_auto_collect_wazuh_vulnerabilities),
+    ("FIREWALL", attack_auto_collect_firewall),
+)
+
+
+def attack_auto_extract_json(text_value):
+    raw = str(text_value or "").strip()
+    raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.I)
+    raw = re.sub(r"\s*```$", "", raw)
+    start, end = raw.find("{"), raw.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("La IA no devolvió un objeto JSON válido")
+    return json.loads(raw[start:end + 1])
+
+
+def attack_auto_ai_enrich(record):
+    """
+    La IA enriquece la narrativa y la correlación. Nunca decide ni modifica
+    los factores o puntajes de riesgo, que permanecen determinísticos.
+    """
+    compact = {
+        "fuente": record.get("source_label"),
+        "activo": record.get("asset_name"),
+        "tipo_activo": record.get("asset_type"),
+        "evento": record.get("threat_event"),
+        "vulnerabilidad": record.get("vulnerability"),
+        "evidencia_resumida": attack_auto_clean(record.get("evidence"), 1200),
+        "controles": attack_auto_clean(record.get("existing_controls"), 800),
+        "debilidades_control": attack_auto_clean(record.get("control_weaknesses"), 800),
+        "mitre": [
+            "{} {} / {}".format(t.get("technique_id"), t.get("technique_name"), t.get("tactic_name"))
+            for t in (record.get("techniques") or [])[:8]
+        ],
+    }
+    prompt = """
+Analiza este resumen técnico de un escenario de amenaza para una aplicación GRAC.
+Devuelve EXCLUSIVAMENTE JSON válido con estas cinco claves de texto:
+description, threat_actor, consequences, control_weaknesses, justification.
+No inventes activos, incidentes, CVE ni controles. Distingue evidencia de hipótesis.
+La justificación debe explicar la correlación entre fuente, activo y MITRE ATT&CK.
+No calcules probabilidad, impacto ni nivel de riesgo.
+
+DATOS:
+{}
+""".format(json.dumps(compact, ensure_ascii=False))
+    response = ai_text_general(
+        prompt,
+        system_prompt="Eres analista senior de ciberseguridad, MITRE ATT&CK, TPRM y gestión de riesgos ISO 27005.",
+        temperature=0.1,
+        max_tokens=350,
+    )
+    data = attack_auto_extract_json(response)
+    allowed = ("description", "threat_actor", "consequences", "control_weaknesses", "justification")
+    result = {key: attack_auto_clean(data.get(key), 4000) for key in allowed}
+    if not any(result.values()):
+        raise ValueError("La IA no entregó contenido utilizable")
+    return result
+
+
+def attack_auto_code_for(source_type, source_ref):
+    digest = hashlib.sha1("{}:{}".format(source_type, source_ref).encode("utf-8")).hexdigest()[:8].upper()
+    prefix = {
+        "MITRE": "MIT", "VULNERABILIDAD": "VUL", "INCIDENTE": "INC",
+        "TPRM": "TPR", "WAZUH_MITRE": "WMI", "WAZUH_VULN": "WVU",
+        "FIREWALL": "FW",
+    }.get(source_type, "ESC")
+    return "ESC-{}-{}".format(prefix, digest)
+
+
+def attack_auto_replace_techniques(scenario, techniques):
+    manual = [item for item in scenario.techniques if item.origin == "Manual"]
+    for item in list(scenario.techniques):
+        if item.origin != "Manual":
+            db.session.delete(item)
+    existing = {(item.technique_id, item.tactic_id or "") for item in manual}
+    for tech in techniques or attack_auto_default_technique():
+        key = (attack_auto_clean(tech.get("technique_id"), 40), attack_auto_clean(tech.get("tactic_id"), 40))
+        if not key[0] or key in existing:
+            continue
+        scenario.techniques.append(AttackAutoTechnique(
+            technique_id=key[0],
+            technique_name=attack_auto_clean(tech.get("technique_name"), 255) or "Técnica MITRE",
+            tactic_id=key[1],
+            tactic_name=attack_auto_clean(tech.get("tactic_name"), 120),
+            rationale=attack_auto_clean(tech.get("rationale"), 4000),
+            confidence=max(0, min(100, int(tech.get("confidence") or 60))),
+            origin="Automático",
+        ))
+        existing.add(key)
+
+
+def attack_auto_apply_record(scenario, record, preserve_manual=True):
+    source_fields = ("source_label", "source_date", "source_count", "source_snapshot", "evidence")
+    editable_fields = (
+        "name", "asset_name", "asset_type", "scope", "description", "exposure_channel",
+        "internet_exposed", "threat_actor", "threat_event", "vulnerability", "consequences",
+        "security_dimensions", "existing_controls", "control_weaknesses", "severity",
+        "risk_appetite", "treatment", "status", "owner", "supplier_id", "supplier_name",
+        "supplier_relationship", "supply_chain_details",
+    )
+    for field in source_fields:
+        if field in record:
+            setattr(scenario, field, record.get(field))
+    if not (preserve_manual and scenario.manually_edited):
+        for field in editable_fields:
+            if field in record:
+                setattr(scenario, field, record.get(field))
+        factors = attack_auto_factor_values(record)
+        for field, value in factors.items():
+            setattr(scenario, field, value)
+    scenario.updated_at = datetime.utcnow()
+
+
+def attack_auto_period_bounds(today=None):
+    today = today or date.today()
+    return "{}-01-01".format(today.year), "{}-12-31".format(today.year)
+
+
+def attack_auto_sync_current_evaluation(scenario, username):
+    start, end = attack_auto_period_bounds()
+    evaluation = AttackAutoEvaluation.query.filter_by(
+        scenario_id=scenario.id, period_start=start, period_end=end
+    ).first()
+    if evaluation and evaluation.origin != "Automático":
+        return evaluation
+    if not evaluation:
+        evaluation = AttackAutoEvaluation(
+            scenario_id=scenario.id,
+            period_start=start,
+            period_end=end,
+            evaluation_date=date.today().isoformat(),
+            evaluator=username,
+            origin="Automático",
+        )
+        db.session.add(evaluation)
+    for field in (
+        "exposure_level", "exploitability", "detected_activity", "control_weakness_level",
+        "asset_criticality", "inherent_probability", "inherent_impact", "inherent_score",
+        "inherent_level", "control_effectiveness", "residual_probability", "residual_impact",
+        "residual_score", "residual_level", "risk_appetite", "treatment",
+    ):
+        setattr(evaluation, field, getattr(scenario, field))
+    evaluation.controls_reviewed = scenario.existing_controls
+    evaluation.justification = scenario.ai_justification or "Evaluación inicial generada con reglas trazables desde la fuente."
+    evaluation.observations = "Evaluación automática del período; puede editarse y quedará preservada en futuras generaciones."
+    evaluation.status = "Vigente"
+    return evaluation
+
+
+def attack_auto_upsert_record(record, username, use_ai=False, ai_budget=None):
+    scenario = AttackAutoScenario.query.filter_by(
+        source_type=record["source_type"], source_ref=str(record["source_ref"])
+    ).first()
+    created = scenario is None
+    if created:
+        scenario = AttackAutoScenario(
+            code=attack_auto_code_for(record["source_type"], record["source_ref"]),
+            source_type=record["source_type"],
+            source_ref=str(record["source_ref"]),
+            source_label=record.get("source_label"),
+            name=record.get("name") or "Escenario de amenaza",
+            created_by=username,
+            generated_at=datetime.utcnow(),
+        )
+        db.session.add(scenario)
+    before = json.dumps({
+        "snapshot": scenario.source_snapshot,
+        "name": scenario.name,
+        "severity": scenario.severity,
+    }, ensure_ascii=False, sort_keys=True)
+    attack_auto_apply_record(scenario, record, preserve_manual=not created)
+    attack_auto_replace_techniques(scenario, record.get("techniques"))
+    changed_by_source = created or before != json.dumps({
+        "snapshot": scenario.source_snapshot,
+        "name": scenario.name,
+        "severity": scenario.severity,
+    }, ensure_ascii=False, sort_keys=True)
+
+    ai_used = False
+    should_enrich_ai = changed_by_source or scenario.ai_status != "Enriquecido"
+    if use_ai and should_enrich_ai and ai_budget is not None and ai_budget[0] > 0 and scenario.severity in {"Crítica", "Alta"}:
+        ai_budget[0] -= 1
+        try:
+            enriched = attack_auto_ai_enrich(record)
+            if not scenario.manually_edited:
+                for field in ("description", "threat_actor", "consequences", "control_weaknesses"):
+                    if enriched.get(field):
+                        setattr(scenario, field, enriched[field])
+            scenario.ai_justification = enriched.get("justification")
+            scenario.ai_status = "Enriquecido"
+            try:
+                scenario.ai_provider = (get_ai_provider() or "openrouter").strip().lower()
+            except Exception:
+                scenario.ai_provider = "configurado"
+            scenario.ai_enriched_at = datetime.utcnow()
+            ai_used = True
+        except Exception as exc:
+            scenario.ai_status = "Omitido por error"
+            scenario.ai_justification = "La generación determinística se completó. IA no disponible: {}".format(attack_auto_clean(exc, 500))
+
+    db.session.flush()
+    attack_auto_sync_current_evaluation(scenario, username)
+    after = json.dumps({
+        "snapshot": scenario.source_snapshot,
+        "name": scenario.name,
+        "severity": scenario.severity,
+    }, ensure_ascii=False, sort_keys=True)
+    return scenario, "created" if created else "updated" if before != after else "unchanged", ai_used
+
+
+def attack_auto_run_generation(username, use_ai=False):
+    ensure_attack_auto_db()
+    log = AttackAutoGenerationLog(executed_by=username, status="En proceso")
+    db.session.add(log)
+    db.session.commit()
+    log_id = log.id
+    counts = {"created": 0, "updated": 0, "unchanged": 0, "ai": 0}
+    source_counts = {}
+    errors = []
+    ai_budget = [max(0, min(25, int(os.getenv("ATTACK_SURFACE_AI_MAX_PER_RUN", "5"))))]
+
+    for source_name, collector in ATTACK_AUTO_COLLECTORS:
+        try:
+            records = collector()
+            source_counts[source_name] = len(records)
+        except Exception as exc:
+            db.session.rollback()
+            source_counts[source_name] = 0
+            errors.append("{}: no se pudo leer la fuente ({})".format(source_name, attack_auto_clean(exc, 700)))
+            continue
+        for record in records:
+            try:
+                _, result, ai_used = attack_auto_upsert_record(record, username, use_ai=use_ai, ai_budget=ai_budget)
+                db.session.commit()
+                counts[result] += 1
+                if ai_used:
+                    counts["ai"] += 1
+            except Exception as exc:
+                db.session.rollback()
+                errors.append("{} {}: {}".format(source_name, record.get("source_ref"), attack_auto_clean(exc, 700)))
+
+    log = AttackAutoGenerationLog.query.get(log_id)
+    log.finished_at = datetime.utcnow()
+    log.created_count = counts["created"]
+    log.updated_count = counts["updated"]
+    log.unchanged_count = counts["unchanged"]
+    log.ai_enriched_count = counts["ai"]
+    log.error_count = len(errors)
+    log.source_counts = json.dumps(source_counts, ensure_ascii=False)
+    log.error_detail = "\n".join(errors[:100])
+    log.status = "Completado" if not errors else "Completado con alertas"
+    db.session.commit()
+    return counts, source_counts, errors
+
+
+def attack_auto_badge(level):
+    return {
+        "Crítico": "danger", "Crítica": "danger", "Alto": "warning", "Alta": "warning",
+        "Medio": "info", "Media": "info", "Bajo": "success", "Baja": "success",
+    }.get(level, "secondary")
+
+
+def attack_auto_shell(title, body):
+    content = render_template_string("""
+    <style>
+      .as-shell{width:96%;max-width:1650px;margin:10px auto 24px auto}
+      .as-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+      .as-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }
+      .as-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        position:relative;
+        z-index:1;
+      }
+      .as-header-overlay::before{
+        content:"🎯";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+      .as-header-text{max-width:1200px;width:100%;position:relative;z-index:1}
+      .as-header-text::before{
+        content:"SGSI · Gestión de Eventos";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }
+      .as-title{
+        color:#ffffff!important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0!important;
+      }
+      .as-subtitle{color:rgba(255,255,255,.95);font-size:.78rem;margin-top:4px;line-height:1.25}
+      .as-card{border:0;border-radius:18px;box-shadow:0 9px 25px rgba(15,23,42,.10);overflow:hidden}
+      .as-kpi{padding:15px;border-radius:15px;background:#fff;border:1px solid #e3edf7;height:100%}
+      .as-kpi small{color:#64748b;font-weight:800}.as-kpi strong{display:block;font-size:1.5rem;color:#0b4a6f}
+      .as-table th{white-space:nowrap;background:#eaf5fb;color:#083b5c;font-size:.75rem}.as-table td{font-size:.78rem;vertical-align:middle}
+      .as-actions{display:flex;gap:5px;flex-wrap:wrap}.as-actions form{margin:0}
+      .as-section{font-weight:950;font-size:.78rem;color:#0b4a8f;padding:9px 12px;border-radius:12px;background:#eef5ff;border:1px solid #d9eaff;margin:14px 0 12px}
+      .as-value{white-space:pre-wrap;overflow-wrap:anywhere;background:#f8fbfd;border:1px solid #e1edf4;border-radius:11px;padding:10px;min-height:44px}
+      .as-tech{background:#eef8ff;border:1px solid #cde9fa;border-radius:12px;padding:9px;margin-bottom:7px}
+      .as-note{font-size:.78rem;color:#475569}.as-form .form-label{font-weight:800;color:#24465d;font-size:.78rem}
+      .as-form .form-control,.as-form .form-select{border-radius:10px;font-size:.82rem}
+      @media(max-width:900px){
+        .as-shell{width:98%}
+        .as-header-card{min-height:88px;padding:14px 18px}
+        .as-header-overlay{flex-direction:column;text-align:center;gap:8px}
+        .as-header-overlay::before{margin-right:0}
+        .as-title,.as-subtitle{text-align:center}
+        .as-actions{min-width:210px}
+      }
+    </style>
+    <div class="as-shell">
+      <div class="as-header-card">
+        <div class="as-header-overlay">
+          <div class="as-header-text">
+            <h3 class="as-title m-0">{{ title }}</h3>
+            <div class="as-subtitle">Correlación automática, trazable y periódica de escenarios de amenaza</div>
+          </div>
+        </div>
+      </div>
+      {{ body|safe }}
+    </div>
+    """, title=title, body=Markup(body))
+    return render_template_string(BASE, content=Markup(content))
+
+
+def attack_auto_get_or_404(scenario_id):
+    scenario = AttackAutoScenario.query.get(scenario_id)
+    if not scenario:
+        abort(404)
+    return scenario
+
+
+@app.route("/superficie_ataque", methods=["GET"])
+@login_required
+def attack_auto():
+    user, response = attack_auto_guard(write=False)
+    if response:
+        return response
+    ensure_attack_auto_db()
+    query_text = (request.args.get("q") or "").strip()
+    source_filter = (request.args.get("source") or "").strip()
+    severity = (request.args.get("severity") or "").strip()
+    status = (request.args.get("status") or "").strip()
+    query = AttackAutoScenario.query
+    if query_text:
+        like = "%{}%".format(query_text)
+        query = query.filter(or_(
+            AttackAutoScenario.code.ilike(like), AttackAutoScenario.name.ilike(like),
+            AttackAutoScenario.asset_name.ilike(like), AttackAutoScenario.supplier_name.ilike(like),
+            AttackAutoScenario.threat_event.ilike(like),
+        ))
+    if source_filter:
+        query = query.filter_by(source_type=source_filter)
+    if severity:
+        query = query.filter_by(severity=severity)
+    if status:
+        query = query.filter_by(status=status)
+    scenarios = query.order_by(AttackAutoScenario.updated_at.desc(), AttackAutoScenario.id.desc()).all()
+    all_items = AttackAutoScenario.query.all()
+    total = len(all_items)
+    linked = sum(1 for item in all_items if item.risk_id)
+    critical_high = sum(1 for item in all_items if item.severity in {"Crítica", "Alta"})
+    sources = len({item.source_type for item in all_items})
+    last_log = AttackAutoGenerationLog.query.order_by(AttackAutoGenerationLog.id.desc()).first()
+    read_only = auditor_is_read_only(user)
+
+    body = render_template_string("""
+    <div class="as-card card mb-3"><div class="card-body p-3">
+      <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap">
+        <div>
+          <h5 class="fw-bold text-primary mb-1"><i class="bi bi-stars"></i> Generación automática</h5>
+          <div class="as-note">Lee los registros existentes de MITRE ATT&CK, vulnerabilidades, incidentes, TPRM, herramienta XDR y firewall.</div>
+        </div>
+        {% if not read_only %}
+        <form method="post" action="{{ url_for('attack_auto_generate') }}" class="d-flex align-items-center gap-3 flex-wrap" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').innerHTML='<span class=&quot;spinner-border spinner-border-sm&quot;></span> Generando...';">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" name="use_ai" value="1" id="use_ai" checked>
+            <label class="form-check-label small fw-bold" for="use_ai">Enriquecer con IA</label>
+          </div>
+          <button class="btn btn-primary rounded-pill px-4"><i class="bi bi-magic"></i> Generar escenarios automáticamente</button>
+        </form>
+        {% endif %}
+      </div>
+      {% if last_log %}
+      <div class="alert {{ 'alert-warning' if last_log.error_count else 'alert-success' }} py-2 mt-3 mb-0 small">
+        Última ejecución: {{ last_log.finished_at or last_log.started_at }} · {{ last_log.status }} ·
+        {{ last_log.created_count }} nuevos, {{ last_log.updated_count }} actualizados,
+        {{ last_log.ai_enriched_count }} enriquecidos con IA, {{ last_log.error_count }} alertas.
+        {% if last_log.error_detail %}<details class="mt-1"><summary>Ver alertas técnicas</summary><pre class="mb-0 small">{{ last_log.error_detail }}</pre></details>{% endif %}
+      </div>
+      {% endif %}
+    </div></div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-6 col-lg"><div class="as-kpi"><small>Escenarios</small><strong>{{ total }}</strong></div></div>
+      <div class="col-6 col-lg"><div class="as-kpi"><small>Fuentes correlacionadas</small><strong>{{ sources }}</strong></div></div>
+      <div class="col-6 col-lg"><div class="as-kpi"><small>Críticos / Altos</small><strong>{{ critical_high }}</strong></div></div>
+      <div class="col-6 col-lg"><div class="as-kpi"><small>En matriz de riesgos</small><strong>{{ linked }}</strong></div></div>
+      <div class="col-6 col-lg"><div class="as-kpi"><small>Pendientes de registrar</small><strong>{{ total-linked }}</strong></div></div>
+    </div>
+
+    <div class="as-card card mb-3"><div class="card-body p-3">
+      <form method="get" class="row g-2 align-items-end">
+        <div class="col-md-4"><label class="form-label small fw-bold">Buscar</label><input name="q" value="{{ query_text }}" class="form-control" placeholder="Código, escenario, activo o proveedor"></div>
+        <div class="col-md-2"><label class="form-label small fw-bold">Fuente</label><select name="source" class="form-select"><option value="">Todas</option>{% for key,label in source_labels.items() %}<option value="{{ key }}" {{ 'selected' if source_filter==key else '' }}>{{ label }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><label class="form-label small fw-bold">Severidad</label><select name="severity" class="form-select"><option value="">Todas</option>{% for item in ['Crítica','Alta','Media','Baja'] %}<option {{ 'selected' if severity==item else '' }}>{{ item }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><label class="form-label small fw-bold">Estado</label><select name="status" class="form-select"><option value="">Todos</option>{% for item in ['En análisis','Vigente','En tratamiento','Aceptado','Cerrado'] %}<option {{ 'selected' if status==item else '' }}>{{ item }}</option>{% endfor %}</select></div>
+        <div class="col-md-2 d-flex gap-2"><button class="btn btn-outline-primary flex-fill">Filtrar</button><a href="{{ url_for('attack_auto') }}" class="btn btn-outline-secondary">Limpiar</a></div>
+      </form>
+    </div></div>
+
+    <div class="as-card card"><div class="table-responsive"><table class="table table-hover as-table mb-0">
+      <thead><tr><th>Código</th><th>Fuente</th><th>Escenario / Activo</th><th>MITRE ATT&CK</th><th>Períodos</th><th>Inherente</th><th>Residual</th><th>Estado</th><th>Riesgo</th><th>Acciones</th></tr></thead>
+      <tbody>
+      {% for item in scenarios %}
+      <tr>
+        <td><b>{{ item.code }}</b><br><span class="text-muted">{{ item.updated_at.strftime('%Y-%m-%d') if item.updated_at else '' }}</span></td>
+        <td><span class="badge bg-dark">{{ source_labels.get(item.source_type,item.source_type) }}</span>{% if item.source_count>1 %}<br><span class="text-muted">{{ item.source_count }} evidencias</span>{% endif %}</td>
+        <td style="min-width:250px"><b>{{ item.name }}</b><br><span class="text-muted"><i class="bi bi-hdd"></i> {{ item.asset_name }}</span>{% if item.supplier_name %}<br><span class="text-primary"><i class="bi bi-truck"></i> {{ item.supplier_name }}</span>{% endif %}</td>
+        <td style="min-width:180px">{% for tech in item.techniques[:3] %}<span class="badge bg-light text-dark border mb-1">{{ tech.technique_id }} · {{ tech.technique_name }}</span><br>{% endfor %}{% if not item.techniques %}<span class="text-muted">Pendiente</span>{% endif %}</td>
+        <td class="text-center"><span class="badge bg-secondary">{{ item.evaluations|length }}</span></td>
+        <td><span class="badge bg-{{ badge(item.inherent_level) }}">{{ item.inherent_score }} · {{ item.inherent_level }}</span></td>
+        <td><span class="badge bg-{{ badge(item.residual_level) }}">{{ item.residual_score }} · {{ item.residual_level }}</span></td>
+        <td>{{ item.status }}{% if item.ai_status=='Enriquecido' %}<br><span class="badge bg-info text-dark"><i class="bi bi-stars"></i> IA</span>{% endif %}</td>
+        <td>{% if item.risk_code %}<span class="badge bg-success">{{ item.risk_code }}</span>{% else %}<span class="text-muted">No registrado</span>{% endif %}</td>
+        <td style="min-width:310px"><div class="as-actions">
+          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('attack_auto_view', scenario_id=item.id) }}"><i class="bi bi-eye"></i> Ver</a>
+          {% if not read_only %}
+          <a class="btn btn-sm btn-outline-warning" href="{{ url_for('attack_auto_edit', scenario_id=item.id) }}"><i class="bi bi-pencil"></i> Editar</a>
+          <form method="post" action="{{ url_for('attack_auto_delete', scenario_id=item.id) }}" onsubmit="return confirm('¿Eliminar este escenario y su histórico de evaluaciones? El riesgo ya registrado no será eliminado.');"><button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i> Eliminar</button></form>
+          <form method="post" action="{{ url_for('attack_auto_register_risk', scenario_id=item.id) }}" onsubmit="return confirm('¿{{ 'Actualizar' if item.risk_id else 'Registrar' }} este escenario en la Matriz de Riesgos?');"><button class="btn btn-sm btn-success"><i class="bi bi-shield-check"></i> {{ 'Actualizar en Riesgos' if item.risk_id else 'Registrar en Matriz de Riesgos' }}</button></form>
+          {% endif %}
+        </div></td>
+      </tr>
+      {% else %}<tr><td colspan="10" class="text-center text-muted py-5">No hay escenarios. Use “Generar escenarios automáticamente” para crearlos desde los datos existentes.</td></tr>{% endfor %}
+      </tbody>
+    </table></div></div>
+    """, scenarios=scenarios, total=total, linked=linked, critical_high=critical_high,
+        sources=sources, last_log=last_log, read_only=read_only, query_text=query_text,
+        source_filter=source_filter, severity=severity, status=status, source_labels=ATTACK_AUTO_SOURCE_LABELS,
+        badge=attack_auto_badge)
+    return attack_auto_shell("Superficie de Ataque y Escenarios", body)
+
+
+@app.route("/superficie_ataque/generar", methods=["POST"])
+@app.route("/superficie_ataque/sincronizar/mitre", methods=["GET", "POST"])
+@app.route("/superficie_ataque/sincronizar-mitre", methods=["GET", "POST"])
+@app.route("/superficie_ataque/sincronizar_mitre", methods=["GET", "POST"])
+@login_required
+def attack_auto_generate():
+    user, response = attack_auto_guard(write=True)
+    if response:
+        return response
+    if request.method == "GET":
+        flash("La sincronización MITRE fue reemplazada por la generación automática multi-fuente. Use el botón de la matriz.", "info")
+        return redirect(url_for("attack_auto"))
+    try:
+        counts, source_counts, errors = attack_auto_run_generation(
+            getattr(user, "username", None) or getattr(user, "email", None) or "usuario",
+            use_ai=attack_auto_yes(request.form.get("use_ai")),
+        )
+        message = "Generación completada: {} nuevos, {} actualizados, {} sin cambios y {} enriquecidos con IA.".format(
+            counts["created"], counts["updated"], counts["unchanged"], counts["ai"]
+        )
+        if errors:
+            flash(message + " Se presentaron {} alertas aisladas; consulte el detalle de la última ejecución.".format(len(errors)), "warning")
+        else:
+            flash(message, "success")
+    except Exception as exc:
+        db.session.rollback()
+        flash("No fue posible iniciar la generación automática: {}".format(attack_auto_clean(exc, 700)), "danger")
+    return redirect(url_for("attack_auto"))
+
+
+@app.route("/superficie_ataque/escenarios/<int:scenario_id>", methods=["GET"])
+@login_required
+def attack_auto_view(scenario_id):
+    user, response = attack_auto_guard(write=False)
+    if response:
+        return response
+    ensure_attack_auto_db()
+    item = attack_auto_get_or_404(scenario_id)
+    read_only = auditor_is_read_only(user)
+    body = render_template_string("""
+    <div class="d-flex justify-content-center gap-2 flex-wrap mb-3">
+      <a href="{{ url_for('attack_auto') }}" class="btn btn-light border rounded-pill px-4"><i class="bi bi-arrow-left"></i> Volver a la matriz</a>
+      {% if not read_only %}<a href="{{ url_for('attack_auto_edit', scenario_id=item.id) }}" class="btn btn-warning rounded-pill px-4"><i class="bi bi-pencil"></i> Editar</a>
+      <form method="post" action="{{ url_for('attack_auto_register_risk', scenario_id=item.id) }}"><button class="btn btn-success rounded-pill px-4"><i class="bi bi-shield-check"></i> {{ 'Actualizar en Riesgos' if item.risk_id else 'Registrar en Matriz de Riesgos' }}</button></form>{% endif %}
+    </div>
+    <div class="as-card card"><div class="card-body p-4">
+      <div class="d-flex justify-content-between gap-3 flex-wrap"><div><h4 class="fw-bold text-primary">{{ item.code }} · {{ item.name }}</h4><div class="text-muted">Fuente: {{ source_labels.get(item.source_type,item.source_type) }} · Referencia {{ item.source_ref }}</div></div><div><span class="badge bg-{{ badge(item.inherent_level) }} fs-6">Inherente {{ item.inherent_score }} · {{ item.inherent_level }}</span> <span class="badge bg-{{ badge(item.residual_level) }} fs-6">Residual {{ item.residual_score }} · {{ item.residual_level }}</span></div></div>
+      <div class="as-section">Contexto del escenario</div>
+      <div class="row g-3">
+        <div class="col-md-4"><b>Activo</b><div class="as-value">{{ item.asset_name }}\n{{ item.asset_type or '' }}</div></div>
+        <div class="col-md-4"><b>Canal de exposición</b><div class="as-value">{{ item.exposure_channel or 'N/D' }}\nExposición a Internet: {{ 'Sí' if item.internet_exposed else 'No' }}</div></div>
+        <div class="col-md-4"><b>Responsable / Estado</b><div class="as-value">{{ item.owner or 'Por asignar' }}\n{{ item.status }}</div></div>
+        <div class="col-md-6"><b>Descripción</b><div class="as-value">{{ item.description or 'N/D' }}</div></div>
+        <div class="col-md-6"><b>Actor de amenaza</b><div class="as-value">{{ item.threat_actor or 'N/D' }}</div></div>
+        <div class="col-md-6"><b>Evento de amenaza</b><div class="as-value">{{ item.threat_event or 'N/D' }}</div></div>
+        <div class="col-md-6"><b>Vulnerabilidad / condición</b><div class="as-value">{{ item.vulnerability or 'N/D' }}</div></div>
+        <div class="col-md-6"><b>Consecuencias</b><div class="as-value">{{ item.consequences or 'N/D' }}</div></div>
+        <div class="col-md-6"><b>Dimensiones</b><div class="as-value">{{ item.security_dimensions or 'N/D' }}</div></div>
+      </div>
+      {% if item.source_type=='TPRM' %}<div class="as-section">Cadena de suministro (TPRM)</div><div class="row g-3"><div class="col-md-4"><b>Proveedor</b><div class="as-value">{{ item.supplier_name or 'N/D' }}</div></div><div class="col-md-4"><b>Relación / servicio</b><div class="as-value">{{ item.supplier_relationship or 'N/D' }}</div></div><div class="col-md-4"><b>Detalle</b><div class="as-value">{{ item.supply_chain_details or 'N/D' }}</div></div></div>{% endif %}
+      <div class="as-section">MITRE ATT&CK</div>
+      {% for tech in item.techniques %}<div class="as-tech"><b>{{ tech.technique_id }} · {{ tech.technique_name }}</b> <span class="badge bg-secondary">{{ tech.tactic_id }} · {{ tech.tactic_name }}</span><br><small>{{ tech.rationale }} · Confianza {{ tech.confidence }}% · {{ tech.origin }}</small></div>{% else %}<div class="text-muted">Sin técnica correlacionada.</div>{% endfor %}
+      <div class="as-section">Controles, evidencia e IA</div>
+      <div class="row g-3"><div class="col-md-4"><b>Controles existentes</b><div class="as-value">{{ item.existing_controls or 'N/D' }}</div></div><div class="col-md-4"><b>Debilidades de control</b><div class="as-value">{{ item.control_weaknesses or 'N/D' }}</div></div><div class="col-md-4"><b>Evidencia de origen</b><div class="as-value">{{ item.evidence or 'N/D' }}</div></div></div>
+      <div class="alert alert-info mt-3 mb-0"><b>IA: {{ item.ai_status }}</b>{% if item.ai_provider %} · {{ item.ai_provider }}{% endif %}<br>{{ item.ai_justification or 'No se solicitó enriquecimiento. La evaluación se generó únicamente con reglas determinísticas.' }}</div>
+      <div class="as-section d-flex justify-content-between align-items-center"><span>Evaluaciones por período</span>{% if not read_only %}<a href="{{ url_for('attack_auto_evaluation_new', scenario_id=item.id) }}" class="btn btn-sm btn-primary"><i class="bi bi-calendar-plus"></i> Nueva evaluación de período</a>{% endif %}</div>
+      <div class="table-responsive"><table class="table table-sm as-table"><thead><tr><th>Período</th><th>Evaluador</th><th>Inherente</th><th>Controles</th><th>Residual</th><th>Tratamiento</th><th>Origen</th><th>Acciones</th></tr></thead><tbody>
+      {% for ev in item.evaluations %}<tr><td>{{ ev.period_start }} a {{ ev.period_end }}<br><small>{{ ev.evaluation_date }}</small></td><td>{{ ev.evaluator or 'N/D' }}</td><td><span class="badge bg-{{ badge(ev.inherent_level) }}">{{ ev.inherent_score }} · {{ ev.inherent_level }}</span></td><td>{{ ev.control_effectiveness }}%</td><td><span class="badge bg-{{ badge(ev.residual_level) }}">{{ ev.residual_score }} · {{ ev.residual_level }}</span></td><td>{{ ev.treatment }}<br><small>{{ ev.status }}</small></td><td>{{ ev.origin }}</td><td>{% if not read_only %}<div class="as-actions"><a class="btn btn-sm btn-outline-warning" href="{{ url_for('attack_auto_evaluation_edit', scenario_id=item.id, evaluation_id=ev.id) }}"><i class="bi bi-pencil"></i> Editar</a><form method="post" action="{{ url_for('attack_auto_evaluation_delete', scenario_id=item.id, evaluation_id=ev.id) }}" onsubmit="return confirm('¿Eliminar esta evaluación del período?');"><button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button></form></div>{% endif %}</td></tr>
+      {% else %}<tr><td colspan="8" class="text-center text-muted">Sin evaluaciones.</td></tr>{% endfor %}
+      </tbody></table></div>
+    </div></div>
+    """, item=item, read_only=read_only, source_labels=ATTACK_AUTO_SOURCE_LABELS, badge=attack_auto_badge)
+    return attack_auto_shell("Detalle del escenario", body)
+
+
+def attack_auto_technique_lines(item):
+    return "\n".join(
+        "{}|{}|{}|{}".format(t.technique_id, t.technique_name, t.tactic_id or "", t.tactic_name or "")
+        for t in item.techniques
+    )
+
+
+def attack_auto_parse_technique_lines(raw):
+    parsed = []
+    for line in str(raw or "").splitlines():
+        parts = [attack_auto_clean(value) for value in line.split("|")]
+        if not parts or not parts[0]:
+            continue
+        while len(parts) < 4:
+            parts.append("")
+        parsed.append({
+            "technique_id": parts[0][:40], "technique_name": (parts[1] or "Técnica MITRE")[:255],
+            "tactic_id": parts[2][:40], "tactic_name": parts[3][:120],
+        })
+    return parsed
+
+
+def attack_auto_apply_scenario_form(item, form):
+    text_fields = (
+        "name", "asset_name", "asset_type", "scope", "description", "exposure_channel",
+        "threat_actor", "threat_event", "vulnerability", "consequences", "security_dimensions",
+        "existing_controls", "control_weaknesses", "evidence", "risk_appetite", "treatment",
+        "status", "owner", "supplier_name", "supplier_relationship", "supply_chain_details",
+    )
+    for field in text_fields:
+        if field in form:
+            setattr(item, field, attack_auto_clean(form.get(field), 4000))
+    item.name = item.name or "Escenario de amenaza"
+    item.asset_name = item.asset_name or "Activo no especificado"
+    item.internet_exposed = attack_auto_yes(form.get("internet_exposed"))
+    item.severity = attack_auto_normalize_severity(form.get("severity"))
+    factor_input = {
+        "severity": item.severity,
+        "exposure_level": form.get("exposure_level"),
+        "exploitability": form.get("exploitability"),
+        "detected_activity": form.get("detected_activity"),
+        "control_weakness_level": form.get("control_weakness_level"),
+        "asset_criticality": form.get("asset_criticality"),
+        "control_effectiveness": max(0, min(100, int(form.get("control_effectiveness") or 0))),
+    }
+    for field, value in attack_auto_factor_values(factor_input).items():
+        setattr(item, field, value)
+    if item.source_type == "TPRM":
+        try:
+            item.supplier_id = int(form.get("supplier_id")) if form.get("supplier_id") else item.supplier_id
+        except Exception:
+            pass
+    for tech in list(item.techniques):
+        db.session.delete(tech)
+    for tech in attack_auto_parse_technique_lines(form.get("technique_lines")):
+        item.techniques.append(AttackAutoTechnique(
+            technique_id=tech["technique_id"], technique_name=tech["technique_name"],
+            tactic_id=tech["tactic_id"], tactic_name=tech["tactic_name"],
+            rationale="Mapeo validado manualmente por el analista.", confidence=100, origin="Manual",
+        ))
+    item.manually_edited = True
+    item.updated_at = datetime.utcnow()
+
+
+def attack_auto_scenario_form(item):
+    body = render_template_string("""
+    <form method="post" class="as-form">
+      <div class="d-flex justify-content-center gap-2 mb-3"><a href="{{ url_for('attack_auto_view', scenario_id=item.id) }}" class="btn btn-light border rounded-pill px-4"><i class="bi bi-arrow-left"></i> Cancelar</a><button class="btn btn-primary rounded-pill px-4"><i class="bi bi-save"></i> Guardar cambios</button></div>
+      <div class="as-card card"><div class="card-body p-4">
+        <div class="alert alert-info small">Los datos se pueden ajustar manualmente. Una nueva generación actualizará la evidencia de origen, pero preservará los campos editados y las técnicas validadas.</div>
+        <div class="as-section">Identificación y alcance</div>
+        <div class="row g-3">
+          <div class="col-md-8"><label class="form-label">Nombre del escenario</label><input class="form-control" name="name" required value="{{ item.name }}"></div>
+          <div class="col-md-2"><label class="form-label">Severidad</label><select class="form-select" name="severity">{% for value in ['Crítica','Alta','Media','Baja'] %}<option {{ 'selected' if item.severity==value else '' }}>{{ value }}</option>{% endfor %}</select></div>
+          <div class="col-md-2"><label class="form-label">Estado</label><select class="form-select" name="status">{% for value in ['En análisis','Vigente','En tratamiento','Aceptado','Cerrado'] %}<option {{ 'selected' if item.status==value else '' }}>{{ value }}</option>{% endfor %}</select></div>
+          <div class="col-md-4"><label class="form-label">Activo</label><input class="form-control" name="asset_name" value="{{ item.asset_name or '' }}"></div>
+          <div class="col-md-4"><label class="form-label">Tipo de activo</label><input class="form-control" name="asset_type" value="{{ item.asset_type or '' }}"></div>
+          <div class="col-md-4"><label class="form-label">Responsable</label><input class="form-control" name="owner" value="{{ item.owner or '' }}"></div>
+          <div class="col-md-8"><label class="form-label">Canal de exposición</label><input class="form-control" name="exposure_channel" value="{{ item.exposure_channel or '' }}"></div>
+          <div class="col-md-4 d-flex align-items-end"><div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="internet_exposed" value="1" id="internet_exposed" {{ 'checked' if item.internet_exposed else '' }}><label class="form-check-label" for="internet_exposed">Expuesto a Internet</label></div></div>
+          <div class="col-12"><label class="form-label">Alcance</label><textarea class="form-control" rows="2" name="scope">{{ item.scope or '' }}</textarea></div>
+        </div>
+        <div class="as-section">Narrativa del escenario</div>
+        <div class="row g-3">
+          <div class="col-md-6"><label class="form-label">Descripción</label><textarea class="form-control" rows="4" name="description">{{ item.description or '' }}</textarea></div>
+          <div class="col-md-6"><label class="form-label">Actor de amenaza</label><textarea class="form-control" rows="4" name="threat_actor">{{ item.threat_actor or '' }}</textarea></div>
+          <div class="col-md-6"><label class="form-label">Evento de amenaza</label><textarea class="form-control" rows="4" name="threat_event">{{ item.threat_event or '' }}</textarea></div>
+          <div class="col-md-6"><label class="form-label">Vulnerabilidad / condición</label><textarea class="form-control" rows="4" name="vulnerability">{{ item.vulnerability or '' }}</textarea></div>
+          <div class="col-md-6"><label class="form-label">Consecuencias</label><textarea class="form-control" rows="4" name="consequences">{{ item.consequences or '' }}</textarea></div>
+          <div class="col-md-6"><label class="form-label">Dimensiones de seguridad</label><textarea class="form-control" rows="4" name="security_dimensions">{{ item.security_dimensions or '' }}</textarea></div>
+        </div>
+        <div class="as-section">Controles y evidencia</div>
+        <div class="row g-3"><div class="col-md-4"><label class="form-label">Controles existentes</label><textarea class="form-control" rows="4" name="existing_controls">{{ item.existing_controls or '' }}</textarea></div><div class="col-md-4"><label class="form-label">Debilidades de control</label><textarea class="form-control" rows="4" name="control_weaknesses">{{ item.control_weaknesses or '' }}</textarea></div><div class="col-md-4"><label class="form-label">Evidencia</label><textarea class="form-control" rows="4" name="evidence">{{ item.evidence or '' }}</textarea></div></div>
+        {% if item.source_type=='TPRM' %}<div class="as-section">Cadena de suministro (TPRM)</div><div class="row g-3"><div class="col-md-2"><label class="form-label">ID proveedor</label><input class="form-control" type="number" name="supplier_id" value="{{ item.supplier_id or '' }}"></div><div class="col-md-4"><label class="form-label">Proveedor</label><input class="form-control" name="supplier_name" value="{{ item.supplier_name or '' }}"></div><div class="col-md-6"><label class="form-label">Relación / servicio</label><input class="form-control" name="supplier_relationship" value="{{ item.supplier_relationship or '' }}"></div><div class="col-12"><label class="form-label">Detalle de cadena de suministro</label><textarea class="form-control" name="supply_chain_details">{{ item.supply_chain_details or '' }}</textarea></div></div>{% endif %}
+        <div class="as-section">Factores de evaluación (1 a 5)</div>
+        <div class="row g-3">
+          {% for field,label,value in factors %}<div class="col-6 col-md-2"><label class="form-label">{{ label }}</label><input class="form-control" type="number" min="1" max="5" name="{{ field }}" value="{{ value }}" required></div>{% endfor %}
+          <div class="col-6 col-md-2"><label class="form-label">Eficacia control %</label><input class="form-control" type="number" min="0" max="100" name="control_effectiveness" value="{{ item.control_effectiveness }}" required></div>
+          <div class="col-md-4"><label class="form-label">Apetito</label><select class="form-select" name="risk_appetite">{% for value in ['Dentro de apetito','Por evaluar','Fuera de apetito'] %}<option {{ 'selected' if item.risk_appetite==value else '' }}>{{ value }}</option>{% endfor %}</select></div>
+          <div class="col-md-4"><label class="form-label">Tratamiento</label><select class="form-select" name="treatment">{% for value in ['Mitigar','Evitar','Transferir','Aceptar','Monitorear'] %}<option {{ 'selected' if item.treatment==value else '' }}>{{ value }}</option>{% endfor %}</select></div>
+        </div>
+        <div class="as-section">MITRE ATT&CK</div><label class="form-label">Una técnica por línea: ID|Nombre|ID táctica|Nombre táctica</label><textarea class="form-control font-monospace" rows="6" name="technique_lines">{{ technique_lines }}</textarea>
+        <div class="text-center mt-4"><button class="btn btn-primary rounded-pill px-5"><i class="bi bi-save"></i> Guardar cambios</button></div>
+      </div></div>
+    </form>
+    """, item=item, technique_lines=attack_auto_technique_lines(item), factors=[
+        ("exposure_level", "Exposición", item.exposure_level),
+        ("exploitability", "Explotabilidad", item.exploitability),
+        ("detected_activity", "Actividad detectada", item.detected_activity),
+        ("control_weakness_level", "Debilidad control", item.control_weakness_level),
+        ("asset_criticality", "Criticidad activo", item.asset_criticality),
+    ])
+    return attack_auto_shell("Editar escenario {}".format(item.code), body)
+
+
+@app.route("/superficie_ataque/escenarios/<int:scenario_id>/editar", methods=["GET", "POST"])
+@login_required
+def attack_auto_edit(scenario_id):
+    user, response = attack_auto_guard(write=True)
+    if response:
+        return response
+    ensure_attack_auto_db()
+    item = attack_auto_get_or_404(scenario_id)
+    if request.method == "POST":
+        try:
+            attack_auto_apply_scenario_form(item, request.form)
+            db.session.commit()
+            flash("Escenario actualizado correctamente.", "success")
+            return redirect(url_for("attack_auto_view", scenario_id=item.id))
+        except Exception as exc:
+            db.session.rollback()
+            flash("No fue posible actualizar el escenario: {}".format(attack_auto_clean(exc, 500)), "danger")
+    return attack_auto_scenario_form(item)
+
+
+@app.route("/superficie_ataque/escenarios/<int:scenario_id>/eliminar", methods=["POST"])
+@login_required
+def attack_auto_delete(scenario_id):
+    user, response = attack_auto_guard(write=True)
+    if response:
+        return response
+    ensure_attack_auto_db()
+    item = attack_auto_get_or_404(scenario_id)
+    risk_code = item.risk_code
+    db.session.delete(item)
+    db.session.commit()
+    message = "Escenario e histórico eliminados."
+    if risk_code:
+        message += " El riesgo {} se conservó en la Matriz de Riesgos.".format(risk_code)
+    flash(message, "success")
+    return redirect(url_for("attack_auto"))
+
+
+def attack_auto_latest_evaluation(item):
+    return sorted(item.evaluations, key=lambda ev: (ev.period_end or "", ev.id or 0), reverse=True)[0] if item.evaluations else None
+
+
+def attack_auto_probability_label(value):
+    return {1: "Rara vez o Muy baja", 2: "Eventualmente o baja", 3: "Puede ocurrir o Moderada", 4: "Probable o Alta", 5: "Muy frecuente o Muy Alta"}.get(int(value or 3), "Puede ocurrir o Moderada")
+
+
+def attack_auto_impact_label(value):
+    return {1: "Insignificante o Inferior", 2: "Menor", 3: "Moderado o Importante", 4: "Mayor", 5: "Catastrófico o Crítico"}.get(int(value or 3), "Moderado o Importante")
+
+
+ATTACK_AUTO_RISK_TYPE_NAME = "Seguridad y Ciberseguridad"
+
+
+def attack_auto_get_or_create_risk_type(user):
+    """Obtiene o crea el Tipo de Riesgo usado por los escenarios de ataque."""
+    risk_type = TipoRiesgo.query.filter(
+        TipoRiesgo.owner_user_id == user.id,
+        db.func.lower(TipoRiesgo.nombre) == ATTACK_AUTO_RISK_TYPE_NAME.lower(),
+    ).first()
+
+    if not risk_type:
+        risk_type = TipoRiesgo(
+            nombre=ATTACK_AUTO_RISK_TYPE_NAME,
+            owner_user_id=user.id,
+            activo=True,
+            creado_por=(
+                getattr(user, "username", None)
+                or session.get("username")
+                or "sistema"
+            ),
+        )
+        db.session.add(risk_type)
+        db.session.flush()
+    elif not risk_type.activo:
+        risk_type.activo = True
+
+    return risk_type
+
+
+@app.route("/superficie_ataque/escenarios/<int:scenario_id>/registrar-riesgo", methods=["POST"])
+@login_required
+def attack_auto_register_risk(scenario_id):
+    user, response = attack_auto_guard(write=True)
+    if response:
+        return response
+    ensure_attack_auto_db()
+    item = attack_auto_get_or_404(scenario_id)
+    evaluation = attack_auto_latest_evaluation(item)
+    expected_risk_code = "R-{}".format(item.code)[:50]
+    risk = Riesgo.query.get(item.risk_id) if item.risk_id else None
+    if not risk:
+        risk = Riesgo.query.filter_by(codigo_riesgo=item.risk_code or expected_risk_code).first()
+    created = risk is None
+    if created:
+        risk = Riesgo(codigo_riesgo=expected_risk_code)
+        db.session.add(risk)
+    risk_type = attack_auto_get_or_create_risk_type(user)
+    probability = evaluation.inherent_probability if evaluation else item.inherent_probability
+    impact = evaluation.inherent_impact if evaluation else item.inherent_impact
+    inherent_score = evaluation.inherent_score if evaluation else item.inherent_score
+    inherent_level = evaluation.inherent_level if evaluation else item.inherent_level
+    residual_probability = evaluation.residual_probability if evaluation else item.residual_probability
+    residual_impact = evaluation.residual_impact if evaluation else item.residual_impact
+    residual_score = evaluation.residual_score if evaluation else item.residual_score
+    residual_level = evaluation.residual_level if evaluation else item.residual_level
+    treatment = evaluation.treatment if evaluation else item.treatment
+    tech_ids = ", ".join(dict.fromkeys(t.technique_id for t in item.techniques))
+    risk.riesgo = attack_auto_clean(item.name, 255)
+    risk.fecha_identificacion = date.today().isoformat()
+    risk.propietario_riesgo = attack_auto_clean(item.owner or "Por asignar", 255)
+    risk.codigo_amenaza = attack_auto_clean(tech_ids, 50)
+    risk.amenaza = attack_auto_clean(item.threat_event, 255)
+    risk.codigo_vulnerabilidad = attack_auto_clean(item.source_ref, 50)
+    risk.vulnerabilidad = attack_auto_clean(item.vulnerability, 255)
+    risk.tipo_activo = attack_auto_clean(item.asset_type, 100)
+    risk.nombre_activo = attack_auto_clean(item.asset_name, 255)
+    risk.dimension_seguridad = attack_auto_clean(item.security_dimensions, 50)
+    risk.tipo_riesgo_id = risk_type.id
+    risk.probabilidad = int(probability)
+    risk.impacto = int(impact)
+    risk.descripcion_control = item.existing_controls
+    risk.diseno_control = "Adecuado" if item.control_effectiveness >= 70 else "Por fortalecer"
+    risk.ejecucion_control = "Fuerte" if item.control_effectiveness >= 70 else "Débil"
+    risk.valor = float(item.control_effectiveness)
+    risk.solidez_individual = float(item.control_effectiveness)
+    risk.solidez_grupal = float(item.control_effectiveness)
+    risk.prob_inh = attack_auto_probability_label(probability)
+    risk.imp_inh = attack_auto_impact_label(impact)
+    risk.riesgo_inherente = "{} - {}".format(inherent_score, inherent_level)
+    risk.prob_res = attack_auto_probability_label(residual_probability)
+    risk.impacto_res = int(residual_impact)
+    risk.impacto_res_label = attack_auto_impact_label(residual_impact)
+    risk.riesgo_residual = "{} - {}".format(residual_score, residual_level)
+    risk.fecha_revision = date.today().isoformat()
+    risk.tratamiento_riesgo = attack_auto_clean(treatment, 255)
+    risk.plan_accion = attack_auto_clean(item.control_weaknesses, 255)
+    risk.responsable = attack_auto_clean(item.owner or "Por asignar", 255)
+    risk.observaciones = "Generado desde {} ({} / {}). IA: {}. {}".format(
+        ATTACK_AUTO_MODULE, item.code, ATTACK_AUTO_SOURCE_LABELS.get(item.source_type, item.source_type),
+        item.ai_status, item.ai_justification or "Evaluación determinística",
+    )
+    risk.archivado = False
+    db.session.flush()
+    item.risk_id = risk.id
+    item.risk_code = risk.codigo_riesgo
+    item.status = "Vigente" if item.status == "En análisis" else item.status
+    if evaluation:
+        evaluation.risk_id = risk.id
+        evaluation.risk_code = risk.codigo_riesgo
+    db.session.commit()
+    flash("Escenario {} {} en la Matriz de Riesgos con código {}.".format(item.code, "registrado" if created else "actualizado", risk.codigo_riesgo), "success")
+    return redirect(url_for("attack_auto"))
+
+
+def attack_auto_validate_date(value, label):
+    try:
+        return datetime.strptime(str(value or ""), "%Y-%m-%d").date().isoformat()
+    except Exception:
+        raise ValueError("{} debe tener formato AAAA-MM-DD".format(label))
+
+
+def attack_auto_apply_evaluation_form(evaluation, form, user):
+    start = attack_auto_validate_date(form.get("period_start"), "Inicio del período")
+    end = attack_auto_validate_date(form.get("period_end"), "Fin del período")
+    if start > end:
+        raise ValueError("El inicio del período no puede ser posterior al fin")
+    evaluation.period_start = start
+    evaluation.period_end = end
+    evaluation.evaluation_date = attack_auto_validate_date(form.get("evaluation_date"), "Fecha de evaluación")
+    evaluation.evaluator = attack_auto_clean(form.get("evaluator") or getattr(user, "username", None) or "usuario", 255)
+    evaluation.methodology = attack_auto_clean(form.get("methodology"), 120) or "Matriz 5x5 GRAC"
+    factor_input = {
+        "severity": form.get("severity") or "Media",
+        "exposure_level": form.get("exposure_level"),
+        "exploitability": form.get("exploitability"),
+        "detected_activity": form.get("detected_activity"),
+        "control_weakness_level": form.get("control_weakness_level"),
+        "asset_criticality": form.get("asset_criticality"),
+        "control_effectiveness": max(0, min(100, int(form.get("control_effectiveness") or 0))),
+    }
+    for field, value in attack_auto_factor_values(factor_input).items():
+        setattr(evaluation, field, value)
+    evaluation.risk_appetite = attack_auto_clean(form.get("risk_appetite"), 50)
+    evaluation.treatment = attack_auto_clean(form.get("treatment"), 80)
+    evaluation.justification = attack_auto_clean(form.get("justification"), 4000)
+    evaluation.controls_reviewed = attack_auto_clean(form.get("controls_reviewed"), 4000)
+    evaluation.observations = attack_auto_clean(form.get("observations"), 4000)
+    evaluation.status = attack_auto_clean(form.get("status"), 50) or "Vigente"
+    evaluation.origin = "Manual"
+
+
+def attack_auto_evaluation_form(item, evaluation, is_new=False):
+    body = render_template_string("""
+    <form method="post" class="as-form">
+      <div class="d-flex justify-content-center gap-2 mb-3"><a href="{{ url_for('attack_auto_view', scenario_id=item.id) }}" class="btn btn-light border rounded-pill px-4"><i class="bi bi-arrow-left"></i> Cancelar</a><button class="btn btn-primary rounded-pill px-4"><i class="bi bi-save"></i> Guardar evaluación</button></div>
+      <div class="as-card card"><div class="card-body p-4">
+        <div class="alert alert-info small">Cada período conserva su propia evaluación. La generación automática futura no sobrescribirá una evaluación que haya sido guardada manualmente.</div>
+        <h5 class="fw-bold text-primary">{{ item.code }} · {{ item.name }}</h5>
+        <div class="as-section">Período y responsable</div>
+        <div class="row g-3">
+          <div class="col-md-3"><label class="form-label">Inicio del período</label><input class="form-control" type="date" name="period_start" value="{{ evaluation.period_start }}" required></div>
+          <div class="col-md-3"><label class="form-label">Fin del período</label><input class="form-control" type="date" name="period_end" value="{{ evaluation.period_end }}" required></div>
+          <div class="col-md-3"><label class="form-label">Fecha de evaluación</label><input class="form-control" type="date" name="evaluation_date" value="{{ evaluation.evaluation_date }}" required></div>
+          <div class="col-md-3"><label class="form-label">Evaluador</label><input class="form-control" name="evaluator" value="{{ evaluation.evaluator or '' }}"></div>
+          <div class="col-md-8"><label class="form-label">Metodología</label><input class="form-control" name="methodology" value="{{ evaluation.methodology or 'Matriz 5x5 GRAC' }}"></div>
+          <div class="col-md-4"><label class="form-label">Estado de evaluación</label><select class="form-select" name="status">{% for value in ['Vigente','En seguimiento','Cerrada','Reemplazada'] %}<option {{ 'selected' if evaluation.status==value else '' }}>{{ value }}</option>{% endfor %}</select></div>
+        </div>
+        <div class="as-section">Factores del período</div>
+        <div class="row g-3">
+          {% for field,label,value in factors %}<div class="col-6 col-md-2"><label class="form-label">{{ label }}</label><input class="form-control" type="number" min="1" max="5" name="{{ field }}" value="{{ value }}" required></div>{% endfor %}
+          <div class="col-6 col-md-2"><label class="form-label">Eficacia control %</label><input class="form-control" type="number" min="0" max="100" name="control_effectiveness" value="{{ evaluation.control_effectiveness }}" required></div>
+          <input type="hidden" name="severity" value="{{ item.severity }}">
+        </div>
+        <div class="as-section">Decisión y soporte</div>
+        <div class="row g-3">
+          <div class="col-md-6"><label class="form-label">Apetito</label><select class="form-select" name="risk_appetite">{% for value in ['Dentro de apetito','Por evaluar','Fuera de apetito'] %}<option {{ 'selected' if evaluation.risk_appetite==value else '' }}>{{ value }}</option>{% endfor %}</select></div>
+          <div class="col-md-6"><label class="form-label">Tratamiento</label><select class="form-select" name="treatment">{% for value in ['Mitigar','Evitar','Transferir','Aceptar','Monitorear'] %}<option {{ 'selected' if evaluation.treatment==value else '' }}>{{ value }}</option>{% endfor %}</select></div>
+          <div class="col-md-6"><label class="form-label">Justificación</label><textarea class="form-control" rows="4" name="justification">{{ evaluation.justification or '' }}</textarea></div>
+          <div class="col-md-6"><label class="form-label">Controles revisados</label><textarea class="form-control" rows="4" name="controls_reviewed">{{ evaluation.controls_reviewed or '' }}</textarea></div>
+          <div class="col-12"><label class="form-label">Observaciones</label><textarea class="form-control" rows="3" name="observations">{{ evaluation.observations or '' }}</textarea></div>
+        </div>
+        <div class="text-center mt-4"><button class="btn btn-primary rounded-pill px-5"><i class="bi bi-save"></i> Guardar evaluación del período</button></div>
+      </div></div>
+    </form>
+    """, item=item, evaluation=evaluation, is_new=is_new, factors=[
+        ("exposure_level", "Exposición", evaluation.exposure_level),
+        ("exploitability", "Explotabilidad", evaluation.exploitability),
+        ("detected_activity", "Actividad detectada", evaluation.detected_activity),
+        ("control_weakness_level", "Debilidad control", evaluation.control_weakness_level),
+        ("asset_criticality", "Criticidad activo", evaluation.asset_criticality),
+    ])
+    return attack_auto_shell(("Nueva" if is_new else "Editar") + " evaluación por período", body)
+
+
+@app.route("/superficie_ataque/escenarios/<int:scenario_id>/evaluaciones/nueva", methods=["GET", "POST"])
+@login_required
+def attack_auto_evaluation_new(scenario_id):
+    user, response = attack_auto_guard(write=True)
+    if response:
+        return response
+    ensure_attack_auto_db()
+    item = attack_auto_get_or_404(scenario_id)
+    start, end = attack_auto_period_bounds()
+    evaluation = AttackAutoEvaluation(
+        scenario_id=item.id, period_start=start, period_end=end,
+        evaluation_date=date.today().isoformat(), evaluator=getattr(user, "username", None),
+        methodology="Matriz 5x5 GRAC", exposure_level=item.exposure_level,
+        exploitability=item.exploitability, detected_activity=item.detected_activity,
+        control_weakness_level=item.control_weakness_level, asset_criticality=item.asset_criticality,
+        inherent_probability=item.inherent_probability, inherent_impact=item.inherent_impact,
+        inherent_score=item.inherent_score, inherent_level=item.inherent_level,
+        control_effectiveness=item.control_effectiveness, residual_probability=item.residual_probability,
+        residual_impact=item.residual_impact, residual_score=item.residual_score,
+        residual_level=item.residual_level, risk_appetite=item.risk_appetite,
+        treatment=item.treatment, controls_reviewed=item.existing_controls, status="Vigente", origin="Manual",
+    )
+    if request.method == "POST":
+        try:
+            attack_auto_apply_evaluation_form(evaluation, request.form, user)
+            duplicate = AttackAutoEvaluation.query.filter_by(
+                scenario_id=item.id, period_start=evaluation.period_start, period_end=evaluation.period_end
+            ).first()
+            if duplicate:
+                raise ValueError("Ya existe una evaluación para ese período; edite la existente")
+            db.session.add(evaluation)
+            db.session.commit()
+            flash("Evaluación del período registrada correctamente.", "success")
+            return redirect(url_for("attack_auto_view", scenario_id=item.id))
+        except Exception as exc:
+            db.session.rollback()
+            flash("No fue posible guardar la evaluación: {}".format(attack_auto_clean(exc, 500)), "danger")
+    return attack_auto_evaluation_form(item, evaluation, is_new=True)
+
+
+@app.route("/superficie_ataque/escenarios/<int:scenario_id>/evaluaciones/<int:evaluation_id>/editar", methods=["GET", "POST"])
+@login_required
+def attack_auto_evaluation_edit(scenario_id, evaluation_id):
+    user, response = attack_auto_guard(write=True)
+    if response:
+        return response
+    ensure_attack_auto_db()
+    item = attack_auto_get_or_404(scenario_id)
+    evaluation = AttackAutoEvaluation.query.filter_by(id=evaluation_id, scenario_id=item.id).first()
+    if not evaluation:
+        abort(404)
+    if request.method == "POST":
+        try:
+            attack_auto_apply_evaluation_form(evaluation, request.form, user)
+            duplicate = AttackAutoEvaluation.query.filter(
+                AttackAutoEvaluation.scenario_id == item.id,
+                AttackAutoEvaluation.period_start == evaluation.period_start,
+                AttackAutoEvaluation.period_end == evaluation.period_end,
+                AttackAutoEvaluation.id != evaluation.id,
+            ).first()
+            if duplicate:
+                raise ValueError("Ya existe otra evaluación para ese período")
+            db.session.commit()
+            flash("Evaluación del período actualizada.", "success")
+            return redirect(url_for("attack_auto_view", scenario_id=item.id))
+        except Exception as exc:
+            db.session.rollback()
+            flash("No fue posible actualizar la evaluación: {}".format(attack_auto_clean(exc, 500)), "danger")
+    return attack_auto_evaluation_form(item, evaluation, is_new=False)
+
+
+@app.route("/superficie_ataque/escenarios/<int:scenario_id>/evaluaciones/<int:evaluation_id>/eliminar", methods=["POST"])
+@login_required
+def attack_auto_evaluation_delete(scenario_id, evaluation_id):
+    user, response = attack_auto_guard(write=True)
+    if response:
+        return response
+    ensure_attack_auto_db()
+    item = attack_auto_get_or_404(scenario_id)
+    evaluation = AttackAutoEvaluation.query.filter_by(id=evaluation_id, scenario_id=item.id).first()
+    if not evaluation:
+        abort(404)
+    db.session.delete(evaluation)
+    db.session.commit()
+    flash("Evaluación del período eliminada.", "success")
+    return redirect(url_for("attack_auto_view", scenario_id=item.id))
+
+# ============================================================================
+# FIN SUPERFICIE DE ATAQUE Y ESCENARIOS
+# ============================================================================
 # ============================================================================================================================================
 
 # =========================
@@ -185226,6 +186858,7 @@ def allowed_file(filename: str) -> bool:
 
 with app.app_context():
     db.create_all()
+    ensure_attack_auto_db()
     asegurar_columnas_marcos_controles_riesgo()
     init_soc2_madurez_db()
 
