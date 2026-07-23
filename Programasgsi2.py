@@ -18282,6 +18282,38 @@ def gestion_riesgos():
 
     riesgos = query.all()
 
+    # Relaciona cada riesgo visible con su plan independiente más reciente.
+    # Reconoce tanto planes asignados manualmente como planes sincronizados.
+    risk_plan_ids = {}
+    visible_risk_ids = {riesgo.id for riesgo in riesgos}
+    if visible_risk_ids:
+        for plan in ContinuousActionPlan.query.order_by(
+            ContinuousActionPlan.id.desc()
+        ).all():
+            risk_id_asociado = None
+            source_ref = (plan.source_ref or "").strip()
+            match = re.match(
+                r"^(?:riesgo-manual|riesgo-existente):(\d+)(?::|$)",
+                source_ref,
+                flags=re.IGNORECASE,
+            )
+            if match:
+                risk_id_asociado = int(match.group(1))
+
+            if risk_id_asociado is None and plan.raw_json:
+                try:
+                    raw_data = json.loads(plan.raw_json)
+                    if isinstance(raw_data, dict) and raw_data.get("riesgo_id"):
+                        risk_id_asociado = int(raw_data["riesgo_id"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    pass
+
+            if (
+                risk_id_asociado in visible_risk_ids
+                and risk_id_asociado not in risk_plan_ids
+            ):
+                risk_plan_ids[risk_id_asociado] = plan.id
+
     total_activos = Riesgo.query.filter_by(archivado=False).count()
     total_archivados = Riesgo.query.filter_by(archivado=True).count()
     total_registros = Riesgo.query.count()
@@ -18556,7 +18588,7 @@ def gestion_riesgos():
                 <th>Impacto Res.</th>
                 <th>Riesgo Residual</th>
                 <th>Estatus</th>
-                <th>Acciones</th>
+                <th class="risk-actions-header">Acciones</th>
               </tr>
             </thead>
 
@@ -18611,6 +18643,8 @@ def gestion_riesgos():
                         Ver
                       </a>
 
+                      {% set associated_plan_id = risk_plan_ids.get(r.id) %}
+
                       {% if not solo_lectura %}
                         {% if not r.archivado %}
 
@@ -18619,14 +18653,23 @@ def gestion_riesgos():
                             Editar
                           </a>
 
-                          <a href="{{ url_for('planes_accion_new', riesgo_id=r.id) }}"
+                          {% if associated_plan_id %}
+                            <a href="{{ url_for('planes_accion_dashboard', plan_id=associated_plan_id) }}"
                                class="risk-action-btn plan-action"
-                               title="Registrar un plan de acción para este riesgo"
-                               aria-label="Registrar plan de acción para el riesgo {{ r.codigo_riesgo or r.id }}">
-
-                              <i class="bi bi-clipboard2-plus-fill" aria-hidden="true"></i>
-                              <span>Plan de acción</span>
-                          </a>
+                               title="Abrir el plan de acción asignado"
+                               aria-label="Ir al plan de acción del riesgo {{ r.codigo_riesgo or r.id }}">
+                              <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+                              <span>Ir al plan de acción</span>
+                            </a>
+                          {% else %}
+                            <a href="{{ url_for('planes_accion_new', riesgo_id=r.id) }}"
+                               class="risk-action-btn plan-action d-inline-flex align-items-center justify-content-center gap-2 text-nowrap"
+                               title="Asignar un plan de acción a este riesgo"
+                               aria-label="Asignar plan de acción al riesgo {{ r.codigo_riesgo or r.id }}">
+                              <i class="bi bi-clipboard2-plus-fill flex-shrink-0" aria-hidden="true"></i>
+                              <span>Asignar plan de acción</span>
+                            </a>
+                          {% endif %}
 
                           <form action="{{ url_for('archivar_riesgo', riesgo_id=r.id) }}"
                                 method="post"
@@ -18645,6 +18688,15 @@ def gestion_riesgos():
 
                         {% else %}
 
+                          {% if associated_plan_id %}
+                            <a href="{{ url_for('planes_accion_dashboard', plan_id=associated_plan_id) }}"
+                               class="risk-action-btn plan-action"
+                               title="Abrir el plan de acción asignado">
+                              <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+                              <span>Ir al plan de acción</span>
+                            </a>
+                          {% endif %}
+
                           <form action="{{ url_for('restaurar_riesgo', riesgo_id=r.id) }}"
                                 method="post"
                                 onsubmit="return confirm('¿Restaurar este riesgo a activos?');"
@@ -18661,6 +18713,14 @@ def gestion_riesgos():
                           </a>
 
                         {% endif %}
+                      {% elif associated_plan_id %}
+                        <a href="{{ url_for('planes_accion_dashboard', plan_id=associated_plan_id) }}"
+                           class="risk-action-btn plan-action"
+                           title="Consultar el plan de acción asignado"
+                           aria-label="Ir al plan de acción del riesgo {{ r.codigo_riesgo or r.id }}">
+                          <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+                          <span>Ir al plan de acción</span>
+                        </a>
                       {% endif %}
 
                     </div>
@@ -19173,20 +19233,36 @@ def gestion_riesgos():
         border: 1px solid #cbd5e1;
       }
 
-      .risk-actions-cell {
-        width: 150px;
+      /* Columna compacta con botones organizados verticalmente */
+      .risk-table th.risk-actions-header,
+      .risk-table td.risk-actions-cell {
+        width: 220px;
+        min-width: 220px;
+        max-width: 220px;
+        text-align: center;
       }
 
       .risk-actions-wrap {
         display: flex;
         flex-direction: column;
+        flex-wrap: nowrap;
         gap: 6px;
         align-items: center;
         justify-content: center;
+        width: 100%;
+      }
+
+      .risk-actions-wrap form {
+        display: flex;
+        flex: 0 0 auto;
+        width: 190px;
+        margin: 0;
       }
 
       .risk-action-btn {
-        min-width: 92px;
+        width: 190px;
+        min-width: 190px;
+        max-width: 190px;
         height: 28px;
         border: none;
         border-radius: 999px;
@@ -19198,6 +19274,14 @@ def gestion_riesgos():
         justify-content: center;
         padding: 0 10px;
         color: #ffffff;
+        flex: 0 0 auto;
+        gap: 6px;
+        white-space: nowrap;
+        box-sizing: border-box;
+      }
+
+      .risk-actions-wrap form .risk-action-btn {
+        width: 100%;
       }
 
       .risk-action-btn.view { background: #087ab8; }
@@ -19386,6 +19470,7 @@ def gestion_riesgos():
         content=Markup(render_template_string(
             riesgos_html,
             riesgos=riesgos,
+            risk_plan_ids=risk_plan_ids,
             solo_lectura=solo_lectura,
             ver=ver,
             color_por_valor=color_por_valor,
@@ -176562,6 +176647,19 @@ class ContinuousActionPlan(db.Model):
     raw_json = db.Column(db.Text, nullable=True)
 
 
+class ContinuousActionPlanSuppression(db.Model):
+    """Evita que una fuente automática vuelva a crear un plan eliminado."""
+    __bind_key__ = "planes_accion"
+    __tablename__ = "continuous_action_plan_suppressions"
+
+    id = db.Column(db.Integer, primary_key=True)
+    source_ref = db.Column(db.String(500), nullable=False, unique=True, index=True)
+    deleted_plan_id = db.Column(db.Integer, nullable=True)
+    deleted_title = db.Column(db.String(500), nullable=True)
+    deleted_by = db.Column(db.String(255), nullable=True)
+    deleted_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
 def migrar_planes_accion_a_db_independiente():
     """
     Copia de forma segura los planes existentes desde la tabla histórica
@@ -177138,7 +177236,7 @@ def cont_comp_generate_evidences_and_actions():
             )
 
         plan_exists = ContinuousActionPlan.query.filter_by(source_ref=v.unique_key, action_type="Remediación").first()
-        if not plan_exists:
+        if not plan_exists and not pa_source_is_suppressed(v.unique_key):
             db.session.add(ContinuousActionPlan(
                 origin="Wazuh",
                 standard="ISO27001",
@@ -177166,7 +177264,7 @@ def cont_comp_generate_evidences_and_actions():
             )
 
         plan_exists = ContinuousActionPlan.query.filter_by(source_ref=a.alert_id, action_type="Incidente").first()
-        if not plan_exists:
+        if not plan_exists and not pa_source_is_suppressed(a.alert_id):
             db.session.add(ContinuousActionPlan(
                 origin="Wazuh",
                 standard="ISO27001",
@@ -177194,7 +177292,7 @@ def cont_comp_generate_evidences_and_actions():
             )
 
         plan_exists = ContinuousActionPlan.query.filter_by(source_ref=s.unique_key, action_type="Hallazgo").first()
-        if not plan_exists:
+        if not plan_exists and not pa_source_is_suppressed(s.unique_key):
             db.session.add(ContinuousActionPlan(
                 origin="Wazuh",
                 standard="ISO27001",
@@ -179312,6 +179410,79 @@ def pa_clean_text(value):
     return text_value
 
 
+def pa_normalize_duplicate_value(value):
+    """
+    Normaliza texto para detectar duplicados aunque cambien mayúsculas,
+    acentos o espacios.
+    """
+    value = pa_clean_text(value)
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(char for char in value if not unicodedata.combining(char))
+    return re.sub(r"\s+", " ", value).strip().casefold()
+
+
+def pa_duplicate_signature(values):
+    """
+    Identidad funcional del plan. Responsable, fecha, estado y descripción
+    pueden actualizarse sin convertir el mismo plan en uno diferente.
+    """
+    fields = (
+        "origin", "standard", "control_code", "title", "asset", "action_type"
+    )
+    return tuple(pa_normalize_duplicate_value(values.get(field)) for field in fields)
+
+
+def pa_source_is_automatic(source_ref):
+    source_ref = pa_normalize_duplicate_value(source_ref)
+    return bool(source_ref) and not (
+        source_ref.startswith("manual:")
+        or source_ref.startswith("riesgo-manual:")
+    )
+
+
+def pa_source_is_suppressed(source_ref):
+    source_ref = (source_ref or "").strip()
+    if not source_ref or not pa_source_is_automatic(source_ref):
+        return False
+    return ContinuousActionPlanSuppression.query.filter_by(
+        source_ref=source_ref
+    ).first() is not None
+
+
+def pa_find_duplicate_plan(values, source_ref="", exclude_id=None):
+    """
+    Busca el plan existente por referencia de origen y, adicionalmente,
+    por su identidad funcional normalizada.
+    """
+    source_ref = (source_ref or "").strip()
+
+    if source_ref:
+        source_query = ContinuousActionPlan.query.filter_by(source_ref=source_ref)
+        if exclude_id is not None:
+            source_query = source_query.filter(ContinuousActionPlan.id != exclude_id)
+        existing = source_query.order_by(ContinuousActionPlan.id.asc()).first()
+        if existing:
+            return existing
+
+    target_signature = pa_duplicate_signature(values)
+    query = ContinuousActionPlan.query
+    if exclude_id is not None:
+        query = query.filter(ContinuousActionPlan.id != exclude_id)
+
+    for existing in query.order_by(ContinuousActionPlan.id.asc()).all():
+        existing_values = {
+            "origin": existing.origin,
+            "standard": existing.standard,
+            "control_code": existing.control_code,
+            "title": existing.title,
+            "asset": existing.asset,
+            "action_type": existing.action_type,
+        }
+        if pa_duplicate_signature(existing_values) == target_signature:
+            return existing
+    return None
+
+
 def pa_due_date_obj(value):
     raw = (value or "").strip()
     if not raw:
@@ -179387,6 +179558,20 @@ def pa_upsert_source_plan(
     plan = ContinuousActionPlan.query.filter_by(source_ref=source_ref).first()
     created = plan is None
     if created:
+        if pa_source_is_suppressed(source_ref):
+            return False
+
+        values = {
+            "origin": origin,
+            "standard": standard,
+            "control_code": control_code,
+            "title": title,
+            "asset": asset,
+            "action_type": action_type,
+        }
+        if pa_find_duplicate_plan(values, source_ref=source_ref):
+            return False
+
         plan = ContinuousActionPlan(source_ref=source_ref)
         db.session.add(plan)
 
@@ -179683,8 +179868,11 @@ def planes_accion_dashboard():
     origin = (request.args.get("origin") or "").strip()
     status = (request.args.get("status") or "").strip()
     search = (request.args.get("search") or "").strip()
+    selected_plan_id = request.args.get("plan_id", type=int)
 
     query = ContinuousActionPlan.query
+    if selected_plan_id:
+        query = query.filter(ContinuousActionPlan.id == selected_plan_id)
     if standard:
         query = query.filter(ContinuousActionPlan.standard == standard)
     if origin:
@@ -179853,9 +180041,19 @@ def planes_accion_dashboard():
                 </td>
                 <td>{{ status_badge(p.status)|safe }}</td>
                 <td>
-                  <a href="{{ url_for('planes_accion_edit', plan_id=p.id) }}" class="btn btn-sm btn-outline-primary">
-                    {% if can_write %}Gestionar{% else %}Ver{% endif %}
-                  </a>
+                  <div class="d-flex flex-wrap gap-1 justify-content-center">
+                    <a href="{{ url_for('planes_accion_edit', plan_id=p.id) }}" class="btn btn-sm btn-outline-primary">
+                      {% if can_write %}Gestionar{% else %}Ver{% endif %}
+                    </a>
+                    {% if can_write %}
+                    <form method="post" action="{{ url_for('planes_accion_delete', plan_id=p.id) }}" class="m-0"
+                          onsubmit="return confirm('¿Confirma que desea eliminar este plan de acción? Esta operación no elimina el riesgo, hallazgo o registro de origen.');">
+                      <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar plan de acción">
+                        <i class="bi bi-trash"></i> Eliminar
+                      </button>
+                    </form>
+                    {% endif %}
+                  </div>
                 </td>
               </tr>
               {% else %}
@@ -179980,18 +180178,30 @@ def planes_accion_new():
                 f"riesgo-manual:{risk_id}:{uuid.uuid4().hex}"
                 if risk_id else f"manual:{uuid.uuid4().hex}"
             )
+            values = {
+                "origin": (request.form.get("origin") or defaults["origin"]).strip(),
+                "standard": (request.form.get("standard") or defaults["standard"]).strip().upper(),
+                "control_code": (request.form.get("control_code") or "").strip(),
+                "title": title[:500],
+                "description": (request.form.get("description") or "").strip(),
+                "asset": (request.form.get("asset") or "").strip(),
+                "severity": (request.form.get("severity") or "Media").strip(),
+                "action_type": (request.form.get("action_type") or "Correctiva").strip(),
+                "responsible": (request.form.get("responsible") or "").strip(),
+                "due_date": (request.form.get("due_date") or "").strip(),
+                "status": (request.form.get("status") or "Abierto").strip(),
+            }
+            duplicate = pa_find_duplicate_plan(values, source_ref=source_ref)
+            if duplicate:
+                flash(
+                    f"El plan de acción ya existe con el ID {duplicate.id}. "
+                    "No se creó un registro repetido.",
+                    "warning",
+                )
+                return redirect(url_for("planes_accion_edit", plan_id=duplicate.id))
+
             plan = ContinuousActionPlan(
-                origin=(request.form.get("origin") or defaults["origin"]).strip(),
-                standard=(request.form.get("standard") or defaults["standard"]).strip().upper(),
-                control_code=(request.form.get("control_code") or "").strip(),
-                title=title[:500],
-                description=(request.form.get("description") or "").strip(),
-                asset=(request.form.get("asset") or "").strip(),
-                severity=(request.form.get("severity") or "Media").strip(),
-                action_type=(request.form.get("action_type") or "Correctiva").strip(),
-                responsible=(request.form.get("responsible") or "").strip(),
-                due_date=(request.form.get("due_date") or "").strip(),
-                status=(request.form.get("status") or "Abierto").strip(),
+                **values,
                 source_ref=source_ref,
                 raw_json=json.dumps({"riesgo_id": risk_id, "creado_por": pa_username(user)}, ensure_ascii=False),
             )
@@ -180059,17 +180269,34 @@ def planes_accion_edit(plan_id):
         if not can_write:
             flash("El rol actual solo puede consultar el plan de acción.", "warning")
             return redirect(url_for("planes_accion_edit", plan_id=plan.id))
-        plan.origin = (request.form.get("origin") or plan.origin or "").strip()
-        plan.standard = (request.form.get("standard") or plan.standard or "SGSI").strip().upper()
-        plan.control_code = (request.form.get("control_code") or "").strip()
-        plan.title = (request.form.get("title") or plan.title or "Plan de acción").strip()[:500]
-        plan.description = (request.form.get("description") or "").strip()
-        plan.asset = (request.form.get("asset") or "").strip()
-        plan.severity = (request.form.get("severity") or "Media").strip()
-        plan.action_type = (request.form.get("action_type") or "Correctiva").strip()
-        plan.responsible = (request.form.get("responsible") or "").strip()
-        plan.due_date = (request.form.get("due_date") or "").strip()
-        plan.status = (request.form.get("status") or "Abierto").strip()
+        values = {
+            "origin": (request.form.get("origin") or plan.origin or "").strip(),
+            "standard": (request.form.get("standard") or plan.standard or "SGSI").strip().upper(),
+            "control_code": (request.form.get("control_code") or "").strip(),
+            "title": (request.form.get("title") or plan.title or "Plan de acción").strip()[:500],
+            "description": (request.form.get("description") or "").strip(),
+            "asset": (request.form.get("asset") or "").strip(),
+            "severity": (request.form.get("severity") or "Media").strip(),
+            "action_type": (request.form.get("action_type") or "Correctiva").strip(),
+            "responsible": (request.form.get("responsible") or "").strip(),
+            "due_date": (request.form.get("due_date") or "").strip(),
+            "status": (request.form.get("status") or "Abierto").strip(),
+        }
+        duplicate = pa_find_duplicate_plan(
+            values,
+            source_ref=plan.source_ref,
+            exclude_id=plan.id,
+        )
+        if duplicate:
+            flash(
+                f"Los cambios generarían un duplicado del plan ID {duplicate.id}. "
+                "No se guardaron los cambios.",
+                "warning",
+            )
+            return redirect(url_for("planes_accion_edit", plan_id=plan.id))
+
+        for field, value in values.items():
+            setattr(plan, field, value)
         db.session.commit()
         registrar_log(pa_username(user), f"Actualizó el plan de acción {plan.id}: {plan.title}.")
         flash("Plan de acción actualizado correctamente.", "success")
@@ -180113,6 +180340,52 @@ def planes_accion_edit(plan_id):
         ],
     )
     return pa_render_page(inner)
+
+
+@app.route("/planes_accion/<int:plan_id>/eliminar", methods=["POST"])
+@login_required
+def planes_accion_delete(plan_id):
+    user, response = pa_require_write()
+    if response:
+        return response
+
+    plan = ContinuousActionPlan.query.get_or_404(plan_id)
+    deleted_title = plan.title or "Plan de acción"
+    source_ref = (plan.source_ref or "").strip()
+    suppression_refs = set()
+
+    if pa_source_is_automatic(source_ref):
+        suppression_refs.add(source_ref)
+
+    # Un plan manual de un riesgo también puede provenir de la sincronización.
+    try:
+        raw_data = json.loads(plan.raw_json or "{}")
+        risk_source_id = raw_data.get("riesgo_id") if isinstance(raw_data, dict) else None
+        if risk_source_id:
+            suppression_refs.add(f"riesgo-existente:{risk_source_id}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pass
+
+    for suppressed_ref in suppression_refs:
+        suppression = ContinuousActionPlanSuppression.query.filter_by(
+            source_ref=suppressed_ref
+        ).first()
+        if suppression is None:
+            suppression = ContinuousActionPlanSuppression(source_ref=suppressed_ref)
+            db.session.add(suppression)
+        suppression.deleted_plan_id = plan.id
+        suppression.deleted_title = deleted_title[:500]
+        suppression.deleted_by = pa_username(user)
+        suppression.deleted_at = datetime.utcnow()
+
+    db.session.delete(plan)
+    db.session.commit()
+    registrar_log(
+        pa_username(user),
+        f"Eliminó el plan de acción {plan_id}: {deleted_title}.",
+    )
+    flash("Plan de acción eliminado correctamente.", "success")
+    return redirect(url_for("planes_accion_dashboard"))
 
 # ============================================================================================================================================
 #                         FIN CAPÍTULO INDEPENDIENTE: PLAN DE ACCIÓN
