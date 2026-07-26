@@ -12583,7 +12583,7 @@ MENU_SECTIONS = [
                     "module": "Cumplimiento Continuo"
                 },
                 {
-                    "label": "Conexión Wazuh",
+                    "label": "Herramienta XDR (Wazuh)",
                     "href": "/cumplimiento_continuo/wazuh",
                     "icon": "bi-plug",
                     "btn": "btn-primary",
@@ -12636,6 +12636,13 @@ MENU_SECTIONS = [
                     "href": "/cumplimiento_continuo/firewall",
                     "icon": "bi-bricks",
                     "btn": "btn-danger",
+                    "module": "Cumplimiento Continuo"
+                },
+                {
+                    "label": "Gobierno de Active Directory",
+                    "href": "/cumplimiento_continuo/active_directory/",
+                    "icon": "bi-person-lock",
+                    "btn": "btn-primary",
                     "module": "Cumplimiento Continuo"
                 },
             ],
@@ -12867,6 +12874,7 @@ def _sgsi_build_global_menu_html():
                     "wazuh",
                     "sincronizacion",
                     "firewall",
+                    "active_directory",
                     "estandar",
                     "evidencias",
                     "planes"
@@ -13321,7 +13329,7 @@ def _sgsi_build_global_menu_html():
                 "endpoints": ["cumplimiento_continuo"],
                 "exact": True
             },
-            "Conexión Wazuh": {
+            "Herramienta XDR (Wazuh)": {
                 "paths": ["/cumplimiento_continuo/wazuh"],
                 "endpoints": ["cumplimiento_continuo_wazuh"]
             },
@@ -18016,10 +18024,64 @@ class Riesgo(db.Model):
     # ✅ Relación: permite acceder a r.tipo_riesgo_rel.nombre
     tipo_riesgo_rel = db.relationship("TipoRiesgo", lazy="joined")
 
+    controles_detalle = db.relationship(
+        "RiesgoControl",
+        back_populates="riesgo_rel",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="RiesgoControl.orden",
+        lazy="selectin",
+    )
+
     # ✅ Propiedad para que tu tabla use key="tipo_riesgo"
     @property
     def tipo_riesgo(self):
         return self.tipo_riesgo_rel.nombre if self.tipo_riesgo_rel else ""
+
+
+class RiesgoControl(db.Model):
+    """Evaluación individual de cada control asociado a un riesgo."""
+    __tablename__ = "riesgo_control"
+
+    id = db.Column(db.Integer, primary_key=True)
+    riesgo_id = db.Column(
+        db.Integer,
+        db.ForeignKey("riesgo.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    orden = db.Column(db.Integer, nullable=False, default=1)
+
+    estandar = db.Column(db.String(30), nullable=False)
+    codigo_control = db.Column(db.String(80), nullable=True)
+    nombre_control = db.Column(db.String(500), nullable=False)
+    descripcion_control = db.Column(db.Text, nullable=True)
+
+    asignacion = db.Column(db.String(50), nullable=True)
+    cargo = db.Column(db.String(255), nullable=True)
+    tipo_control = db.Column(db.String(50), nullable=True)
+    forma_control = db.Column(db.String(50), nullable=True)
+    frecuencia = db.Column(db.String(100), nullable=True)
+    funcionalidad = db.Column(db.String(50), nullable=True)
+    estado_control = db.Column(db.String(80), nullable=True)
+    evidencia_control = db.Column(db.String(50), nullable=True)
+    referencia_documental = db.Column(db.String(500), nullable=True)
+    soporte_evidencia = db.Column(db.String(500), nullable=True)
+    ejecucion_control = db.Column(db.String(50), nullable=True)
+
+    diseno_control = db.Column(db.Float, nullable=False, default=0.0)
+    valor_ejecucion_control = db.Column(db.Float, nullable=False, default=0.0)
+    solidez_individual = db.Column(db.Float, nullable=False, default=0.0)
+
+    creado_en = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    actualizado_en = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    riesgo_rel = db.relationship("Riesgo", back_populates="controles_detalle")
 
 
 def asegurar_columnas_marcos_controles_riesgo():
@@ -18028,6 +18090,7 @@ def asegurar_columnas_marcos_controles_riesgo():
     En bases nuevas, db.create_all() las crea directamente desde el modelo.
     """
     try:
+        RiesgoControl.__table__.create(bind=db.engine, checkfirst=True)
         inspector = inspect(db.engine)
         if "riesgo" not in inspector.get_table_names():
             return
@@ -18100,6 +18163,1201 @@ class ConfigImpactoResidual(db.Model):
     bajar = db.Column(db.Integer, nullable=False)
 
 
+# ============================================================
+# MOTOR ÚNICO DE CÁLCULO DE RIESGO RESIDUAL
+# - La solidez se guarda internamente entre 0 y 1.
+# - Las reglas configuradas pueden estar en 0..100 o en 0..1.
+# - En límites compartidos se aplica el rango de mayor solidez.
+# - La matriz 5x5 usa los mismos umbrales del Mapa de Calor.
+# ============================================================
+RISK_PROB_LABEL_TO_NUM = {
+    "Rara vez o Muy baja": 1,
+    "Eventualmente o baja": 2,
+    "Puede ocurrir o Moderada": 3,
+    "Probable o Alta": 4,
+    "Muy frecuente o Muy Alta": 5,
+}
+RISK_PROB_NUM_TO_LABEL = {v: k for k, v in RISK_PROB_LABEL_TO_NUM.items()}
+
+RISK_IMPACT_LABEL_TO_NUM = {
+    "Insignificante o Inferior": 1,
+    "Menor": 2,
+    "Moderado o Importante": 3,
+    "Mayor": 4,
+    "Catastrófico o Crítico": 5,
+}
+RISK_IMPACT_NUM_TO_LABEL = {v: k for k, v in RISK_IMPACT_LABEL_TO_NUM.items()}
+
+RISK_CONTROL_DESIGN_MAPS = {
+    "asignacion": {"asignado": 0.20, "no asignado": 0.0},
+    "tipo_control": {"preventivo": 0.15, "detectivo": 0.10, "correctivo": 0.07},
+    "forma_control": {"automatico": 0.15, "semiautomatico": 0.07, "manual": 0.05},
+    "funcionalidad": {"adecuada": 0.15, "no adecuada": 0.0},
+    "estado_control": {
+        "implementado y documentado": 0.20,
+        "implementado y no documentado": 0.07,
+        "no documentado": 0.0,
+    },
+    "evidencia_control": {"con evidencia": 0.15, "sin evidencia": 0.0},
+}
+RISK_CONTROL_EXECUTION_MAP = {
+    "siempre": 1.0,
+    "casi siempre": 0.5,
+    "nunca": 0.0,
+}
+
+
+def riesgo_normalizar_opcion(valor):
+    texto = str(valor or "").strip().lower()
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    return re.sub(r"\s+", " ", texto).strip()
+
+
+def riesgo_float(valor, default=None):
+    if valor is None:
+        return default
+    texto = str(valor).strip().replace("%", "").replace(",", ".")
+    if not texto:
+        return default
+    try:
+        return float(texto)
+    except (TypeError, ValueError):
+        return default
+
+
+def riesgo_normalizar_fraccion(valor, default=0.0):
+    """Convierte 80, '80%', 0.8 o '0.8' a 0.8 y limita a 0..1."""
+    numero = riesgo_float(valor, None)
+    if numero is None:
+        return default
+    if numero > 1.0:
+        numero = numero / 100.0
+    return max(0.0, min(1.0, float(numero)))
+
+
+def riesgo_formatear_porcentaje(fraccion):
+    porcentaje = riesgo_normalizar_fraccion(fraccion, 0.0) * 100.0
+    return f"{porcentaje:.2f}".rstrip("0").rstrip(".") + "%"
+
+
+def riesgo_nivel_numero(valor, tipo="probabilidad", default=1):
+    mapa = RISK_PROB_LABEL_TO_NUM if tipo == "probabilidad" else RISK_IMPACT_LABEL_TO_NUM
+    if valor in mapa:
+        return mapa[valor]
+
+    numero = riesgo_float(valor, None)
+    if numero is not None:
+        return max(1, min(5, int(round(numero))))
+
+    texto = riesgo_normalizar_opcion(valor)
+    if tipo == "probabilidad":
+        if "muy frecuente" in texto or "muy alta" in texto:
+            return 5
+        if "probable" in texto or texto == "alta":
+            return 4
+        if "puede ocurrir" in texto or "moderada" in texto:
+            return 3
+        if "eventual" in texto or texto == "baja":
+            return 2
+        if "rara" in texto or "muy baja" in texto:
+            return 1
+    else:
+        if "catastrofico" in texto or "critico" in texto:
+            return 5
+        if texto == "mayor":
+            return 4
+        if "moderado" in texto or "importante" in texto:
+            return 3
+        if texto == "menor":
+            return 2
+        if "insignificante" in texto or "inferior" in texto:
+            return 1
+    return max(1, min(5, int(default or 1)))
+
+
+def riesgo_clasificar_puntaje(puntaje):
+    """Umbrales oficiales usados por el mapa de calor del módulo."""
+    valor = max(1, min(25, int(round(float(puntaje or 1)))))
+    if valor <= 4:
+        return "Bajo"
+    if valor <= 8:
+        return "Medio"
+    if valor <= 12:
+        return "Alto"
+    if valor <= 20:
+        return "Muy Alto"
+    return "Extremo"
+
+
+def riesgo_normalizar_reglas(reglas):
+    normalizadas = []
+    for posicion, regla in enumerate(reglas or []):
+        try:
+            if isinstance(regla, dict):
+                minimo = riesgo_float(regla.get("min"), None)
+                maximo = riesgo_float(regla.get("max"), None)
+                bajar = int(regla.get("bajar") or 0)
+            else:
+                minimo = riesgo_float(getattr(regla, "min", None), None)
+                maximo = riesgo_float(getattr(regla, "max", None), None)
+                bajar = int(getattr(regla, "bajar", 0) or 0)
+            if minimo is None or maximo is None:
+                continue
+
+            # Compatibilidad con configuraciones antiguas expresadas como 0..1.
+            if max(abs(minimo), abs(maximo)) <= 1.0:
+                minimo *= 100.0
+                maximo *= 100.0
+
+            rango_min = max(0.0, min(100.0, min(minimo, maximo)))
+            rango_max = max(0.0, min(100.0, max(minimo, maximo)))
+            normalizadas.append({
+                "rmin": rango_min,
+                "rmax": rango_max,
+                "bajar": max(0, min(4, bajar)),
+                "posicion": posicion,
+            })
+        except Exception as exc:
+            print("[WARN] Regla residual inválida:", repr(exc))
+
+    # En límites compartidos (ej. 60-80 y 80-100), prevalece el rango superior.
+    return sorted(
+        normalizadas,
+        key=lambda item: (item["rmin"], -(item["rmax"] - item["rmin"]), -item["posicion"]),
+        reverse=True,
+    )
+
+
+def riesgo_resolver_regla_solidez(solidez_individual, reglas):
+    """
+    Resuelve la banda configurada para una solidez entre 0 y 100.
+
+    Prioridad:
+    1. Coincidencia exacta dentro del intervalo.
+    2. Si existen huecos entre bandas, usa la banda más cercana.
+    3. Si el porcentaje supera el máximo configurado, usa la banda superior.
+    4. Si queda por debajo del mínimo configurado, usa la banda inferior.
+
+    De esta manera una solidez válida nunca queda sin regla por decimales,
+    límites compartidos o pequeños huecos de configuración.
+    """
+    solidez_pct = riesgo_normalizar_fraccion(solidez_individual, 0.0) * 100.0
+    reglas_norm = riesgo_normalizar_reglas(reglas)
+
+    if not reglas_norm:
+        return None, solidez_pct, "sin_reglas"
+
+    # Coincidencia directa. La lista ya está ordenada para que en límites
+    # compartidos prevalezca la banda de mayor solidez.
+    for regla in reglas_norm:
+        if regla["rmin"] <= solidez_pct <= regla["rmax"]:
+            return regla, solidez_pct, "exacta"
+
+    # Por encima o por debajo de todo el instrumento.
+    banda_superior = max(reglas_norm, key=lambda item: (item["rmax"], item["rmin"]))
+    banda_inferior = min(reglas_norm, key=lambda item: (item["rmin"], item["rmax"]))
+    if solidez_pct > banda_superior["rmax"]:
+        return banda_superior, solidez_pct, "superior"
+    if solidez_pct < banda_inferior["rmin"]:
+        return banda_inferior, solidez_pct, "inferior"
+
+    # Hueco entre intervalos: selecciona la banda más cercana. En empate,
+    # privilegia la banda superior porque representa mayor solidez.
+    def distancia(item):
+        if solidez_pct < item["rmin"]:
+            return item["rmin"] - solidez_pct
+        if solidez_pct > item["rmax"]:
+            return solidez_pct - item["rmax"]
+        return 0.0
+
+    regla = min(
+        reglas_norm,
+        key=lambda item: (distancia(item), -item["rmin"], -item["rmax"]),
+    )
+    return regla, solidez_pct, "cercana"
+
+
+def riesgo_reduccion_por_solidez(solidez_individual, reglas):
+    regla, solidez_pct, modo = riesgo_resolver_regla_solidez(solidez_individual, reglas)
+    if regla is None:
+        return 0, None, solidez_pct
+    regla_aplicada = dict(regla)
+    regla_aplicada["modo"] = modo
+    return regla_aplicada["bajar"], regla_aplicada, solidez_pct
+
+
+def riesgo_calcular_solidez_control(
+    asignacion=None,
+    tipo_control=None,
+    forma_control=None,
+    funcionalidad=None,
+    estado_control=None,
+    evidencia_control=None,
+    ejecucion_control=None,
+    diseno_control=None,
+    solidez_existente=None,
+):
+    valores = {
+        "asignacion": asignacion,
+        "tipo_control": tipo_control,
+        "forma_control": forma_control,
+        "funcionalidad": funcionalidad,
+        "estado_control": estado_control,
+        "evidencia_control": evidencia_control,
+    }
+
+    componentes = {}
+    parametros_reconocidos = False
+    for campo, valor in valores.items():
+        clave = riesgo_normalizar_opcion(valor)
+        mapa = RISK_CONTROL_DESIGN_MAPS[campo]
+        if clave in mapa:
+            parametros_reconocidos = True
+            componentes[campo] = mapa[clave]
+        else:
+            componentes[campo] = 0.0
+
+    if parametros_reconocidos:
+        diseno = max(0.0, min(1.0, sum(componentes.values())))
+    else:
+        diseno = riesgo_normalizar_fraccion(diseno_control, None)
+
+    clave_ejecucion = riesgo_normalizar_opcion(ejecucion_control)
+    ejecucion = RISK_CONTROL_EXECUTION_MAP.get(clave_ejecucion)
+
+    if diseno is not None and ejecucion is not None:
+        solidez = max(0.0, min(1.0, (diseno * 0.60) + (ejecucion * 0.40)))
+        calculada = True
+    else:
+        solidez = riesgo_normalizar_fraccion(solidez_existente, 0.0)
+        calculada = False
+
+    return {
+        "diseno": diseno,
+        "ejecucion": ejecucion,
+        "solidez": round(solidez, 6),
+        "componentes": componentes,
+        "calculada": calculada,
+    }
+
+
+# ============================================================
+# CONTROLES MÚLTIPLES POR RIESGO
+# ============================================================
+RISK_CONTROL_STANDARD_LABELS = {
+    "ISO_27001": "ISO 27001 / Anexo A (ISO 27002:2022)",
+    "NIST_CSF": "NIST CSF 2.0",
+    "PCI_DSS": "PCI DSS",
+    "SOC_2": "SOC 2",
+    "OTROS": "Otros",
+}
+
+
+def riesgo_normalizar_estandar_control(valor):
+    clave = riesgo_normalizar_opcion(valor).replace("/", " ").replace("_", " ")
+    if clave in {"iso 27001", "iso 27002", "iso iec 27001", "iso iec 27002", "iso 27001 anexo a"}:
+        return "ISO_27001"
+    if clave in {"nist", "nist csf", "nist csf 2.0", "nist csf 20"}:
+        return "NIST_CSF"
+    if clave in {"pci", "pci dss", "pcidss"}:
+        return "PCI_DSS"
+    if clave in {"soc", "soc 2", "soc2"}:
+        return "SOC_2"
+    if clave in {"otros", "otro", "other"}:
+        return "OTROS"
+    if str(valor or "").strip() in RISK_CONTROL_STANDARD_LABELS:
+        return str(valor).strip()
+    return ""
+
+
+def riesgo_catalogo_fuente(estandar):
+    return {
+        "ISO_27001": ISO_27002_CONTROLES,
+        "NIST_CSF": NIST_CSF_20_CONTROLES,
+        "PCI_DSS": PCI_DSS_CONTROLES,
+        "SOC_2": SOC2_CONTROLES,
+    }.get(estandar, [])
+
+
+def riesgo_texto_resumido(valor, limite=135):
+    texto = re.sub(r"\s+", " ", str(valor or "")).strip()
+    if len(texto) <= limite:
+        return texto
+    return texto[: limite - 1].rstrip() + "…"
+
+
+def riesgo_catalogos_para_frontend():
+    temas_iso = {
+        str(item.get("nr") or "").strip(): str(item.get("topic") or "").strip()
+        for item in (globals().get("FULL_SOA") or [])
+        if isinstance(item, dict)
+    }
+    resultado = {}
+    for estandar in ("ISO_27001", "NIST_CSF", "PCI_DSS", "SOC_2"):
+        items = []
+        for codigo, descripcion in riesgo_catalogo_fuente(estandar):
+            codigo = str(codigo or "").strip()
+            descripcion = str(descripcion or "").strip()
+            nombre = temas_iso.get(codigo) if estandar == "ISO_27001" else ""
+            if not nombre:
+                nombre = riesgo_texto_resumido(descripcion)
+            items.append({
+                "codigo": codigo,
+                "nombre": nombre,
+                "descripcion": descripcion,
+            })
+        resultado[estandar] = items
+    return resultado
+
+
+def riesgo_buscar_control_catalogo(estandar, codigo):
+    estandar = riesgo_normalizar_estandar_control(estandar)
+    codigo = str(codigo or "").strip()
+    if not estandar or not codigo or estandar == "OTROS":
+        return None
+    for item in riesgo_catalogos_para_frontend().get(estandar, []):
+        if item["codigo"] == codigo:
+            return item
+    return None
+
+
+def riesgo_lista_form(form, nombre):
+    try:
+        return form.getlist(nombre)
+    except Exception:
+        valor = form.get(nombre)
+        return [valor] if valor is not None else []
+
+
+def riesgo_extraer_controles_formulario(form):
+    campos = {
+        "estandar": riesgo_lista_form(form, "control_estandar[]"),
+        "codigo": riesgo_lista_form(form, "control_catalogo_codigo[]"),
+        "otro_nombre": riesgo_lista_form(form, "control_otro_nombre[]"),
+        "otro_descripcion": riesgo_lista_form(form, "control_otro_descripcion[]"),
+        "asignacion": riesgo_lista_form(form, "control_asignacion[]"),
+        "cargo": riesgo_lista_form(form, "control_cargo[]"),
+        "tipo_control": riesgo_lista_form(form, "control_tipo[]"),
+        "forma_control": riesgo_lista_form(form, "control_forma[]"),
+        "frecuencia": riesgo_lista_form(form, "control_frecuencia[]"),
+        "funcionalidad": riesgo_lista_form(form, "control_funcionalidad[]"),
+        "estado_control": riesgo_lista_form(form, "control_estado[]"),
+        "evidencia_control": riesgo_lista_form(form, "control_evidencia[]"),
+        "referencia_documental": riesgo_lista_form(form, "control_referencia[]"),
+        "soporte_evidencia": riesgo_lista_form(form, "control_soporte[]"),
+        "ejecucion_control": riesgo_lista_form(form, "control_ejecucion[]"),
+        # Valores históricos usados como respaldo durante la migración de
+        # riesgos anteriores y riesgos originados en Superficie de Ataque.
+        "diseno_existente": riesgo_lista_form(form, "control_diseno_existente[]"),
+        "solidez_existente": riesgo_lista_form(form, "control_solidez_existente[]"),
+    }
+    total = max((len(v) for v in campos.values()), default=0)
+
+    def valor(campo, posicion):
+        lista = campos.get(campo, [])
+        return str(lista[posicion] if posicion < len(lista) else "").strip()
+
+    controles = []
+    for i in range(total):
+        estandar = riesgo_normalizar_estandar_control(valor("estandar", i))
+        if not estandar:
+            continue
+
+        codigo = valor("codigo", i)
+        nombre = ""
+        descripcion = ""
+        if estandar == "OTROS":
+            nombre = valor("otro_nombre", i)
+            descripcion = valor("otro_descripcion", i)
+            codigo = ""
+            if not nombre:
+                continue
+        else:
+            if not codigo:
+                continue
+            catalogo = riesgo_buscar_control_catalogo(estandar, codigo)
+            if catalogo:
+                nombre = catalogo["nombre"] or codigo
+                descripcion = catalogo["descripcion"] or ""
+            else:
+                nombre = codigo
+
+        evaluacion = {
+            "asignacion": valor("asignacion", i),
+            "cargo": valor("cargo", i),
+            "tipo_control": valor("tipo_control", i),
+            "forma_control": valor("forma_control", i),
+            "frecuencia": valor("frecuencia", i),
+            "funcionalidad": valor("funcionalidad", i),
+            "estado_control": valor("estado_control", i),
+            "evidencia_control": valor("evidencia_control", i),
+            "referencia_documental": valor("referencia_documental", i),
+            "soporte_evidencia": valor("soporte_evidencia", i),
+            "ejecucion_control": valor("ejecucion_control", i),
+        }
+        calculo = riesgo_calcular_solidez_control(
+            asignacion=evaluacion["asignacion"],
+            tipo_control=evaluacion["tipo_control"],
+            forma_control=evaluacion["forma_control"],
+            funcionalidad=evaluacion["funcionalidad"],
+            estado_control=evaluacion["estado_control"],
+            evidencia_control=evaluacion["evidencia_control"],
+            ejecucion_control=evaluacion["ejecucion_control"],
+            # Si el registro proviene de una versión anterior o de
+            # Superficie de Ataque, conserva la efectividad existente hasta
+            # que la evaluación nueva esté completamente diligenciada.
+            diseno_control=valor("diseno_existente", i),
+            solidez_existente=valor("solidez_existente", i),
+        )
+        controles.append({
+            "orden": len(controles) + 1,
+            "estandar": estandar,
+            "codigo_control": codigo,
+            "nombre_control": nombre,
+            "descripcion_control": descripcion,
+            **evaluacion,
+            "diseno_control": calculo["diseno"] or 0.0,
+            "valor_ejecucion_control": calculo["ejecucion"] or 0.0,
+            "solidez_individual": calculo["solidez"],
+            "componentes": calculo["componentes"],
+        })
+    return controles
+
+
+def riesgo_calcular_solidez_grupal(controles):
+    valores = [
+        riesgo_normalizar_fraccion(c.get("solidez_individual"), 0.0)
+        for c in (controles or [])
+    ]
+    if not valores:
+        return 0.0
+    return round(sum(valores) / len(valores), 6)
+
+
+def riesgo_reemplazar_controles(riesgo, controles):
+    riesgo.controles_detalle.clear()
+    for posicion, control in enumerate(controles or [], start=1):
+        riesgo.controles_detalle.append(RiesgoControl(
+            orden=posicion,
+            estandar=control.get("estandar") or "OTROS",
+            codigo_control=control.get("codigo_control") or None,
+            nombre_control=control.get("nombre_control") or "Control sin nombre",
+            descripcion_control=control.get("descripcion_control") or None,
+            asignacion=control.get("asignacion") or None,
+            cargo=control.get("cargo") or None,
+            tipo_control=control.get("tipo_control") or None,
+            forma_control=control.get("forma_control") or None,
+            frecuencia=control.get("frecuencia") or None,
+            funcionalidad=control.get("funcionalidad") or None,
+            estado_control=control.get("estado_control") or None,
+            evidencia_control=control.get("evidencia_control") or None,
+            referencia_documental=control.get("referencia_documental") or None,
+            soporte_evidencia=control.get("soporte_evidencia") or None,
+            ejecucion_control=control.get("ejecucion_control") or None,
+            diseno_control=riesgo_normalizar_fraccion(control.get("diseno_control"), 0.0),
+            valor_ejecucion_control=riesgo_normalizar_fraccion(control.get("valor_ejecucion_control"), 0.0),
+            solidez_individual=riesgo_normalizar_fraccion(control.get("solidez_individual"), 0.0),
+        ))
+
+
+def riesgo_sincronizar_campos_legacy(riesgo, controles):
+    '''Mantiene reportes antiguos compatibles y guarda la solidez grupal efectiva.'''
+    controles = list(controles or [])
+    grupal = riesgo_calcular_solidez_grupal(controles)
+    riesgo.solidez_grupal = grupal
+    riesgo.valor = grupal
+
+    if not controles:
+        riesgo.control_codigo = None
+        riesgo.codigo_anexo = None
+        riesgo.codigo_control_pci_dss = None
+        riesgo.codigo_control_nist_csf = None
+        riesgo.codigo_control_soc2 = None
+        riesgo.descripcion_control = None
+        riesgo.solidez_individual = 0.0
+        return grupal
+
+    primero = controles[0]
+    riesgo.solidez_individual = riesgo_normalizar_fraccion(primero.get("solidez_individual"), 0.0)
+    riesgo.control_codigo = " | ".join(
+        f"{RISK_CONTROL_STANDARD_LABELS.get(c.get('estandar'), c.get('estandar'))}: "
+        f"{c.get('codigo_control') or c.get('nombre_control')}"
+        for c in controles
+    )
+    riesgo.codigo_anexo = ", ".join(c.get("codigo_control") or "" for c in controles if c.get("estandar") == "ISO_27001")
+    riesgo.codigo_control_nist_csf = ", ".join(c.get("codigo_control") or "" for c in controles if c.get("estandar") == "NIST_CSF")
+    riesgo.codigo_control_pci_dss = ", ".join(c.get("codigo_control") or "" for c in controles if c.get("estandar") == "PCI_DSS")
+    riesgo.codigo_control_soc2 = ", ".join(c.get("codigo_control") or "" for c in controles if c.get("estandar") == "SOC_2")
+    riesgo.descripcion_control = "\n\n".join(
+        f"{RISK_CONTROL_STANDARD_LABELS.get(c.get('estandar'), c.get('estandar'))} — "
+        f"{c.get('codigo_control') or c.get('nombre_control')}\n"
+        f"{c.get('nombre_control') or ''}\n{c.get('descripcion_control') or ''}".strip()
+        for c in controles
+    )
+
+    riesgo.asignacion = primero.get("asignacion")
+    riesgo.cargo = primero.get("cargo")
+    riesgo.tipo_control = primero.get("tipo_control")
+    riesgo.forma_control = primero.get("forma_control")
+    riesgo.frecuencia = primero.get("frecuencia")
+    riesgo.funcionalidad = primero.get("funcionalidad")
+    riesgo.estado_control = primero.get("estado_control")
+    riesgo.referencia_documental = primero.get("referencia_documental")
+    riesgo.evidencia_control = primero.get("evidencia_control")
+    riesgo.soporte_evidencia = primero.get("soporte_evidencia")
+    riesgo.ejecucion_control = primero.get("ejecucion_control")
+    riesgo.diseno_control = riesgo_formatear_porcentaje(primero.get("diseno_control"))
+    riesgo.valor_ejecucion_control = riesgo_normalizar_fraccion(primero.get("valor_ejecucion_control"), 0.0)
+
+    componentes = primero.get("componentes") or {}
+    riesgo.calificacion_asignacion = componentes.get("asignacion", 0.0)
+    riesgo.calificacion_tipo_control = componentes.get("tipo_control", 0.0)
+    riesgo.calificacion_forma_control = componentes.get("forma_control", 0.0)
+    riesgo.calificacion_funcionalidad = componentes.get("funcionalidad", 0.0)
+    riesgo.calificacion_estado_control = componentes.get("estado_control", 0.0)
+    riesgo.calificacion_soporte_evidencia = componentes.get("evidencia_control", 0.0)
+    return grupal
+
+
+def riesgo_control_para_dict(control):
+    return {
+        "estandar": control.estandar or "OTROS",
+        "codigo_control": control.codigo_control or "",
+        "nombre_control": control.nombre_control or "",
+        "descripcion_control": control.descripcion_control or "",
+        "asignacion": control.asignacion or "",
+        "cargo": control.cargo or "",
+        "tipo_control": control.tipo_control or "",
+        "forma_control": control.forma_control or "",
+        "frecuencia": control.frecuencia or "",
+        "funcionalidad": control.funcionalidad or "",
+        "estado_control": control.estado_control or "",
+        "evidencia_control": control.evidencia_control or "",
+        "referencia_documental": control.referencia_documental or "",
+        "soporte_evidencia": control.soporte_evidencia or "",
+        "ejecucion_control": control.ejecucion_control or "",
+        "diseno_control": riesgo_normalizar_fraccion(control.diseno_control, 0.0),
+        "solidez_individual": riesgo_normalizar_fraccion(control.solidez_individual, 0.0),
+    }
+
+
+def riesgo_controles_para_formulario(riesgo):
+    filas = list(getattr(riesgo, "controles_detalle", []) or [])
+    if filas:
+        return [riesgo_control_para_dict(c) for c in filas]
+
+    # Compatibilidad: convierte la evaluación única histórica en uno o varios controles virtuales.
+    referencias = [
+        ("ISO_27001", getattr(riesgo, "codigo_anexo", None)),
+        ("NIST_CSF", getattr(riesgo, "codigo_control_nist_csf", None)),
+        ("PCI_DSS", getattr(riesgo, "codigo_control_pci_dss", None)),
+        ("SOC_2", getattr(riesgo, "codigo_control_soc2", None)),
+    ]
+    controles = []
+    for estandar, codigo in referencias:
+        codigo = str(codigo or "").strip()
+        if not codigo:
+            continue
+        item = riesgo_buscar_control_catalogo(estandar, codigo) or {
+            "codigo": codigo,
+            "nombre": codigo,
+            "descripcion": "",
+        }
+        controles.append({
+            "estandar": estandar,
+            "codigo_control": codigo,
+            "nombre_control": item.get("nombre") or codigo,
+            "descripcion_control": item.get("descripcion") or "",
+        })
+
+    if not controles and (getattr(riesgo, "control_codigo", None) or getattr(riesgo, "descripcion_control", None)):
+        controles.append({
+            "estandar": "OTROS",
+            "codigo_control": "",
+            "nombre_control": getattr(riesgo, "control_codigo", None) or "Control existente",
+            "descripcion_control": getattr(riesgo, "descripcion_control", None) or "",
+        })
+
+    for control in controles:
+        control.update({
+            "asignacion": getattr(riesgo, "asignacion", None) or "",
+            "cargo": getattr(riesgo, "cargo", None) or "",
+            "tipo_control": getattr(riesgo, "tipo_control", None) or "",
+            "forma_control": getattr(riesgo, "forma_control", None) or "",
+            "frecuencia": getattr(riesgo, "frecuencia", None) or "",
+            "funcionalidad": getattr(riesgo, "funcionalidad", None) or "",
+            "estado_control": getattr(riesgo, "estado_control", None) or "",
+            "evidencia_control": getattr(riesgo, "evidencia_control", None) or "",
+            "referencia_documental": getattr(riesgo, "referencia_documental", None) or "",
+            "soporte_evidencia": getattr(riesgo, "soporte_evidencia", None) or "",
+            "ejecucion_control": getattr(riesgo, "ejecucion_control", None) or "",
+            "diseno_control": riesgo_normalizar_fraccion(getattr(riesgo, "diseno_control", None), 0.0),
+            "solidez_individual": riesgo_normalizar_fraccion(getattr(riesgo, "solidez_individual", None), 0.0),
+        })
+    return controles
+
+
+def riesgo_json_seguro(valor):
+    return json.dumps(valor, ensure_ascii=False).replace("</", "<\\/")
+
+
+def riesgo_controles_widget_html(controles_iniciales=None, reglas_prob=None, reglas_imp=None, section_class="riskform-section-title"):
+    catalogos_json = riesgo_json_seguro(riesgo_catalogos_para_frontend())
+    iniciales_json = riesgo_json_seguro(controles_iniciales or [])
+    reglas_prob_json = riesgo_json_seguro(reglas_prob or [])
+    reglas_imp_json = riesgo_json_seguro(reglas_imp or [])
+    plantilla = r'''
+<div class="col-12">
+  <div class="%SECTION_CLASS% risk-controls-section-header">
+    <span>🧩 Controles Actuales - Evaluación del Control</span>
+    <button type="button" class="btn btn-outline-primary btn-sm rounded-pill" onclick="riesgoAgregarControl()">
+      ➕ Agregar control
+    </button>
+  </div>
+  <div class="risk-controls-help">
+    Seleccione el estándar y el control. Cada control tiene su propia evaluación, diseño y solidez individual. Los riesgos históricos conservan su efectividad hasta completar la nueva evaluación.
+  </div>
+</div>
+<div class="col-12">
+  <div id="risk-controls-container" class="risk-controls-container"></div>
+</div>
+
+<style>
+  .risk-controls-section-header{display:flex!important;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .risk-controls-help{font-size:.78rem;color:#64748b;margin:-5px 0 10px 2px}
+  .risk-controls-container{display:flex;flex-direction:column;gap:14px}
+  .risk-control-card{border:1px solid #cfe0f5;border-radius:16px;background:linear-gradient(180deg,#f8fbff,#fff);box-shadow:0 8px 18px rgba(15,23,42,.08);padding:14px}
+  .risk-control-card-header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;padding-bottom:9px;border-bottom:1px solid #dbe8f7}
+  .risk-control-card-title{font-weight:950;color:#0b4a8f;font-size:.88rem}
+  .risk-control-card-badge{font-size:.68rem;font-weight:900;color:#1d4f8f;background:#e7f1ff;border:1px solid #cfe0f5;border-radius:999px;padding:4px 9px}
+  .risk-control-remove{border:none;background:#fff1f2;color:#b91c1c;border-radius:999px;font-weight:900;font-size:.72rem;padding:5px 10px}
+  .risk-control-result{background:#eff6ff!important;color:#0b4a8f!important;font-weight:950!important}
+  .risk-control-description{min-height:82px!important}
+  .risk-control-hidden{display:none!important}
+  @media(max-width:768px){.risk-controls-section-header .btn{width:100%}.risk-control-card{padding:10px}}
+</style>
+
+<script>
+(function(){
+  const CATALOGOS = %CATALOGOS%;
+  const INICIALES = %INICIALES%;
+  const REGLAS_PROB = %REGLAS_PROB%;
+  const REGLAS_IMP = %REGLAS_IMP%;
+  const ETIQUETAS = {
+    ISO_27001: 'ISO 27001 / Anexo A',
+    NIST_CSF: 'NIST CSF 2.0',
+    PCI_DSS: 'PCI DSS',
+    SOC_2: 'SOC 2',
+    OTROS: 'Otros'
+  };
+
+  function esc(v){
+    return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+  }
+  function seleccionado(actual, valor){ return String(actual || '') === valor ? 'selected' : ''; }
+  function opciones(lista, actual){
+    return ['<option value="">Seleccione...</option>'].concat(
+      lista.map(v => `<option value="${esc(v)}" ${seleccionado(actual,v)}>${esc(v)}</option>`)
+    ).join('');
+  }
+  function opcionesEstandar(actual){
+    return '<option value="">Seleccione un estándar...</option>' + Object.entries(ETIQUETAS)
+      .map(([k,v]) => `<option value="${k}" ${seleccionado(actual,k)}>${esc(v)}</option>`).join('');
+  }
+  function buscarCatalogo(estandar, codigo){
+    return (CATALOGOS[estandar] || []).find(x => String(x.codigo) === String(codigo)) || null;
+  }
+  function opcionesCatalogo(estandar, actual){
+    return '<option value="">Seleccione un control...</option>' + (CATALOGOS[estandar] || []).map(item => {
+      const label = `${item.codigo} - ${item.nombre}`;
+      return `<option value="${esc(item.codigo)}" ${seleccionado(actual,item.codigo)}>${esc(label)}</option>`;
+    }).join('');
+  }
+  function valorPct(raw){
+    let n = parseFloat(String(raw || '0').replace('%','').replace(',','.'));
+    if (isNaN(n)) return 0;
+    if (!String(raw).includes('%') && n <= 1) n *= 100;
+    return Math.max(0, Math.min(100, n));
+  }
+
+  function iniciar(){
+    const container = document.getElementById('risk-controls-container');
+    if (!container || container.dataset.ready === '1') return;
+    container.dataset.ready = '1';
+
+    function renumerar(){
+      [...container.querySelectorAll('.risk-control-card')].forEach((card, i) => {
+        const titulo = card.querySelector('.risk-control-card-title');
+        const badge = card.querySelector('.risk-control-card-badge');
+        if (titulo) titulo.textContent = `Control ${i + 1}`;
+        if (badge) badge.textContent = `Evaluación individual ${i + 1}`;
+      });
+    }
+
+    function actualizarGrupo(){
+      const solidos = [...container.querySelectorAll('.risk-control-card')].filter(card => {
+        const estandar = card.querySelector('[name="control_estandar[]"]')?.value || '';
+        const codigo = card.querySelector('[name="control_catalogo_codigo[]"]')?.value || '';
+        const otro = card.querySelector('[name="control_otro_nombre[]"]')?.value.trim() || '';
+        return estandar && (estandar === 'OTROS' ? otro : codigo);
+      }).map(card => valorPct(card.querySelector('[name="control_solidez_visual[]"]')?.value || '0'));
+
+      const promedio = solidos.length ? solidos.reduce((a,b) => a + b, 0) / solidos.length : 0;
+      const campoGrupo = document.getElementById('solidez_grupal');
+      const campoValor = document.getElementById('valor');
+      if (campoGrupo) {
+        campoGrupo.value = promedio.toFixed(2) + '%';
+        campoGrupo.dispatchEvent(new Event('input', {bubbles:true}));
+      }
+      if (campoValor) campoValor.value = promedio.toFixed(2) + '%';
+      if (typeof window.riesgoActualizarResidualGrupal === 'function') window.riesgoActualizarResidualGrupal();
+    }
+
+    function calcularTarjeta(card){
+      const get = nombre => card.querySelector(`[name="${nombre}"]`)?.value || '';
+      const mapas = {
+        asignacion: {'Asignado':0.20,'No Asignado':0},
+        tipo: {'Preventivo':0.15,'Detectivo':0.10,'Correctivo':0.07},
+        forma: {'Automático':0.15,'Semiautomático':0.07,'Manual':0.05},
+        funcionalidad: {'Adecuada':0.15,'No Adecuada':0},
+        estado: {'Implementado y Documentado':0.20,'Implementado y No Documentado':0.07,'No Documentado':0},
+        evidencia: {'Con Evidencia':0.15,'Sin Evidencia':0},
+        ejecucion: {'Siempre':1.0,'Casi Siempre':0.5,'Nunca':0}
+      };
+      const valoresDiseno = [
+        get('control_asignacion[]'),
+        get('control_tipo[]'),
+        get('control_forma[]'),
+        get('control_funcionalidad[]'),
+        get('control_estado[]'),
+        get('control_evidencia[]')
+      ];
+      const evaluacionDisenoCompleta = valoresDiseno.every(v => String(v || '').trim() !== '');
+      const ejecucionTexto = get('control_ejecucion[]');
+      const ejecucion = mapas.ejecucion[ejecucionTexto];
+
+      const disenoCalculado =
+        (mapas.asignacion[get('control_asignacion[]')] || 0) +
+        (mapas.tipo[get('control_tipo[]')] || 0) +
+        (mapas.forma[get('control_forma[]')] || 0) +
+        (mapas.funcionalidad[get('control_funcionalidad[]')] || 0) +
+        (mapas.estado[get('control_estado[]')] || 0) +
+        (mapas.evidencia[get('control_evidencia[]')] || 0);
+
+      // Los riesgos generados desde Superficie de Ataque pueden traer una
+      // efectividad histórica y valores de ejecución como Fuerte/Débil. Al
+      // editar no se debe convertir esa solidez a 0 % antes de diligenciar
+      // completamente la nueva evaluación por control.
+      const disenoExistente = valorPct(card.querySelector('.risk-control-existing-design')?.value || '0') / 100;
+      const solidezExistente = valorPct(card.querySelector('.risk-control-existing-solidity')?.value || '0') / 100;
+      const puedeRecalcular = evaluacionDisenoCompleta && ejecucion !== undefined;
+      const diseno = puedeRecalcular ? disenoCalculado : disenoExistente;
+      const solidez = puedeRecalcular
+        ? ((disenoCalculado * 0.60) + (ejecucion * 0.40))
+        : solidezExistente;
+
+      const campoDiseno = card.querySelector('[name="control_diseno_visual[]"]');
+      const campoSolidez = card.querySelector('[name="control_solidez_visual[]"]');
+      if (campoDiseno) campoDiseno.value = (diseno * 100).toFixed(2) + '%';
+      if (campoSolidez) campoSolidez.value = (solidez * 100).toFixed(2) + '%';
+      actualizarGrupo();
+    }
+
+    function crearTarjeta(data){
+      data = data || {};
+      const card = document.createElement('div');
+      card.className = 'risk-control-card';
+      card.innerHTML = `
+        <div class="risk-control-card-header">
+          <div><span class="risk-control-card-title">Control</span> <span class="risk-control-card-badge">Evaluación individual</span></div>
+          <button type="button" class="risk-control-remove">🗑️ Eliminar control</button>
+        </div>
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label">Estándar</label>
+            <select class="form-select risk-standard" name="control_estandar[]" required>${opcionesEstandar(data.estandar)}</select>
+          </div>
+          <div class="col-md-8 risk-catalog-group">
+            <label class="form-label">Control del estándar</label>
+            <select class="form-select risk-catalog" name="control_catalogo_codigo[]"></select>
+          </div>
+          <div class="col-md-4 risk-other-name-group risk-control-hidden">
+            <label class="form-label">Nombre del control</label>
+            <input class="form-control risk-other-name" name="control_otro_nombre[]" value="${esc(data.nombre_control || '')}" placeholder="Digite el nombre del control">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Descripción del control</label>
+            <textarea class="form-control risk-control-description" name="control_otro_descripcion[]" rows="3">${esc(data.descripcion_control || '')}</textarea>
+          </div>
+
+          <div class="col-12"><div class="fw-bold text-primary small mt-1">🧩 Evaluación y Eficacia del Control</div></div>
+          <div class="col-md-3"><label class="form-label">Asignación</label><select class="form-select risk-eval" name="control_asignacion[]" required>${opciones(['Asignado','No Asignado'],data.asignacion)}</select></div>
+          <div class="col-md-3"><label class="form-label">Cargo</label><input class="form-control risk-eval" name="control_cargo[]" value="${esc(data.cargo || '')}"></div>
+          <div class="col-md-3"><label class="form-label">Tipo de Control</label><select class="form-select risk-eval" name="control_tipo[]" required>${opciones(['Detectivo','Preventivo','Correctivo'],data.tipo_control)}</select></div>
+          <div class="col-md-3"><label class="form-label">Forma de Control</label><select class="form-select risk-eval" name="control_forma[]" required>${opciones(['Automático','Semiautomático','Manual'],data.forma_control)}</select></div>
+          <div class="col-md-3"><label class="form-label">Frecuencia</label><input class="form-control risk-eval" name="control_frecuencia[]" value="${esc(data.frecuencia || '')}"></div>
+          <div class="col-md-3"><label class="form-label">Funcionalidad</label><select class="form-select risk-eval" name="control_funcionalidad[]" required>${opciones(['Adecuada','No Adecuada'],data.funcionalidad)}</select></div>
+          <div class="col-md-3"><label class="form-label">Estado del Control</label><select class="form-select risk-eval" name="control_estado[]" required>${opciones(['Implementado y Documentado','Implementado y No Documentado','No Documentado'],data.estado_control)}</select></div>
+          <div class="col-md-3"><label class="form-label">Evidencia que Compone el Control</label><select class="form-select risk-eval" name="control_evidencia[]" required>${opciones(['Con Evidencia','Sin Evidencia'],data.evidencia_control)}</select></div>
+          <div class="col-md-3"><label class="form-label">Referencia Documental</label><input class="form-control risk-eval" name="control_referencia[]" value="${esc(data.referencia_documental || '')}"></div>
+          <div class="col-md-3"><label class="form-label">Soporte de Evidencia</label><input class="form-control risk-eval" name="control_soporte[]" value="${esc(data.soporte_evidencia || '')}"></div>
+          <div class="col-md-2"><label class="form-label">Diseño (Automático)</label><input class="form-control risk-control-result" name="control_diseno_visual[]" readonly></div>
+          <div class="col-md-2"><label class="form-label">Ejecución</label><select class="form-select risk-eval" name="control_ejecucion[]" required>${opciones(['Siempre','Casi Siempre','Nunca'],data.ejecucion_control)}</select></div>
+          <div class="col-md-2"><label class="form-label">Solidez Individual</label><input class="form-control risk-control-result" name="control_solidez_visual[]" readonly></div>
+          <input type="hidden" class="risk-control-existing-design" name="control_diseno_existente[]" value="${esc(data.diseno_control ?? '')}">
+          <input type="hidden" class="risk-control-existing-solidity" name="control_solidez_existente[]" value="${esc(data.solidez_individual ?? '')}">
+        </div>`;
+
+      container.appendChild(card);
+      const estandar = card.querySelector('.risk-standard');
+      const catalogo = card.querySelector('.risk-catalog');
+      const catalogGroup = card.querySelector('.risk-catalog-group');
+      const otherGroup = card.querySelector('.risk-other-name-group');
+      const otherName = card.querySelector('.risk-other-name');
+      const descripcion = card.querySelector('.risk-control-description');
+
+      function configurarEstandar(codigoInicial){
+        const valor = estandar.value;
+        const esOtro = valor === 'OTROS';
+        catalogGroup.classList.toggle('risk-control-hidden', esOtro);
+        otherGroup.classList.toggle('risk-control-hidden', !esOtro);
+        catalogo.required = !esOtro && !!valor;
+        otherName.required = esOtro;
+        descripcion.readOnly = !esOtro;
+        if (esOtro) {
+          catalogo.innerHTML = '<option value="">No aplica</option>';
+        } else {
+          catalogo.innerHTML = opcionesCatalogo(valor, codigoInicial || '');
+          const item = buscarCatalogo(valor, catalogo.value);
+          descripcion.value = item ? item.descripcion : '';
+        }
+        calcularTarjeta(card);
+      }
+
+      estandar.addEventListener('change', () => configurarEstandar(''));
+      catalogo.addEventListener('change', () => {
+        const item = buscarCatalogo(estandar.value, catalogo.value);
+        descripcion.value = item ? item.descripcion : '';
+        calcularTarjeta(card);
+      });
+      card.querySelectorAll('.risk-eval,.risk-other-name,.risk-control-description').forEach(campo => {
+        campo.addEventListener('change', () => calcularTarjeta(card));
+        campo.addEventListener('input', () => calcularTarjeta(card));
+      });
+      card.querySelector('.risk-control-remove').addEventListener('click', () => {
+        card.remove();
+        if (!container.querySelector('.risk-control-card')) crearTarjeta({});
+        renumerar();
+        actualizarGrupo();
+      });
+
+      configurarEstandar(data.codigo_control || '');
+      renumerar();
+      calcularTarjeta(card);
+    }
+
+    function normalizarReglas(reglas){
+      return (reglas || []).map((r,index) => {
+        let a = parseFloat(String(r.min ?? '').replace(',','.'));
+        let b = parseFloat(String(r.max ?? '').replace(',','.'));
+        if (isNaN(a) || isNaN(b)) return null;
+        if (Math.max(Math.abs(a),Math.abs(b)) <= 1){ a*=100; b*=100; }
+        return {
+          min:Math.max(0,Math.min(100,Math.min(a,b))),
+          max:Math.max(0,Math.min(100,Math.max(a,b))),
+          bajar:Math.max(0,Math.min(4,parseInt(r.bajar,10)||0)),
+          index
+        };
+      }).filter(Boolean).sort((a,b)=>(b.min-a.min)||((a.max-a.min)-(b.max-b.min))||(a.index-b.index));
+    }
+
+    function resolverRegla(reglas,pct){
+      const lista=normalizarReglas(reglas);
+      if(!lista.length) return {regla:null,modo:'sin_reglas'};
+
+      const exacta=lista.find(x=>x.min<=pct&&pct<=x.max);
+      if(exacta) return {regla:exacta,modo:'exacta'};
+
+      const superior=[...lista].sort((a,b)=>(b.max-a.max)||(b.min-a.min))[0];
+      const inferior=[...lista].sort((a,b)=>(a.min-b.min)||(a.max-b.max))[0];
+      if(pct>superior.max) return {regla:superior,modo:'superior'};
+      if(pct<inferior.min) return {regla:inferior,modo:'inferior'};
+
+      const distancia=r=>pct<r.min?r.min-pct:(pct>r.max?pct-r.max:0);
+      const cercana=[...lista].sort((a,b)=>
+        (distancia(a)-distancia(b)) || (b.min-a.min) || (b.max-a.max)
+      )[0];
+      return {regla:cercana,modo:'cercana'};
+    }
+
+    function bajar(reglas,pct){
+      const res=resolverRegla(reglas,pct);
+      return res.regla?res.regla.bajar:0;
+    }
+
+    function textoRegla(reglas,pct,tipo){
+      const res=resolverRegla(reglas,pct);
+      if(!res.regla) return `${tipo}: no hay bandas configuradas`;
+      const r=res.regla;
+      const nota=res.modo==='exacta'?'':` · ajuste ${res.modo}`;
+      return `${tipo}: ${r.min.toFixed(2)}%–${r.max.toFixed(2)}% · baja ${r.bajar} nivel(es)${nota}`;
+    }
+    function nivel(score){ if(score<=4)return'Bajo';if(score<=8)return'Medio';if(score<=12)return'Alto';if(score<=20)return'Muy Alto';return'Extremo'; }
+    const MAPA_PROB={'Rara vez o Muy baja':1,'Eventualmente o baja':2,'Puede ocurrir o Moderada':3,'Probable o Alta':4,'Muy frecuente o Muy Alta':5};
+    const MAPA_PROB_LABEL={1:'Rara vez o Muy baja',2:'Eventualmente o baja',3:'Puede ocurrir o Moderada',4:'Probable o Alta',5:'Muy frecuente o Muy Alta'};
+    const MAPA_IMP={'Insignificante o Inferior':1,'Menor':2,'Moderado o Importante':3,'Mayor':4,'Catastrófico o Crítico':5};
+    const MAPA_IMP_LABEL={1:'Insignificante o Inferior',2:'Menor',3:'Moderado o Importante',4:'Mayor',5:'Catastrófico o Crítico'};
+
+    function actualizarInherente(){
+      const p=MAPA_PROB[document.getElementById('prob_inh')?.value||'']||0;
+      const i=MAPA_IMP[document.getElementById('imp_inh')?.value||'']||0;
+      const campo=document.getElementById('riesgo_inherente');
+      if(campo) campo.value=(p&&i)?`${p*i} (${nivel(p*i)})`:'';
+    }
+    function actualizarResidual(){
+      actualizarInherente();
+      const p=MAPA_PROB[document.getElementById('prob_inh')?.value||'']||1;
+      const i=MAPA_IMP[document.getElementById('imp_inh')?.value||'']||1;
+      const pct=valorPct(document.getElementById('solidez_grupal')?.value||'0');
+      const bajaProb=bajar(REGLAS_PROB,pct);
+      const bajaImp=bajar(REGLAS_IMP,pct);
+      const pr=Math.max(1,p-bajaProb);
+      const ir=Math.max(1,i-bajaImp);
+      const cp=document.getElementById('cuadrante_prob');
+      const ci=document.getElementById('cuadrante_imp');
+      const rr=document.getElementById('riesgo_residual');
+      const detalle=document.getElementById('detalle_regla_residual');
+      if(cp) cp.value=MAPA_PROB_LABEL[pr];
+      if(ci) ci.value=MAPA_IMP_LABEL[ir];
+      if(rr) rr.value=`${pr*ir} (${nivel(pr*ir)})`;
+      if(detalle){
+        detalle.textContent=
+          textoRegla(REGLAS_PROB,pct,'Probabilidad')+' | '+
+          textoRegla(REGLAS_IMP,pct,'Impacto');
+      }
+    }
+    window.riesgoActualizarResidualGrupal=actualizarResidual;
+    window.actualizarRiesgoResidualDesdeParametros=actualizarResidual;
+    window.calcularRiesgoInherente=actualizarInherente;
+    window.calcularRiesgoResidual=actualizarResidual;
+    window.riesgoAgregarControl=() => crearTarjeta({});
+
+    (INICIALES.length ? INICIALES : [{}]).forEach(crearTarjeta);
+    ['prob_inh','imp_inh'].forEach(id => document.getElementById(id)?.addEventListener('change',actualizarResidual));
+    actualizarGrupo();
+    actualizarResidual();
+  }
+
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar);
+  else iniciar();
+})();
+</script>
+'''
+    return (plantilla
+        .replace("%SECTION_CLASS%", section_class)
+        .replace("%CATALOGOS%", catalogos_json)
+        .replace("%INICIALES%", iniciales_json)
+        .replace("%REGLAS_PROB%", reglas_prob_json)
+        .replace("%REGLAS_IMP%", reglas_imp_json))
+
+
+def riesgo_controles_detalle_html(riesgo):
+    controles = riesgo_controles_para_formulario(riesgo)
+    if not controles:
+        return '<div class="col-12"><div class="alert alert-secondary mb-0">No hay controles registrados para este riesgo.</div></div>'
+    bloques = []
+    for i, c in enumerate(controles, start=1):
+        codigo = c.get("codigo_control") or c.get("nombre_control") or "—"
+        estandar = RISK_CONTROL_STANDARD_LABELS.get(c.get("estandar"), c.get("estandar") or "Otros")
+        bloques.append(f'''
+        <div class="col-12">
+          <div class="border rounded-4 p-3 bg-light mb-2">
+            <div class="d-flex justify-content-between gap-2 flex-wrap mb-2">
+              <strong class="text-primary">Control {i}: {escape(estandar)} — {escape(codigo)}</strong>
+              <span class="badge bg-primary">Solidez individual: {riesgo_formatear_porcentaje(c.get('solidez_individual'))}</span>
+            </div>
+            <div class="small mb-2"><b>Nombre:</b> {escape(c.get('nombre_control') or '—')}</div>
+            <div class="small text-muted mb-3" style="white-space:pre-wrap">{escape(c.get('descripcion_control') or '—')}</div>
+            <div class="row g-2 small">
+              <div class="col-md-3"><b>Asignación:</b> {escape(c.get('asignacion') or '—')}</div>
+              <div class="col-md-3"><b>Cargo:</b> {escape(c.get('cargo') or '—')}</div>
+              <div class="col-md-3"><b>Tipo:</b> {escape(c.get('tipo_control') or '—')}</div>
+              <div class="col-md-3"><b>Forma:</b> {escape(c.get('forma_control') or '—')}</div>
+              <div class="col-md-3"><b>Frecuencia:</b> {escape(c.get('frecuencia') or '—')}</div>
+              <div class="col-md-3"><b>Funcionalidad:</b> {escape(c.get('funcionalidad') or '—')}</div>
+              <div class="col-md-3"><b>Estado:</b> {escape(c.get('estado_control') or '—')}</div>
+              <div class="col-md-3"><b>Evidencia:</b> {escape(c.get('evidencia_control') or '—')}</div>
+              <div class="col-md-4"><b>Referencia:</b> {escape(c.get('referencia_documental') or '—')}</div>
+              <div class="col-md-4"><b>Soporte:</b> {escape(c.get('soporte_evidencia') or '—')}</div>
+              <div class="col-md-2"><b>Diseño:</b> {riesgo_formatear_porcentaje(c.get('diseno_control'))}</div>
+              <div class="col-md-2"><b>Ejecución:</b> {escape(c.get('ejecucion_control') or '—')}</div>
+            </div>
+          </div>
+        </div>''')
+    return "".join(bloques)
+
+
+def riesgo_describir_regla(regla):
+    if not regla:
+        return "sin banda configurada"
+    return (
+        f"{float(regla.get('rmin', 0.0)):.2f}%-{float(regla.get('rmax', 0.0)):.2f}%"
+        f" · {regla.get('modo', 'exacta')}"
+    )
+
+
+def riesgo_calcular_resultados(prob_inh, imp_inh, solidez_grupal, reglas_prob=None, reglas_imp=None):
+    prob_inh_num = riesgo_nivel_numero(prob_inh, "probabilidad", 1)
+    imp_inh_num = riesgo_nivel_numero(imp_inh, "impacto", 1)
+
+    if reglas_prob is None:
+        reglas_prob = ConfigProbResidual.query.all()
+    if reglas_imp is None:
+        reglas_imp = ConfigImpactoResidual.query.all()
+
+    bajar_prob, regla_prob, solidez_pct = riesgo_reduccion_por_solidez(solidez_grupal, reglas_prob)
+    bajar_imp, regla_imp, _ = riesgo_reduccion_por_solidez(solidez_grupal, reglas_imp)
+
+    prob_res_num = max(1, min(5, prob_inh_num - int(bajar_prob)))
+    imp_res_num = max(1, min(5, imp_inh_num - int(bajar_imp)))
+
+    inherente_score = prob_inh_num * imp_inh_num
+    residual_score = prob_res_num * imp_res_num
+
+    return {
+        "solidez_pct": round(solidez_pct, 2),
+        "prob_inh_num": prob_inh_num,
+        "imp_inh_num": imp_inh_num,
+        "prob_res_num": prob_res_num,
+        "imp_res_num": imp_res_num,
+        "prob_res_label": RISK_PROB_NUM_TO_LABEL[prob_res_num],
+        "imp_res_label": RISK_IMPACT_NUM_TO_LABEL[imp_res_num],
+        "bajar_prob": bajar_prob,
+        "bajar_imp": bajar_imp,
+        "regla_prob": regla_prob,
+        "regla_imp": regla_imp,
+        "inherente_score": inherente_score,
+        "inherente_nivel": riesgo_clasificar_puntaje(inherente_score),
+        "residual_score": residual_score,
+        "residual_nivel": riesgo_clasificar_puntaje(residual_score),
+        "riesgo_inherente": f"{inherente_score} ({riesgo_clasificar_puntaje(inherente_score)})",
+        "riesgo_residual": f"{residual_score} ({riesgo_clasificar_puntaje(residual_score)})",
+    }
+
+
+def riesgo_actualizar_calculo_objeto(riesgo, reglas_prob=None, reglas_imp=None):
+    """Recalcula controles individuales, promedio grupal y riesgo residual."""
+    campos_control = [
+        "diseno_control", "calificacion_asignacion", "calificacion_tipo_control",
+        "calificacion_forma_control", "calificacion_funcionalidad",
+        "calificacion_estado_control", "calificacion_soporte_evidencia",
+        "valor_ejecucion_control", "solidez_individual", "solidez_grupal",
+        "prob_inh", "imp_inh", "riesgo_inherente", "cuadrante_prob", "prob_res",
+        "cuadrante_imp", "impacto_res", "impacto_res_label", "riesgo_residual",
+        "probabilidad", "impacto",
+    ]
+    antes = tuple(getattr(riesgo, campo, None) for campo in campos_control)
+
+    filas = list(getattr(riesgo, "controles_detalle", []) or [])
+    if filas:
+        controles = []
+        for fila in filas:
+            calculo = riesgo_calcular_solidez_control(
+                asignacion=fila.asignacion,
+                tipo_control=fila.tipo_control,
+                forma_control=fila.forma_control,
+                funcionalidad=fila.funcionalidad,
+                estado_control=fila.estado_control,
+                evidencia_control=fila.evidencia_control,
+                ejecucion_control=fila.ejecucion_control,
+                diseno_control=fila.diseno_control,
+                solidez_existente=fila.solidez_individual,
+            )
+            fila.diseno_control = calculo["diseno"] or 0.0
+            fila.valor_ejecucion_control = calculo["ejecucion"] or 0.0
+            fila.solidez_individual = calculo["solidez"]
+            controles.append({
+                **riesgo_control_para_dict(fila),
+                "componentes": calculo["componentes"],
+                "diseno_control": fila.diseno_control,
+                "valor_ejecucion_control": fila.valor_ejecucion_control,
+                "solidez_individual": fila.solidez_individual,
+            })
+        solidez_efectiva = riesgo_sincronizar_campos_legacy(riesgo, controles)
+    else:
+        evidencia = getattr(riesgo, "evidencia_control", None)
+        if not evidencia and riesgo_normalizar_opcion(getattr(riesgo, "soporte_evidencia", None)) in RISK_CONTROL_DESIGN_MAPS["evidencia_control"]:
+            evidencia = getattr(riesgo, "soporte_evidencia", None)
+        control = riesgo_calcular_solidez_control(
+            asignacion=getattr(riesgo, "asignacion", None),
+            tipo_control=getattr(riesgo, "tipo_control", None),
+            forma_control=getattr(riesgo, "forma_control", None),
+            funcionalidad=getattr(riesgo, "funcionalidad", None),
+            estado_control=getattr(riesgo, "estado_control", None),
+            evidencia_control=evidencia,
+            ejecucion_control=getattr(riesgo, "ejecucion_control", None),
+            diseno_control=getattr(riesgo, "diseno_control", None),
+            solidez_existente=getattr(riesgo, "solidez_individual", None),
+        )
+        componentes = control["componentes"]
+        if control["diseno"] is not None and control["calculada"]:
+            riesgo.diseno_control = riesgo_formatear_porcentaje(control["diseno"])
+            riesgo.calificacion_asignacion = componentes["asignacion"]
+            riesgo.calificacion_tipo_control = componentes["tipo_control"]
+            riesgo.calificacion_forma_control = componentes["forma_control"]
+            riesgo.calificacion_funcionalidad = componentes["funcionalidad"]
+            riesgo.calificacion_estado_control = componentes["estado_control"]
+            riesgo.calificacion_soporte_evidencia = componentes["evidencia_control"]
+            riesgo.valor_ejecucion_control = control["ejecucion"]
+        riesgo.solidez_individual = control["solidez"]
+        riesgo.solidez_grupal = control["solidez"]
+        riesgo.valor = control["solidez"]
+        solidez_efectiva = riesgo.solidez_grupal
+
+    prob_base = getattr(riesgo, "prob_inh", None) or getattr(riesgo, "probabilidad", None)
+    imp_base = getattr(riesgo, "imp_inh", None) or getattr(riesgo, "impacto", None)
+    if not prob_base or not imp_base:
+        return False
+
+    resultado = riesgo_calcular_resultados(
+        prob_base,
+        imp_base,
+        solidez_efectiva,
+        reglas_prob=reglas_prob,
+        reglas_imp=reglas_imp,
+    )
+    riesgo.probabilidad = resultado["prob_inh_num"]
+    riesgo.impacto = resultado["imp_inh_num"]
+    riesgo.prob_inh = RISK_PROB_NUM_TO_LABEL[resultado["prob_inh_num"]]
+    riesgo.imp_inh = RISK_IMPACT_NUM_TO_LABEL[resultado["imp_inh_num"]]
+    riesgo.riesgo_inherente = resultado["riesgo_inherente"]
+    riesgo.cuadrante_prob = resultado["prob_res_label"]
+    riesgo.prob_res = resultado["prob_res_label"]
+    riesgo.cuadrante_imp = resultado["imp_res_label"]
+    riesgo.impacto_res = resultado["imp_res_num"]
+    riesgo.impacto_res_label = resultado["imp_res_label"]
+    riesgo.riesgo_residual = resultado["riesgo_residual"]
+
+    despues = tuple(getattr(riesgo, campo, None) for campo in campos_control)
+    return antes != despues
+
+
+def riesgo_recalcular_matriz_existente(commit=True):
+    reglas_prob = ConfigProbResidual.query.all()
+    reglas_imp = ConfigImpactoResidual.query.all()
+    actualizados = 0
+    for riesgo in Riesgo.query.all():
+        try:
+            if riesgo_actualizar_calculo_objeto(riesgo, reglas_prob, reglas_imp):
+                actualizados += 1
+        except Exception as exc:
+            print(f"[WARN] No se pudo recalcular el riesgo {getattr(riesgo, 'id', '?')}: {exc!r}")
+    if commit and actualizados:
+        db.session.commit()
+    return actualizados
+
+
 def riesgo_get(obj, key, default="—"):
     """
     Obtiene el valor de un riesgo con aliases para soportar distintos nombres
@@ -18154,6 +19412,14 @@ def gestion_riesgos():
             flash("No tiene permiso para ver la Gestión de Riesgos.", "danger")
             return redirect(url_for('menu'))
         solo_lectura = False
+
+    # Mantiene la matriz sincronizada con la configuración residual vigente.
+    if request.method == 'GET':
+        try:
+            riesgo_recalcular_matriz_existente(commit=True)
+        except Exception as exc:
+            db.session.rollback()
+            print("[WARN] No se pudo sincronizar la matriz residual:", repr(exc))
 
     # =========================
     # POST
@@ -18232,7 +19498,7 @@ def gestion_riesgos():
             soporte_evidencia=soporte_evidencia,
             diseno_control=diseno_control,
             ejecucion_control=ejecucion_control,
-            valor=valor,
+            valor=solidez_individual_calculada,
             solidez_individual=solidez_individual,
             solidez_grupal=solidez_grupal,
             cuadrante_prob=cuadrante_prob,
@@ -18378,7 +19644,7 @@ def gestion_riesgos():
             return "nivel2"
         elif n <= 12:
             return "nivel3"
-        elif n <= 19:
+        elif n <= 20:
             return "nivel4"
         else:
             return "nivel5"
@@ -19599,221 +20865,28 @@ def agregar_riesgo():
     # =========================================================
     if request.method == 'POST':
 
-        def limpiar_porcentaje(valor):
-            if not valor:
-                return None
-            txt = str(valor).replace('%', '').strip()
-            return float(txt) if txt.replace('.', '', 1).isdigit() else valor
+        controles_formulario = riesgo_extraer_controles_formulario(request.form)
+        solidez_individual_calculada = (
+            controles_formulario[0]["solidez_individual"] if controles_formulario else 0.0
+        )
+        solidez_grupal_calculada = riesgo_calcular_solidez_grupal(controles_formulario)
 
-        valor = limpiar_porcentaje(request.form.get('valor'))
-        solidez_individual = limpiar_porcentaje(request.form.get('solidez_individual'))
-        solidez_grupal = limpiar_porcentaje(request.form.get('solidez_grupal'))
-        cuadrante_prob = limpiar_porcentaje(request.form.get('cuadrante_prob'))
-        cuadrante_imp = limpiar_porcentaje(request.form.get('cuadrante_imp'))
-        riesgo_residual = limpiar_porcentaje(request.form.get('riesgo_residual'))
-
-        asignacion = request.form.get('asignacion')
-        tipo_control = request.form.get('tipo_control')
-        forma_control = request.form.get('forma_control')
-        funcionalidad = request.form.get('funcionalidad')
-        estado_control = request.form.get('estado_control')
-        evidencia_control = request.form.get('evidencia_control')
-        soporte_evidencia = request.form.get('soporte_evidencia')
-        ejecucion_control = request.form.get('ejecucion_control')
-
-        mapa_asignacion = {"Asignado": 0.20, "No Asignado": 0}
-        mapa_tipo_control = {"Preventivo": 0.15, "Detectivo": 0.10, "Correctivo": 0.07}
-        mapa_forma_control = {"Automático": 0.15, "Semiautomático": 0.07, "Manual": 0.05}
-        mapa_funcionalidad = {"Adecuada": 0.15, "No Adecuada": 0}
-        mapa_estado_control = {
-            "Implementado y Documentado": 0.20,
-            "Implementado y No Documentado": 0.07,
-            "No Documentado": 0
-        }
-        mapa_soporte_evidencia = {"Con Evidencia": 0.15, "Sin Evidencia": 0}
-        mapa_ejecucion_control = {"Siempre": 1, "Casi Siempre": 0.5, "Nunca": 0}
-
-        calificacion_asignacion = mapa_asignacion.get(asignacion, 0)
-        calificacion_tipo_control = mapa_tipo_control.get(tipo_control, 0)
-        calificacion_forma_control = mapa_forma_control.get(forma_control, 0)
-        calificacion_funcionalidad = mapa_funcionalidad.get(funcionalidad, 0)
-        calificacion_estado_control = mapa_estado_control.get(estado_control, 0)
-        calificacion_soporte_evidencia = mapa_soporte_evidencia.get((evidencia_control or '').strip().title(), 0)
-        valor_ejecucion_control = mapa_ejecucion_control.get(ejecucion_control, 0)
-
-        diseno_text = request.form.get('diseno_control')
-        ejec_text = request.form.get('ejecucion_control')
-
-        mapa_diseno = {
-            "Adecuado": 0.15,
-            "No Adecuado": 0.0,
-        }
-        mapa_ejecucion = {
-            "Siempre": 1.0,
-            "Casi Siempre": 0.5,
-            "Nunca": 0.0
-        }
-
-        def a_float_normalizado(valor, mapa):
-            if valor is None:
-                return 0.0
-            v = str(valor).strip()
-            if v.endswith('%'):
-                try:
-                    return float(v.replace('%', '')) / 100.0
-                except Exception:
-                    return mapa.get(v, 0.0)
-            try:
-                num = float(v)
-                return num / 100.0 if num > 1 else num
-            except Exception:
-                return mapa.get(v, 0.0)
-
-        calificacion_diseno = a_float_normalizado(diseno_text, mapa_diseno)
-        calificacion_ejecucion = a_float_normalizado(ejec_text, mapa_ejecucion)
-
-        solidez_individual_calculada = round((calificacion_diseno * 0.6) + (calificacion_ejecucion * 0.4), 6)
-        solidez_grupal_calculada = round(solidez_individual_calculada / 1, 6)
-
-        mapa_prob_inh = {
-            "Rara vez o Muy baja": 1,
-            "Eventualmente o baja": 2,
-            "Puede ocurrir o Moderada": 3,
-            "Probable o Alta": 4,
-            "Muy frecuente o Muy Alta": 5
-        }
-        prob_inh_text = request.form.get('prob_inh')
-        prob_inh_num = mapa_prob_inh.get(prob_inh_text, None)
-        if prob_inh_num is None:
-            try:
-                prob_inh_num = int(float(request.form.get('prob_inh') or 1))
-            except Exception:
-                prob_inh_num = 1
-
-        config_residual = ConfigProbResidual.query.all()
-        solidez_pct = solidez_individual_calculada * 100.0 if solidez_individual_calculada is not None else 0.0
-        niveles_bajada = 0
-
-        if config_residual:
-            reglas_norm = []
-            for r in config_residual:
-                try:
-                    rmin = float(r.min)
-                    rmax = float(r.max)
-                    bajar = int(r.bajar or 0)
-                    reglas_norm.append({
-                        'rmin': min(rmin, rmax),
-                        'rmax': max(rmin, rmax),
-                        'bajar': bajar
-                    })
-                except Exception as e:
-                    print("[WARN] regla inválida:", e)
-
-            reglas_norm = sorted(reglas_norm, key=lambda x: x['rmin'])
-
-            for reg in reglas_norm:
-                if reg['rmin'] <= solidez_pct <= reg['rmax']:
-                    niveles_bajada = reg['bajar']
-                    break
-
-        prob_res_num = max(1, min(5, prob_inh_num - int(niveles_bajada)))
-
-        mapa_niveles = {
-            1: "Rara vez o Muy baja",
-            2: "Eventualmente o baja",
-            3: "Puede ocurrir o Moderada",
-            4: "Probable o Alta",
-            5: "Muy frecuente o Muy Alta"
-        }
-        prob_res_label = mapa_niveles.get(prob_res_num, "Desconocido")
+        resultado_residual = riesgo_calcular_resultados(
+            request.form.get('prob_inh'),
+            request.form.get('imp_inh'),
+            solidez_grupal_calculada,
+        )
+        prob_res_num = resultado_residual['prob_res_num']
+        impacto_res_num = resultado_residual['imp_res_num']
+        prob_res_label = resultado_residual['prob_res_label']
+        impacto_res_label = resultado_residual['imp_res_label']
         cuadrante_prob = prob_res_label
         prob_res = prob_res_label
-
-        config_impacto = ConfigImpactoResidual.query.all()
-
-        mapa_imp_inh = {
-            "Insignificante o Inferior": 1,
-            "Menor": 2,
-            "Moderado o Importante": 3,
-            "Mayor": 4,
-            "Catastrófico o Crítico": 5
-        }
-        imp_inh_text = request.form.get('imp_inh')
-        impacto_inh_num = mapa_imp_inh.get(imp_inh_text, 3)
-
-        niveles_bajada_imp = 0
-
-        if config_impacto:
-            reglas_norm = []
-            for r in config_impacto:
-                try:
-                    rmin = float(r.min)
-                    rmax = float(r.max)
-                    bajar = int(r.bajar or 0)
-                    reglas_norm.append({
-                        'rmin': min(rmin, rmax),
-                        'rmax': max(rmin, rmax),
-                        'bajar': bajar
-                    })
-                except Exception as e:
-                    print("[WARN] Regla inválida en ConfigImpactoResidual:", e)
-
-            reglas_norm = sorted(reglas_norm, key=lambda x: x['rmin'])
-
-            for reg in reglas_norm:
-                if reg['rmin'] <= solidez_pct <= reg['rmax']:
-                    niveles_bajada_imp = reg['bajar']
-                    break
-
-        impacto_res_num = max(1, min(5, impacto_inh_num - int(niveles_bajada_imp)))
-
-        mapa_impacto_niveles = {
-            1: "Insignificante o Inferior",
-            2: "Menor",
-            3: "Moderado o Importante",
-            4: "Mayor",
-            5: "Catastrófico o Crítico",
-        }
-        impacto_res_label = mapa_impacto_niveles.get(impacto_res_num, "Desconocido")
         cuadrante_imp = impacto_res_label
-        impacto_res = impacto_res_label
-
-        try:
-            riesgo_residual_valor = round(prob_res_num * impacto_res_num, 2)
-
-            if riesgo_residual_valor <= 4:
-                nivel_residual = "Bajo"
-            elif riesgo_residual_valor <= 8:
-                nivel_residual = "Medio"
-            elif riesgo_residual_valor <= 12:
-                nivel_residual = "Alto"
-            elif riesgo_residual_valor <= 19:
-                nivel_residual = "Muy Alto"
-            else:
-                nivel_residual = "Extremo"
-
-            riesgo_residual_calc = f"{riesgo_residual_valor} ({nivel_residual})"
-        except Exception as e:
-            print(f"[ERROR calculando riesgo residual] {e}")
-            riesgo_residual_calc = None
+        riesgo_residual_calc = resultado_residual['riesgo_residual']
+        riesgo_inherente_calc = resultado_residual['riesgo_inherente']
 
         tipo_riesgo_id = request.form.get("tipo_riesgo_id")
-
-        codigo_anexo_seleccionado = (
-            request.form.get('cod_anexo')
-            or request.form.get('codigo_anexo')
-            or ''
-        ).strip()
-        codigo_pci_seleccionado = (request.form.get('codigo_control_pci_dss') or '').strip()
-        codigo_nist_seleccionado = (request.form.get('codigo_control_nist_csf') or '').strip()
-        codigo_soc2_seleccionado = (request.form.get('codigo_control_soc2') or '').strip()
-
-        descripcion_control_multimarco = construir_descripcion_controles_multimarco(
-            codigo_iso=codigo_anexo_seleccionado,
-            codigo_pci=codigo_pci_seleccionado,
-            codigo_nist=codigo_nist_seleccionado,
-            codigo_soc2=codigo_soc2_seleccionado
-        )
 
         obs_final = (request.form.get('observaciones') or '').strip()
         if origen.lower() == 'proveedor':
@@ -19838,36 +20911,38 @@ def agregar_riesgo():
             tipo_activo=request.form.get('tipo_activo'),
             nombre_activo=request.form.get('nombre_activo'),
             dimension_seguridad=request.form.get('dimension_seguridad'),
+            probabilidad=resultado_residual['prob_inh_num'],
+            impacto=resultado_residual['imp_inh_num'],
             prob_inh=request.form.get('prob_inh'),
             imp_inh=request.form.get('imp_inh'),
-            riesgo_inherente=request.form.get('riesgo_inherente'),
-            control_codigo=request.form.get('control_codigo'),
-            codigo_anexo=codigo_anexo_seleccionado,
-            codigo_control_pci_dss=codigo_pci_seleccionado,
-            codigo_control_nist_csf=codigo_nist_seleccionado,
-            codigo_control_soc2=codigo_soc2_seleccionado,
-            descripcion_control=descripcion_control_multimarco,
+            riesgo_inherente=riesgo_inherente_calc,
+            control_codigo=None,
+            codigo_anexo=None,
+            codigo_control_pci_dss=None,
+            codigo_control_nist_csf=None,
+            codigo_control_soc2=None,
+            descripcion_control=None,
             plan_accion=request.form.get('plan_accion'),
-            asignacion=request.form.get('asignacion'),
-            cargo=request.form.get('cargo'),
-            tipo_control=request.form.get('tipo_control'),
-            forma_control=request.form.get('forma_control'),
-            frecuencia=request.form.get('frecuencia'),
-            funcionalidad=request.form.get('funcionalidad'),
-            estado_control=request.form.get('estado_control'),
-            referencia_documental=request.form.get('referencia_documental'),
-            evidencia_control=request.form.get('evidencia_control'),
-            soporte_evidencia=request.form.get('soporte_evidencia'),
-            diseno_control=request.form.get('diseno_control'),
-            ejecucion_control=request.form.get('ejecucion_control'),
-            calificacion_asignacion=calificacion_asignacion,
-            calificacion_tipo_control=calificacion_tipo_control,
-            calificacion_forma_control=calificacion_forma_control,
-            calificacion_funcionalidad=calificacion_funcionalidad,
-            calificacion_estado_control=calificacion_estado_control,
-            calificacion_soporte_evidencia=calificacion_soporte_evidencia,
-            valor_ejecucion_control=valor_ejecucion_control,
-            valor=valor,
+            asignacion=None,
+            cargo=None,
+            tipo_control=None,
+            forma_control=None,
+            frecuencia=None,
+            funcionalidad=None,
+            estado_control=None,
+            referencia_documental=None,
+            evidencia_control=None,
+            soporte_evidencia=None,
+            diseno_control=None,
+            ejecucion_control=None,
+            calificacion_asignacion=0.0,
+            calificacion_tipo_control=0.0,
+            calificacion_forma_control=0.0,
+            calificacion_funcionalidad=0.0,
+            calificacion_estado_control=0.0,
+            calificacion_soporte_evidencia=0.0,
+            valor_ejecucion_control=0.0,
+            valor=solidez_grupal_calculada,
             solidez_individual=solidez_individual_calculada,
             solidez_grupal=solidez_grupal_calculada,
             cuadrante_prob=cuadrante_prob,
@@ -19886,17 +20961,35 @@ def agregar_riesgo():
         )
 
         db.session.add(nuevo)
+        db.session.flush()
+        riesgo_reemplazar_controles(nuevo, controles_formulario)
+        riesgo_sincronizar_campos_legacy(nuevo, controles_formulario)
         db.session.commit()
-        flash("✅ Riesgo registrado correctamente", "success")
+        flash(
+            f"✅ Riesgo registrado con {len(controles_formulario)} control(es). "
+            f"Solidez grupal: {solidez_grupal_calculada * 100:.2f}%.",
+            "success",
+        )
         return redirect(url_for('riesgos_menu'))
 
-    reglas = ConfigProbResidual.query.order_by(ConfigProbResidual.min.desc()).all()
+    reglas = sorted(ConfigProbResidual.query.all(), key=lambda r: max(float(r.min), float(r.max)), reverse=True)
+    reglas_impacto = sorted(ConfigImpactoResidual.query.all(), key=lambda r: max(float(r.min), float(r.max)), reverse=True)
     reglas_json = json.dumps([{'min': r.min, 'max': r.max, 'bajar': r.bajar} for r in reglas])
+    reglas_impacto_json = json.dumps([{'min': r.min, 'max': r.max, 'bajar': r.bajar} for r in reglas_impacto])
 
     tipos_riesgo = TipoRiesgo.query.filter_by(
         owner_user_id=user.id,
         activo=True
     ).order_by(TipoRiesgo.nombre.asc()).all()
+
+    reglas_prob_data = [{'min': r.min, 'max': r.max, 'bajar': r.bajar} for r in reglas]
+    reglas_imp_data = [{'min': r.min, 'max': r.max, 'bajar': r.bajar} for r in reglas_impacto]
+    controles_widget = riesgo_controles_widget_html(
+        controles_iniciales=[],
+        reglas_prob=reglas_prob_data,
+        reglas_imp=reglas_imp_data,
+        section_class="riskform-section-title",
+    )
 
     riesgos_html_formulario = """
     <div class="riskform-shell">
@@ -20044,168 +21137,40 @@ def agregar_riesgo():
               <input type="text" class="form-control" name="riesgo_inherente" id="riesgo_inherente" readonly>
             </div>
 
-            <div class="col-12">
-              <div class="riskform-section-title">🧩 Controles Actuales - Evaluación del Control</div>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Control de Código</label>
-              <input class="form-control" name="control_codigo">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Código Control Anexo ISO 27002</label>
-              <select id="codigo_iso" name="cod_anexo" class="form-control" required>
-                <option value="">Seleccione un control...</option>
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Código Control PCI DSS</label>
-              <select id="codigo_pci_dss" name="codigo_control_pci_dss" class="form-control">
-                {{ pci_options|safe }}
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Código Control NIST CSF 2.0</label>
-              <select id="codigo_nist_csf" name="codigo_control_nist_csf" class="form-control">
-                {{ nist_options|safe }}
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Código Control SOC 2</label>
-              <select id="codigo_soc2" name="codigo_control_soc2" class="form-control">
-                {{ soc2_options|safe }}
-              </select>
-            </div>
-            <div class="col-md-12">
-              <label class="form-label">Descripción consolidada de los controles seleccionados</label>
-              <textarea class="form-control" name="descripcion_control" rows="12" readonly></textarea>
-              <div class="form-text">
-                Se genera automáticamente con el texto completo de ISO 27002, PCI DSS, NIST CSF 2.0 y SOC 2 seleccionados.
-              </div>
-            </div>
+            {{ controles_widget|safe }}
 
             <div class="col-12">
               <div class="riskform-section-title">🧩 Tratamiento del Riesgo Inherente</div>
             </div>
-
             <div class="col-md-12">
               <label class="form-label">Plan de Acción</label>
               <textarea class="form-control" name="plan_accion"></textarea>
             </div>
 
             <div class="col-12">
-              <div class="riskform-section-title">🧩 Evaluación y Eficacia del Control</div>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Asignación</label>
-              <select class="form-control" name="asignacion" required onchange="calcularDisenoControl()">
-                <option value="">Seleccione...</option>
-                <option>Asignado</option>
-                <option>No Asignado</option>
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Cargo</label>
-              <input class="form-control" name="cargo">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Tipo de Control</label>
-              <select class="form-control" name="tipo_control" required onchange="calcularDisenoControl()">
-                <option value="">Seleccione...</option>
-                <option>Detectivo</option>
-                <option>Preventivo</option>
-                <option>Correctivo</option>
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Forma de Control</label>
-              <select class="form-control" name="forma_control" required onchange="calcularDisenoControl()">
-                <option value="">Seleccione...</option>
-                <option>Automático</option>
-                <option>Semiautomático</option>
-                <option>Manual</option>
-              </select>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Frecuencia</label>
-              <input class="form-control" name="frecuencia">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Funcionalidad</label>
-              <select class="form-control" name="funcionalidad" required onchange="calcularDisenoControl()">
-                <option value="">Seleccione...</option>
-                <option>Adecuada</option>
-                <option>No Adecuada</option>
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Estado del Control</label>
-              <select class="form-control" name="estado_control" required onchange="calcularDisenoControl()">
-                <option value="">Seleccione...</option>
-                <option>Implementado y Documentado</option>
-                <option>Implementado y No Documentado</option>
-                <option>No Documentado</option>
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Evidencia que Compone el Control</label>
-              <select class="form-control" name="evidencia_control" required onchange="calcularDisenoControl()">
-                <option value="">Seleccione...</option>
-                <option>Con Evidencia</option>
-                <option>Sin Evidencia</option>
-              </select>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Referencia Documental</label>
-              <input class="form-control" name="referencia_documental">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Soporte de Evidencia</label>
-              <input class="form-control" name="soporte_evidencia">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Diseño del Control (Automático)</label>
-              <input class="form-control" id="diseno_control" name="diseno_control" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Ejecución del Control</label>
-              <select class="form-control" name="ejecucion_control" id="ejecucion_control" required onchange="calcularSolidezIndividual();calcularRiesgoResidual();">
-                <option value="">Seleccione...</option>
-                <option>Siempre</option>
-                <option>Casi Siempre</option>
-                <option>Nunca</option>
-              </select>
-            </div>
-
-            <div class="col-12">
               <div class="riskform-section-title">🧩 Evaluación del Riesgo Residual</div>
             </div>
-
             <div class="col-md-3">
-              <label class="form-label">Solidez Individual</label>
-              <input class="form-control" id="solidez_individual" name="solidez_individual" readonly>
+              <label class="form-label">Solidez Grupal (Promedio)</label>
+              <input class="form-control risk-control-result" id="solidez_grupal" name="solidez_grupal" readonly>
+              <input type="hidden" id="valor" name="valor">
+              <div class="form-text">Promedio de la solidez individual de todos los controles registrados.</div>
             </div>
-
+            <div class="col-md-3">
+              <label class="form-label">Probabilidad Residual</label>
+              <input class="form-control" id="cuadrante_prob" name="cuadrante_prob" readonly>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Impacto Residual</label>
+              <input class="form-control" id="cuadrante_imp" name="cuadrante_imp" readonly>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Riesgo Residual</label>
+              <input class="form-control" id="riesgo_residual" name="riesgo_residual" readonly>
+            </div>
             <div class="col-md-3">
               <label class="form-label">Fecha de Revisión</label>
               <input type="date" class="form-control" name="fecha_revision">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Tratamiento del Riesgo</label>
-              <select class="form-control" name="tratamiento" required>
-                <option value="">Seleccione...</option>
-                <option>Aceptación</option>
-                <option>Rechazo</option>
-                <option>Transferencia</option>
-                <option>Mitigación</option>
-              </select>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Fecha de Implementación</label>
-              <input type="date" class="form-control" name="fecha_implementacion">
             </div>
 
             <div class="col-12">
@@ -20232,402 +21197,6 @@ def agregar_riesgo():
             </a>
           </div>
         </div>
-
-        <script>
-          function calcularRiesgoInherente() {
-            const probText = document.getElementById("prob_inh").value;
-            const impText = document.getElementById("imp_inh").value;
-
-            const mapaProb = {
-              "Rara vez o Muy baja": 1,
-              "Eventualmente o baja": 2,
-              "Puede ocurrir o Moderada": 3,
-              "Probable o Alta": 4,
-              "Muy frecuente o Muy Alta": 5
-            };
-            const mapaImp = {
-              "Insignificante o Inferior": 1,
-              "Menor": 2,
-              "Moderado o Importante": 3,
-              "Mayor": 4,
-              "Catastrófico o Crítico": 5
-            };
-
-            const probVal = mapaProb[probText] || 0;
-            const impVal = mapaImp[impText] || 0;
-            const resultado = probVal * impVal;
-
-            let nivel = "";
-            if (resultado >= 1 && resultado <= 4) nivel = "Bajo";
-            else if (resultado <= 8) nivel = "Medio";
-            else if (resultado <= 12) nivel = "Alto";
-            else if (resultado <= 19) nivel = "Muy Alto";
-            else if (resultado <= 25) nivel = "Extremo";
-
-            const campo = document.getElementById("riesgo_inherente");
-            campo.value = resultado > 0 ? `${resultado} (${nivel})` : "";
-          }
-        </script>
-
-        <script>
-          function calcularSolidezIndividual() {
-            const disenoRaw = document.querySelector('input[name="diseno_control"]').value.trim();
-            const ejecucion = document.querySelector('select[name="ejecucion_control"]').value;
-            const mapaEjecucion = {"Siempre": 1.0, "Casi Siempre": 0.5, "Nunca": 0.0};
-
-            let valDiseno = 0.0;
-            if (disenoRaw.endsWith('%')) {
-              valDiseno = parseFloat(disenoRaw.replace('%','')) / 100.0;
-            } else {
-              const n = parseFloat(disenoRaw);
-              valDiseno = isNaN(n) ? 0.0 : (n > 1 ? n / 100.0 : n);
-            }
-
-            const valEjecucion = mapaEjecucion[ejecucion] || 0.0;
-            const solidez = (valDiseno * 0.6) + (valEjecucion * 0.4);
-
-            document.getElementById("solidez_individual").value = (solidez * 100).toFixed(0) + '%';
-            document.getElementById("solidez_grupal").value = (solidez * 100).toFixed(0) + '%';
-            document.getElementById("valor").value = (solidez * 100).toFixed(2) + '%';
-          }
-
-          const campoDiseno = document.querySelector('input[name="diseno_control"]');
-          const campoEjecucion = document.querySelector('select[name="ejecucion_control"]');
-          if (campoDiseno) campoDiseno.addEventListener('input', calcularSolidezIndividual);
-          if (campoEjecucion) campoEjecucion.addEventListener('change', calcularSolidezIndividual);
-        </script>
-
-        <script>
-          function calcularDisenoControl() {
-              const asignacion = document.querySelector('select[name="asignacion"]')?.value || "";
-              const tipo_control = document.querySelector('select[name="tipo_control"]')?.value || "";
-              const forma_control = document.querySelector('select[name="forma_control"]')?.value || "";
-              const funcionalidad = document.querySelector('select[name="funcionalidad"]')?.value || "";
-              const estado_control = document.querySelector('select[name="estado_control"]')?.value || "";
-              const soporte_evidencia = document.querySelector('select[name="evidencia_control"]')?.value || "";
-
-              const mapa_asignacion = {"Asignado": 0.20, "No Asignado": 0};
-              const mapa_tipo_control = {"Preventivo": 0.15, "Detectivo": 0.10, "Correctivo": 0.07};
-              const mapa_forma_control = {"Automático": 0.15, "Semiautomático": 0.07, "Manual": 0.05};
-              const mapa_funcionalidad = {"Adecuada": 0.15, "No Adecuada": 0};
-              const mapa_estado_control = {
-                  "Implementado y Documentado": 0.20,
-                  "Implementado y No Documentado": 0.07,
-                  "No Documentado": 0
-              };
-              const mapa_soporte_evidencia = {"Con Evidencia": 0.15, "Sin Evidencia": 0};
-
-              const diseno =
-                  (mapa_asignacion[asignacion] || 0) +
-                  (mapa_tipo_control[tipo_control] || 0) +
-                  (mapa_forma_control[forma_control] || 0) +
-                  (mapa_funcionalidad[funcionalidad] || 0) +
-                  (mapa_estado_control[estado_control] || 0) +
-                  (mapa_soporte_evidencia[soporte_evidencia] || 0);
-
-              document.getElementById('diseno_control').value = (diseno * 100).toFixed(0) + '%';
-              calcularSolidezIndividual();
-          }
-
-          ['asignacion','tipo_control','forma_control','funcionalidad','estado_control','evidencia_control']
-          .forEach(id => {
-              const campo = document.querySelector(`[name="${id}"]`);
-              if (campo) campo.addEventListener('change', calcularDisenoControl);
-          });
-
-          window.addEventListener('load', () => {
-              calcularDisenoControl();
-              calcularSolidezIndividual();
-          });
-        </script>
-
-        <script>
-          const FULL_SOA = [
-              {"nr":"5.1","chapter":"Controles organizacionales","topic":"Políticas de seguridad de la información","control_text":"La política de seguridad de la información y las políticas específicas deberán definirse, aprobarse por la dirección, publicarse, comunicarse y reconocerse por el personal y las partes interesadas, y revisarse a intervalos planificados o cuando se produzcan cambios significativos."},
-              {"nr":"5.2","chapter":"Controles organizacionales","topic":"Roles y responsabilidades de seguridad de la información","control_text":"Los roles y responsabilidades de seguridad de la información deberán definirse y asignarse según las necesidades de la organización."},
-              {"nr":"5.3","chapter":"Controles organizacionales","topic":"Separación de funciones","control_text":"Las funciones conflictivas y las áreas de responsabilidad en conflicto deberán separarse."},
-              {"nr":"5.4","chapter":"Controles organizacionales","topic":"Responsabilidades de la dirección","control_text":"La dirección deberá exigir que todo el personal aplique la seguridad de la información de acuerdo con la política y los procedimientos específicos aplicables."},
-              {"nr":"5.5","chapter":"Controles organizacionales","topic":"Contacto con autoridades","control_text":"La organización deberá establecer y mantener contacto con las autoridades relevantes."},
-              {"nr":"5.6","chapter":"Controles organizacionales","topic":"Contacto con grupos de interés especial","control_text":"La organización deberá establecer y mantener contacto con grupos de especial interés, foros especializados y asociaciones profesionales."},
-              {"nr":"5.7","chapter":"Controles organizacionales","topic":"Inteligencia de amenazas","control_text":"Se deberá recopilar y analizar información relacionada con las amenazas para producir inteligencia sobre amenazas."},
-              {"nr":"5.8","chapter":"Controles organizacionales","topic":"Seguridad de la información en la gestión de proyectos","control_text":"La seguridad de la información deberá integrarse en la gestión de proyectos."},
-              {"nr":"5.9","chapter":"Controles organizacionales","topic":"Inventario de información y activos asociados","control_text":"Se deberá desarrollar y mantener un inventario de la información y otros activos asociados, incluidos los propietarios."},
-              {"nr":"5.10","chapter":"Controles organizacionales","topic":"Uso aceptable de la información y activos asociados","control_text":"Se deberán identificar, documentar e implantar reglas y procedimientos para el uso aceptable y el manejo de la información y otros activos asociados."},
-              {"nr":"5.11","chapter":"Controles organizacionales","topic":"Devolución de activos","control_text":"El personal y otras partes interesadas deberán devolver los activos de la organización en su posesión al cambiar o terminar su relación contractual o laboral."},
-              {"nr":"5.12","chapter":"Controles organizacionales","topic":"Clasificación de la información","control_text":"La información deberá clasificarse según las necesidades de seguridad de la organización (confidencialidad, integridad, disponibilidad) y requisitos de las partes interesadas."},
-              {"nr":"5.13","chapter":"Controles organizacionales","topic":"Etiquetado de la información","control_text":"Se deberán desarrollar e implantar procedimientos apropiados para etiquetar la información según el esquema de clasificación adoptado."},
-              {"nr":"5.14","chapter":"Controles organizacionales","topic":"Transferencia de información","control_text":"Deben existir reglas, procedimientos o acuerdos para todo tipo de transferencia dentro de la organización y con terceros."},
-              {"nr":"5.15","chapter":"Controles organizacionales","topic":"Control de accesos","control_text":"Se deberán establecer e implementar reglas para controlar el acceso físico y lógico a la información y activos asociados según requisitos de negocio y seguridad."},
-              {"nr":"5.16","chapter":"Controles organizacionales","topic":"Gestión de identidades","control_text":"Deberá gestionarse el ciclo de vida completo de las identidades."},
-              {"nr":"5.17","chapter":"Controles organizacionales","topic":"Información de autenticación","control_text":"La asignación y gestión de la información de autenticación deberá controlarse mediante procesos de gestión y orientación al personal."},
-              {"nr":"5.18","chapter":"Controles organizacionales","topic":"Derechos de acceso","control_text":"Los derechos de acceso deberán ser provisionados, revisados, modificados y eliminados conforme a políticas y reglas de control de acceso."},
-              {"nr":"5.19","chapter":"Controles organizacionales","topic":"Seguridad de la información en relaciones con proveedores","control_text":"Se deberán definir e implantar procesos para gestionar los riesgos de seguridad asociados al uso de productos o servicios de proveedores."},
-              {"nr":"5.20","chapter":"Controles organizacionales","topic":"Seguridad en acuerdos con proveedores","control_text":"Se establecerán y acordarán requisitos de seguridad de la información con cada proveedor según el tipo de relación."},
-              {"nr":"5.21","chapter":"Controles organizacionales","topic":"Gestión de la seguridad en la cadena de suministro TIC","control_text":"Se deberán definir e implantar procesos para gestionar los riesgos asociados con productos y servicios TIC de la cadena de suministro."},
-              {"nr":"5.22","chapter":"Controles organizacionales","topic":"Monitoreo y gestión del cambio de servicios de proveedor","control_text":"La organización deberá supervisar, revisar y gestionar cambios en prácticas de seguridad y entrega de servicios de proveedores."},
-              {"nr":"5.23","chapter":"Controles organizacionales","topic":"Seguridad para uso de servicios en la nube","control_text":"Se deberán establecer procesos para adquisición, uso, gestión y salida de servicios en la nube según requisitos de seguridad organizacionales."},
-              {"nr":"5.24","chapter":"Controles organizacionales","topic":"Planificación y preparación para la gestión de incidentes","control_text":"La organización deberá planear y prepararse para gestionar incidentes de seguridad definiendo procesos, roles y responsabilidades."},
-              {"nr":"5.25","chapter":"Controles organizacionales","topic":"Evaluación y decisión sobre eventos de seguridad","control_text":"La organización deberá evaluar los eventos de seguridad y decidir si deben categorizarse como incidentes."},
-              {"nr":"5.26","chapter":"Controles organizacionales","topic":"Respuesta a incidentes de seguridad","control_text":"Los incidentes de seguridad deben responderse de acuerdo con procedimientos documentados."},
-              {"nr":"5.27","chapter":"Controles organizacionales","topic":"Aprendizaje de incidentes de seguridad","control_text":"El conocimiento obtenido de incidentes debe usarse para fortalecer y mejorar los controles de seguridad."},
-              {"nr":"5.28","chapter":"Controles organizacionales","topic":"Recopilación de evidencias","control_text":"Se deberán establecer procedimientos para la identificación, recolección y preservación de evidencias relacionadas con eventos de seguridad."},
-              {"nr":"5.29","chapter":"Controles organizacionales","topic":"Seguridad durante la interrupción","control_text":"La organización deberá planear cómo mantener la seguridad de la información en un nivel apropiado durante una interrupción."},
-              {"nr":"5.30","chapter":"Controles organizacionales","topic":"Preparación TIC para continuidad del negocio","control_text":"La preparación TIC para continuidad debe planearse, implementarse, mantenerse y probarse según objetivos de continuidad."},
-              {"nr":"5.31","chapter":"Controles organizacionales","topic":"Requisitos legales, reglamentarios y contractuales","control_text":"Se deberán identificar, documentar y mantener actualizados los requisitos legales y contractuales relevantes para la seguridad de la información."},
-              {"nr":"5.32","chapter":"Controles organizacionales","topic":"Derechos de propiedad intelectual","control_text":"La organización deberá implantar procedimientos apropiados para proteger la propiedad intelectual."},
-              {"nr":"5.33","chapter":"Controles organizacionales","topic":"Protección de registros","control_text":"Los registros deberán protegerse contra pérdida, destrucción, falsificación, acceso no autorizado y divulgación no autorizada."},
-              {"nr":"5.34","chapter":"Controles organizacionales","topic":"Privacidad y protección de datos personales (PII)","control_text":"La organización deberá identificar y cumplir los requisitos de preservación de la privacidad y protección de PII conforme a leyes y contratos aplicables."},
-              {"nr":"5.35","chapter":"Controles organizacionales","topic":"Revisión independiente de seguridad de la información","control_text":"El enfoque de la organización para gestionar la seguridad deberá revisarse de forma independiente a intervalos planificados o tras cambios significativos."},
-              {"nr":"5.36","chapter":"Controles organizacionales","topic":"Cumplimiento con políticas, reglas y estándares","control_text":"El cumplimiento con la política de seguridad, políticas específicas, reglas y estándares deberá revisarse regularmente."},
-              {"nr":"5.37","chapter":"Controles organizacionales","topic":"Procedimientos operativos documentados","control_text":"Se deberán documentar los procedimientos operativos para las instalaciones de procesamiento de información y ponerlos a disposición del personal que los necesite."},
-              {"nr":"6.1","chapter":"Controles de personas","topic":"Verificación de antecedentes (screening)","control_text":"Se deberán efectuar verificaciones previas de antecedentes para candidatos al personal y de forma continua según leyes, regulaciones y riesgos."},
-              {"nr":"6.2","chapter":"Controles de personas","topic":"Términos y condiciones de empleo","control_text":"Los contratos de empleo deberán expresar las responsabilidades del personal y de la organización respecto a la seguridad de la información."},
-              {"nr":"6.3","chapter":"Controles de personas","topic":"Concienciación, educación y formación en seguridad","control_text":"El personal y partes interesadas relevantes deberán recibir formación y actualizaciones sobre políticas y procedimientos de seguridad."},
-              {"nr":"6.4","chapter":"Controles de personas","topic":"Proceso disciplinario","control_text":"Se deberá formalizar y comunicar un proceso disciplinario para acciones contra incumplimientos de la política de seguridad."},
-              {"nr":"6.5","chapter":"Controles de personas","topic":"Responsabilidades tras terminación o cambio de empleo","control_text":"Se deberán definir y comunicar responsabilidades de seguridad que se mantienen tras la terminación o cambio de empleo."},
-              {"nr":"6.6","chapter":"Controles de personas","topic":"Acuerdos de confidencialidad (NDA)","control_text":"Se deberán identificar, documentar, revisar y firmar acuerdos de confidencialidad según las necesidades de la organización."},
-              {"nr":"6.7","chapter":"Controles de personas","topic":"Trabajo remoto","control_text":"Se deberán implantar medidas de seguridad cuando el personal trabaje de forma remota para proteger la información fuera de las instalaciones."},
-              {"nr":"6.8","chapter":"Controles de personas","topic":"Reportes de eventos de seguridad","control_text":"La organización deberá proporcionar mecanismos para que el personal reporte incidentes observados o sospechados de forma oportuna."},
-              {"nr":"7.1","chapter":"Controles físicos","topic":"Perímetros de seguridad física","control_text":"Se deberán definir perímetros de seguridad para proteger áreas que contengan información y activos asociados."},
-              {"nr":"7.2","chapter":"Controles físicos","topic":"Entrada física","control_text":"Las áreas seguras deberán protegerse mediante controles de acceso y puntos de entrada apropiados."},
-              {"nr":"7.3","chapter":"Controles físicos","topic":"Aseguramiento de oficinas, salas e instalaciones","control_text":"La seguridad física de oficinas, salas e instalaciones deberá diseñarse e implementarse."},
-              {"nr":"7.4","chapter":"Controles físicos","topic":"Monitorización de seguridad física","control_text":"Las instalaciones deberán ser monitorizadas para detectar accesos físicos no autorizados."},
-              {"nr":"7.5","chapter":"Controles físicos","topic":"Protección contra amenazas físicas y ambientales","control_text":"Se deberán diseñar e implementar medidas contra amenazas físicas y ambientales (desastres naturales, etc.)."},
-              {"nr":"7.6","chapter":"Controles físicos","topic":"Trabajo en áreas seguras","control_text":"Se deberán implantar medidas de seguridad para el trabajo en áreas seguras."},
-              {"nr":"7.7","chapter":"Controles físicos","topic":"Escritorio y pantalla limpios","control_text":"Se deberán definir y aplicar reglas de escritorio y pantalla limpia para proteger la información."},
-              {"nr":"7.8","chapter":"Controles físicos","topic":"Ubicación y protección del equipo","control_text":"El equipo deberá ubicarse y protegerse físicamente."},
-              {"nr":"7.9","chapter":"Controles físicos","topic":"Seguridad de activos fuera de las instalaciones","control_text":"Los activos fuera de las instalaciones deberán protegerse adecuadamente."},
-              {"nr":"7.10","chapter":"Controles físicos","topic":"Medios de almacenamiento","control_text":"Los medios de almacenamiento deberán gestionarse durante todo su ciclo (adquisición, uso, transporte, eliminación) conforme al esquema de clasificación."},
-              {"nr":"7.11","chapter":"Controles físicos","topic":"Servicios de apoyo","control_text":"Las instalaciones de procesamiento de información deberán protegerse de fallos de servicios públicos y otras interrupciones."},
-              {"nr":"7.12","chapter":"Controles físicos","topic":"Seguridad del cableado","control_text":"Los cables que transporten energía o datos deberán protegerse contra intercepción, interferencia o daño."},
-              {"nr":"7.13","chapter":"Controles físicos","topic":"Mantenimiento de equipos","control_text":"El equipo deberá mantenerse para asegurar disponibilidad, integridad y confidencialidad."},
-              {"nr":"7.14","chapter":"Controles físicos","topic":"Disposición segura o reutilización de equipos","control_text":"Los equipos con medios de almacenamiento deberán verificarse para asegurar que los datos sensibles se han eliminado o sobrescrito antes de su eliminación o reutilización."},
-              {"nr":"8.1","chapter":"Controles tecnológicos","topic":"Dispositivos endpoint de usuario","control_text":"La información almacenada, procesada o accesible mediante dispositivos endpoint deberá protegerse."},
-              {"nr":"8.2","chapter":"Controles tecnológicos","topic":"Derechos privilegiados de acceso","control_text":"La asignación y uso de derechos privilegiados deberá restringirse y gestionarse."},
-              {"nr":"8.3","chapter":"Controles tecnológicos","topic":"Restricción de acceso a la información","control_text":"El acceso a la información y activos asociados deberá restringirse conforme a la política de control de acceso."},
-              {"nr":"8.4","chapter":"Controles tecnológicos","topic":"Acceso al código fuente","control_text":"El acceso de lectura/escritura al código fuente, herramientas de desarrollo y bibliotecas deberá gestionarse adecuadamente."},
-              {"nr":"8.5","chapter":"Controles tecnológicos","topic":"Autenticación segura","control_text":"Deben implementarse tecnologías y procedimientos de autenticación segura basados en la política de control de acceso."},
-              {"nr":"8.6","chapter":"Controles tecnológicos","topic":"Gestión de capacidad","control_text":"Se deberán monitorizar y ajustar los recursos conforme a los requisitos actuales y esperados."},
-              {"nr":"8.7","chapter":"Controles tecnológicos","topic":"Protección contra malware","control_text":"Deben implementarse medidas de protección contra malware y concienciación del usuario."},
-              {"nr":"8.8","chapter":"Controles tecnológicos","topic":"Gestión de vulnerabilidades técnicas","control_text":"Se deberá obtener información sobre vulnerabilidades técnicas y evaluar la exposición de la organización, tomando medidas apropiadas."},
-              {"nr":"8.9","chapter":"Controles tecnológicos","topic":"Gestión de configuración","control_text":"Se deberán establecer, documentar, implementar y revisar configuraciones, incluidas las de seguridad."},
-              {"nr":"8.10","chapter":"Controles tecnológicos","topic":"Eliminación de información","control_text":"La información almacenada en sistemas o medios deberá eliminarse cuando ya no sea necesaria."},
-              {"nr":"8.11","chapter":"Controles tecnológicos","topic":"Enmascaramiento de datos","control_text":"Se deberá aplicar enmascaramiento de datos conforme a políticas y requisitos legales y de negocio."},
-              {"nr":"8.12","chapter":"Controles tecnológicos","topic":"Prevención de pérdida de datos","control_text":"Se deberán aplicar medidas de prevención de fuga de datos a sistemas, redes y dispositivos que procesen información sensible."},
-              {"nr":"8.13","chapter":"Controles tecnológicos","topic":"Copia de seguridad de la información","control_text":"Se deberán mantener y probar regularmente copias de seguridad de información, software y sistemas conforme a la política de backups."},
-              {"nr":"8.14","chapter":"Controles tecnológicos","topic":"Redundancia de instalaciones de procesamiento","control_text":"Las instalaciones de procesamiento deberán contar con redundancia suficiente para cumplir requisitos de disponibilidad."},
-              {"nr":"8.15","chapter":"Controles tecnológicos","topic":"Registro y trazabilidad (logging)","control_text":"Deben generarse, almacenar, proteger y analizar registros que reflejen actividades, excepciones y fallos relevantes."},
-              {"nr":"8.16","chapter":"Controles tecnológicos","topic":"Actividades de monitorización","control_text":"Redes, sistemas y aplicaciones deberán monitorizarse para detectar comportamientos anómalos y evaluar posibles incidentes."},
-              {"nr":"8.17","chapter":"Controles tecnológicos","topic":"Sincronización de relojes","control_text":"Los relojes de los sistemas deberán sincronizarse con fuentes de tiempo aprobadas."},
-              {"nr":"8.18","chapter":"Controles tecnológicos","topic":"Uso de utilidades privilegiadas","control_text":"El uso de programas utilitarios capaces de anular controles del sistema deberá restringirse y controlarse estrictamente."},
-              {"nr":"8.19","chapter":"Controles tecnológicos","topic":"Instalación de software en sistemas operativos","control_text":"Deben implementarse procedimientos para gestionar la instalación de software en sistemas operativos de manera segura."},
-              {"nr":"8.20","chapter":"Controles tecnológicos","topic":"Seguridad de redes","control_text":"Redes y dispositivos de red deberán protegerse, gestionarse y controlarse para salvaguardar la información."},
-              {"nr":"8.21","chapter":"Controles tecnológicos","topic":"Seguridad de servicios de red","control_text":"Se deberán identificar, implementar y monitorizar mecanismos y niveles de servicio de los servicios de red."},
-              {"nr":"8.22","chapter":"Controles tecnológicos","topic":"Segregación en redes","control_text":"Se deberán segregar grupos de servicios, usuarios y sistemas en las redes de la organización."},
-              {"nr":"8.23","chapter":"Controles tecnológicos","topic":"Filtrado web","control_text":"El acceso a sitios externos deberá gestionarse para reducir exposición a contenido malicioso."},
-              {"nr":"8.24","chapter":"Controles tecnológicos","topic":"Uso de criptografía","control_text":"Deben definirse e implantar reglas para el uso efectivo de criptografía y gestión de claves."},
-              {"nr":"8.25","chapter":"Controles tecnológicos","topic":"Ciclo de vida de desarrollo seguro","control_text":"Deben establecerse y aplicarse reglas para el desarrollo seguro de software y sistemas."},
-              {"nr":"8.26","chapter":"Controles tecnológicos","topic":"Requisitos de seguridad de aplicaciones","control_text":"Se deberán identificar, especificar y aprobar requisitos de seguridad al desarrollar o adquirir aplicaciones."},
-              {"nr":"8.27","chapter":"Controles tecnológicos","topic":"Arquitectura y principios de ingeniería seguros","control_text":"Deben establecerse principios documentados para ingeniería de sistemas seguros en actividades de desarrollo."},
-              {"nr":"8.28","chapter":"Controles tecnológicos","topic":"Codificación segura","control_text":"Deben aplicarse principios de codificación segura durante el desarrollo de software."},
-              {"nr":"8.29","chapter":"Controles tecnológicos","topic":"Pruebas de seguridad en desarrollo y aceptación","control_text":"Deben definirse e implantar procesos de pruebas de seguridad dentro del ciclo de desarrollo."},
-              {"nr":"8.30","chapter":"Controles tecnológicos","topic":"Desarrollo externalizado","control_text":"La organización deberá dirigir, supervisar y revisar actividades relacionadas con el desarrollo externalizado."},
-              {"nr":"8.31","chapter":"Controles tecnológicos","topic":"Separación de entornos (desarrollo, prueba, producción)","control_text":"Los entornos de desarrollo, prueba y producción deberán separarse y asegurarse."},
-              {"nr":"8.32","chapter":"Controles tecnológicos","topic":"Gestión de cambios","control_text":"Los cambios en instalaciones y sistemas deberán sujetarse a procedimientos de gestión de cambios."},
-              {"nr":"8.33","chapter":"Controles tecnológicos","topic":"Información de prueba","control_text":"La información de prueba deberá seleccionarse, protegerse y gestionarse apropiadamente."},
-              {"nr":"8.34","chapter":"Controles tecnológicos","topic":"Protección de sistemas durante pruebas de auditoría","control_text":"Las pruebas de auditoría y actividades de aseguramiento en sistemas operativos deberán planificarse y acordarse con la dirección apropiada."}
-          ];
-
-          window.addEventListener('DOMContentLoaded', () => {
-            const selectISO = document.getElementById('codigo_iso');
-            const selectPCI = document.getElementById('codigo_pci_dss');
-            const selectNIST = document.getElementById('codigo_nist_csf');
-            const selectSOC2 = document.getElementById('codigo_soc2');
-            const descripcion = document.querySelector('textarea[name="descripcion_control"]');
-
-            FULL_SOA.forEach(ctrl => {
-              const option = document.createElement('option');
-              option.value = ctrl.nr;
-              option.textContent = `${ctrl.nr} - ${ctrl.topic}`;
-              option.dataset.descripcion = [
-                ctrl.chapter,
-                ctrl.topic,
-                ctrl.control_text
-              ].filter(Boolean).join('\\n');
-              selectISO.appendChild(option);
-            });
-
-            function bloqueSeleccionado(select, marco) {
-              if (!select || !select.value) return "";
-              const option = select.options[select.selectedIndex];
-              const texto = option?.dataset?.descripcion || "";
-              return texto
-                ? `${marco} — ${select.value}\\n${texto}`
-                : `${marco} — ${select.value}`;
-            }
-
-            function actualizarDescripcionControles() {
-              if (!descripcion) return;
-
-              const bloques = [
-                bloqueSeleccionado(selectISO, "ISO/IEC 27002:2022"),
-                bloqueSeleccionado(selectPCI, "PCI DSS"),
-                bloqueSeleccionado(selectNIST, "NIST CSF 2.0"),
-                bloqueSeleccionado(selectSOC2, "SOC 2")
-              ].filter(Boolean);
-
-              descripcion.value = bloques.join('\\n\\n');
-            }
-
-            [selectISO, selectPCI, selectNIST, selectSOC2].forEach(select => {
-              if (select) select.addEventListener('change', actualizarDescripcionControles);
-            });
-
-            actualizarDescripcionControles();
-          });
-        </script>
-
-        <script>
-          (function(){
-            const REGLAS = {{ reglas_json|safe }} || [];
-
-            const mapaProbInh = {
-              "Rara vez o Muy baja": 1,
-              "Eventualmente o baja": 2,
-              "Puede ocurrir o Moderada": 3,
-              "Probable o Alta": 4,
-              "Muy frecuente o Muy Alta": 5
-            };
-
-            function obtenerProbInhNum(){
-              const v = document.querySelector('select[name="prob_inh"]')?.value || "";
-              if (mapaProbInh[v]) return mapaProbInh[v];
-              const asNum = parseInt(v);
-              return isNaN(asNum) ? 1 : asNum;
-            }
-
-            function obtenerSolidezComoNumero(){
-              const raw = document.querySelector('input[name="solidez_individual"]')?.value || "";
-              if (!raw) return 0.0;
-              const s = raw.toString().trim();
-              if (s.endsWith('%')){
-                const n = parseFloat(s.replace('%',''));
-                return isNaN(n) ? 0.0 : (n/100.0);
-              }
-              const n = parseFloat(s);
-              if (isNaN(n)) return 0.0;
-              return (n > 1) ? n/100.0 : n;
-            }
-
-            function aplicarReglasYCalcular(prob_inh_num, solidez_float){
-              if (!REGLAS || REGLAS.length === 0) return prob_inh_num;
-              const ejemplo_max = parseFloat(REGLAS[0].max || 0);
-              const reglas_en_porcent = ejemplo_max > 1.0;
-
-              let sol = solidez_float;
-              if (reglas_en_porcent && sol <= 1.0) sol = sol * 100.0;
-              if (!reglas_en_porcent && sol > 1.0) sol = sol / 100.0;
-
-              for (let i=0;i<REGLAS.length;i++){
-                const r = REGLAS[i];
-                const rmin = parseFloat(r.min);
-                const rmax = parseFloat(r.max);
-                if (rmin <= sol && sol <= rmax){
-                  const bajar = parseInt(r.bajar) || 0;
-                  const nuevo = Math.max(1, prob_inh_num - bajar);
-                  return Math.min(5, Math.max(1, nuevo));
-                }
-              }
-              return prob_inh_num;
-            }
-
-            function actualizarProbabilidadResidualEnFormulario(){
-              const prob_inh_num = obtenerProbInhNum();
-              const sol = obtenerSolidezComoNumero();
-              const prob_res_num = aplicarReglasYCalcular(prob_inh_num, sol);
-
-              const mapaNiveles = {
-                1: "Rara vez o Muy baja",
-                2: "Eventualmente o baja",
-                3: "Puede ocurrir o Moderada",
-                4: "Probable o Alta",
-                5: "Muy frecuente o Muy Alta"
-              };
-
-              const campo = document.getElementById('cuadrante_prob');
-              if (campo) campo.value = mapaNiveles[prob_res_num] || prob_res_num;
-
-              calcularRiesgoResidual();
-            }
-
-            const campoProbInh = document.querySelector('select[name="prob_inh"]');
-            const campoSolidez = document.querySelector('input[name="solidez_individual"]');
-            if (campoProbInh) campoProbInh.addEventListener('change', actualizarProbabilidadResidualEnFormulario);
-            if (campoSolidez) campoSolidez.addEventListener('input', actualizarProbabilidadResidualEnFormulario);
-
-            window.addEventListener('load', () => {
-              actualizarProbabilidadResidualEnFormulario();
-            });
-
-            try {
-              const originalCalc = window.calcularSolidezIndividual;
-              if (typeof originalCalc === 'function'){
-                window.calcularSolidezIndividual = function(){
-                  originalCalc();
-                  actualizarProbabilidadResidualEnFormulario();
-                };
-              }
-            } catch(e){}
-          })();
-        </script>
-
-        <script>
-          function calcularRiesgoResidual() {
-            const mapaProb = {
-              "Rara vez o Muy baja": 1,
-              "Eventualmente o baja": 2,
-              "Puede ocurrir o Moderada": 3,
-              "Probable o Alta": 4,
-              "Muy frecuente o Muy Alta": 5
-            };
-            const mapaImp = {
-              "Insignificante o Inferior": 1,
-              "Menor": 2,
-              "Moderado o Importante": 3,
-              "Mayor": 4,
-              "Catastrófico o Crítico": 5
-            };
-
-            const probText = document.getElementById("cuadrante_prob")?.value || "";
-            const impText = document.getElementById("cuadrante_imp")?.value || document.getElementById("imp_inh")?.value || "";
-
-            const probVal = mapaProb[probText] || 0;
-            const impVal = mapaImp[impText] || 0;
-            const resultado = probVal * impVal;
-
-            let nivel = "";
-            if (resultado >= 1 && resultado <= 4) nivel = "Bajo";
-            else if (resultado <= 8) nivel = "Medio";
-            else if (resultado <= 12) nivel = "Alto";
-            else if (resultado <= 19) nivel = "Muy Alto";
-            else if (resultado <= 25) nivel = "Extremo";
-
-            const campo = document.getElementById("riesgo_residual");
-            if (campo) campo.value = resultado > 0 ? `${resultado} (${nivel})` : "";
-
-            const campoImpactoResidual = document.getElementById("cuadrante_imp");
-            if (campoImpactoResidual && !campoImpactoResidual.value) {
-              const impInh = document.getElementById("imp_inh")?.value || "";
-              campoImpactoResidual.value = impInh;
-            }
-          }
-
-          window.addEventListener('DOMContentLoaded', () => {
-            calcularRiesgoInherente();
-            calcularSolidezIndividual();
-            calcularRiesgoResidual();
-          });
-        </script>
 
         <style>
           body{
@@ -20950,6 +21519,7 @@ def agregar_riesgo():
         riesgos_html_formulario,
         tipos_riesgo=tipos_riesgo,
         reglas_json=reglas_json,
+        reglas_impacto_json=reglas_impacto_json,
         fecha_hoy=fecha_hoy,
         origen=origen,
         proveedor_id=proveedor_id,
@@ -20964,6 +21534,7 @@ def agregar_riesgo():
         observaciones_prefill=observaciones_prefill,
         planes_accion_prefill=planes_accion_prefill,
         responsable_prefill=responsable_prefill,
+        controles_widget=Markup(controles_widget),
         pci_options=construir_opciones_control(PCI_DSS_CONTROLES),
         nist_options=construir_opciones_control(NIST_CSF_20_CONTROLES),
         soc2_options=construir_opciones_control(SOC2_CONTROLES)
@@ -20994,11 +21565,13 @@ def configurar_probabilidad_residual():
             max_val = request.form.get(f'max_{i}')
             bajar = request.form.get(f'bajar_{i}')
 
-            if min_val and max_val and bajar:
+            if min_val not in (None, '') and max_val not in (None, '') and bajar not in (None, ''):
+                minimo = float(str(min_val).replace(',', '.'))
+                maximo = float(str(max_val).replace(',', '.'))
                 reglas.append({
-                    'min': float(min_val),
-                    'max': float(max_val),
-                    'bajar': int(bajar)
+                    'min': min(minimo, maximo),
+                    'max': max(minimo, maximo),
+                    'bajar': max(0, min(4, int(bajar)))
                 })
 
         db.session.query(ConfigProbResidual).delete()
@@ -21012,10 +21585,14 @@ def configurar_probabilidad_residual():
             db.session.add(nueva)
 
         db.session.commit()
-        flash("✅ Configuración de probabilidad residual guardada correctamente.", "success")
+        actualizados = riesgo_recalcular_matriz_existente(commit=True)
+        flash(
+            f"✅ Configuración de probabilidad residual guardada. {actualizados} riesgo(s) recalculado(s).",
+            "success",
+        )
         return redirect(url_for('configurar_probabilidad_residual'))
 
-    reglas = ConfigProbResidual.query.order_by(ConfigProbResidual.min.desc()).all()
+    reglas = sorted(ConfigProbResidual.query.all(), key=lambda r: max(float(r.min), float(r.max)), reverse=True)
 
     html = render_template_string("""
     <div class="prob-shell">
@@ -21052,8 +21629,8 @@ def configurar_probabilidad_residual():
                 <table class="table table-bordered align-middle text-center prob-table mb-0">
                   <thead>
                     <tr>
-                      <th>Rango máximo (%)</th>
                       <th>Rango mínimo (%)</th>
+                      <th>Rango máximo (%)</th>
                       <th>Bajada de nivel</th>
                     </tr>
                   </thead>
@@ -21475,11 +22052,13 @@ def configurar_impacto_residual():
             max_val = request.form.get(f'max_{i}')
             bajar = request.form.get(f'bajar_{i}')
 
-            if min_val and max_val and bajar:
+            if min_val not in (None, '') and max_val not in (None, '') and bajar not in (None, ''):
+                minimo = float(str(min_val).replace(',', '.'))
+                maximo = float(str(max_val).replace(',', '.'))
                 reglas.append({
-                    'min': float(min_val),
-                    'max': float(max_val),
-                    'bajar': int(bajar)
+                    'min': min(minimo, maximo),
+                    'max': max(minimo, maximo),
+                    'bajar': max(0, min(4, int(bajar)))
                 })
 
         db.session.query(ConfigImpactoResidual).delete()
@@ -21493,10 +22072,14 @@ def configurar_impacto_residual():
             db.session.add(nueva)
 
         db.session.commit()
-        flash("✅ Configuración de impacto residual guardada correctamente.", "success")
+        actualizados = riesgo_recalcular_matriz_existente(commit=True)
+        flash(
+            f"✅ Configuración de impacto residual guardada. {actualizados} riesgo(s) recalculado(s).",
+            "success",
+        )
         return redirect(url_for('configurar_impacto_residual'))
 
-    reglas = ConfigImpactoResidual.query.order_by(ConfigImpactoResidual.min.desc()).all()
+    reglas = sorted(ConfigImpactoResidual.query.all(), key=lambda r: max(float(r.min), float(r.max)), reverse=True)
 
     html = render_template_string("""
     <div class="imp-shell">
@@ -21533,8 +22116,8 @@ def configurar_impacto_residual():
                 <table class="table table-bordered align-middle text-center imp-table mb-0">
                   <thead>
                     <tr>
-                      <th>Rango máximo (%)</th>
                       <th>Rango mínimo (%)</th>
+                      <th>Rango máximo (%)</th>
                       <th>Bajada de nivel</th>
                     </tr>
                   </thead>
@@ -23511,125 +24094,32 @@ def riesgo_detalle(riesgo_id):
             </div>
 
             <div class="col-12">
-              <div class="riskform-section-title">🧩 Controles Actuales - Evaluación del Control</div>
+              <div class="riskform-section-title">🧩 Controles Actuales - Evaluación Individual</div>
             </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Control de Código</label>
-              <input class="form-control" value="{{ riesgo.control_codigo or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Código Control Anexo ISO 27002</label>
-              <input class="form-control" value="{{ riesgo.codigo_anexo or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Código Control PCI DSS</label>
-              <input class="form-control" value="{{ riesgo.codigo_control_pci_dss or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Código Control NIST CSF 2.0</label>
-              <input class="form-control" value="{{ riesgo.codigo_control_nist_csf or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Código Control SOC 2</label>
-              <input class="form-control" value="{{ riesgo.codigo_control_soc2 or '' }}" readonly>
-            </div>
-
-            <div class="col-md-12">
-              <label class="form-label">Descripción del Control</label>
-              <textarea class="form-control" readonly>{{ riesgo.descripcion_control or '' }}</textarea>
-            </div>
-
-            <div class="col-12">
-              <div class="riskform-section-title">🧩 Tratamiento del Riesgo Inherente</div>
-            </div>
-
-            <div class="col-md-12">
-              <label class="form-label">Plan de Acción</label>
-              <textarea class="form-control" readonly>{{ riesgo.plan_accion or '' }}</textarea>
-            </div>
-
-            <div class="col-12">
-              <div class="riskform-section-title">🧩 Evaluación y Eficacia del Control</div>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Asignación</label>
-              <input class="form-control" value="{{ riesgo.asignacion or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Cargo</label>
-              <input class="form-control" value="{{ riesgo.cargo or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Tipo de Control</label>
-              <input class="form-control" value="{{ riesgo.tipo_control or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Forma de Control</label>
-              <input class="form-control" value="{{ riesgo.forma_control or '' }}" readonly>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Frecuencia</label>
-              <input class="form-control" value="{{ riesgo.frecuencia or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Funcionalidad</label>
-              <input class="form-control" value="{{ riesgo.funcionalidad or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Estado del Control</label>
-              <input class="form-control" value="{{ riesgo.estado_control or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Evidencia que Compone el Control</label>
-              <input class="form-control" value="{{ riesgo.evidencia_control or '' }}" readonly>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Soporte de Evidencia</label>
-              <input class="form-control" value="{{ riesgo.soporte_evidencia or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Diseño del Control</label>
-              <input class="form-control" value="{{ riesgo.diseno_control or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Ejecución del Control</label>
-              <input class="form-control" value="{{ riesgo.ejecucion_control or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Solidez Individual</label>
-              <input class="form-control"
-                     value="{{ ((riesgo.solidez_individual or 0) * 100)|round|int }}%"
-                     readonly>
-            </div>
+            {{ controles_detalle_html|safe }}
 
             <div class="col-12">
               <div class="riskform-section-title">🧩 Evaluación del Riesgo Residual</div>
             </div>
-
+            <div class="col-md-3">
+              <label class="form-label">Solidez Grupal (Promedio)</label>
+              <input class="form-control" value="{{ riesgo_formatear_porcentaje(riesgo.solidez_grupal or 0) }}" readonly>
+            </div>
             <div class="col-md-3">
               <label class="form-label">Probabilidad Residual</label>
-              <input class="form-control" value="{{ riesgo.prob_res or riesgo.cuadrante_prob or '' }}" readonly>
+              <input class="form-control" value="{{ riesgo.cuadrante_prob or riesgo.prob_res or '' }}" readonly>
             </div>
             <div class="col-md-3">
               <label class="form-label">Impacto Residual</label>
-              <input class="form-control" value="{{ riesgo.impacto_res_label or riesgo.cuadrante_imp or '' }}" readonly>
+              <input class="form-control" value="{{ riesgo.cuadrante_imp or riesgo.impacto_res_label or '' }}" readonly>
             </div>
             <div class="col-md-3">
               <label class="form-label">Riesgo Residual</label>
-              <input class="form-control {{ color_por_valor(riesgo.riesgo_residual) }}" value="{{ riesgo.riesgo_residual or '' }}" readonly>
+              <input class="form-control" value="{{ riesgo.riesgo_residual or '' }}" readonly>
             </div>
-
             <div class="col-md-3">
               <label class="form-label">Fecha de Revisión</label>
               <input class="form-control" value="{{ riesgo.fecha_revision or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Tratamiento del Riesgo</label>
-              <input class="form-control" value="{{ riesgo.tratamiento_riesgo or '' }}" readonly>
             </div>
 
             <div class="col-12">
@@ -23969,7 +24459,9 @@ def riesgo_detalle(riesgo_id):
             detalle_html,
             riesgo=riesgo,
             tipo_riesgo_nombre=tipo_riesgo_nombre,
-            color_por_valor=color_por_valor
+            color_por_valor=color_por_valor,
+            controles_detalle_html=Markup(riesgo_controles_detalle_html(riesgo)),
+            riesgo_formatear_porcentaje=riesgo_formatear_porcentaje
         ))
     )
 
@@ -23991,12 +24483,27 @@ def editar_riesgo(id):
     user_role = session.get('role', 'admin')
     solo_lectura = (user_role == 'auditor')
 
+    # Al abrir la edición se recalcula inmediatamente con las bandas vigentes.
+    # Esto evita mostrar valores residuales históricos o calculados con una
+    # configuración anterior.
+    if request.method == 'GET':
+        try:
+            if riesgo_actualizar_calculo_objeto(
+                riesgo,
+                reglas_prob=ConfigProbResidual.query.all(),
+                reglas_imp=ConfigImpactoResidual.query.all(),
+            ):
+                db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+            print(f"[WARN] No se pudo refrescar el residual del riesgo {id}: {exc!r}")
+
     if request.method == 'POST' and not solo_lectura:
-        
-        # Actualización de todos los campos
+        # Identificación y análisis
         riesgo.codigo_riesgo = request.form.get('codigo_riesgo')
         riesgo.riesgo = request.form.get('riesgo')
-        riesgo.activo = request.form.get('activo')
+        riesgo.fecha_identificacion = request.form.get('fecha_identificacion')
+        riesgo.propietario_riesgo = request.form.get('propietario_riesgo')
         riesgo.codigo_amenaza = request.form.get('codigo_amenaza')
         riesgo.amenaza = request.form.get('amenaza')
         riesgo.codigo_vulnerabilidad = request.form.get('codigo_vulnerabilidad')
@@ -24004,363 +24511,55 @@ def editar_riesgo(id):
         riesgo.tipo_activo = request.form.get('tipo_activo')
         riesgo.nombre_activo = request.form.get('nombre_activo')
         riesgo.dimension_seguridad = request.form.get('dimension_seguridad')
+        riesgo.prob_inh = request.form.get('prob_inh')
+        riesgo.imp_inh = request.form.get('imp_inh')
 
-        # --- Cálculo automático de solidez_individual ---
-        diseno_text = request.form.get('diseno_control')
-        ejec_text = request.form.get('ejecucion_control')
+        tipo_riesgo_id = request.form.get('tipo_riesgo_id')
+        riesgo.tipo_riesgo_id = int(tipo_riesgo_id) if tipo_riesgo_id else None
 
-        mapa_ejecucion = {
-            "Siempre": 1.0,
-            "Casi Siempre": 0.5,
-            "Nunca": 0.0
-        }
-        mapa_diseno = {
-            "Adecuado": 0.15,
-            "No Adecuado": 0.0,
-            "Otro": 0.0
-        }
-
-        def obtener_calificacion(texto, mapa):
-            if texto is None:
-                return 0.0
-            texto = texto.strip()
-            try:
-                if texto.endswith('%'):
-                    return float(texto.replace('%','')) / 100.0
-                return float(texto)
-            except Exception:
-                return mapa.get(texto, 0.0)
-
-        calificacion_diseno = obtener_calificacion(diseno_text, mapa_diseno)
-        calificacion_ejecucion = obtener_calificacion(ejec_text, mapa_ejecucion)
-
-        riesgo.solidez_individual = float((calificacion_diseno * 0.6) + (calificacion_ejecucion * 0.4))
-        # --- Fin del cálculo automático ---
-
-
-        # ==========================================
-        # Calcular probabilidad residual dinámica desde configuración BD
-        # ==========================================
-        config_residual = ConfigProbResidual.query.all()
-        solidez_pct = riesgo.solidez_individual * 100.0 if riesgo.solidez_individual is not None else 0.0
-        prob_inh_text = request.form.get('prob_inh')
-
-        mapa_prob_inh = {
-            "Rara vez o Muy baja": 1,
-            "Eventualmente o baja": 2,
-            "Puede ocurrir o Moderada": 3,
-            "Probable o Alta": 4,
-            "Muy frecuente o Muy Alta": 5
-        }
-        prob_inh_num = mapa_prob_inh.get(prob_inh_text, 1)
-
-        niveles_bajada = 0
-        if config_residual:
-            reglas_norm = []
-            for r in config_residual:
-                try:
-                    rmin = float(r.min)
-                    rmax = float(r.max)
-                    bajar = int(r.bajar or 0)
-                    reglas_norm.append({'rmin': min(rmin, rmax), 'rmax': max(rmin, rmax), 'bajar': bajar})
-                except Exception as e:
-                    print("[WARN] Regla inválida:", e)
-
-            for reg in reglas_norm:
-                if reg['rmin'] <= solidez_pct <= reg['rmax']:
-                    niveles_bajada = reg['bajar']
-                    break
-
-        prob_res_num = max(1, min(5, prob_inh_num - int(niveles_bajada)))
-        mapa_niveles = {
-            1: "Rara vez o Muy baja",
-            2: "Eventualmente o baja",
-            3: "Puede ocurrir o Moderada",
-            4: "Probable o Alta",
-            5: "Muy frecuente o Muy Alta"
-        }
-        prob_res_label = mapa_niveles.get(prob_res_num, "Desconocido")
-
-        riesgo.cuadrante_prob = prob_res_label
-        riesgo.prob_res = prob_res_label
-
-        # ==========================================
-        # Calcular impacto residual dinámico desde configuración BD
-        # ==========================================
-        config_impacto = ConfigImpactoResidual.query.all()
-        solidez_pct = riesgo.solidez_individual * 100.0 if riesgo.solidez_individual is not None else 0.0
-
-        mapa_imp_inh = {
-            "Insignificante o Inferior": 1,
-            "Menor": 2,
-            "Moderado o Importante": 3,
-            "Mayor": 4,
-            "Catastrófico o Crítico": 5
-        }
-        imp_inh_text = request.form.get('imp_inh')
-        impacto_inh_num = mapa_imp_inh.get(imp_inh_text, 3)
-
-        niveles_bajada_imp = 0
-        if config_impacto:
-            reglas_norm = []
-            for r in config_impacto:
-                try:
-                    rmin = float(r.min)
-                    rmax = float(r.max)
-                    bajar = int(r.bajar or 0)
-                    reglas_norm.append({'rmin': min(rmin, rmax), 'rmax': max(rmin, rmax), 'bajar': bajar})
-                except Exception as e:
-                    print("[WARN] Regla inválida impacto:", e)
-
-            for reg in reglas_norm:
-                if reg['rmin'] <= solidez_pct <= reg['rmax']:
-                    niveles_bajada_imp = reg['bajar']
-                    break
-
-        impacto_res_num = max(1, min(5, impacto_inh_num - int(niveles_bajada_imp)))
-        mapa_impacto_niveles = {
-            1:"Insignificante o Inferior",
-            2:"Menor",
-            3:"Moderado o Importante",
-            4:"Mayor",
-            5:"Catastrófico o Crítico",
-        }
-        impacto_res_label = mapa_impacto_niveles.get(impacto_res_num, "Desconocido")
-
-        riesgo.cuadrante_imp = impacto_res_label
-        riesgo.impacto_res = impacto_res_num
-        riesgo.impacto_res_label = impacto_res_label
-        riesgo.prob_res_num = prob_res_num
-        riesgo.impacto_res_num = impacto_res_num
-
-        # ==========================================
-        # Calcular RIESGO RESIDUAL (numérico y cualitativo)
-        # ==========================================
-        try:
-            riesgo_residual_valor = round(prob_res_num * impacto_res_num, 2)
-
-            if riesgo_residual_valor <= 4:
-                nivel_residual = "Bajo"
-            elif riesgo_residual_valor <= 8:
-                nivel_residual = "Medio"
-            elif riesgo_residual_valor <= 12:
-                nivel_residual = "Alto"
-            elif riesgo_residual_valor <= 19:
-                nivel_residual = "Muy Alto"
-            else:
-                nivel_residual = "Extremo"
-
-            riesgo_residual_calc = f"{riesgo_residual_valor} ({nivel_residual})"
-        except Exception as e:
-            print(f"[ERROR calculando riesgo residual] {e}")
-            riesgo_residual_calc = None
-
-        riesgo.riesgo_residual = riesgo_residual_calc
-
-        # ==========================================
-        # Calcular RIESGO INHERENTE (numérico + texto)
-        # ==========================================
-        try:
-            mapa_prob_inh = {
-                "Rara vez o Muy baja": 1,
-                "Eventualmente o baja": 2,
-                "Puede ocurrir o Moderada": 3,
-                "Probable o Alta": 4,
-                "Muy frecuente o Muy Alta": 5
-            }
-            mapa_imp_inh = {
-                "Insignificante o Inferior": 1,
-                "Menor": 2,
-                "Moderado o Importante": 3,
-                "Mayor": 4,
-                "Catastrófico o Crítico": 5
-            }
-
-            prob_inh_text = request.form.get('prob_inh')
-            imp_inh_text = request.form.get('imp_inh')
-
-            prob_inh_num = mapa_prob_inh.get(prob_inh_text, 1)
-            imp_inh_num = mapa_imp_inh.get(imp_inh_text, 1)
-
-            # Cálculo numérico
-            riesgo_inh_valor = round(prob_inh_num * imp_inh_num, 2)
-
-            # Clasificación textual
-            if riesgo_inh_valor <= 4:
-                nivel_inh = "Bajo"
-            elif riesgo_inh_valor <= 8:
-                nivel_inh = "Medio"
-            elif riesgo_inh_valor <= 12:
-                nivel_inh = "Alto"
-            elif riesgo_inh_valor <= 19:
-                nivel_inh = "Muy Alto"
-            else:
-                nivel_inh = "Extremo"
-
-            # Combinar número + nivel
-            riesgo_inherente_calc = f"{riesgo_inh_valor} ({nivel_inh})"
-
-        except Exception as e:
-            print(f"[ERROR calculando riesgo inherente] {e}")
-            riesgo_inherente_calc = "Error de cálculo"
-
-
-        riesgo.descripcion_control = request.form.get('controles_existentes')
+        # Controles múltiples y evaluación individual
+        controles_formulario = riesgo_extraer_controles_formulario(request.form)
         riesgo.plan_accion = request.form.get('plan_accion')
-        riesgo.responsable = request.form.get('responsable')
-        
-        #riesgo.fecha_compromiso = request.form.get('fecha_compromiso')
-        #riesgo.estado = request.form.get('estado')
 
-        # Campos de control
-        riesgo.control_codigo = request.form.get('control_codigo')
-        riesgo.codigo_anexo = (request.form.get('codigo_anexo') or '').strip()
-        riesgo.codigo_control_pci_dss = (request.form.get('codigo_control_pci_dss') or '').strip()
-        riesgo.codigo_control_nist_csf = (request.form.get('codigo_control_nist_csf') or '').strip()
-        riesgo.codigo_control_soc2 = (request.form.get('codigo_control_soc2') or '').strip()
-        riesgo.descripcion_control = construir_descripcion_controles_multimarco(
-            codigo_iso=riesgo.codigo_anexo,
-            codigo_pci=riesgo.codigo_control_pci_dss,
-            codigo_nist=riesgo.codigo_control_nist_csf,
-            codigo_soc2=riesgo.codigo_control_soc2
-        )
-        riesgo.asignacion = request.form.get('asignacion')
-        riesgo.cargo = request.form.get('cargo')
-        riesgo.tipo_control = request.form.get('tipo_control')
-        riesgo.forma_control = request.form.get('forma_control')
-        riesgo.frecuencia = request.form.get('frecuencia')
-        riesgo.funcionalidad = request.form.get('funcionalidad')
-        riesgo.estado_control = request.form.get('estado_control')
-        riesgo.referencia_documental = request.form.get('referencia_documental')
-        riesgo.evidencia_control = request.form.get('evidencia_control')
-        riesgo.soporte_evidencia = request.form.get('soporte_evidencia')
-        # Calcular el valor automático del campo "Diseño del control"
-        asignacion = request.form.get('asignacion')
-        tipo_control = request.form.get('tipo_control')
-        forma_control = request.form.get('forma_control')
-        funcionalidad = request.form.get('funcionalidad')
-        estado_control = request.form.get('estado_control')
-        evidencia_control = request.form.get('evidencia_control')
-        soporte_evidencia = request.form.get('soporte_evidencia')
-
-        mapa_asignacion = {'Asignado': 0.20, 'No Asignado': 0}
-        mapa_tipo = {'Preventivo': 0.15, 'Detectivo': 0.10, 'Correctivo': 0.07}
-        mapa_forma = {'Automatico': 0.15, 'Semiautomatico': 0.07, 'Manual': 0.05}
-        mapa_funcionalidad = {'Adecuada': 0.15, 'No Adecuada': 0}
-        mapa_estado = {
-            'Implementado y Documentado': 0.20,
-            'Implementado y No Documentado': 0.07,
-            'No Documentado': 0
-        }
-        mapa_soporte = {'Con Evidencia': 0.15, 'Sin Evidencia': 0}
-
-        calificacion_diseno = (
-            mapa_asignacion.get(asignacion, 0)
-            + mapa_tipo.get(tipo_control, 0)
-            + mapa_forma.get(forma_control, 0)
-            + mapa_funcionalidad.get(funcionalidad, 0)
-            + mapa_estado.get(estado_control, 0)
-            + mapa_soporte.get(soporte_evidencia, 0)
-        )
-
-        riesgo.diseno_control = round(calificacion_diseno, 6)
-        riesgo.ejecucion_control = request.form.get('ejecucion_control')
-        riesgo.valor = request.form.get('valor')
-        riesgo.solidez_grupal = request.form.get('solidez_grupal')        
+        # Tratamiento y seguimiento
         riesgo.fecha_revision = request.form.get('fecha_revision')
         riesgo.tratamiento_riesgo = request.form.get('tratamiento_riesgo')
         riesgo.observaciones = request.form.get('observaciones')
         riesgo.planes_accion = request.form.get('planes_accion')
+        riesgo.responsable = request.form.get('responsable')
         riesgo.fecha_implementacion = request.form.get('fecha_implementacion')
 
-        diseno_text = request.form.get('diseno_control')
-        ejec_text = request.form.get('ejecucion_control')
+        riesgo_reemplazar_controles(riesgo, controles_formulario)
+        solidez_grupal = riesgo_sincronizar_campos_legacy(riesgo, controles_formulario)
 
-        mapa_diseno = {
-            "Adecuado": 0.15,
-            "No Adecuado": 0.0,
-        }
-        mapa_ejecucion = {
-            "Siempre": 1.0,
-            "Casi Siempre": 0.5,
-            "Nunca": 0.0
-        }
-
-        def a_float_normalizado(valor, mapa):
-            if valor is None:
-                return 0.0
-            v = valor.strip()
-            if v.endswith('%'):
-                try:
-                    return float(v.replace('%',''))/100.0
-                except:
-                    return mapa.get(v, 0.0)
-            try:
-                num = float(v)
-                return num/100.0 if num > 1 else num
-            except:
-                return mapa.get(v, 0.0)
-        # === Conversión segura de campos numéricos/porcentuales ===
-        def parse_float_nullable(value):
-            """
-            Convierte cadenas como '75%', '75', '0.75' o '' en un float o None.
-            Guarda el número porcentual (75.0, no 0.75).
-            """
-            if value is None:
-                return None
-            v = str(value).strip()
-            if v == "":
-                return None
-            # Quitar símbolo %
-            v = v.replace('%', '').strip()
-            try:
-                n = float(v)
-                # Si el usuario escribió 0.75, se asume que quiso decir 75%
-                if n > 1:
-                    n = n / 100.0
-                return round(n, 4)
-            except ValueError:
-                return None
-
-        # === Normalizar campos antes de guardar ===
-
-        # diseno_control (ya lo calculas antes, pero si viene del form, se corrige)
-        diseno_form = request.form.get('diseno_control')
-        diseno_norm = parse_float_nullable(diseno_form)
-        if diseno_norm is not None:
-            riesgo.diseno_control = diseno_norm
-
-        # solidez_individual (si la recalculas arriba, no toques — sino normaliza)
-        solidez_individual_form = request.form.get('solidez_individual')
-        solidez_individual_norm = parse_float_nullable(solidez_individual_form)
-        if solidez_individual_norm is not None:
-            riesgo.solidez_individual = solidez_individual_norm
-
-        # solidez_grupal
-        sg_form = request.form.get('solidez_grupal')
-        sg_norm = parse_float_nullable(sg_form)
-        if sg_norm is not None:
-            riesgo.solidez_grupal = sg_norm
-
-        # impacto_res
-        impacto_res_form = request.form.get('impacto_res')
-        impacto_norm = parse_float_nullable(impacto_res_form)
-        if impacto_norm is not None:
-            riesgo.impacto_res = impacto_norm
-
-        calificacion_diseno = a_float_normalizado(diseno_text, mapa_diseno)
-        calificacion_ejecucion = a_float_normalizado(ejec_text, mapa_ejecucion)
-
-        riesgo.solidez_individual = round((calificacion_diseno * 0.6) + (calificacion_ejecucion * 0.4), 6)
-
-        riesgo.prob_inh = request.form.get('prob_inh')
-        riesgo.imp_inh = request.form.get('imp_inh')
-        riesgo.riesgo_inherente = riesgo_inherente_calc
-        if not riesgo_inherente_calc:
-            riesgo.riesgo_inherente = "Sin calcular"
+        reglas_prob_actuales = ConfigProbResidual.query.all()
+        reglas_imp_actuales = ConfigImpactoResidual.query.all()
+        resultado = riesgo_calcular_resultados(
+            riesgo.prob_inh,
+            riesgo.imp_inh,
+            solidez_grupal,
+            reglas_prob=reglas_prob_actuales,
+            reglas_imp=reglas_imp_actuales,
+        )
+        riesgo.probabilidad = resultado['prob_inh_num']
+        riesgo.impacto = resultado['imp_inh_num']
+        riesgo.riesgo_inherente = resultado['riesgo_inherente']
+        riesgo.cuadrante_prob = resultado['prob_res_label']
+        riesgo.prob_res = resultado['prob_res_label']
+        riesgo.cuadrante_imp = resultado['imp_res_label']
+        riesgo.impacto_res = resultado['imp_res_num']
+        riesgo.impacto_res_label = resultado['imp_res_label']
+        riesgo.riesgo_residual = resultado['riesgo_residual']
 
         db.session.commit()
-        flash("✅ Riesgo actualizado correctamente", "success")
+        flash(
+            f"✅ Riesgo actualizado con {len(controles_formulario)} control(es). Solidez grupal: {resultado['solidez_pct']:.2f}%. "
+            f"Reducción probabilidad: {resultado['bajar_prob']} nivel(es) "
+            f"({riesgo_describir_regla(resultado['regla_prob'])}); "
+            f"reducción impacto: {resultado['bajar_imp']} nivel(es) "
+            f"({riesgo_describir_regla(resultado['regla_imp'])}).",
+            "success",
+        )
         return redirect(url_for('gestion_riesgos'))
 
     FULL_SOA = [
@@ -24572,6 +24771,15 @@ def editar_riesgo(id):
         riesgo.codigo_control_soc2
     )
 
+    reglas_prob_edit = ConfigProbResidual.query.all()
+    reglas_imp_edit = ConfigImpactoResidual.query.all()
+    controles_widget = riesgo_controles_widget_html(
+        controles_iniciales=riesgo_controles_para_formulario(riesgo),
+        reglas_prob=[{'min': r.min, 'max': r.max, 'bajar': r.bajar} for r in reglas_prob_edit],
+        reglas_imp=[{'min': r.min, 'max': r.max, 'bajar': r.bajar} for r in reglas_imp_edit],
+        section_class="riskedit-section-title",
+    )
+
     html_editar = f"""
     <div class="riskedit-shell">
 
@@ -24695,150 +24903,40 @@ def editar_riesgo(id):
               <input type="text" class="form-control" name="riesgo_inherente" id="riesgo_inherente" value="{riesgo.riesgo_inherente or ''}" readonly>
             </div>
 
-            <div class="col-12">
-              <div class="riskedit-section-title">🧩 Controles Actuales - Evaluación del Control</div>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Control de Código</label>
-              <input class="form-control" name="control_codigo" value='{riesgo.control_codigo or ""}'>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Código Control Anexo ISO 27002</label>
-              <select id="codigo_iso" name="codigo_anexo" class="form-control" required>
-                <option value="">Seleccione un control...</option>
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Código Control PCI DSS</label>
-              <select id="codigo_pci_dss" name="codigo_control_pci_dss" class="form-control">
-                {pci_options_html}
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Código Control NIST CSF 2.0</label>
-              <select id="codigo_nist_csf" name="codigo_control_nist_csf" class="form-control">
-                {nist_options_html}
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Código Control SOC 2</label>
-              <select id="codigo_soc2" name="codigo_control_soc2" class="form-control">
-                {soc2_options_html}
-              </select>
-            </div>
-
-            <div class="col-md-12">
-              <label class="form-label">Descripción consolidada de los controles seleccionados</label>
-              <textarea class="form-control" name="descripcion_control" rows="12" readonly>{riesgo.descripcion_control or ""}</textarea>
-              <div class="form-text">
-                Se genera automáticamente con el texto completo de ISO 27002, PCI DSS, NIST CSF 2.0 y SOC 2 seleccionados.
-              </div>
-            </div>
+            {controles_widget}
 
             <div class="col-12">
               <div class="riskedit-section-title">🧩 Tratamiento del Riesgo Inherente</div>
             </div>
-
             <div class="col-md-12">
-              <label class='form-label'>Plan de Acción</label>
+              <label class="form-label">Plan de Acción</label>
               <textarea class="form-control" name="plan_accion">{riesgo.plan_accion or ""}</textarea>
-            </div>
-
-            <div class="col-12">
-              <div class="riskedit-section-title">🧩 Evaluación y Eficacia del Control</div>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Asignación</label>
-              <select class="form-control" name="asignacion" required>
-                <option value="">Seleccione...</option>
-                <option value="Asignado" {"selected" if riesgo.asignacion=="Asignado" else ""}>Asignado</option>
-                <option value="No Asignado" {"selected" if riesgo.asignacion=="No Asignado" else ""}>No Asignado</option>
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Cargo</label>
-              <input class="form-control" name="cargo" value='{riesgo.cargo or ""}'>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Tipo de Control</label>
-              <select class="form-control" name="tipo_control" required>
-                <option value="">Seleccione...</option>
-                <option value="Detectivo" {"selected" if riesgo.tipo_control=="Detectivo" else ""}>Detectivo</option>
-                <option value="Preventivo" {"selected" if riesgo.tipo_control=="Preventivo" else ""}>Preventivo</option>
-                <option value="Correctivo" {"selected" if riesgo.tipo_control=="Correctivo" else ""}>Correctivo</option>
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Forma de Control</label>
-              <select class="form-control" name="forma_control" required>
-                  <option value="">Seleccione...</option>
-                  <option value="Automático" {"selected" if riesgo.forma_control=="Automático" else ""}>Automático</option>
-                  <option value="Semiautomático" {"selected" if riesgo.forma_control=="Semiautomático" else ""}>Semiautomático</option>
-                  <option value="Manual" {"selected" if riesgo.forma_control=="Manual" else ""}>Manual</option>
-              </select>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Frecuencia</label>
-              <input class="form-control" name="frecuencia" value='{riesgo.frecuencia or ""}'>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Funcionalidad</label>
-              <select class="form-control" name="funcionalidad" required>
-                  <option value="">Seleccione...</option>
-                  <option value="Adecuada" {"selected" if riesgo.funcionalidad=="Adecuada" else ""}>Adecuada</option>
-                  <option value="No Adecuada" {"selected" if riesgo.funcionalidad=="No Adecuada" else ""}>No Adecuada</option>
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Estado del Control</label>
-              <select class="form-control" name="estado_control" required>
-                  <option value="">Seleccione...</option>
-                  <option value="Implementado y Documentado" {"selected" if riesgo.estado_control=="Implementado y Documentado" else ""}>Implementado y Documentado</option>
-                  <option value="Implementado y No Documentado" {"selected" if riesgo.estado_control=="Implementado y No Documentado" else ""}>Implementado y No Documentado</option>
-                  <option value="No Documentado" {"selected" if riesgo.estado_control=="No Documentado" else ""}>No Documentado</option>
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Evidencia que Compone el Control</label>
-              <select class="form-control" name="evidencia_control" required>
-                  <option value="">Seleccione...</option>
-                  <option value="Con Evidencia" {"selected" if riesgo.evidencia_control=="Con Evidencia" else ""}>Con Evidencia</option>
-                  <option value="Sin Evidencia" {"selected" if riesgo.evidencia_control=="Sin Evidencia" else ""}>Sin Evidencia</option>
-              </select>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Soporte de Evidencia</label>
-              <input class="form-control" name="soporte_evidencia" value='{riesgo.soporte_evidencia or ""}'>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Diseño del Control (Automático)</label>
-              <input class="form-control" id="diseno_control" name="diseno_control" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Ejecución del Control</label>
-              <select class="form-control" name="ejecucion_control" required>
-                  <option value="">Seleccione...</option>
-                  <option value="Siempre" {"selected" if riesgo.ejecucion_control=="Siempre" else ""}>Siempre</option>
-                  <option value="Casi Siempre" {"selected" if riesgo.ejecucion_control=="Casi Siempre" else ""}>Casi Siempre</option>
-                  <option value="Nunca" {"selected" if riesgo.ejecucion_control=="Nunca" else ""}>Nunca</option>
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Solidez Individual</label>
-              <input class="form-control" id="solidez_individual" name="solidez_individual" readonly>
             </div>
 
             <div class="col-12">
               <div class="riskedit-section-title">🧩 Riesgo Residual</div>
             </div>
-
             <div class="col-md-3">
-              <label class="form-label">Solidez Grupal</label>
-              <input class="form-control" id="solidez_grupal" name="solidez_grupal" readonly>
+              <label class="form-label">Solidez Grupal (Promedio)</label>
+              <input class="form-control risk-control-result" id="solidez_grupal" name="solidez_grupal" value="{riesgo_formatear_porcentaje(riesgo.solidez_grupal or 0)}" readonly>
+              <input type="hidden" id="valor" name="valor" value="{riesgo_formatear_porcentaje(riesgo.solidez_grupal or 0)}">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Probabilidad Residual</label>
+              <input class="form-control" id="cuadrante_prob" value="{riesgo.cuadrante_prob or riesgo.prob_res or ''}" readonly>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Impacto Residual</label>
+              <input class="form-control" id="cuadrante_imp" value="{riesgo.cuadrante_imp or riesgo.impacto_res_label or ''}" readonly>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Riesgo Residual</label>
+              <input class="form-control" id="riesgo_residual" value="{riesgo.riesgo_residual or ''}" readonly>
+            </div>
+            <div class="col-12">
+              <div id="detalle_regla_residual" class="alert alert-info py-2 px-3 mb-0 small">
+                Validando las bandas configuradas de probabilidad e impacto...
+              </div>
             </div>
             <div class="col-md-3">
               <label class="form-label">Fecha de Revisión</label>
@@ -24885,182 +24983,6 @@ def editar_riesgo(id):
           </div>
         </div>
 
-        <script>
-          const FULL_SOA = {full_soa_json};
-
-          window.addEventListener('DOMContentLoaded', () => {{
-              const selectISO = document.getElementById('codigo_iso');
-              const selectPCI = document.getElementById('codigo_pci_dss');
-              const selectNIST = document.getElementById('codigo_nist_csf');
-              const selectSOC2 = document.getElementById('codigo_soc2');
-              const descripcion = document.querySelector('textarea[name="descripcion_control"]');
-              const valorActual = "{riesgo.codigo_anexo or ''}";
-
-              FULL_SOA.forEach(ctrl => {{
-                  const option = document.createElement('option');
-                  option.value = ctrl.nr;
-                  option.textContent = `${{ctrl.nr}} - ${{ctrl.topic}}`;
-                  option.dataset.descripcion = [
-                    ctrl.chapter,
-                    ctrl.topic,
-                    ctrl.control_text
-                  ].filter(Boolean).join('\\n');
-                  if (ctrl.nr === valorActual) option.selected = true;
-                  selectISO.appendChild(option);
-              }});
-
-              function bloqueSeleccionado(select, marco) {{
-                if (!select || !select.value) return "";
-                const option = select.options[select.selectedIndex];
-                const texto = option?.dataset?.descripcion || "";
-                return texto
-                  ? `${{marco}} — ${{select.value}}\\n${{texto}}`
-                  : `${{marco}} — ${{select.value}}`;
-              }}
-
-              function actualizarDescripcionControles() {{
-                if (!descripcion) return;
-
-                const bloques = [
-                  bloqueSeleccionado(selectISO, "ISO/IEC 27002:2022"),
-                  bloqueSeleccionado(selectPCI, "PCI DSS"),
-                  bloqueSeleccionado(selectNIST, "NIST CSF 2.0"),
-                  bloqueSeleccionado(selectSOC2, "SOC 2")
-                ].filter(Boolean);
-
-                descripcion.value = bloques.join('\\n\\n');
-              }}
-
-              [selectISO, selectPCI, selectNIST, selectSOC2].forEach(select => {{
-                if (select) select.addEventListener('change', actualizarDescripcionControles);
-              }});
-
-              actualizarDescripcionControles();
-          }});
-        </script>
-
-        <script>
-          function calcularRiesgoInherente() {{
-            const probText = document.getElementById("prob_inh").value;
-            const impText = document.getElementById("imp_inh").value;
-
-            const mapaProb = {{
-              "Rara vez o Muy baja": 1,
-              "Eventualmente o baja": 2,
-              "Puede ocurrir o Moderada": 3,
-              "Probable o Alta": 4,
-              "Muy frecuente o Muy Alta": 5
-            }};
-            const mapaImp = {{
-              "Insignificante o Inferior": 1,
-              "Menor": 2,
-              "Moderado o Importante": 3,
-              "Mayor": 4,
-              "Catastrófico o Crítico": 5
-            }};
-
-            const probVal = mapaProb[probText] || 0;
-            const impVal = mapaImp[impText] || 0;
-            const resultado = probVal * impVal;
-
-            let nivel = "";
-            if (resultado >= 1 && resultado <= 4) nivel = "Bajo";
-            else if (resultado <= 9) nivel = "Moderado";
-            else if (resultado <= 15) nivel = "Alto";
-            else if (resultado <= 25) nivel = "Extremo";
-
-            const campo = document.getElementById("riesgo_inherente");
-            campo.value = resultado > 0 ? `${{resultado}} (${{nivel}})` : "";
-          }}
-
-          document.addEventListener('DOMContentLoaded', () => {{
-            const prob = document.getElementById("prob_inh");
-            const imp = document.getElementById("imp_inh");
-
-            if (prob) prob.addEventListener("change", calcularRiesgoInherente);
-            if (imp) imp.addEventListener("change", calcularRiesgoInherente);
-
-            calcularRiesgoInherente();
-          }});
-        </script>
-
-        <script>
-          function calcularSolidezIndividual() {{
-            const disenoElem = document.querySelector('input[name="diseno_control"]');
-            const ejecElem = document.querySelector('select[name="ejecucion_control"]');
-            const disenoRaw = disenoElem ? disenoElem.value.trim() : "";
-            const ejecucion = ejecElem ? ejecElem.value : "";
-
-            const mapaEjecucion = {{ "Siempre": 1.0, "Casi Siempre": 0.5, "Nunca": 0.0 }};
-
-            let valDiseno = 0.0;
-            if (disenoRaw.endsWith('%')) {{
-              valDiseno = parseFloat(disenoRaw.replace('%','')) / 100.0;
-            }} else {{
-              const n = parseFloat(disenoRaw);
-              valDiseno = isNaN(n) ? 0.0 : (n > 1 ? n / 100.0 : n);
-            }}
-
-            const valEjecucion = mapaEjecucion[ejecucion] || 0.0;
-            const solidez = (valDiseno * 0.6) + (valEjecucion * 0.4);
-
-            const si = document.getElementById("solidez_individual");
-            const sg = document.getElementById("solidez_grupal");
-            if (si) si.value = (solidez * 100).toFixed(0) + '%';
-            if (sg) sg.value = (solidez * 100).toFixed(0) + '%';
-          }}
-
-          document.addEventListener('DOMContentLoaded', () => {{
-            const campoDiseno = document.querySelector('input[name="diseno_control"]');
-            const campoEjecucion = document.querySelector('select[name="ejecucion_control"]');
-            if (campoDiseno) campoDiseno.addEventListener('input', calcularSolidezIndividual);
-            if (campoEjecucion) campoEjecucion.addEventListener('change', calcularSolidezIndividual);
-          }});
-        </script>
-
-        <script>
-          function calcularDisenoControl() {{
-            const asignacion = document.querySelector('select[name="asignacion"]')?.value || "";
-            const tipo_control = document.querySelector('select[name="tipo_control"]')?.value || "";
-            const forma_control = document.querySelector('select[name="forma_control"]')?.value || "";
-            const funcionalidad = document.querySelector('select[name="funcionalidad"]')?.value || "";
-            const estado_control = document.querySelector('select[name="estado_control"]')?.value || "";
-            const evidencia_control = document.querySelector('select[name="evidencia_control"]')?.value || "";
-
-            const mapa_asignacion = {{ "Asignado": 0.20, "No Asignado": 0 }};
-            const mapa_tipo_control = {{ "Preventivo": 0.15, "Detectivo": 0.10, "Correctivo": 0.07 }};
-            const mapa_forma_control = {{ "Automático": 0.15, "Semiautomático": 0.07, "Manual": 0.05 }};
-            const mapa_funcionalidad = {{ "Adecuada": 0.15, "No Adecuada": 0 }};
-            const mapa_estado_control = {{
-              "Implementado y Documentado": 0.20,
-              "Implementado y No Documentado": 0.07,
-              "No Documentado": 0
-            }};
-            const mapa_evidencia_control = {{ "Con Evidencia": 0.15, "Sin Evidencia": 0 }};
-
-            const diseno =
-              (mapa_asignacion[asignacion] || 0) +
-              (mapa_tipo_control[tipo_control] || 0) +
-              (mapa_forma_control[forma_control] || 0) +
-              (mapa_funcionalidad[funcionalidad] || 0) +
-              (mapa_estado_control[estado_control] || 0) +
-              (mapa_evidencia_control[evidencia_control] || 0);
-
-            const campoDiseno = document.getElementById('diseno_control');
-            if (campoDiseno) campoDiseno.value = (diseno * 100).toFixed(0) + '%';
-            calcularSolidezIndividual();
-          }}
-
-          document.addEventListener('DOMContentLoaded', () => {{
-            ['asignacion','tipo_control','forma_control','funcionalidad','estado_control','evidencia_control']
-              .forEach(nombre => {{
-                const campo = document.querySelector(`[name="${{nombre}}"]`);
-                if (campo) campo.addEventListener('change', calcularDisenoControl);
-              }});
-            calcularDisenoControl();
-            calcularSolidezIndividual();
-          }});
-        </script>
       </form>
     </div>
 
@@ -25322,131 +25244,38 @@ def editar_riesgo(id):
 # CALCULAR PROBABILIDAD RESIDUAL
 # ===========================
 def calcular_probabilidad_residual(prob_inherente, solidez):
-    from models import ConfigProbResidual
+    resultado = riesgo_calcular_resultados(
+        prob_inherente,
+        1,
+        solidez,
+        reglas_prob=ConfigProbResidual.query.all(),
+        reglas_imp=[],
+    )
+    return resultado["prob_res_num"]
 
-    reglas = ConfigProbResidual.query.all()
-    if not reglas:
-        print("⚠️ No hay reglas configuradas en la tabla config_prob_residual")
-        return prob_inherente
-
-    solidez_pct = solidez * 100 if solidez <= 1 else solidez
-    regla_aplicada = None
-
-    for regla in reglas:
-        rango_min = min(regla.min, regla.max)
-        rango_max = max(regla.min, regla.max)
-        if rango_min <= solidez_pct <= rango_max:
-            regla_aplicada = regla
-            break
-
-    if not regla_aplicada:
-        print("⚠️ No se encontró regla aplicable, se deja igual")
-        return prob_inherente
-
-    nuevo_valor = max(1, prob_inherente - regla_aplicada.bajar)
-    return nuevo_valor
 
 # ===========================================================
 # CALCULAR IMPACTO RESIDUAL
 # ===========================================================
 def calcular_impacto_residual(impacto_inherente, solidez):
-    """
-    Calcula el nivel de impacto residual basándose en:
-    - el impacto inherente (1 a 5)
-    - la solidez individual (0..1)
-    y las reglas guardadas en la tabla config_impacto_residual.
-    """
-    from models import ConfigImpactoResidual
-
-    # 1️⃣ Leer reglas de configuración desde la base de datos
-    config_residual = ConfigImpactoResidual.query.all()
-
-    # 2️⃣ Normalizar solidez a porcentaje (0..1 → 0..100)
-    solidez_pct = solidez * 100.0 if solidez <= 1 else solidez
-    niveles_bajada = 0
-
-    # 3️⃣ Buscar la regla aplicable según el rango configurado
-    if config_residual:
-        reglas_norm = []
-        for r in config_residual:
-            try:
-                rmin = float(r.min)
-                rmax = float(r.max)
-                bajar = int(r.bajar or 0)
-                rango_min = min(rmin, rmax)
-                rango_max = max(rmin, rmax)
-                reglas_norm.append({'rmin': rango_min, 'rmax': rango_max, 'bajar': bajar})
-            except Exception as e:
-                print("[WARN] Regla inválida en ConfigImpactoResidual:", e)
-
-        # probar reglas con rmin mayores / rangos más altos primero
-        reglas_norm = sorted(reglas_norm, key=lambda x: x['rmin'], reverse=True)
-
-        for reg in reglas_norm:
-            if reg['rmin'] <= solidez_pct <= reg['rmax']:
-                niveles_bajada = reg['bajar']
-                print(f"[APLICA IMPACTO REGLA] {reg} para solidez_pct={solidez_pct}")
-                break
-        else:
-            print(f"[NO IMPACTO REGLA] solidez_pct={solidez_pct} no encaja en reglas_norm")
-    else:
-        print("[INFO] No hay reglas en ConfigImpactoResidual; se usa impacto inherente sin cambios.")
-
-    # 4️⃣ Calcular valor numérico (1..5)
-    impacto_res_num = max(1, min(5, impacto_inherente - int(niveles_bajada)))
-
-    # 5️⃣ Convertir a texto (para guardar o mostrar)
-    mapa_niveles = {
-        1:"Insignificante o Inferior",
-        2:"Menor",
-        3:"Moderado o Importante",
-        4:"Mayor",
-        5:"Catastrófico o Crítico",
-    }
-    impacto_res_label = mapa_niveles.get(impacto_res_num, "Desconocido")
-
-    # Retorna ambos valores (numérico y textual)
-    return impacto_res_num, impacto_res_label
+    resultado = riesgo_calcular_resultados(
+        1,
+        impacto_inherente,
+        solidez,
+        reglas_prob=[],
+        reglas_imp=ConfigImpactoResidual.query.all(),
+    )
+    return resultado["imp_res_num"], resultado["imp_res_label"]
 
 
 # ===========================
 # FUNCIÓN DE CÁLCULO DE RIESGO
 # ===========================
 def calcular_riesgo(prob_texto, imp_texto):
-    # Mapas de texto → valor numérico
-    mapa_prob = {
-        "Rara vez o Muy baja": 1,
-        "Eventualmente o baja": 2,
-        "Puede ocurrir o Moderada": 3,
-        "Probable o Alta": 4,
-        "Muy frecuente o Muy Alta": 5
-    }
-    mapa_imp = {
-        "Insignificante o Inferior": 1,
-        "Menor": 2,
-        "Moderado o Importante": 3,
-        "Mayor": 4,
-        "Catastrófico o Crítico": 5
-    }
-
-    prob_val = mapa_prob.get(prob_texto, 0)
-    imp_val = mapa_imp.get(imp_texto, 0)
-    resultado = prob_val * imp_val
-
-    # Clasificación según la tabla
-    if resultado <= 4:
-        nivel = "Bajo"
-    elif resultado <= 8:
-        nivel = "Medio"
-    elif resultado <= 12:
-        nivel = "Alto"
-    elif resultado <= 19:
-        nivel = "Muy Alto"
-    else:
-        nivel = "Extremo"
-
-    return resultado, nivel
-
+    prob = riesgo_nivel_numero(prob_texto, "probabilidad", 1)
+    imp = riesgo_nivel_numero(imp_texto, "impacto", 1)
+    puntaje = prob * imp
+    return puntaje, riesgo_clasificar_puntaje(puntaje)
 
 
 @app.post("/tipos_riesgo/delete/<int:tipo_id>")
@@ -77558,6 +77387,509 @@ def asegurar_sincronizacion_vulnerabilidades_modelamiento():
         return 0
 
 
+# ============================================================
+# ACTIVE DIRECTORY -> MODELAMIENTO DE AMENAZAS / MITRE ATT&CK
+# ============================================================
+THREAT_MODEL_AD_SOURCE = "active_directory"
+THREAT_MODEL_AD_MARKER_RE = re.compile(r"\[GRAC-AD-FINDING:(\d+)\]", re.I)
+
+
+def tm_ad_marker(finding_id):
+    try:
+        return "[GRAC-AD-FINDING:{}]".format(int(finding_id))
+    except Exception:
+        return ""
+
+
+def tm_ad_finding_id(entry):
+    """Obtiene el ID externo del hallazgo AD sin reutilizar llaves foráneas de escáneres."""
+    if entry is None or (getattr(entry, "herramienta", "") or "").strip().lower() != THREAT_MODEL_AD_SOURCE:
+        return None
+    for value in (
+        getattr(entry, "descripcion", None),
+        getattr(entry, "impacto", None),
+        getattr(entry, "vulnerabilidad", None),
+    ):
+        match = THREAT_MODEL_AD_MARKER_RE.search(str(value or ""))
+        if match:
+            try:
+                return int(match.group(1))
+            except Exception:
+                return None
+    return None
+
+
+def tm_ad_source_ready():
+    """Confirma que la base y tabla de Gobierno AD están disponibles antes de sincronizar."""
+    ad_db_path = os.path.join(app.instance_path, "ad_governance.db")
+    if not os.path.exists(ad_db_path):
+        return False
+    conn = None
+    try:
+        conn = sqlite3.connect(ad_db_path, timeout=15)
+        return conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ad_findings'"
+        ).fetchone() is not None
+    except sqlite3.Error:
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def sincronizar_active_directory_con_modelamiento():
+    """
+    Incorpora cada hallazgo activo de Gobierno de Active Directory como una
+    entrada trazable de Modelamiento de Amenazas.
+
+    La identificación externa se conserva dentro de un marcador técnico en la
+    descripción para no mezclar IDs de Active Directory con las llaves foráneas
+    de hallazgos producidos por escáneres. La sincronización es idempotente:
+    actualiza cambios, elimina duplicados y retira registros que ya no están
+    activos en la fuente AD.
+    """
+    if not tm_ad_source_ready():
+        return 0
+
+    collector = globals().get("attack_auto_collect_active_directory")
+    if not callable(collector):
+        # La función se define más adelante en el archivo y estará disponible
+        # durante las solicitudes Flask, una vez cargado completamente el módulo.
+        return 0
+
+    records = collector() or []
+    existing = (
+        ThreatModelEntry.query
+        .options(selectinload(ThreatModelEntry.tecnicas))
+        .filter(func.lower(ThreatModelEntry.herramienta) == THREAT_MODEL_AD_SOURCE)
+        .order_by(ThreatModelEntry.id.asc())
+        .all()
+    )
+
+    existing_by_id = defaultdict(list)
+    for entry in existing:
+        finding_id = tm_ad_finding_id(entry)
+        if finding_id is not None:
+            existing_by_id[int(finding_id)].append(entry)
+
+    source_ids = set()
+    changes = 0
+
+    def update_attr(obj, attr, value):
+        nonlocal changes
+        if getattr(obj, attr) != value:
+            setattr(obj, attr, value)
+            changes += 1
+
+    for record in records:
+        source_ref = str(record.get("source_ref") or "")
+        match = re.search(r"(?:^|:)AD:(\d+)$", source_ref, flags=re.I)
+        if not match:
+            match = re.search(r"(\d+)$", source_ref)
+        if not match:
+            continue
+
+        finding_id = int(match.group(1))
+        source_ids.add(finding_id)
+        candidates = existing_by_id.get(finding_id, [])
+        entry = candidates[0] if candidates else None
+
+        for duplicate in candidates[1:]:
+            db.session.delete(duplicate)
+            changes += 1
+
+        severity = attack_auto_normalize_severity(record.get("severity"))
+        asset = attack_auto_clean(record.get("asset_name") or "Directorio corporativo", 200)
+        vulnerability = attack_auto_clean(
+            record.get("vulnerability") or record.get("title") or "Hallazgo de Gobierno de Active Directory",
+            500,
+        )
+        marker = tm_ad_marker(finding_id)
+        description_parts = [
+            attack_auto_clean(record.get("description") or vulnerability, 4300),
+            "Estado en Gobierno AD: {}.".format(attack_auto_clean(record.get("status") or "En análisis", 80)),
+        ]
+        if record.get("existing_controls"):
+            description_parts.append("Controles relacionados: {}".format(attack_auto_clean(record.get("existing_controls"), 1200)))
+        if record.get("control_weaknesses"):
+            description_parts.append("Tratamiento recomendado: {}".format(attack_auto_clean(record.get("control_weaknesses"), 1500)))
+        if record.get("evidence"):
+            description_parts.append("Evidencia: {}".format(attack_auto_clean(record.get("evidence"), 1200)))
+        description_parts.append(marker)
+        description = "\n\n".join(part for part in description_parts if part)[:5000]
+        impact = attack_auto_clean(
+            record.get("consequences") or
+            "Compromiso de identidad, persistencia, escalamiento de privilegios y movimiento lateral en el dominio.",
+            4000,
+        )
+
+        techniques = list(record.get("techniques") or [])
+        if not techniques:
+            techniques = [
+                {
+                    "technique_id": "T1078.002",
+                    "technique_name": "Valid Accounts: Domain Accounts",
+                    "tactic_id": "TA0001",
+                    "tactic_name": "Initial Access",
+                    "rationale": "El hallazgo puede facilitar el uso indebido de una identidad válida de dominio.",
+                    "confidence": 90,
+                },
+                {
+                    "technique_id": "T1098",
+                    "technique_name": "Account Manipulation",
+                    "tactic_id": "TA0003",
+                    "tactic_name": "Persistence",
+                    "rationale": "La debilidad de gobierno puede permitir persistencia mediante cambios de cuentas, grupos o privilegios.",
+                    "confidence": 82,
+                },
+            ]
+
+        confidence = max(
+            [int(item.get("confidence") or 0) for item in techniques] or [80]
+        )
+
+        if entry is None:
+            entry = ThreatModelEntry(
+                activo=asset,
+                herramienta=THREAT_MODEL_AD_SOURCE,
+                vulnerabilidad=vulnerability,
+                descripcion=description,
+                impacto=impact,
+                severidad=severity,
+                confianza=confidence,
+            )
+            db.session.add(entry)
+            db.session.flush()
+            changes += 1
+        else:
+            update_attr(entry, "activo", asset)
+            update_attr(entry, "herramienta", THREAT_MODEL_AD_SOURCE)
+            update_attr(entry, "vulnerabilidad", vulnerability)
+            update_attr(entry, "descripcion", description)
+            update_attr(entry, "impacto", impact)
+            update_attr(entry, "severidad", severity)
+            update_attr(entry, "confianza", confidence)
+
+        expected = []
+        base_score = tm_score_from_severity(severity)
+        for item in techniques:
+            technique_id = attack_auto_clean(item.get("technique_id"), 20)
+            if not technique_id:
+                continue
+            expected.append((
+                technique_id,
+                attack_auto_clean(item.get("technique_name") or technique_id, 255),
+                attack_auto_clean(item.get("tactic_id"), 20) or None,
+                attack_auto_clean(item.get("tactic_name") or "Other", 100),
+                attack_auto_clean(item.get("rationale") or "Mapeo desde Gobierno de Active Directory", 4000),
+                max(base_score, int(item.get("confidence") or confidence or 60)),
+            ))
+
+        actual = [
+            (
+                tech.mitre_technique_id,
+                tech.mitre_technique_name,
+                tech.mitre_tactic_id,
+                tech.mitre_tactic_name,
+                tech.rationale or "",
+                int(tech.score or 0),
+            )
+            for tech in (entry.tecnicas or [])
+        ]
+
+        if actual != expected:
+            entry.tecnicas.clear()
+            db.session.flush()
+            for technique_id, technique_name, tactic_id, tactic_name, rationale, score in expected:
+                entry.tecnicas.append(ThreatModelTechnique(
+                    mitre_technique_id=technique_id,
+                    mitre_technique_name=technique_name,
+                    mitre_tactic_id=tactic_id,
+                    mitre_tactic_name=tactic_name,
+                    rationale=rationale,
+                    score=score,
+                ))
+            changes += 1
+
+    # Retira del modelamiento los hallazgos que dejaron de estar activos en AD.
+    for entry in existing:
+        finding_id = tm_ad_finding_id(entry)
+        if finding_id is None or int(finding_id) not in source_ids:
+            db.session.delete(entry)
+            changes += 1
+
+    if changes:
+        db.session.commit()
+    return changes
+
+
+def asegurar_sincronizacion_active_directory_modelamiento():
+    """Sincroniza Gobierno AD sin impedir el acceso al módulo ante un error externo."""
+    try:
+        return sincronizar_active_directory_con_modelamiento()
+    except Exception as exc:
+        db.session.rollback()
+        print("No fue posible sincronizar Gobierno de Active Directory con Modelamiento de Amenazas:", repr(exc))
+        return 0
+
+
+# ============================================================
+# GOBIERNO DE FIREWALL -> MODELAMIENTO DE AMENAZAS / MITRE ATT&CK
+# ============================================================
+THREAT_MODEL_FIREWALL_SOURCE = "firewall_governance"
+THREAT_MODEL_FIREWALL_MARKER_RE = re.compile(r"\[GRAC-FIREWALL-FINDING:(\d+)\]", re.I)
+
+
+def tm_firewall_marker(finding_id):
+    try:
+        return "[GRAC-FIREWALL-FINDING:{}]".format(int(finding_id))
+    except Exception:
+        return ""
+
+
+def tm_firewall_finding_id(entry):
+    """Obtiene el ID externo del hallazgo de firewall almacenado en el marcador técnico."""
+    if entry is None or (getattr(entry, "herramienta", "") or "").strip().lower() != THREAT_MODEL_FIREWALL_SOURCE:
+        return None
+    for value in (
+        getattr(entry, "descripcion", None),
+        getattr(entry, "impacto", None),
+        getattr(entry, "vulnerabilidad", None),
+    ):
+        match = THREAT_MODEL_FIREWALL_MARKER_RE.search(str(value or ""))
+        if match:
+            try:
+                return int(match.group(1))
+            except Exception:
+                return None
+    return None
+
+
+def tm_firewall_finding_url(entry):
+    """Construye un enlace trazable desde Modelamiento hacia el hallazgo original."""
+    finding_id = tm_firewall_finding_id(entry)
+    finding_model = globals().get("FirewallGovFinding")
+    if finding_id is None or finding_model is None:
+        return ""
+    try:
+        finding = db.session.get(finding_model, int(finding_id))
+    except Exception:
+        finding = finding_model.query.get(int(finding_id))
+    if not finding:
+        return ""
+    return url_for(
+        "cumplimiento_continuo_firewall",
+        device_id=finding.device_id,
+        q=finding.finding_code or finding.id,
+    )
+
+
+def sincronizar_firewall_con_modelamiento():
+    """
+    Incorpora los hallazgos activos de Gobierno de Firewall como entradas
+    trazables de Modelamiento de Amenazas y mantiene su mapeo MITRE ATT&CK.
+
+    La sincronización es idempotente: actualiza cambios, elimina duplicados
+    y retira los registros cuya fuente ya no está activa.
+    """
+    collector = globals().get("attack_auto_collect_firewall")
+    finding_model = globals().get("FirewallGovFinding")
+    if not callable(collector) or finding_model is None:
+        return 0
+
+    records = collector() or []
+    source_findings = {
+        int(item.id): item
+        for item in finding_model.query.filter_by(active=True).order_by(finding_model.id.asc()).all()
+    }
+    existing = (
+        ThreatModelEntry.query
+        .options(selectinload(ThreatModelEntry.tecnicas))
+        .filter(func.lower(ThreatModelEntry.herramienta) == THREAT_MODEL_FIREWALL_SOURCE)
+        .order_by(ThreatModelEntry.id.asc())
+        .all()
+    )
+
+    existing_by_id = defaultdict(list)
+    for entry in existing:
+        finding_id = tm_firewall_finding_id(entry)
+        if finding_id is not None:
+            existing_by_id[int(finding_id)].append(entry)
+
+    source_ids = set()
+    changes = 0
+
+    def update_attr(obj, attr, value):
+        nonlocal changes
+        if getattr(obj, attr) != value:
+            setattr(obj, attr, value)
+            changes += 1
+
+    for record in records:
+        source_ref = str(record.get("source_ref") or "")
+        match = re.search(r"(\d+)$", source_ref)
+        if not match:
+            continue
+
+        finding_id = int(match.group(1))
+        finding = source_findings.get(finding_id)
+        if finding is None:
+            continue
+
+        source_ids.add(finding_id)
+        candidates = existing_by_id.get(finding_id, [])
+        entry = candidates[0] if candidates else None
+
+        for duplicate in candidates[1:]:
+            db.session.delete(duplicate)
+            changes += 1
+
+        severity = attack_auto_normalize_severity(record.get("severity") or finding.severity)
+        asset = attack_auto_clean(record.get("asset_name") or "Firewall / Perímetro", 200)
+        vulnerability = attack_auto_clean(
+            record.get("vulnerability") or finding.title or "Hallazgo de Gobierno de Firewall",
+            500,
+        )
+        marker = tm_firewall_marker(finding_id)
+
+        description_parts = [
+            attack_auto_clean(record.get("description") or finding.description or vulnerability, 3500),
+            "Código: {}. Regla: {}. Estado: {}.".format(
+                attack_auto_clean(finding.finding_code or "N/D", 120),
+                attack_auto_clean(finding.rule_name or finding.rule_external_id or "N/D", 500),
+                attack_auto_clean(finding.status or "Abierto", 80),
+            ),
+        ]
+        if finding.control_mapping:
+            description_parts.append(
+                "Controles relacionados: {}".format(
+                    attack_auto_clean(finding.control_mapping, 1200)
+                )
+            )
+        if finding.recommendation:
+            description_parts.append(
+                "Tratamiento recomendado: {}".format(
+                    attack_auto_clean(finding.recommendation, 1500)
+                )
+            )
+        if finding.technical_detail:
+            description_parts.append(
+                "Detalle técnico: {}".format(
+                    attack_auto_clean(finding.technical_detail, 1200)
+                )
+            )
+        if record.get("evidence"):
+            description_parts.append(
+                "Evidencia: {}".format(attack_auto_clean(record.get("evidence"), 1200))
+            )
+        description_parts.append(marker)
+        description = "\n\n".join(part for part in description_parts if part)[:5000]
+
+        impact = attack_auto_clean(
+            record.get("consequences")
+            or "Acceso no autorizado, exposición del perímetro, evasión de controles, movimiento lateral o afectación de servicios.",
+            4000,
+        )
+
+        techniques = list(record.get("techniques") or [])
+        if not techniques:
+            techniques = [{
+                "technique_id": "T1562.004",
+                "technique_name": "Impair Defenses: Disable or Modify System Firewall",
+                "tactic_id": "TA0005",
+                "tactic_name": "Defense Evasion",
+                "rationale": "El hallazgo evidencia una debilidad de configuración o gobierno que puede reducir la eficacia del control perimetral.",
+                "confidence": 70,
+            }]
+
+        confidence = max([int(item.get("confidence") or 0) for item in techniques] or [70])
+
+        if entry is None:
+            entry = ThreatModelEntry(
+                activo=asset,
+                herramienta=THREAT_MODEL_FIREWALL_SOURCE,
+                vulnerabilidad=vulnerability,
+                descripcion=description,
+                impacto=impact,
+                severidad=severity,
+                confianza=confidence,
+            )
+            db.session.add(entry)
+            db.session.flush()
+            changes += 1
+        else:
+            update_attr(entry, "activo", asset)
+            update_attr(entry, "herramienta", THREAT_MODEL_FIREWALL_SOURCE)
+            update_attr(entry, "vulnerabilidad", vulnerability)
+            update_attr(entry, "descripcion", description)
+            update_attr(entry, "impacto", impact)
+            update_attr(entry, "severidad", severity)
+            update_attr(entry, "confianza", confidence)
+
+        expected = []
+        base_score = tm_score_from_severity(severity)
+        seen_techniques = set()
+        for item in techniques:
+            technique_id = attack_auto_clean(item.get("technique_id"), 20)
+            if not technique_id or technique_id in seen_techniques:
+                continue
+            seen_techniques.add(technique_id)
+            expected.append((
+                technique_id,
+                attack_auto_clean(item.get("technique_name") or technique_id, 255),
+                attack_auto_clean(item.get("tactic_id"), 20) or None,
+                attack_auto_clean(item.get("tactic_name") or "Other", 100),
+                attack_auto_clean(item.get("rationale") or "Mapeo desde Gobierno de Firewall", 4000),
+                max(base_score, int(item.get("confidence") or confidence or 60)),
+            ))
+
+        actual = [
+            (
+                tech.mitre_technique_id,
+                tech.mitre_technique_name,
+                tech.mitre_tactic_id,
+                tech.mitre_tactic_name,
+                tech.rationale or "",
+                int(tech.score or 0),
+            )
+            for tech in (entry.tecnicas or [])
+        ]
+
+        if actual != expected:
+            entry.tecnicas.clear()
+            db.session.flush()
+            for technique_id, technique_name, tactic_id, tactic_name, rationale, score in expected:
+                entry.tecnicas.append(ThreatModelTechnique(
+                    mitre_technique_id=technique_id,
+                    mitre_technique_name=technique_name,
+                    mitre_tactic_id=tactic_id,
+                    mitre_tactic_name=tactic_name,
+                    rationale=rationale,
+                    score=score,
+                ))
+            changes += 1
+
+    for entry in existing:
+        finding_id = tm_firewall_finding_id(entry)
+        if finding_id is None or int(finding_id) not in source_ids:
+            db.session.delete(entry)
+            changes += 1
+
+    if changes:
+        db.session.commit()
+    return changes
+
+
+def asegurar_sincronizacion_firewall_modelamiento():
+    """Sincroniza Gobierno de Firewall sin bloquear el acceso ante un error externo."""
+    try:
+        return sincronizar_firewall_con_modelamiento()
+    except Exception as exc:
+        db.session.rollback()
+        print("No fue posible sincronizar Gobierno de Firewall con Modelamiento de Amenazas:", repr(exc))
+        return 0
+
+
 # ===================
 # Helper
 # ===================
@@ -77756,6 +78088,8 @@ def threat_model_dashboard():
 
     # Incluye automáticamente todas las vulnerabilidades existentes de la matriz.
     asegurar_sincronizacion_vulnerabilidades_modelamiento()
+    asegurar_sincronizacion_active_directory_modelamiento()
+    asegurar_sincronizacion_firewall_modelamiento()
 
     mapped_count = (
         db.session.query(func.count(func.distinct(ThreatModelEntry.id)))
@@ -77812,6 +78146,16 @@ def threat_model_dashboard():
           🧭 Matriz MITRE ATT&CK
         </a>
 
+        <a href="{{ url_for('threat_model_dashboard', herramienta='active_directory') }}"
+           class="btn btn-outline-dark rounded-pill px-4">
+          <i class="bi bi-person-lock"></i> Hallazgos Active Directory
+        </a>
+
+        <a href="{{ url_for('threat_model_dashboard', herramienta='firewall_governance') }}"
+           class="btn btn-outline-primary rounded-pill px-4">
+          <i class="bi bi-shield-lock"></i> Hallazgos Gobierno de Firewall
+        </a>
+
         <a href="{{ url_for('threat_model_unmapped_view') }}"
            class="btn btn-outline-danger rounded-pill px-4">
           🧩 Ver No Mapeados
@@ -77858,7 +78202,7 @@ def threat_model_dashboard():
           <label class="form-label">Herramienta</label>
           <select name="herramienta" class="form-select">
             <option value="">-- Todas --</option>
-            {% for op in ['registro_vulnerabilidades','nikto','nessus','nuclei','nmap','testssl','owasp_zap','zap'] %}
+            {% for op in ['active_directory','firewall_governance','registro_vulnerabilidades','nikto','nessus','nuclei','nmap','testssl','owasp_zap','zap'] %}
               <option value="{{ op }}" {% if filtro_herramienta == op %}selected{% endif %}>{{ op|upper }}</option>
             {% endfor %}
           </select>
@@ -77969,7 +78313,7 @@ def threat_model_dashboard():
               <tr>
                 <td class="text-center fw-bold">{{ it.id }}</td>
                 <td>{{ it.activo }}</td>
-                <td class="text-center">{{ it.herramienta|upper }}</td>
+                <td class="text-center">{% if it.herramienta == 'active_directory' %}<span class="badge bg-dark">ACTIVE DIRECTORY</span>{% elif it.herramienta == 'firewall_governance' %}<span class="badge bg-primary">GOBIERNO FIREWALL</span>{% else %}{{ it.herramienta|upper }}{% endif %}</td>
                 <td class="small">{{ it.vulnerabilidad }}</td>
                 <td class="text-center">{{ badge_severidad_html(it.severidad) }}</td>
 
@@ -77987,6 +78331,20 @@ def threat_model_dashboard():
 
                 <td class="text-center">
                   <div class="tm-actions-wrap">
+                    {% set ad_finding_id = tm_ad_finding_id(it) %}
+                    {% if ad_finding_id %}
+                      <a href="{{ url_for('adgov.finding_detail', finding_id=ad_finding_id) }}"
+                         class="btn btn-outline-dark btn-sm rounded-pill px-3">
+                        Ver hallazgo AD
+                      </a>
+                    {% endif %}
+                    {% set firewall_finding_url = tm_firewall_finding_url(it) %}
+                    {% if firewall_finding_url %}
+                      <a href="{{ firewall_finding_url }}"
+                         class="btn btn-outline-primary btn-sm rounded-pill px-3">
+                        Ver hallazgo Firewall
+                      </a>
+                    {% endif %}
                     {% if not read_only %}
                       <a href="{{ url_for('threat_model_delete', id=it.id) }}"
                          class="btn btn-danger btn-sm rounded-pill px-3"
@@ -78131,7 +78489,9 @@ def threat_model_dashboard():
             mapped_count=mapped_count,
             unmapped_count=unmapped_count,
             coverage_pct=coverage_pct,
-            badge_severidad_html=badge_severidad_html
+            badge_severidad_html=badge_severidad_html,
+            tm_ad_finding_id=tm_ad_finding_id,
+            tm_firewall_finding_url=tm_firewall_finding_url
         )
     )
 
@@ -78500,6 +78860,8 @@ def threat_model_asset_view():
     read_only = True if user.role == 'auditor' else False
 
     asegurar_sincronizacion_vulnerabilidades_modelamiento()
+    asegurar_sincronizacion_active_directory_modelamiento()
+    asegurar_sincronizacion_firewall_modelamiento()
 
     activo = (request.args.get('activo') or '').strip()
 
@@ -79048,6 +79410,8 @@ def threat_model_export_navigator():
         return redirect(url_for('menu'))
 
     asegurar_sincronizacion_vulnerabilidades_modelamiento()
+    asegurar_sincronizacion_active_directory_modelamiento()
+    asegurar_sincronizacion_firewall_modelamiento()
 
     activo = (request.args.get('activo') or '').strip()
 
@@ -101887,7 +102251,7 @@ def normalize_level(raw):
             return "Medio"
         elif n <= 12:
             return "Alto"
-        elif n <= 19:
+        elif n <= 20:
             return "Muy Alto"
         else:
             return "Extremo"
@@ -176605,6 +176969,7 @@ class ContinuousEvidence(db.Model):
     event_ref = db.Column(db.String(500), nullable=True)
     asset = db.Column(db.String(255), nullable=True)
     severity = db.Column(db.String(50), nullable=True)
+    status = db.Column(db.String(50), nullable=True, default="No evaluado")
     description = db.Column(db.Text, nullable=True)
     evidence_date = db.Column(db.DateTime, default=datetime.utcnow)
     raw_json = db.Column(db.Text, nullable=True)
@@ -177053,11 +177418,26 @@ def cont_comp_seed_controls():
     db.session.commit()
 
 
+
+def cont_comp_migrate_evidence_schema():
+    """Agrega columnas nuevas sin perder evidencias existentes."""
+    try:
+        rows = db.session.execute(text("PRAGMA table_info(continuous_evidences)")).fetchall()
+        columns = {row[1] for row in rows}
+        if "status" not in columns:
+            db.session.execute(text("ALTER TABLE continuous_evidences ADD COLUMN status VARCHAR(50)"))
+            db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        print("No se pudo actualizar el esquema de evidencias de Cumplimiento Continuo:", repr(exc))
+
+
 def init_continuous_compliance_db():
     with app.app_context():
         # Crea las tablas de la base principal y de todos los binds,
         # incluida instance/planes_accion.db.
         db.create_all()
+        cont_comp_migrate_evidence_schema()
         migrar_planes_accion_a_db_independiente()
         cont_comp_seed_controls()
 
@@ -177874,7 +178254,7 @@ def cont_comp_final_status_hybrid(wazuh_evidences, manual_evidences):
             "status": wazuh_status,
             "score": wazuh_score,
             "summary": wazuh_summary,
-            "source_type": "Automática Wazuh",
+            "source_type": "Herramienta XDR (Wazuh)",
             "evidence_count": len(wazuh_evidences) + manual["count"],
             "last_evaluated_at": last_date,
             "evaluation_type": "AUTOMATIC" if wazuh_status in ("No cumple", "Cumple") else "HYBRID",
@@ -178388,28 +178768,40 @@ def cont_comp_source_status(source_type, result=None, level=0, severity=None):
 
 
 def cont_comp_final_status_from_evidences(evidences):
-    if not evidences:
-        return "No monitoreado", 0, "No existe evidencia técnica automática desde Wazuh para este punto."
+    """Consolida evidencia automática multifuente para un punto normativo."""
+    def value(item, field, default=None):
+        if isinstance(item, dict):
+            return item.get(field, default)
+        return getattr(item, field, default)
 
-    visibles = [e for e in evidences if e.status != "No aplica"]
+    if not evidences:
+        return "No monitoreado", 0, "No existe evidencia automática desde la herramienta XDR, Gobierno de Firewall o Gobierno de Active Directory para este punto."
+
+    visibles = [e for e in evidences if (value(e, "status") or "") != "No aplica"]
 
     if not visibles:
-        return "No aplica", None, "Punto excluido técnicamente por Wazuh."
+        return "No aplica", None, "Punto excluido por la evaluación técnica o por la gestión del hallazgo."
 
-    fail = [e for e in visibles if e.status == "No cumple"]
-    partial = [e for e in visibles if e.status == "Parcial"]
-    ok = [e for e in visibles if e.status == "Cumple"]
+    fail = [e for e in visibles if (value(e, "status") or "") == "No cumple"]
+    partial = [e for e in visibles if (value(e, "status") or "") == "Parcial"]
+    ok = [e for e in visibles if (value(e, "status") or "") == "Cumple"]
+    sources = sorted({
+        (value(e, "source") or "Fuente automática").strip()
+        for e in visibles
+        if (value(e, "source") or "").strip()
+    })
+    source_text = ", ".join(sources) if sources else "fuentes automáticas"
 
     if fail:
-        return "No cumple", 0, f"{len(fail)} hallazgo(s) técnico(s) detectado(s) por Wazuh."
+        return "No cumple", 0, f"{len(fail)} hallazgo(s) abierto(s) afectan este punto. Origen: {source_text}."
 
     if partial:
-        return "Parcial", 60, f"{len(partial)} evento(s) requieren revisión técnica."
+        return "Parcial", 60, f"{len(partial)} evidencia(s) o hallazgo(s) requieren tratamiento o revisión. Origen: {source_text}."
 
     if ok:
-        return "Cumple", 100, f"{len(ok)} evidencia(s) técnica(s) soportan cumplimiento."
+        return "Cumple", 100, f"{len(ok)} evidencia(s) soportan el cumplimiento. Origen: {source_text}."
 
-    return "No monitoreado", 0, "Wazuh no entregó evidencia concluyente para este punto."
+    return "No monitoreado", 0, f"Las fuentes {source_text} no entregaron una conclusión para este punto."
 
 
 def cont_comp_get_control_eval_map(standard):
@@ -178437,7 +178829,7 @@ def cont_comp_control_to_detail_status(control_obj):
             "status": "No evaluado",
             "score": 0,
             "source_type": "-",
-            "summary": "No existe mapeo automático Wazuh para este punto específico.",
+            "summary": "No existe mapeo automático desde la herramienta XDR, Gobierno de Firewall o Gobierno de Active Directory para este punto específico.",
             "evidence_count": 0,
             "last_evaluated_at": None,
         }
@@ -178453,52 +178845,124 @@ def cont_comp_control_to_detail_status(control_obj):
 
 
 def cont_comp_build_standard_detail_rows(standard):
+    """Construye la matriz por estándar usando XDR, Firewall y Active Directory."""
     standard = (standard or "").strip().upper()
-
     catalog = cont_comp_build_standard_catalog(standard)
-
-    evidences = WazuhComplianceControl.query.filter_by(
-        standard=standard
-    ).order_by(
-        WazuhComplianceControl.rule_level.desc(),
-        WazuhComplianceControl.synced_at.desc()
-    ).all()
 
     evidence_by_code = {}
 
-    for e in evidences:
-        if e.status == "No aplica":
-            continue
+    xdr_evidences = WazuhComplianceControl.query.filter_by(
+        standard=standard
+    ).order_by(
+        WazuhComplianceControl.synced_at.desc()
+    ).all()
 
+    for e in xdr_evidences:
         code = cont_comp_normalize_code(e.control_code)
         if not code:
             continue
 
-        evidence_by_code.setdefault(code, []).append(e)
+        record = {
+            "status": e.status or "No evaluado",
+            "source": "Herramienta XDR (Wazuh)",
+            "source_type": "SCA" if (e.rule_id or "").startswith("SCA-") else "Alerta / telemetría",
+            "title": e.rule_description or e.control_name or f"Evidencia XDR {code}",
+            "reference": e.rule_id or e.alert_id or "—",
+            "severity": e.severity or "—",
+            "date": e.synced_at,
+            "control_name": e.control_name,
+        }
+        evidence_by_code.setdefault(code, []).append(record)
 
         if code not in catalog:
             catalog[code] = {
                 "detail_code": code,
                 "parent_code": cont_comp_parent_for_detail(standard, code),
-                "name": e.control_name or f"Control detectado por Wazuh: {code}",
+                "name": e.control_name or f"Control detectado por la herramienta XDR: {code}",
+            }
+
+    governance_evidences = ContinuousEvidence.query.filter_by(
+        standard=standard
+    ).filter(
+        ContinuousEvidence.source.in_([
+            "Gobierno de Firewall",
+            "Gobierno de Active Directory",
+        ])
+    ).order_by(ContinuousEvidence.evidence_date.desc()).all()
+
+    for e in governance_evidences:
+        code = cont_comp_normalize_code(e.control_code)
+        if not code:
+            continue
+
+        raw = {}
+        if e.raw_json:
+            try:
+                raw = json.loads(e.raw_json) or {}
+            except Exception:
+                raw = {}
+
+        record = {
+            "status": e.status or "No evaluado",
+            "source": e.source or "Fuente de gobierno",
+            "source_type": e.source_type or "Hallazgo de gobierno",
+            "title": raw.get("finding_title") or e.description or e.control_name or f"Hallazgo {code}",
+            "reference": raw.get("finding_code") or e.event_ref or "—",
+            "severity": e.severity or "—",
+            "date": e.evidence_date,
+            "control_name": e.control_name,
+        }
+        evidence_by_code.setdefault(code, []).append(record)
+
+        if code not in catalog:
+            catalog[code] = {
+                "detail_code": code,
+                "parent_code": cont_comp_parent_for_detail(standard, code),
+                "name": raw.get("mapped_control_name") or e.control_name or f"Control mapeado por hallazgo: {code}",
             }
 
     rows = []
 
     for code, item in catalog.items():
-        evs = evidence_by_code.get(code, [])
-
-        status, score, summary = cont_comp_final_status_from_evidences(evs)
+        records = evidence_by_code.get(code, [])
+        status, score, summary = cont_comp_final_status_from_evidences(records)
 
         if status == "No aplica":
             continue
 
-        sources = sorted(set([
-            "SCA" if (e.rule_id or "").startswith("SCA-") else "Alerta"
-            for e in evs
-        ]))
+        sources = sorted({r.get("source") for r in records if r.get("source")})
+        last_seen = max([r.get("date") for r in records if r.get("date")], default=None)
 
-        last_seen = max([e.synced_at for e in evs if e.synced_at], default=None)
+        status_priority = {"No cumple": 1, "Parcial": 2, "Cumple": 3, "No evaluado": 4}
+        ordered_records = sorted(
+            records,
+            key=lambda r: (
+                status_priority.get(r.get("status"), 9),
+                -(r.get("date").timestamp() if hasattr(r.get("date"), "timestamp") else 0),
+            )
+        )
+
+        origin_details = []
+        seen_details = set()
+        for rec in ordered_records:
+            key = (
+                rec.get("source"), rec.get("reference"), rec.get("title"), rec.get("status")
+            )
+            if key in seen_details:
+                continue
+            seen_details.add(key)
+            title = str(rec.get("title") or "Evidencia automática").strip()
+            if len(title) > 260:
+                title = title[:257] + "..."
+            origin_details.append({
+                "source": rec.get("source") or "Fuente automática",
+                "status": rec.get("status") or "No evaluado",
+                "title": title,
+                "reference": rec.get("reference") or "—",
+                "severity": rec.get("severity") or "—",
+            })
+            if len(origin_details) >= 6:
+                break
 
         rows.append({
             "detail_code": code,
@@ -178508,9 +178972,10 @@ def cont_comp_build_standard_detail_rows(standard):
             "status": status,
             "score": score,
             "summary": summary,
-            "evidence_count": len(evs),
+            "evidence_count": len(records),
             "last_evaluated_at": last_seen,
-            "evaluation_type": "AUTOMATIC" if evs else "NOT_MONITORED",
+            "evaluation_type": "AUTOMATIC_MULTI_SOURCE" if records else "NOT_MONITORED",
+            "origin_details": origin_details,
         })
 
     priority = {
@@ -178681,6 +179146,7 @@ def cont_comp_dashboard():
     if resp:
         return resp
 
+    cont_comp_sync_governance_findings()
     cfg = WazuhConfig.query.first()
 
     last_sync = ContinuousComplianceSyncLog.query.order_by(
@@ -178697,6 +179163,8 @@ def cont_comp_dashboard():
         firewall_findings_count = 0
         firewall_critical_count = 0
         firewall_last_sync = None
+
+    ad_metrics = cont_comp_get_ad_dashboard_metrics()
 
     standards_keys = ["ISO27001", "SOC2", "PCIDSS", "NISTCSF"]
 
@@ -178790,7 +179258,7 @@ def cont_comp_dashboard():
             <tr>
               <th>Estándar</th>
               <th>Total puntos</th>
-              <th>Evaluados por Wazuh</th>
+              <th>Evaluados automáticamente</th>
               <th>Cumple</th>
               <th>Parcial</th>
               <th>No cumple</th>
@@ -178829,21 +179297,30 @@ def cont_comp_dashboard():
     <div class="cc-card">
       <h5 class="cc-section-title">Estado de conexión</h5>
       <div class="row g-3">
-        <div class="col-md-6">
+        <div class="col-md-4">
           <div class="p-3 border rounded-4 h-100 bg-white">
-            <div class="fw-bold text-primary mb-2"><i class="bi bi-broadcast"></i> Wazuh</div>
+            <div class="fw-bold text-primary mb-2"><i class="bi bi-broadcast"></i> Herramienta XDR (Wazuh)</div>
             <p class="mb-1"><strong>Estado:</strong> {{ cfg.last_status if cfg else "No configurado" }}</p>
             <p class="mb-1"><strong>Último mensaje:</strong> {{ cfg.last_message if cfg else "—" }}</p>
             <p class="mb-0"><strong>Última sincronización:</strong> {{ last_sync.finished_at if last_sync else "Sin sincronización" }}</p>
           </div>
         </div>
-        <div class="col-md-6">
+        <div class="col-md-4">
           <div class="p-3 border rounded-4 h-100 bg-white">
             <div class="fw-bold text-primary mb-2"><i class="bi bi-bricks"></i> Gobierno de Firewall</div>
             <p class="mb-1"><strong>Dispositivos:</strong> {{ firewall_devices_count }}</p>
             <p class="mb-1"><strong>Hallazgos activos:</strong> {{ firewall_findings_count }} · <strong>Críticos:</strong> {{ firewall_critical_count }}</p>
             <p class="mb-2"><strong>Última sincronización:</strong> {{ firewall_last_sync.finished_at if firewall_last_sync else "Sin sincronización" }}</p>
             <a class="btn btn-sm btn-outline-primary" href="{{ url_for('cumplimiento_continuo_firewall') }}">Abrir Gobierno de Firewall</a>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="p-3 border rounded-4 h-100 bg-white">
+            <div class="fw-bold text-primary mb-2"><i class="bi bi-person-lock"></i> Gobierno de Active Directory</div>
+            <p class="mb-1"><strong>Conectores:</strong> {{ ad_metrics.connectors }}</p>
+            <p class="mb-1"><strong>Hallazgos activos:</strong> {{ ad_metrics.findings }} · <strong>Críticos:</strong> {{ ad_metrics.critical }}</p>
+            <p class="mb-2"><strong>Última sincronización:</strong> {{ ad_metrics.last_sync or 'Sin sincronización' }}</p>
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('adgov.dashboard') }}">Abrir Gobierno de Active Directory</a>
           </div>
         </div>
       </div>
@@ -178860,13 +179337,14 @@ def cont_comp_dashboard():
     firewall_devices_count=firewall_devices_count,
     firewall_findings_count=firewall_findings_count,
     firewall_critical_count=firewall_critical_count,
-    firewall_last_sync=firewall_last_sync)
+    firewall_last_sync=firewall_last_sync,
+    ad_metrics=ad_metrics)
 
     return cont_comp_render(
         content,
         "dashboard",
         "Cumplimiento Continuo",
-        "Monitoreo automático con Wazuh y evaluación continua de reglas de firewall."
+        "Monitoreo automático con herramienta XDR (Wazuh), Gobierno de Firewall y Gobierno de Active Directory."
     )
 
 
@@ -178945,7 +179423,7 @@ def cont_comp_wazuh_config():
     </div>
     """, cfg=cfg)
 
-    return cont_comp_render(content, "wazuh", "Conexión Wazuh", "Configure la API REST para extraer agentes, alertas, vulnerabilidades, FIM, SCA y MITRE.")
+    return cont_comp_render(content, "wazuh", "Herramienta XDR (Wazuh)", "Configure la API REST de Wazuh para extraer agentes, alertas, vulnerabilidades, FIM, SCA y MITRE.")
 
 
 @app.route("/cumplimiento_continuo/sincronizacion", methods=["GET", "POST"])
@@ -179007,6 +179485,7 @@ def cont_comp_standard(standard):
         return resp
 
     standard = (standard or "").strip().upper()
+    cont_comp_sync_governance_findings()
 
     titles = {
         "ISO27001": "ISO 27001",
@@ -179022,7 +179501,6 @@ def cont_comp_standard(standard):
     cumple = [r for r in rows_all if r["status"] == "Cumple"]
     no_monitoreado = [r for r in rows_all if r["status"] == "No monitoreado"]
 
-    # SOLO se muestran controles con evidencia automática Wazuh
     rows = no_cumple + parcial + cumple
 
     evaluados = len(rows)
@@ -179032,52 +179510,18 @@ def cont_comp_standard(standard):
 
     content = render_template_string("""
     <div class="row g-3">
-      <div class="col-md-3">
-        <div class="cc-kpi">
-          <div class="icon"><i class="bi bi-x-octagon"></i></div>
-          <div>
-            <div class="num">{{ no_cumple|length }}</div>
-            <div class="lbl">No cumple</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-md-3">
-        <div class="cc-kpi">
-          <div class="icon"><i class="bi bi-exclamation-triangle"></i></div>
-          <div>
-            <div class="num">{{ parcial|length }}</div>
-            <div class="lbl">Parcial</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-md-3">
-        <div class="cc-kpi">
-          <div class="icon"><i class="bi bi-check-circle"></i></div>
-          <div>
-            <div class="num">{{ cumple|length }}</div>
-            <div class="lbl">Cumple</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-md-3">
-        <div class="cc-kpi">
-          <div class="icon"><i class="bi bi-broadcast"></i></div>
-          <div>
-            <div class="num">{{ cobertura }}%</div>
-            <div class="lbl">Cobertura Wazuh</div>
-          </div>
-        </div>
-      </div>
+      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-x-octagon"></i></div><div><div class="num">{{ no_cumple|length }}</div><div class="lbl">No cumple</div></div></div></div>
+      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-exclamation-triangle"></i></div><div><div class="num">{{ parcial|length }}</div><div class="lbl">Parcial</div></div></div></div>
+      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-check-circle"></i></div><div><div class="num">{{ cumple|length }}</div><div class="lbl">Cumple</div></div></div></div>
+      <div class="col-md-3"><div class="cc-kpi"><div class="icon"><i class="bi bi-broadcast"></i></div><div><div class="num">{{ cobertura }}%</div><div class="lbl">Cobertura automática</div></div></div></div>
     </div>
 
     <div class="cc-card mt-3">
-      <h5 class="cc-section-title">{{ title }} — Evaluación automática Wazuh</h5>
+      <h5 class="cc-section-title">{{ title }} — Evaluación automática multifuente</h5>
 
       <p class="cc-muted mb-3">
-        Se muestran únicamente puntos con evidencia técnica automática.
+        La evaluación consolida evidencias de la <strong>herramienta XDR (Wazuh)</strong>,
+        <strong>Gobierno de Firewall</strong> y <strong>Gobierno de Active Directory</strong>.
         Puntos no monitoreados ocultos: <strong>{{ no_monitoreado|length }}</strong>.
         Score técnico sobre puntos evaluados: <strong>{{ score }}%</strong>.
       </p>
@@ -179089,9 +179533,9 @@ def cont_comp_standard(standard):
               <th>Punto norma</th>
               <th>Descripción</th>
               <th>Estado</th>
-              <th>Análisis técnico</th>
+              <th>Análisis consolidado</th>
               <th>Evidencias</th>
-              <th>Fuente</th>
+              <th>Fuente de evaluación</th>
               <th>Última evaluación</th>
               <th>Acción</th>
             </tr>
@@ -179100,31 +179544,19 @@ def cont_comp_standard(standard):
           <tbody>
           {% for r in rows %}
             <tr>
-              <td>
-                <strong>{{ r.detail_code }}</strong><br>
-                <small>{{ r.parent_code or "—" }}</small>
-              </td>
-
+              <td><strong>{{ r.detail_code }}</strong><br><small>{{ r.parent_code or "—" }}</small></td>
               <td>{{ r.name or "—" }}</td>
               <td>{{ status_badge(r.status)|safe }}</td>
               <td><small>{{ r.summary }}</small></td>
               <td><strong>{{ r.evidence_count }}</strong></td>
               <td><span class="cc-pill">{{ r.source_type }}</span></td>
               <td>{{ r.last_evaluated_at or "—" }}</td>
-
               <td>
-                <a class="btn btn-sm btn-outline-primary"
-                   href="{{ url_for('cont_comp_evidences', standard=standard, control_code=r.detail_code) }}">
-                  Ver evidencia
-                </a>
+                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('cont_comp_evidences', standard=standard, control_code=r.detail_code) }}">Ver evidencia</a>
               </td>
             </tr>
           {% else %}
-            <tr>
-              <td colspan="8" class="cc-empty">
-                No hay evidencias automáticas Wazuh para este estándar.
-              </td>
-            </tr>
+            <tr><td colspan="8" class="cc-empty">No hay evidencias automáticas de XDR, Firewall o Active Directory para este estándar.</td></tr>
           {% endfor %}
           </tbody>
         </table>
@@ -179146,7 +179578,7 @@ def cont_comp_standard(standard):
         content,
         standard,
         titles.get(standard, standard),
-        "Evaluación técnica automática. Solo se muestran controles con evidencia Wazuh."
+        "Evaluación automática con herramienta XDR, Gobierno de Firewall y Gobierno de Active Directory."
     )
 
 
@@ -179159,89 +179591,95 @@ def cont_comp_evidences():
 
     standard = (request.args.get("standard") or "").strip().upper()
     control_code = cont_comp_normalize_code(request.args.get("control_code") or "")
+    source_filter = (request.args.get("source") or "").strip()
+    status_filter = (request.args.get("status") or "").strip()
+    if status_filter not in ("Cumple", "Parcial", "No cumple"):
+        status_filter = ""
 
-    q = WazuhComplianceControl.query
-
-    if standard:
-        q = q.filter_by(standard=standard)
-
-    if control_code:
-        q = q.filter(
-            func.upper(WazuhComplianceControl.control_code) == control_code
-        )
-
-    q = q.filter(
-        db.or_(
-            WazuhComplianceControl.status.is_(None),
-            WazuhComplianceControl.status != "No aplica"
-        )
+    cont_comp_sync_governance_findings()
+    evidences = cont_comp_collect_evidence_rows(
+        standard=standard,
+        control_code=control_code,
+        source_filter=source_filter,
+        status_filter=status_filter,
     )
 
-    evidences = q.order_by(
-        WazuhComplianceControl.rule_level.desc(),
-        WazuhComplianceControl.synced_at.desc()
-    ).limit(1000).all()
+    # En Evidencias se muestran los resultados con evaluación técnica:
+    # Cumple, Parcial y No cumple. Se mantienen ocultos No aplica y No evaluado.
+    evidences = [
+        e for e in evidences
+        if (e.get("status") or "").strip() in ("Cumple", "Parcial", "No cumple")
+    ]
+
+    counts = {
+        "Cumple": sum(1 for e in evidences if e["status"] == "Cumple"),
+        "Parcial": sum(1 for e in evidences if e["status"] == "Parcial"),
+        "No cumple": sum(1 for e in evidences if e["status"] == "No cumple"),
+    }
 
     content = render_template_string("""
+    <div class="row g-3 mb-3">
+      <div class="col-lg-3 col-md-6"><div class="cc-kpi"><div class="icon"><i class="bi bi-check-circle"></i></div><div><div class="num">{{ counts['Cumple'] }}</div><div class="lbl">Cumple</div></div></div></div>
+      <div class="col-lg-3 col-md-6"><div class="cc-kpi"><div class="icon"><i class="bi bi-exclamation-circle"></i></div><div><div class="num">{{ counts['Parcial'] }}</div><div class="lbl">Parcial</div></div></div></div>
+      <div class="col-lg-3 col-md-6"><div class="cc-kpi"><div class="icon"><i class="bi bi-x-octagon"></i></div><div><div class="num">{{ counts['No cumple'] }}</div><div class="lbl">No cumple</div></div></div></div>
+      <div class="col-lg-3 col-md-6"><div class="cc-kpi"><div class="icon"><i class="bi bi-database-check"></i></div><div><div class="num">{{ evidences|length }}</div><div class="lbl">Total evidencias</div></div></div></div>
+    </div>
+
     <div class="cc-card">
-      <h5 class="cc-section-title">Evidencias automáticas Wazuh</h5>
+      <h5 class="cc-section-title">Evidencias automáticas multifuente</h5>
 
       <p class="cc-muted mb-3">
-        Esta vista muestra únicamente evidencias técnicas automáticas.
-        No se muestran registros No aplica ni evidencias manuales.
+        Incluye puntos que <strong>cumplen</strong>, presentan cumplimiento <strong>parcial</strong>
+        o <strong>no cumplen</strong>, obtenidos desde la <strong>herramienta XDR (Wazuh)</strong>,
+        <strong>Gobierno de Firewall</strong> y <strong>Gobierno de Active Directory</strong>.
       </p>
 
       <form class="row g-2 mb-3">
-        <div class="col-md-3">
-          <input class="form-control" name="standard" placeholder="PCIDSS / SOC2 / ISO27001 / NISTCSF" value="{{ standard }}">
+        <div class="col-lg-2 col-md-4"><input class="form-control" name="standard" placeholder="PCIDSS / SOC2 / ISO27001 / NISTCSF" value="{{ standard }}"></div>
+        <div class="col-lg-2 col-md-4"><input class="form-control" name="control_code" placeholder="1.2.5 / A.8.8 / PR.AA" value="{{ control_code }}"></div>
+        <div class="col-lg-3 col-md-4">
+          <select class="form-select" name="source">
+            <option value="">Todas las fuentes</option>
+            {% for value in ['Herramienta XDR (Wazuh)','Gobierno de Firewall','Gobierno de Active Directory'] %}
+            <option value="{{ value }}" {% if source_filter == value %}selected{% endif %}>{{ value }}</option>
+            {% endfor %}
+          </select>
         </div>
-
-        <div class="col-md-3">
-          <input class="form-control" name="control_code" placeholder="1.2.5 / 10.2 / A.8.8 / GV.OC" value="{{ control_code }}">
+        <div class="col-lg-2 col-md-4">
+          <select class="form-select" name="status">
+            <option value="">Cumple, parcial y no cumple</option>
+            {% for value in ['Cumple','Parcial','No cumple'] %}
+            <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ value }}</option>
+            {% endfor %}
+          </select>
         </div>
-
-        <div class="col-md-2">
-          <button class="btn btn-primary w-100">Filtrar</button>
-        </div>
-
-        <div class="col-md-2">
-          <a class="btn btn-outline-secondary w-100" href="{{ url_for('cont_comp_evidences') }}">Limpiar</a>
-        </div>
+        <div class="col-lg-1 col-md-4"><button class="btn btn-primary w-100">Filtrar</button></div>
+        <div class="col-lg-2 col-md-4"><a class="btn btn-outline-secondary w-100" href="{{ url_for('cont_comp_evidences') }}">Limpiar</a></div>
       </form>
 
       <div class="table-responsive">
-        <table class="table cc-table table-hover">
+        <table class="table cc-table table-hover align-middle">
           <thead>
             <tr>
-              <th>Fecha</th>
-              <th>Estándar</th>
-              <th>Punto norma</th>
-              <th>Estado</th>
-              <th>Activo</th>
-              <th>Regla / Check</th>
-              <th>Nivel</th>
-              <th>Severidad</th>
-              <th>Descripción técnica Wazuh</th>
+              <th>Fecha</th><th>Fuente</th><th>Estándar</th><th>Punto norma</th><th>Estado</th>
+              <th>Activo / cuenta / regla</th><th>Referencia</th><th>Severidad</th><th>Hallazgo o evidencia obtenida</th>
             </tr>
           </thead>
-
           <tbody>
           {% for e in evidences %}
             <tr>
-              <td>{{ e.synced_at }}</td>
+              <td>{{ e.date or '—' }}</td>
+              <td><span class="cc-pill">{{ e.source }}</span></td>
               <td>{{ e.standard }}</td>
               <td><strong>{{ e.control_code }}</strong></td>
               <td>{{ status_badge(e.status)|safe }}</td>
-              <td>{{ e.agent_name or "—" }}</td>
-              <td>{{ e.rule_id or "—" }}</td>
-              <td>{{ e.rule_level }}</td>
-              <td>{{ e.severity or "—" }}</td>
-              <td>{{ e.rule_description or e.control_name or "—" }}</td>
+              <td>{{ e.asset or '—' }}</td>
+              <td>{{ e.reference or '—' }}</td>
+              <td>{{ e.severity or '—' }}</td>
+              <td style="min-width:320px">{{ e.description or '—' }}</td>
             </tr>
           {% else %}
-            <tr>
-              <td colspan="9" class="cc-empty">No hay evidencias automáticas visibles para este filtro.</td>
-            </tr>
+            <tr><td colspan="9" class="cc-empty">No hay evidencias visibles para este filtro.</td></tr>
           {% endfor %}
           </tbody>
         </table>
@@ -179249,15 +179687,18 @@ def cont_comp_evidences():
     </div>
     """,
     evidences=evidences,
+    counts=counts,
     standard=standard,
     control_code=control_code,
+    source_filter=source_filter,
+    status_filter=status_filter,
     status_badge=cont_comp_status_badge)
 
     return cont_comp_render(
         content,
         "evidences",
-        "Evidencias Automáticas",
-        "Evidencias técnicas recolectadas desde Wazuh."
+        "Evidencias de Cumplimiento Continuo",
+        "Evidencias de la herramienta XDR, Gobierno de Firewall y Gobierno de Active Directory."
     )
 
 
@@ -181542,6 +181983,12 @@ def fwgov_main_actions(selected_device=None):
             "Consulte la vista técnica estandarizada de las reglas sincronizadas.",
             url_for("fwgov_rules_inventory", **params),
         ),
+        (
+            "bi-diagram-3-fill",
+            "Modelamiento de Amenazas",
+            "Consulte los hallazgos del firewall mapeados con tácticas y técnicas MITRE ATT&CK.",
+            url_for("threat_model_dashboard", herramienta=THREAT_MODEL_FIREWALL_SOURCE),
+        ),
     ]
     return Markup(render_template_string("""
     <div class="fwgov-action-grid" data-keep-cumplimiento-nav="true">
@@ -181653,6 +182100,22 @@ def cumplimiento_continuo_firewall():
     ))
     findings = findings[:500]
 
+    # Vincula cada hallazgo con su plan existente sin modificar el esquema
+    # de firewall_governance.db. El vínculo se resuelve por source_ref.
+    plan_refs = [f"firewall-finding:{finding.id}" for finding in findings]
+    plan_by_ref = {}
+    if plan_refs:
+        existing_plans = ContinuousActionPlan.query.filter(
+            ContinuousActionPlan.source_ref.in_(plan_refs)
+        ).all()
+        plan_by_ref = {
+            (plan.source_ref or ""): plan.id
+            for plan in existing_plans
+            if plan.source_ref
+        }
+    for finding in findings:
+        finding.action_plan_id = plan_by_ref.get(f"firewall-finding:{finding.id}")
+
     metrics = fwgov_dashboard_metrics(selected_device.id if selected_device else None)
     read_only = not cont_comp_can_write(user)
     selected_device_id = selected_device.id if selected_device else None
@@ -181741,9 +182204,18 @@ def cumplimiento_continuo_firewall():
                   <input class="form-control form-control-sm" name="management_comment" value="{{ f.management_comment or '' }}" placeholder="Comentario de gestión">
                   <button class="btn btn-sm btn-outline-primary">Actualizar</button>
                 </form>
+                {% if f.action_plan_id %}
+                <a class="btn btn-sm btn-success w-100 mt-1"
+                   href="{{ url_for('planes_accion_dashboard', plan_id=f.action_plan_id) }}">
+                  <i class="bi bi-box-arrow-up-right"></i> Ir al plan de acción
+                </a>
+                {% else %}
                 <form method="post" action="{{ url_for('fwgov_create_plan', finding_id=f.id) }}" class="mt-1">
-                  <button class="btn btn-sm btn-outline-danger w-100">Crear plan de acción</button>
+                  <button class="btn btn-sm btn-outline-danger w-100">
+                    <i class="bi bi-clipboard2-plus"></i> Crear plan de acción
+                  </button>
                 </form>
+                {% endif %}
                 {% else %}
                 <span class="fwgov-small">Solo lectura</span>
                 {% endif %}
@@ -182295,8 +182767,12 @@ def fwgov_create_plan(finding_id):
     source_ref = f"firewall-finding:{finding.id}"
     existing = ContinuousActionPlan.query.filter_by(source_ref=source_ref).first()
     if existing:
+        if finding.status not in ("Resuelto", "Resuelto automáticamente", "Falso positivo"):
+            finding.status = "En tratamiento"
+            finding.updated_at = datetime.utcnow()
+            db.session.commit()
         flash("Este hallazgo ya tiene un plan de acción asociado.", "warning")
-        return redirect(url_for("cumplimiento_continuo_firewall", device_id=finding.device_id))
+        return redirect(url_for("planes_accion_dashboard", plan_id=existing.id))
 
     plan = ContinuousActionPlan(
         origin="Firewall Governance",
@@ -182318,11 +182794,14 @@ def fwgov_create_plan(finding_id):
         }, ensure_ascii=False),
     )
     db.session.add(plan)
+    if finding.status not in ("Resuelto", "Resuelto automáticamente", "Falso positivo"):
+        finding.status = "En tratamiento"
+        finding.updated_at = datetime.utcnow()
     db.session.commit()
 
     registrar_log(fwgov_current_username(user), f"Plan de acción creado desde hallazgo de firewall {finding.finding_code}.")
-    flash("Plan de acción creado en el capítulo Plan de Acción.", "success")
-    return redirect(url_for("cumplimiento_continuo_firewall", device_id=finding.device_id))
+    flash("Plan de acción creado correctamente.", "success")
+    return redirect(url_for("planes_accion_dashboard", plan_id=plan.id))
 
 
 @app.route("/cumplimiento_continuo/firewall/exportar.csv")
@@ -185509,6 +185988,7 @@ ATTACK_AUTO_SOURCE_LABELS = {
     "WAZUH_MITRE": "Wazuh + MITRE",
     "WAZUH_VULN": "Wazuh Vulnerabilidades",
     "FIREWALL": "Gobierno de Firewall",
+    "ACTIVE_DIRECTORY": "Gobierno de Active Directory",
 }
 
 
@@ -185760,7 +186240,7 @@ def attack_auto_factor_values(record):
     source_type = record.get("source_type")
     internet = bool(record.get("internet_exposed"))
     detected_default = 5 if source_type in {"INCIDENTE", "WAZUH_MITRE"} else 2
-    exposure_default = 5 if internet else (4 if source_type in {"FIREWALL", "TPRM"} else 3)
+    exposure_default = 5 if internet else (4 if source_type in {"FIREWALL", "TPRM", "ACTIVE_DIRECTORY"} else 3)
     exploit_default = max(2, severity_factor)
     weakness_default = max(2, severity_factor)
     criticality_default = max(3, severity_factor)
@@ -185860,6 +186340,11 @@ def attack_auto_base_record(source_type, source_ref, name, asset_name, severity)
 def attack_auto_collect_threat_models():
     records = []
     for entry in ThreatModelEntry.query.order_by(ThreatModelEntry.id.asc()).all():
+        # Active Directory and Gobierno de Firewall have richer dedicated
+        # collectors. Skipping their mirrored MITRE entries prevents duplicates.
+        mirrored_sources = {THREAT_MODEL_AD_SOURCE, THREAT_MODEL_FIREWALL_SOURCE}
+        if (entry.herramienta or "").strip().lower() in mirrored_sources:
+            continue
         record = attack_auto_base_record(
             "MITRE", entry.id,
             "Explotación de {} en {}".format(entry.vulnerabilidad, entry.activo),
@@ -186108,6 +186593,117 @@ def attack_auto_collect_firewall():
     return records
 
 
+def attack_auto_collect_active_directory():
+    """Convierte los hallazgos de Gobierno de Active Directory en escenarios trazables."""
+    ad_db_path = os.path.join(app.instance_path, "ad_governance.db")
+    if not os.path.exists(ad_db_path):
+        return []
+
+    conn = sqlite3.connect(ad_db_path, timeout=20)
+    conn.row_factory = sqlite3.Row
+    try:
+        table_exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ad_findings'"
+        ).fetchone()
+        if not table_exists:
+            return []
+        rows = conn.execute(
+            """
+            SELECT f.id,f.connector_id,f.finding_key,f.finding_code,f.severity,f.title,
+                   f.description,f.recommendation,f.control_mapping,f.status,f.assigned_to,
+                   f.management_comment,f.first_detected_at,f.last_detected_at,f.resolved_at,
+                   c.name connector_name,c.host connector_host,
+                   u.sam_account_name,u.display_name,u.department,u.title account_title,
+                   u.privilege_path,u.enabled,u.privileged,u.service_account,u.generic_account
+              FROM ad_findings f
+              JOIN ad_connectors c ON c.id=f.connector_id
+              LEFT JOIN ad_users u ON u.id=f.user_id
+             WHERE f.active=1
+             ORDER BY f.id ASC
+            """
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
+
+    records = []
+    for row in rows:
+        status_text = tm_normalize_text(row["status"])
+        closed = status_text in {
+            "resuelto", "resuelto automaticamente", "descartado", "falso positivo"
+        }
+        in_treatment = status_text in {"en tratamiento", "riesgo aceptado"}
+        account = row["sam_account_name"] or row["display_name"] or row["connector_name"] or "Directorio corporativo"
+        privilege_path = row["privilege_path"] or "No identificada"
+        severity = attack_auto_normalize_severity(row["severity"])
+        source_ref = "AD:{}".format(row["id"])
+
+        record = attack_auto_base_record(
+            "ACTIVE_DIRECTORY",
+            source_ref,
+            "Abuso o compromiso de identidad por {}".format(row["title"]),
+            account,
+            severity,
+        )
+        record.update({
+            "source_date": row["last_detected_at"] or row["first_detected_at"] or "",
+            "asset_type": "Identidad / Active Directory",
+            "scope": "Conector: {} ({}). Área: {}. Cargo: {}. Ruta de privilegio: {}.".format(
+                row["connector_name"] or "N/D", row["connector_host"] or "N/D",
+                row["department"] or "N/D", row["account_title"] or "N/D", privilege_path,
+            ),
+            "description": row["description"] or row["title"],
+            "exposure_channel": "Active Directory / LDAP / Kerberos",
+            "internet_exposed": False,
+            "threat_actor": "Atacante interno, cuenta comprometida o actor con credenciales válidas",
+            "threat_event": "Uso indebido, compromiso o escalamiento de privilegios sobre una identidad del directorio",
+            "vulnerability": "{}: {}".format(row["finding_code"], row["description"] or row["title"]),
+            "consequences": "Acceso no autorizado, persistencia, escalamiento de privilegios, movimiento lateral y afectación de información o servicios corporativos.",
+            "security_dimensions": "Confidencialidad, Integridad, Disponibilidad",
+            "existing_controls": row["control_mapping"] or "Gobierno de identidades, autenticación y revisión de accesos",
+            "control_weaknesses": row["recommendation"] or "Corregir el hallazgo de gobierno de identidad y validar la evidencia de cierre",
+            "control_effectiveness": 85 if closed else 45 if in_treatment else 20,
+            "asset_criticality": 5 if severity in {"Crítica", "Alta"} else 3,
+            "owner": row["assigned_to"],
+            "evidence": "Hallazgo AD #{}; código {}; cuenta {}; conector {}; estado {}; última detección {}.".format(
+                row["id"], row["finding_code"], account, row["connector_name"] or "N/D",
+                row["status"] or "N/D", row["last_detected_at"] or "N/D",
+            ),
+            "source_snapshot": json.dumps({
+                "finding_id": row["id"],
+                "finding_code": row["finding_code"],
+                "finding_key": row["finding_key"],
+                "connector_id": row["connector_id"],
+                "connector": row["connector_name"],
+                "account": account,
+                "status": row["status"],
+                "management_comment": row["management_comment"],
+            }, ensure_ascii=False),
+            "status": "Cerrado" if closed else "En tratamiento" if in_treatment else "En análisis",
+            "techniques": [
+                {
+                    "technique_id": "T1078.002",
+                    "technique_name": "Valid Accounts: Domain Accounts",
+                    "tactic_id": "TA0001",
+                    "tactic_name": "Initial Access",
+                    "rationale": "Los hallazgos de cuentas y credenciales de Active Directory pueden facilitar el uso de identidades de dominio válidas.",
+                    "confidence": 92,
+                },
+                {
+                    "technique_id": "T1098",
+                    "technique_name": "Account Manipulation",
+                    "tactic_id": "TA0003",
+                    "tactic_name": "Persistence",
+                    "rationale": "La debilidad de gobierno de identidades puede permitir persistencia mediante cambios de cuentas, grupos o privilegios.",
+                    "confidence": 82,
+                },
+            ],
+        })
+        records.append(record)
+    return records
+
+
 ATTACK_AUTO_COLLECTORS = (
     ("MITRE", attack_auto_collect_threat_models),
     ("VULNERABILIDAD", attack_auto_collect_vulnerabilities),
@@ -186116,6 +186712,7 @@ ATTACK_AUTO_COLLECTORS = (
     ("WAZUH_MITRE", attack_auto_collect_wazuh_mitre),
     ("WAZUH_VULN", attack_auto_collect_wazuh_vulnerabilities),
     ("FIREWALL", attack_auto_collect_firewall),
+    ("ACTIVE_DIRECTORY", attack_auto_collect_active_directory),
 )
 
 
@@ -186505,7 +187102,8 @@ def attack_auto():
         query = query.filter(or_(
             AttackAutoScenario.code.ilike(like), AttackAutoScenario.name.ilike(like),
             AttackAutoScenario.asset_name.ilike(like), AttackAutoScenario.supplier_name.ilike(like),
-            AttackAutoScenario.threat_event.ilike(like),
+            AttackAutoScenario.threat_event.ilike(like), AttackAutoScenario.source_ref.ilike(like),
+            AttackAutoScenario.source_label.ilike(like),
         ))
     if source_filter:
         query = query.filter_by(source_type=source_filter)
@@ -186527,7 +187125,7 @@ def attack_auto():
       <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap">
         <div>
           <h5 class="fw-bold text-primary mb-1"><i class="bi bi-stars"></i> Generación automática</h5>
-          <div class="as-note">Lee los registros existentes de MITRE ATT&CK, vulnerabilidades, incidentes, TPRM, herramienta XDR y firewall.</div>
+          <div class="as-note">Lee los registros existentes de MITRE ATT&CK, vulnerabilidades, incidentes, TPRM, herramienta XDR, firewall y Gobierno de Active Directory.</div>
         </div>
         {% if not read_only %}
         <form method="post" action="{{ url_for('attack_auto_generate') }}" class="d-flex align-items-center gap-3 flex-wrap" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').innerHTML='<span class=&quot;spinner-border spinner-border-sm&quot;></span> Generando...';">
@@ -186911,18 +187509,24 @@ def attack_auto_register_risk(scenario_id):
     risk.probabilidad = int(probability)
     risk.impacto = int(impact)
     risk.descripcion_control = item.existing_controls
-    risk.diseno_control = "Adecuado" if item.control_effectiveness >= 70 else "Por fortalecer"
-    risk.ejecucion_control = "Fuerte" if item.control_effectiveness >= 70 else "Débil"
-    risk.valor = float(item.control_effectiveness)
-    risk.solidez_individual = float(item.control_effectiveness)
-    risk.solidez_grupal = float(item.control_effectiveness)
+    efectividad_control = riesgo_normalizar_fraccion(item.control_effectiveness, 0.0)
+    risk.diseno_control = riesgo_formatear_porcentaje(efectividad_control)
+    risk.ejecucion_control = "Fuerte" if efectividad_control >= 0.70 else "Débil"
+    risk.valor = efectividad_control
+    risk.solidez_individual = efectividad_control
+    risk.solidez_grupal = efectividad_control
     risk.prob_inh = attack_auto_probability_label(probability)
     risk.imp_inh = attack_auto_impact_label(impact)
-    risk.riesgo_inherente = "{} - {}".format(inherent_score, inherent_level)
-    risk.prob_res = attack_auto_probability_label(residual_probability)
-    risk.impacto_res = int(residual_impact)
-    risk.impacto_res_label = attack_auto_impact_label(residual_impact)
-    risk.riesgo_residual = "{} - {}".format(residual_score, residual_level)
+    resultado_matriz = riesgo_calcular_resultados(risk.prob_inh, risk.imp_inh, efectividad_control)
+    risk.probabilidad = resultado_matriz["prob_inh_num"]
+    risk.impacto = resultado_matriz["imp_inh_num"]
+    risk.riesgo_inherente = resultado_matriz["riesgo_inherente"]
+    risk.cuadrante_prob = resultado_matriz["prob_res_label"]
+    risk.prob_res = resultado_matriz["prob_res_label"]
+    risk.cuadrante_imp = resultado_matriz["imp_res_label"]
+    risk.impacto_res = resultado_matriz["imp_res_num"]
+    risk.impacto_res_label = resultado_matriz["imp_res_label"]
+    risk.riesgo_residual = resultado_matriz["riesgo_residual"]
     risk.fecha_revision = date.today().isoformat()
     risk.tratamiento_riesgo = attack_auto_clean(treatment, 255)
     risk.plan_accion = attack_auto_clean(item.control_weaknesses, 255)
@@ -186940,6 +187544,20 @@ def attack_auto_register_risk(scenario_id):
         evaluation.risk_id = risk.id
         evaluation.risk_code = risk.codigo_riesgo
     db.session.commit()
+
+    # Mantener la trazabilidad con el hallazgo AD original. La creación o
+    # actualización del riesgo continúa ocurriendo únicamente en este módulo.
+    if item.source_type == "ACTIVE_DIRECTORY":
+        try:
+            finding_id = int(str(item.source_ref or "").split(":")[-1])
+            ad_db_path = os.path.join(app.instance_path, "ad_governance.db")
+            if os.path.exists(ad_db_path):
+                with sqlite3.connect(ad_db_path, timeout=20) as ad_conn:
+                    ad_conn.execute("UPDATE ad_findings SET risk_id=? WHERE id=?", (risk.id, finding_id))
+                    ad_conn.commit()
+        except Exception:
+            pass
+
     flash("Escenario {} {} en la Matriz de Riesgos con código {}.".format(item.code, "registrado" if created else "actualizado", risk.codigo_riesgo), "success")
     return redirect(url_for("attack_auto"))
 
@@ -187129,8 +187747,2040 @@ def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+import csv
+import hashlib
+import io
+import json
+import os
+import re
+import socket
+import sqlite3
+import ssl
+import uuid
+from collections import defaultdict, deque
+from datetime import date, datetime, timedelta, timezone
+from functools import wraps
+
+from cryptography.fernet import Fernet, InvalidToken
+from flask import (
+    Blueprint,
+    abort,
+    flash,
+    redirect,
+    render_template_string,
+    request,
+    send_file,
+    session,
+    url_for,
+)
+from markupsafe import Markup, escape
+
+
+AD_MODULE_NAME = "Cumplimiento Continuo"
+AD_PRIVILEGED_GROUPS = {
+    "administrators",
+    "domain admins",
+    "enterprise admins",
+    "schema admins",
+    "account operators",
+    "server operators",
+    "backup operators",
+    "dnsadmins",
+    "group policy creator owners",
+}
+AD_SEVERITY_ORDER = {"Crítica": 4, "Alta": 3, "Media": 2, "Baja": 1, "Informativa": 0}
+AD_UAC_DISABLED = 0x0002
+AD_UAC_LOCKOUT = 0x0010
+AD_UAC_PASSWORD_NOT_REQUIRED = 0x0020
+AD_UAC_PASSWORD_CANNOT_CHANGE = 0x0040
+AD_UAC_NORMAL_ACCOUNT = 0x0200
+AD_UAC_DONT_EXPIRE_PASSWORD = 0x10000
+
+
+AD_STYLE = """
+<style>
+  .adg-shell{width:96%;max-width:1650px;margin:10px auto 24px auto;padding:0}
+  .adg-hero{
+    background:linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
+    border-radius:18px;padding:16px 24px;min-height:94px;display:flex;align-items:center;
+    justify-content:flex-start;gap:14px;box-shadow:0 12px 24px rgba(15,23,42,.24);
+    color:#fff;position:relative;overflow:hidden;margin-bottom:12px
+  }
+  .adg-hero::before{
+    content:"";position:absolute;inset:0;background:
+      radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
+      repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0,rgba(255,255,255,.05) 1px,transparent 1px,transparent 15px);
+    pointer-events:none
+  }
+  .adg-hero-icon{
+    width:54px;height:54px;min-width:54px;border-radius:14px;background:rgba(255,255,255,.96);
+    color:#0b4a8f;display:flex;align-items:center;justify-content:center;font-size:1.55rem;
+    box-shadow:0 8px 18px rgba(0,0,0,.20);position:relative;z-index:1
+  }
+  .adg-hero-text{position:relative;z-index:1;min-width:0}
+  .adg-module-kicker{
+    display:inline-block;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.30);
+    border-radius:999px;padding:3px 10px;font-size:.66rem;font-weight:800;letter-spacing:.35px;margin-bottom:4px
+  }
+  .adg-hero h2{color:#fff!important;font-weight:950;font-size:1.36rem;line-height:1.08;margin:0}
+  .adg-hero p{margin:5px 0 0;color:rgba(255,255,255,.90);font-size:.82rem;font-weight:600}
+  .adg-module-nav{
+    background:rgba(255,255,255,.97);border:1px solid rgba(219,230,244,.98);border-radius:16px;
+    box-shadow:0 8px 20px rgba(15,23,42,.10);padding:10px 12px;margin-bottom:14px
+  }
+  .adg-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:0}
+  .adg-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border-radius:999px;
+    padding:9px 15px;text-decoration:none;font-size:.82rem;font-weight:750;border:1px solid transparent}
+  .adg-btn-primary{background:#0d6efd;color:#fff}.adg-btn-primary:hover{background:#0959cb;color:#fff}
+  .adg-btn-light{background:#f4f8fe;color:#0b4a8f;border-color:#d2e2f4}.adg-btn-light:hover{background:#e7f1fd;color:#062b55}
+  .adg-btn-danger{background:#dc3545;color:#fff}.adg-btn-danger:hover{background:#b92d3a;color:#fff}
+  .adg-btn-success{background:#198754;color:#fff}.adg-btn-success:hover{background:#146c43;color:#fff}
+  .adg-btn-warning{background:#ffc107;color:#3b2c00}.adg-btn-warning:hover{background:#e5ac00;color:#231a00}
+  .adg-btn-outline{background:#fff;color:#0b4a8f;border-color:#9cc5eb}.adg-btn-outline:hover{background:#e9f4ff;color:#062b55}
+  .adg-grid{display:grid;grid-template-columns:repeat(6,minmax(150px,1fr));gap:14px;margin-top:14px}
+  .adg-kpi,.adg-card{background:rgba(255,255,255,.96);border:1px solid rgba(169,205,235,.86);
+    border-radius:18px;box-shadow:0 10px 24px rgba(16,42,75,.10)}
+  .adg-kpi{padding:15px}.adg-kpi .value{font-size:1.55rem;font-weight:850;color:#0b4a8f}
+  .adg-kpi .label{font-size:.76rem;color:#526d8c;font-weight:700}
+  .adg-card{padding:16px;margin-top:14px}.adg-card h5{color:#0b4a8f;font-weight:800}
+  .adg-table{font-size:.79rem}.adg-table th{background:#0b4a8f!important;color:#fff!important;
+    white-space:nowrap;vertical-align:middle}.adg-table td{vertical-align:middle}
+  .adg-table-wrap{overflow:auto;max-height:680px;border-radius:15px}
+  .adg-muted{font-size:.78rem;color:#58718e}.adg-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.73rem}
+  .adg-chip{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-weight:750;font-size:.7rem}
+  .adg-chip-ok{background:#dff7e9;color:#12683e}.adg-chip-bad{background:#ffe3e7;color:#a51d2d}
+  .adg-chip-warn{background:#fff1c9;color:#765700}.adg-chip-info{background:#dcecff;color:#0753a0}
+  .adg-form label{font-size:.78rem;font-weight:750;color:#244565}
+  .adg-form .form-control,.adg-form .form-select{border-radius:12px;border-color:#b8d3eb}
+  .adg-actions-vertical{display:flex;flex-direction:column;align-items:stretch;gap:6px;min-width:175px}
+  .adg-actions-vertical .adg-btn,.adg-actions-vertical button{width:100%;white-space:nowrap}
+  .adg-detail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .adg-detail-item{background:#f5f9fd;border:1px solid #d9e8f6;border-radius:13px;padding:12px}
+  .adg-detail-item span{display:block;color:#58718e;font-size:.72rem;font-weight:700}
+  .adg-detail-item strong{display:block;color:#173a5e;font-size:.83rem;overflow-wrap:anywhere}
+  @media(max-width:1200px){.adg-grid{grid-template-columns:repeat(3,1fr)}}
+  @media(max-width:720px){.adg-grid{grid-template-columns:repeat(2,1fr)}.adg-detail{grid-template-columns:1fr}.adg-shell{width:calc(100% - 20px)}.adg-hero{padding:14px 16px}.adg-hero-icon{width:48px;height:48px;min-width:48px}}
+</style>
+"""
+
+
+def register_ad_governance(
+    app,
+    base_template,
+    user_model,
+    permission_checker=None,
+    audit_logger=None,
+    plan_model=None,
+    orm_db=None,
+    risk_model=None,
+    risk_type_model=None,
+    ai_helper=None,
+):
+    """Registra Gobierno de Active Directory sin alterar la base principal de GRAC."""
+
+    db_path = os.path.join(app.instance_path, "ad_governance.db")
+    key_path = os.path.join(app.instance_path, "ad_governance.key")
+    os.makedirs(app.instance_path, exist_ok=True)
+
+    def db_conn():
+        conn = sqlite3.connect(db_path, timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
+
+    def init_db():
+        schema = """
+        CREATE TABLE IF NOT EXISTS ad_connectors (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          host TEXT NOT NULL,
+          port INTEGER NOT NULL DEFAULT 389,
+          use_ssl INTEGER NOT NULL DEFAULT 0,
+          verify_ssl INTEGER NOT NULL DEFAULT 0,
+          ca_cert_path TEXT,
+          base_dn TEXT NOT NULL,
+          bind_user TEXT NOT NULL,
+          bind_password_encrypted TEXT,
+          connect_timeout INTEGER NOT NULL DEFAULT 15,
+          inactive_days INTEGER NOT NULL DEFAULT 90,
+          password_age_days INTEGER NOT NULL DEFAULT 90,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          last_status TEXT DEFAULT 'No probado',
+          last_message TEXT,
+          last_test_at TEXT,
+          last_sync_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS ad_users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          connector_id INTEGER NOT NULL,
+          object_guid TEXT NOT NULL,
+          distinguished_name TEXT NOT NULL,
+          sam_account_name TEXT,
+          user_principal_name TEXT,
+          display_name TEXT,
+          given_name TEXT,
+          surname TEXT,
+          mail TEXT,
+          department TEXT,
+          title TEXT,
+          description TEXT,
+          user_account_control INTEGER DEFAULT 0,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          locked INTEGER NOT NULL DEFAULT 0,
+          password_never_expires INTEGER NOT NULL DEFAULT 0,
+          password_not_required INTEGER NOT NULL DEFAULT 0,
+          service_account INTEGER NOT NULL DEFAULT 0,
+          generic_account INTEGER NOT NULL DEFAULT 0,
+          privileged INTEGER NOT NULL DEFAULT 0,
+          privilege_type TEXT,
+          privilege_path TEXT,
+          when_created TEXT,
+          when_changed TEXT,
+          pwd_last_set TEXT,
+          last_logon TEXT,
+          account_expires TEXT,
+          direct_groups_json TEXT,
+          raw_json TEXT,
+          active INTEGER NOT NULL DEFAULT 1,
+          first_seen_at TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL,
+          UNIQUE(connector_id, object_guid),
+          FOREIGN KEY(connector_id) REFERENCES ad_connectors(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS ad_groups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          connector_id INTEGER NOT NULL,
+          object_guid TEXT NOT NULL,
+          distinguished_name TEXT NOT NULL,
+          sam_account_name TEXT,
+          display_name TEXT,
+          description TEXT,
+          group_type TEXT,
+          privileged INTEGER NOT NULL DEFAULT 0,
+          member_count INTEGER NOT NULL DEFAULT 0,
+          members_json TEXT,
+          active INTEGER NOT NULL DEFAULT 1,
+          first_seen_at TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL,
+          UNIQUE(connector_id, object_guid),
+          FOREIGN KEY(connector_id) REFERENCES ad_connectors(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS ad_memberships (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          connector_id INTEGER NOT NULL,
+          group_dn TEXT NOT NULL,
+          member_dn TEXT NOT NULL,
+          member_type TEXT,
+          detected_at TEXT NOT NULL,
+          UNIQUE(connector_id, group_dn, member_dn),
+          FOREIGN KEY(connector_id) REFERENCES ad_connectors(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS ad_findings (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          connector_id INTEGER NOT NULL,
+          user_id INTEGER,
+          finding_key TEXT NOT NULL,
+          finding_code TEXT NOT NULL,
+          severity TEXT NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          recommendation TEXT,
+          control_mapping TEXT,
+          status TEXT NOT NULL DEFAULT 'Abierto',
+          assigned_to TEXT,
+          management_comment TEXT,
+          ai_analysis TEXT,
+          plan_id INTEGER,
+          risk_id INTEGER,
+          active INTEGER NOT NULL DEFAULT 1,
+          first_detected_at TEXT NOT NULL,
+          last_detected_at TEXT NOT NULL,
+          resolved_at TEXT,
+          UNIQUE(connector_id, finding_key),
+          FOREIGN KEY(connector_id) REFERENCES ad_connectors(id) ON DELETE CASCADE,
+          FOREIGN KEY(user_id) REFERENCES ad_users(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS ad_sync_logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          connector_id INTEGER NOT NULL,
+          started_at TEXT NOT NULL,
+          finished_at TEXT,
+          status TEXT NOT NULL,
+          message TEXT,
+          users_received INTEGER DEFAULT 0,
+          groups_received INTEGER DEFAULT 0,
+          memberships_received INTEGER DEFAULT 0,
+          findings_active INTEGER DEFAULT 0,
+          critical_findings INTEGER DEFAULT 0,
+          high_findings INTEGER DEFAULT 0,
+          compliance_score REAL DEFAULT 100,
+          executed_by TEXT,
+          FOREIGN KEY(connector_id) REFERENCES ad_connectors(id) ON DELETE CASCADE
+        );
+        """
+        with db_conn() as conn:
+            conn.executescript(schema)
+
+    init_db()
+
+    def now_iso():
+        return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+    def current_user():
+        try:
+            return user_model.query.get(session.get("user_id"))
+        except Exception:
+            return None
+
+    def username(user=None):
+        return (
+            getattr(user, "username", None)
+            or session.get("username")
+            or "Sistema"
+        )
+
+    def can_read(user):
+        if not user:
+            return False
+        if getattr(user, "role", "") in ("admin", "auditor"):
+            return True
+        if permission_checker:
+            try:
+                return bool(permission_checker(user, AD_MODULE_NAME))
+            except Exception:
+                return False
+        return False
+
+    def can_write(user):
+        if not user or getattr(user, "role", "") == "auditor":
+            return False
+        if getattr(user, "role", "") == "admin":
+            return True
+        if permission_checker:
+            try:
+                return bool(permission_checker(user, AD_MODULE_NAME))
+            except Exception:
+                return False
+        return False
+
+    def audit(message, user=None):
+        if audit_logger:
+            try:
+                audit_logger(username(user), message)
+            except Exception:
+                pass
+
+    def require_access(write=False):
+        def decorator(fn):
+            @wraps(fn)
+            def wrapped(*args, **kwargs):
+                if "user_id" not in session:
+                    flash("Por favor, inicia sesión.", "warning")
+                    return redirect(url_for("login"))
+                user = current_user()
+                allowed = can_write(user) if write else can_read(user)
+                if not allowed:
+                    flash(
+                        "No tiene permiso para modificar Gobierno de Active Directory."
+                        if write else
+                        "No tiene permiso para consultar Gobierno de Active Directory.",
+                        "danger",
+                    )
+                    return redirect(url_for("menu"))
+                return fn(*args, **kwargs)
+            return wrapped
+        return decorator
+
+    def get_fernet():
+        env_key = (os.getenv("AD_GOV_FERNET_KEY") or "").strip()
+        if env_key:
+            return Fernet(env_key.encode("utf-8"))
+        if os.path.exists(key_path):
+            with open(key_path, "rb") as fh:
+                key = fh.read().strip()
+        else:
+            key = Fernet.generate_key()
+            with open(key_path, "wb") as fh:
+                fh.write(key)
+            try:
+                os.chmod(key_path, 0o600)
+            except Exception:
+                pass
+        return Fernet(key)
+
+    def encrypt_secret(value):
+        value = (value or "").strip()
+        return get_fernet().encrypt(value.encode()).decode() if value else None
+
+    def decrypt_secret(value):
+        if not value:
+            return ""
+        try:
+            return get_fernet().decrypt(value.encode()).decode()
+        except (InvalidToken, ValueError, TypeError):
+            return ""
+
+    def fetchone(sql, params=()):
+        with db_conn() as conn:
+            return conn.execute(sql, params).fetchone()
+
+    def fetchall(sql, params=()):
+        with db_conn() as conn:
+            return conn.execute(sql, params).fetchall()
+
+    def connector_or_404(connector_id):
+        row = fetchone("SELECT * FROM ad_connectors WHERE id=?", (connector_id,))
+        if not row:
+            abort(404)
+        return row
+
+    def html_badge(value, kind="info"):
+        return Markup(f'<span class="adg-chip adg-chip-{kind}">{escape(str(value))}</span>')
+
+    def severity_badge(severity):
+        kind = {
+            "Crítica": "bad",
+            "Alta": "warn",
+            "Media": "info",
+            "Baja": "ok",
+        }.get(severity, "info")
+        return html_badge(severity, kind)
+
+    def page(content, title, subtitle=""):
+        user = current_user()
+        header = render_template_string(
+            """
+            {{ style|safe }}
+            <div class="adg-shell">
+              <div class="adg-hero">
+                <div class="adg-hero-icon"><i class="bi bi-person-lock"></i></div>
+                <div class="adg-hero-text">
+                  <span class="adg-module-kicker">SGSI · Gobierno de Identidades</span>
+                  <h2>{{ title }}</h2>
+                  <p>{{ subtitle }}</p>
+                </div>
+              </div>
+              <div class="adg-module-nav" data-keep-cumplimiento-nav="true">
+                <div class="adg-actions">
+                  <a class="adg-btn adg-btn-light" href="{{ url_for('adgov.dashboard') }}"><i class="bi bi-speedometer2"></i> Dashboard</a>
+                  <a class="adg-btn adg-btn-light" href="{{ url_for('adgov.users') }}"><i class="bi bi-people"></i> Usuarios</a>
+                  <a class="adg-btn adg-btn-light" href="{{ url_for('adgov.groups') }}"><i class="bi bi-diagram-3"></i> Grupos</a>
+                  <a class="adg-btn adg-btn-light" href="{{ url_for('adgov.findings') }}"><i class="bi bi-shield-exclamation"></i> Hallazgos</a>
+                  <a class="adg-btn adg-btn-light" href="{{ url_for('attack_auto', source='ACTIVE_DIRECTORY') }}"><i class="bi bi-bullseye"></i> Superficie de Ataque</a>
+                  <a class="adg-btn adg-btn-light" href="{{ url_for('threat_model_dashboard', herramienta='active_directory') }}"><i class="bi bi-diagram-3-fill"></i> Modelamiento de Amenazas</a>
+                  <a class="adg-btn adg-btn-light" href="{{ url_for('adgov.history') }}"><i class="bi bi-clock-history"></i> Historial</a>
+                  {% if can_write %}<a class="adg-btn adg-btn-light" href="{{ url_for('adgov.config') }}"><i class="bi bi-gear"></i> Configuración</a>{% endif %}
+                </div>
+              </div>
+              {{ content|safe }}
+            </div>
+            """,
+            style=Markup(AD_STYLE),
+            title=title,
+            subtitle=subtitle,
+            content=Markup(content),
+            can_write=can_write(user),
+        )
+        return render_template_string(base_template, content=Markup(header))
+
+    def require_ldap3():
+        try:
+            from ldap3 import ALL, BASE, SUBTREE, Connection, Server, Tls
+            return {
+                "ALL": ALL,
+                "BASE": BASE,
+                "SUBTREE": SUBTREE,
+                "Connection": Connection,
+                "Server": Server,
+                "Tls": Tls,
+            }
+        except ImportError as exc:
+            raise RuntimeError(
+                "Falta la dependencia ldap3. Instálela con: python3 -m pip install ldap3"
+            ) from exc
+
+    def ldap_connection(connector):
+        ldap = require_ldap3()
+        host = (connector["host"] or "").strip()
+        if not host:
+            raise ValueError("El host LDAP es obligatorio.")
+        password = decrypt_secret(connector["bind_password_encrypted"])
+        if not password:
+            raise ValueError("No existe una contraseña válida guardada para el conector.")
+        use_ssl = bool(connector["use_ssl"])
+        verify_ssl = bool(connector["verify_ssl"])
+        tls = ldap["Tls"](
+            validate=ssl.CERT_REQUIRED if verify_ssl else ssl.CERT_NONE,
+            ca_certs_file=(connector["ca_cert_path"] or "").strip() or None,
+        )
+        server = ldap["Server"](
+            host,
+            port=int(connector["port"] or (636 if use_ssl else 389)),
+            use_ssl=use_ssl,
+            tls=tls,
+            get_info=ldap["ALL"],
+            connect_timeout=int(connector["connect_timeout"] or 15),
+        )
+        connection = ldap["Connection"](
+            server,
+            user=(connector["bind_user"] or "").strip(),
+            password=password,
+            auto_bind=True,
+            receive_timeout=int(connector["connect_timeout"] or 15),
+            raise_exceptions=True,
+        )
+        return connection, ldap
+
+    def value(attrs, key, default=None):
+        raw = attrs.get(key, default)
+        if isinstance(raw, list):
+            return raw[0] if raw else default
+        return raw
+
+    def values(attrs, key):
+        raw = attrs.get(key, [])
+        if raw is None:
+            return []
+        return raw if isinstance(raw, list) else [raw]
+
+    def text_value(raw):
+        if raw is None:
+            return ""
+        if isinstance(raw, bytes):
+            try:
+                return str(uuid.UUID(bytes_le=raw))
+            except Exception:
+                return raw.hex()
+        return str(raw)
+
+    def int_value(raw, default=0):
+        try:
+            return int(raw)
+        except Exception:
+            try:
+                return int(str(raw))
+            except Exception:
+                return default
+
+    def ad_datetime(raw):
+        if raw in (None, "", 0, "0", 9223372036854775807, "9223372036854775807"):
+            return ""
+        if isinstance(raw, datetime):
+            if raw.tzinfo is None:
+                raw = raw.replace(tzinfo=timezone.utc)
+            return raw.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+        if isinstance(raw, date):
+            return datetime(raw.year, raw.month, raw.day, tzinfo=timezone.utc).isoformat()
+        text = str(raw).strip()
+        if re.fullmatch(r"\d{12,18}", text):
+            try:
+                ticks = int(text)
+                if ticks <= 0 or ticks >= 9223372036854775807:
+                    return ""
+                unix_seconds = (ticks - 116444736000000000) / 10000000
+                return datetime.fromtimestamp(unix_seconds, tz=timezone.utc).replace(microsecond=0).isoformat()
+            except Exception:
+                return ""
+        return text
+
+    def parse_iso(raw):
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    def entry_attributes(entry):
+        if isinstance(entry, dict):
+            return entry.get("attributes") or {}
+        return {}
+
+    def is_service_account(sam, dn, description):
+        joined = " ".join([sam or "", dn or "", description or ""]).lower()
+        return (
+            (sam or "").lower().startswith(("svc_", "svc-", "service.", "sa_"))
+            or "ou=cuentasservicio" in joined
+            or "cuenta de servicio" in joined
+            or "service account" in joined
+        )
+
+    def is_generic_account(sam, display_name, description):
+        joined = " ".join([sam or "", display_name or "", description or ""]).lower()
+        patterns = (
+            "generico", "genérico", "generic", "compartida", "compartido",
+            "shared account", "usuario.generico", "operaciones@", "turno",
+        )
+        return any(pattern in joined for pattern in patterns)
+
+    def finding_key(connector_id, code, object_guid):
+        payload = f"{connector_id}|{code}|{object_guid}".encode()
+        return hashlib.sha256(payload).hexdigest()
+
+    def add_finding(target, connector_id, user_guid, code, severity, title, description, recommendation, controls):
+        target.append({
+            "finding_key": finding_key(connector_id, code, user_guid),
+            "finding_code": code,
+            "user_guid": user_guid,
+            "severity": severity,
+            "title": title,
+            "description": description,
+            "recommendation": recommendation,
+            "control_mapping": controls,
+        })
+
+    def build_findings(connector, users):
+        findings = []
+        now = datetime.now(timezone.utc)
+        inactive_days = int(connector["inactive_days"] or 90)
+        password_age_days = int(connector["password_age_days"] or 90)
+        for item in users:
+            guid = item["object_guid"]
+            sam = item["sam_account_name"] or item["display_name"] or guid
+            if item["locked"] and item["enabled"]:
+                add_finding(
+                    findings, connector["id"], guid, "ACCOUNT_LOCKED", "Media",
+                    f"Cuenta bloqueada: {sam}",
+                    "La cuenta se encuentra bloqueada por eventos de autenticación fallida.",
+                    "Confirmar la identidad del usuario, investigar los intentos fallidos y desbloquear solo después de validar el evento.",
+                    "ISO 27001 A.5.15/A.8.16; NIST CSF PR.AA/DE.CM; SOC 2 CC6/CC7",
+                )
+            if item["enabled"] and item["generic_account"]:
+                add_finding(
+                    findings, connector["id"], guid, "GENERIC_SHARED_ACCOUNT", "Alta",
+                    f"Cuenta genérica o compartida activa: {sam}",
+                    "El nombre o la descripción indican que la cuenta puede ser compartida y reducir la trazabilidad individual.",
+                    "Sustituirla por cuentas nominativas o documentar excepción, custodio, rotación, MFA y trazabilidad de uso.",
+                    "ISO 27001 A.5.16/A.5.18; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 8.2.1",
+                )
+            if item["password_not_required"] and item["enabled"]:
+                add_finding(
+                    findings, connector["id"], guid, "PASSWORD_NOT_REQUIRED", "Crítica",
+                    f"Contraseña no requerida: {sam}",
+                    "La bandera de la cuenta permite que no se requiera contraseña.",
+                    "Retirar inmediatamente la configuración PASSWD_NOTREQD, establecer una contraseña robusta y revisar actividad reciente.",
+                    "ISO 27001 A.5.17; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 8.3",
+                )
+            if item["password_never_expires"] and item["enabled"]:
+                severity = "Media" if item["service_account"] else "Alta"
+                add_finding(
+                    findings, connector["id"], guid, "PASSWORD_NEVER_EXPIRES", severity,
+                    f"Contraseña configurada para no expirar: {sam}",
+                    "La cuenta tiene activa la bandera DONT_EXPIRE_PASSWORD.",
+                    "Aplicar rotación controlada. Para cuentas técnicas, documentar propietario, bóveda, uso, alcance y periodicidad de rotación.",
+                    "ISO 27001 A.5.17/A.8.5; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 8.3.9",
+                )
+            pwd_date = parse_iso(item["pwd_last_set"])
+            if item["enabled"] and pwd_date and (now - pwd_date).days > password_age_days:
+                add_finding(
+                    findings, connector["id"], guid, "STALE_PASSWORD", "Alta",
+                    f"Contraseña con antigüedad elevada: {sam}",
+                    f"La contraseña tiene aproximadamente {(now - pwd_date).days} días, superior al umbral de {password_age_days}.",
+                    "Rotar la contraseña y validar que la política de credenciales se aplique a la cuenta.",
+                    "ISO 27001 A.5.17; NIST CSF PR.AA; SOC 2 CC6",
+                )
+            last_logon = parse_iso(item["last_logon"])
+            created = parse_iso(item["when_created"])
+            if item["enabled"] and last_logon and (now - last_logon).days > inactive_days:
+                add_finding(
+                    findings, connector["id"], guid, "STALE_ACTIVE_ACCOUNT", "Alta",
+                    f"Cuenta activa sin uso reciente: {sam}",
+                    f"El último inicio de sesión conocido supera el umbral de {inactive_days} días.",
+                    "Validar vigencia con el propietario y deshabilitar o retirar la cuenta si ya no se necesita.",
+                    "ISO 27001 A.5.18; NIST CSF PR.AA; SOC 2 CC6",
+                )
+            elif item["enabled"] and not last_logon and created and (now - created).days > 30:
+                add_finding(
+                    findings, connector["id"], guid, "NEVER_USED_ACTIVE_ACCOUNT", "Media",
+                    f"Cuenta activa sin inicio de sesión: {sam}",
+                    "La cuenta tiene más de 30 días y no registra un inicio de sesión conocido.",
+                    "Confirmar su necesidad; deshabilitarla si fue creada por error o nunca fue entregada.",
+                    "ISO 27001 A.5.18; NIST CSF PR.AA; SOC 2 CC6",
+                )
+            if item["service_account"] and item["privileged"] and item["enabled"]:
+                add_finding(
+                    findings, connector["id"], guid, "PRIVILEGED_SERVICE_ACCOUNT", "Crítica",
+                    f"Cuenta de servicio con privilegios elevados: {sam}",
+                    f"La cuenta técnica alcanza un grupo privilegiado por la ruta: {item['privilege_path'] or 'no documentada'}.",
+                    "Retirar privilegios no indispensables, restringir inicio interactivo, rotar el secreto y usar una cuenta administrada cuando sea posible.",
+                    "ISO 27001 A.5.15/A.8.2; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 7/8",
+                )
+            elif item["privileged"] and item["privilege_type"] == "Anidado" and item["enabled"]:
+                add_finding(
+                    findings, connector["id"], guid, "NESTED_PRIVILEGE", "Alta",
+                    f"Privilegio administrativo heredado: {sam}",
+                    f"La cuenta obtiene privilegios mediante grupos anidados: {item['privilege_path']}.",
+                    "Validar aprobación y necesidad del privilegio; retirar la membresía indirecta si no corresponde.",
+                    "ISO 27001 A.5.15/A.8.2; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 7.2",
+                )
+            if not item["enabled"] and item["privileged"]:
+                add_finding(
+                    findings, connector["id"], guid, "DISABLED_PRIVILEGED_ACCOUNT", "Alta",
+                    f"Cuenta privilegiada deshabilitada aún existente: {sam}",
+                    "La cuenta permanece asociada a privilegios administrativos aunque está deshabilitada.",
+                    "Retirar membresías privilegiadas y eliminar la cuenta conforme a la política de retención y baja.",
+                    "ISO 27001 A.5.18/A.8.2; NIST CSF PR.AA; SOC 2 CC6",
+                )
+            if item["enabled"] and not item["service_account"] and not item["generic_account"]:
+                missing = []
+                if not item["mail"]:
+                    missing.append("correo")
+                if not item["department"]:
+                    missing.append("área/departamento")
+                if missing:
+                    add_finding(
+                        findings, connector["id"], guid, "INCOMPLETE_IDENTITY_DATA", "Baja",
+                        f"Datos de identidad incompletos: {sam}",
+                        "Faltan atributos de gobierno: " + ", ".join(missing) + ".",
+                        "Completar los atributos para soportar recertificación, propiedad y trazabilidad.",
+                        "ISO 27001 A.5.16/A.5.18; NIST CSF PR.AA; SOC 2 CC6",
+                    )
+        return findings
+
+    def test_connector(connector):
+        started = datetime.now(timezone.utc)
+        connection = None
+        try:
+            socket.getaddrinfo(connector["host"], int(connector["port"]))
+            connection, ldap = ldap_connection(connector)
+            ok = connection.search(
+                search_base=connector["base_dn"],
+                search_filter="(objectClass=*)",
+                search_scope=ldap["BASE"],
+                attributes=["distinguishedName"],
+            )
+            if not ok and connection.result.get("result") not in (0,):
+                raise RuntimeError(connection.result.get("message") or "No se pudo consultar el Base DN.")
+            elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+            return True, f"Conexión y autenticación LDAP correctas ({elapsed:.2f} s)."
+        except Exception as exc:
+            return False, str(exc)
+        finally:
+            if connection:
+                try:
+                    connection.unbind()
+                except Exception:
+                    pass
+
+    def sync_connector(connector, executed_by):
+        sync_started = now_iso()
+        with db_conn() as sql:
+            cur = sql.execute(
+                """INSERT INTO ad_sync_logs
+                   (connector_id,started_at,status,message,executed_by)
+                   VALUES(?,?,?,?,?)""",
+                (connector["id"], sync_started, "En proceso", "Conectando con Active Directory.", executed_by),
+            )
+            log_id = cur.lastrowid
+            sql.commit()
+
+        connection = None
+        try:
+            connection, ldap = ldap_connection(connector)
+            user_attributes = [
+                "objectGUID", "distinguishedName", "sAMAccountName", "userPrincipalName",
+                "displayName", "givenName", "sn", "mail", "department", "title",
+                "description", "userAccountControl", "lockoutTime", "whenCreated",
+                "whenChanged", "pwdLastSet", "lastLogonTimestamp", "lastLogon",
+                "accountExpires", "memberOf",
+            ]
+            group_attributes = [
+                "objectGUID", "distinguishedName", "sAMAccountName", "displayName",
+                "description", "groupType", "member",
+            ]
+            user_entries = connection.extend.standard.paged_search(
+                search_base=connector["base_dn"],
+                search_filter="(&(objectCategory=person)(objectClass=user))",
+                search_scope=ldap["SUBTREE"],
+                attributes=user_attributes,
+                paged_size=1000,
+                generator=False,
+            )
+            group_entries = connection.extend.standard.paged_search(
+                search_base=connector["base_dn"],
+                search_filter="(objectClass=group)",
+                search_scope=ldap["SUBTREE"],
+                attributes=group_attributes,
+                paged_size=1000,
+                generator=False,
+            )
+
+            raw_groups = []
+            group_by_dn = {}
+            parents = defaultdict(set)
+            for entry in group_entries:
+                attrs = entry_attributes(entry)
+                dn = text_value(value(attrs, "distinguishedName") or entry.get("dn")).strip()
+                if not dn:
+                    continue
+                sam = text_value(value(attrs, "sAMAccountName")).strip()
+                members = [text_value(x).strip() for x in values(attrs, "member") if text_value(x).strip()]
+                group = {
+                    "object_guid": text_value(value(attrs, "objectGUID") or hashlib.sha256(dn.lower().encode()).hexdigest()),
+                    "distinguished_name": dn,
+                    "sam_account_name": sam,
+                    "display_name": text_value(value(attrs, "displayName") or sam),
+                    "description": text_value(value(attrs, "description")),
+                    "group_type": text_value(value(attrs, "groupType")),
+                    "privileged": int(sam.lower() in AD_PRIVILEGED_GROUPS),
+                    "members": members,
+                }
+                raw_groups.append(group)
+                group_by_dn[dn.lower()] = group
+                for member_dn in members:
+                    parents[member_dn.lower()].add(dn.lower())
+
+            privileged_dns = {
+                group["distinguished_name"].lower()
+                for group in raw_groups if group["privileged"]
+            }
+
+            def privilege_for(user_dn):
+                start = user_dn.lower()
+                direct = list(parents.get(start, set()))
+                queue = deque((group_dn, [group_dn]) for group_dn in direct)
+                visited = set()
+                while queue:
+                    group_dn, path_dns = queue.popleft()
+                    if group_dn in visited:
+                        continue
+                    visited.add(group_dn)
+                    if group_dn in privileged_dns:
+                        names = [
+                            group_by_dn.get(dn, {}).get("sam_account_name") or dn
+                            for dn in path_dns
+                        ]
+                        return True, "Directo" if len(path_dns) == 1 else "Anidado", " → ".join(names)
+                    for parent_dn in parents.get(group_dn, set()):
+                        queue.append((parent_dn, path_dns + [parent_dn]))
+                return False, "", ""
+
+            raw_users = []
+            for entry in user_entries:
+                attrs = entry_attributes(entry)
+                dn = text_value(value(attrs, "distinguishedName") or entry.get("dn")).strip()
+                if not dn:
+                    continue
+                sam = text_value(value(attrs, "sAMAccountName")).strip()
+                display = text_value(value(attrs, "displayName") or sam)
+                description = text_value(value(attrs, "description"))
+                uac = int_value(value(attrs, "userAccountControl"), 0)
+                locked = bool(int_value(value(attrs, "lockoutTime"), 0) or (uac & AD_UAC_LOCKOUT))
+                privileged, privilege_type, privilege_path = privilege_for(dn)
+                direct_groups = [
+                    group_by_dn.get(group_dn, {}).get("sam_account_name") or group_dn
+                    for group_dn in parents.get(dn.lower(), set())
+                ]
+                last_logon_raw = value(attrs, "lastLogonTimestamp") or value(attrs, "lastLogon")
+                item = {
+                    "object_guid": text_value(value(attrs, "objectGUID") or hashlib.sha256(dn.lower().encode()).hexdigest()),
+                    "distinguished_name": dn,
+                    "sam_account_name": sam,
+                    "user_principal_name": text_value(value(attrs, "userPrincipalName")),
+                    "display_name": display,
+                    "given_name": text_value(value(attrs, "givenName")),
+                    "surname": text_value(value(attrs, "sn")),
+                    "mail": text_value(value(attrs, "mail")),
+                    "department": text_value(value(attrs, "department")),
+                    "title": text_value(value(attrs, "title")),
+                    "description": description,
+                    "user_account_control": uac,
+                    "enabled": int(not bool(uac & AD_UAC_DISABLED)),
+                    "locked": int(locked),
+                    "password_never_expires": int(bool(uac & AD_UAC_DONT_EXPIRE_PASSWORD)),
+                    "password_not_required": int(bool(uac & AD_UAC_PASSWORD_NOT_REQUIRED)),
+                    "service_account": int(is_service_account(sam, dn, description)),
+                    "generic_account": int(is_generic_account(sam, display, description)),
+                    "privileged": int(privileged),
+                    "privilege_type": privilege_type,
+                    "privilege_path": privilege_path,
+                    "when_created": ad_datetime(value(attrs, "whenCreated")),
+                    "when_changed": ad_datetime(value(attrs, "whenChanged")),
+                    "pwd_last_set": ad_datetime(value(attrs, "pwdLastSet")),
+                    "last_logon": ad_datetime(last_logon_raw),
+                    "account_expires": ad_datetime(value(attrs, "accountExpires")),
+                    "direct_groups": sorted(set(direct_groups)),
+                }
+                raw_users.append(item)
+
+            findings = build_findings(connector, raw_users)
+            seen_at = now_iso()
+            with db_conn() as sql:
+                sql.execute("BEGIN")
+                sql.execute("UPDATE ad_users SET active=0 WHERE connector_id=?", (connector["id"],))
+                sql.execute("UPDATE ad_groups SET active=0 WHERE connector_id=?", (connector["id"],))
+                sql.execute("UPDATE ad_findings SET active=0 WHERE connector_id=?", (connector["id"],))
+                sql.execute("DELETE FROM ad_memberships WHERE connector_id=?", (connector["id"],))
+
+                for group in raw_groups:
+                    sql.execute(
+                        """INSERT INTO ad_groups
+                           (connector_id,object_guid,distinguished_name,sam_account_name,display_name,
+                            description,group_type,privileged,member_count,members_json,active,first_seen_at,last_seen_at)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                           ON CONFLICT(connector_id,object_guid) DO UPDATE SET
+                            distinguished_name=excluded.distinguished_name,
+                            sam_account_name=excluded.sam_account_name,
+                            display_name=excluded.display_name,
+                            description=excluded.description,
+                            group_type=excluded.group_type,
+                            privileged=excluded.privileged,
+                            member_count=excluded.member_count,
+                            members_json=excluded.members_json,
+                            active=1,last_seen_at=excluded.last_seen_at""",
+                        (
+                            connector["id"], group["object_guid"], group["distinguished_name"],
+                            group["sam_account_name"], group["display_name"], group["description"],
+                            group["group_type"], group["privileged"], len(group["members"]),
+                            json.dumps(group["members"], ensure_ascii=False), 1, seen_at, seen_at,
+                        ),
+                    )
+                    for member_dn in group["members"]:
+                        member_type = "Grupo" if member_dn.lower() in group_by_dn else "Usuario/Objeto"
+                        sql.execute(
+                            """INSERT OR IGNORE INTO ad_memberships
+                               (connector_id,group_dn,member_dn,member_type,detected_at)
+                               VALUES(?,?,?,?,?)""",
+                            (connector["id"], group["distinguished_name"], member_dn, member_type, seen_at),
+                        )
+
+                for item in raw_users:
+                    sql.execute(
+                        """INSERT INTO ad_users
+                           (connector_id,object_guid,distinguished_name,sam_account_name,user_principal_name,
+                            display_name,given_name,surname,mail,department,title,description,user_account_control,
+                            enabled,locked,password_never_expires,password_not_required,service_account,
+                            generic_account,privileged,privilege_type,privilege_path,when_created,when_changed,
+                            pwd_last_set,last_logon,account_expires,direct_groups_json,raw_json,
+                            active,first_seen_at,last_seen_at)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                           ON CONFLICT(connector_id,object_guid) DO UPDATE SET
+                            distinguished_name=excluded.distinguished_name,sam_account_name=excluded.sam_account_name,
+                            user_principal_name=excluded.user_principal_name,display_name=excluded.display_name,
+                            given_name=excluded.given_name,surname=excluded.surname,mail=excluded.mail,
+                            department=excluded.department,title=excluded.title,description=excluded.description,
+                            user_account_control=excluded.user_account_control,enabled=excluded.enabled,
+                            locked=excluded.locked,password_never_expires=excluded.password_never_expires,
+                            password_not_required=excluded.password_not_required,
+                            service_account=excluded.service_account,generic_account=excluded.generic_account,
+                            privileged=excluded.privileged,privilege_type=excluded.privilege_type,
+                            privilege_path=excluded.privilege_path,when_created=excluded.when_created,
+                            when_changed=excluded.when_changed,pwd_last_set=excluded.pwd_last_set,
+                            last_logon=excluded.last_logon,account_expires=excluded.account_expires,
+                            direct_groups_json=excluded.direct_groups_json,raw_json=excluded.raw_json,
+                            active=1,last_seen_at=excluded.last_seen_at""",
+                        (
+                            connector["id"], item["object_guid"], item["distinguished_name"],
+                            item["sam_account_name"], item["user_principal_name"], item["display_name"],
+                            item["given_name"], item["surname"], item["mail"], item["department"],
+                            item["title"], item["description"], item["user_account_control"],
+                            item["enabled"], item["locked"], item["password_never_expires"],
+                            item["password_not_required"], item["service_account"], item["generic_account"],
+                            item["privileged"], item["privilege_type"], item["privilege_path"],
+                            item["when_created"], item["when_changed"], item["pwd_last_set"],
+                            item["last_logon"], item["account_expires"],
+                            json.dumps(item["direct_groups"], ensure_ascii=False),
+                            json.dumps(item, ensure_ascii=False), 1, seen_at, seen_at,
+                        ),
+                    )
+
+                user_ids = {
+                    row["object_guid"]: row["id"]
+                    for row in sql.execute(
+                        "SELECT id,object_guid FROM ad_users WHERE connector_id=?",
+                        (connector["id"],),
+                    ).fetchall()
+                }
+                for finding in findings:
+                    sql.execute(
+                        """INSERT INTO ad_findings
+                           (connector_id,user_id,finding_key,finding_code,severity,title,description,
+                            recommendation,control_mapping,status,active,first_detected_at,last_detected_at)
+                           VALUES(?,?,?,?,?,?,?,?,?,'Abierto',1,?,?)
+                           ON CONFLICT(connector_id,finding_key) DO UPDATE SET
+                            user_id=excluded.user_id,finding_code=excluded.finding_code,
+                            severity=excluded.severity,title=excluded.title,description=excluded.description,
+                            recommendation=excluded.recommendation,control_mapping=excluded.control_mapping,
+                            active=1,last_detected_at=excluded.last_detected_at,
+                            status=CASE WHEN ad_findings.status='Resuelto automáticamente' THEN 'Abierto' ELSE ad_findings.status END,
+                            resolved_at=CASE WHEN ad_findings.status='Resuelto automáticamente' THEN NULL ELSE ad_findings.resolved_at END""",
+                        (
+                            connector["id"], user_ids.get(finding["user_guid"]),
+                            finding["finding_key"], finding["finding_code"], finding["severity"],
+                            finding["title"], finding["description"], finding["recommendation"],
+                            finding["control_mapping"], seen_at, seen_at,
+                        ),
+                    )
+
+                sql.execute(
+                    """UPDATE ad_findings SET status='Resuelto automáticamente',resolved_at=?
+                       WHERE connector_id=? AND active=0
+                       AND status NOT IN ('Riesgo aceptado','Falso positivo','Descartado')""",
+                    (seen_at, connector["id"]),
+                )
+                metrics = sql.execute(
+                    """SELECT COUNT(*) total,
+                       SUM(CASE WHEN severity='Crítica' THEN 1 ELSE 0 END) critical,
+                       SUM(CASE WHEN severity='Alta' THEN 1 ELSE 0 END) high
+                       FROM ad_findings WHERE connector_id=? AND active=1""",
+                    (connector["id"],),
+                ).fetchone()
+                total_findings = int(metrics["total"] or 0)
+                critical = int(metrics["critical"] or 0)
+                high = int(metrics["high"] or 0)
+                score = max(0.0, round(100 - critical * 15 - high * 8 - max(0, total_findings - critical - high) * 2, 1))
+                sql.execute(
+                    """UPDATE ad_connectors SET last_status='Conectado',last_message=?,
+                       last_sync_at=?,updated_at=? WHERE id=?""",
+                    (
+                        f"{len(raw_users)} usuarios, {len(raw_groups)} grupos y {total_findings} hallazgos.",
+                        seen_at, seen_at, connector["id"],
+                    ),
+                )
+                sql.execute(
+                    """UPDATE ad_sync_logs SET finished_at=?,status='Completado',message=?,
+                       users_received=?,groups_received=?,memberships_received=?,findings_active=?,
+                       critical_findings=?,high_findings=?,compliance_score=? WHERE id=?""",
+                    (
+                        seen_at, "Sincronización LDAP finalizada correctamente.", len(raw_users),
+                        len(raw_groups), sum(len(g["members"]) for g in raw_groups), total_findings,
+                        critical, high, score, log_id,
+                    ),
+                )
+                sql.commit()
+            return {
+                "users": len(raw_users),
+                "groups": len(raw_groups),
+                "memberships": sum(len(g["members"]) for g in raw_groups),
+                "findings": total_findings,
+                "score": score,
+            }
+        except Exception as exc:
+            finished = now_iso()
+            with db_conn() as sql:
+                sql.execute(
+                    "UPDATE ad_connectors SET last_status='Error',last_message=?,updated_at=? WHERE id=?",
+                    (str(exc), finished, connector["id"]),
+                )
+                sql.execute(
+                    "UPDATE ad_sync_logs SET finished_at=?,status='Error',message=? WHERE id=?",
+                    (finished, str(exc), log_id),
+                )
+                sql.commit()
+            raise
+        finally:
+            if connection:
+                try:
+                    connection.unbind()
+                except Exception:
+                    pass
+
+    bp = Blueprint("adgov", __name__, url_prefix="/cumplimiento_continuo/active_directory")
+
+    @bp.route("/")
+    @require_access()
+    def dashboard():
+        connector_id = request.args.get("connector_id", type=int)
+        connectors = fetchall("SELECT * FROM ad_connectors ORDER BY id")
+        if not connector_id and connectors:
+            connector_id = connectors[0]["id"]
+        selected = fetchone("SELECT * FROM ad_connectors WHERE id=?", (connector_id,)) if connector_id else None
+        params = (connector_id,) if connector_id else ()
+        where = " WHERE connector_id=?" if connector_id else ""
+        metrics = {
+            "users": fetchone(f"SELECT COUNT(*) n FROM ad_users{where}" + (" AND active=1" if where else " WHERE active=1"), params)["n"],
+            "enabled": fetchone(f"SELECT COUNT(*) n FROM ad_users{where}" + (" AND active=1 AND enabled=1" if where else " WHERE active=1 AND enabled=1"), params)["n"],
+            "privileged": fetchone(f"SELECT COUNT(*) n FROM ad_users{where}" + (" AND active=1 AND privileged=1" if where else " WHERE active=1 AND privileged=1"), params)["n"],
+            "groups": fetchone(f"SELECT COUNT(*) n FROM ad_groups{where}" + (" AND active=1" if where else " WHERE active=1"), params)["n"],
+            "findings": fetchone(f"SELECT COUNT(*) n FROM ad_findings{where}" + (" AND active=1" if where else " WHERE active=1"), params)["n"],
+            "critical_high": fetchone(f"SELECT COUNT(*) n FROM ad_findings{where}" + (" AND active=1 AND severity IN ('Crítica','Alta')" if where else " WHERE active=1 AND severity IN ('Crítica','Alta')"), params)["n"],
+        }
+        recent = fetchall(
+            f"""SELECT f.*,u.sam_account_name FROM ad_findings f
+                LEFT JOIN ad_users u ON u.id=f.user_id
+                {'WHERE f.connector_id=? AND f.active=1' if connector_id else 'WHERE f.active=1'}
+                ORDER BY CASE f.severity WHEN 'Crítica' THEN 4 WHEN 'Alta' THEN 3 WHEN 'Media' THEN 2 ELSE 1 END DESC,
+                f.id DESC LIMIT 10""",
+            params,
+        )
+        latest_log = fetchone(
+            f"SELECT * FROM ad_sync_logs {('WHERE connector_id=?' if connector_id else '')} ORDER BY id DESC LIMIT 1",
+            params,
+        )
+        body = render_template_string(
+            """
+            {% if not connectors %}
+              <div class="adg-card text-center py-5">
+                <i class="bi bi-plug display-5 text-primary"></i>
+                <h5 class="mt-3">Configure el primer conector</h5>
+                <p class="adg-muted">Registre el controlador Samba AD o Microsoft Active Directory para iniciar el inventario.</p>
+                {% if can_write %}<a class="adg-btn adg-btn-primary" href="{{ url_for('adgov.config') }}">Configurar conector</a>{% endif %}
+              </div>
+            {% else %}
+              <div class="adg-card">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                  <div>
+                    <h5 class="mb-1">{{ selected.name if selected else 'Todos los conectores' }}</h5>
+                    <div class="adg-muted">
+                      {{ selected.host ~ ':' ~ selected.port if selected else '' }}
+                      {% if selected %} · {{ selected.base_dn }} · Estado: {{ selected.last_status }}{% endif %}
+                    </div>
+                  </div>
+                  <div class="d-flex flex-wrap gap-2">
+                    <form method="get">
+                      <select class="form-select form-select-sm" name="connector_id" onchange="this.form.submit()">
+                        {% for c in connectors %}<option value="{{ c.id }}" {% if selected and selected.id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+                      </select>
+                    </form>
+                    {% if can_write and selected %}
+                      <form method="post" action="{{ url_for('adgov.test', connector_id=selected.id) }}"><button class="adg-btn adg-btn-outline"><i class="bi bi-plug"></i> Probar</button></form>
+                      <form method="post" action="{{ url_for('adgov.sync', connector_id=selected.id) }}"><button class="adg-btn adg-btn-primary"><i class="bi bi-arrow-repeat"></i> Sincronizar</button></form>
+                    {% endif %}
+                  </div>
+                </div>
+              </div>
+              <div class="adg-grid">
+                {% for value,label in [(metrics.users,'Usuarios'),(metrics.enabled,'Usuarios activos'),(metrics.privileged,'Privilegiados'),(metrics.groups,'Grupos'),(metrics.findings,'Hallazgos'),(metrics.critical_high,'Críticos y altos')] %}
+                  <div class="adg-kpi"><div class="value">{{ value }}</div><div class="label">{{ label }}</div></div>
+                {% endfor %}
+              </div>
+              {% if latest_log %}
+              <div class="adg-card">
+                <h5>Última sincronización</h5>
+                <div class="adg-muted">{{ latest_log.started_at }} · {{ latest_log.status }} · Score {{ latest_log.compliance_score }}% · {{ latest_log.message }}</div>
+              </div>
+              {% endif %}
+              <div class="adg-card">
+                <h5>Hallazgos prioritarios</h5>
+                <div class="table-responsive">
+                  <table class="table adg-table table-hover">
+                    <thead><tr><th>Severidad</th><th>Código</th><th>Cuenta</th><th>Hallazgo</th><th>Estado</th><th>Acción</th></tr></thead>
+                    <tbody>
+                    {% for f in recent %}
+                      <tr><td>{{ severity_badge(f.severity) }}</td><td class="adg-code">{{ f.finding_code }}</td>
+                      <td>{{ f.sam_account_name or '—' }}</td><td>{{ f.title }}</td><td>{{ f.status }}</td>
+                      <td><a class="adg-btn adg-btn-outline" href="{{ url_for('adgov.finding_detail', finding_id=f.id) }}">Gestionar</a></td></tr>
+                    {% else %}<tr><td colspan="6" class="text-center py-4 text-muted">No hay hallazgos activos.</td></tr>{% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            {% endif %}
+            """,
+            connectors=connectors,
+            selected=selected,
+            metrics=metrics,
+            recent=recent,
+            latest_log=latest_log,
+            can_write=can_write(current_user()),
+            severity_badge=severity_badge,
+        )
+        return page(body, "Gobierno de Active Directory", "Inventario, privilegios, cuentas, hallazgos y trazabilidad del directorio corporativo.")
+
+    @bp.route("/configuracion")
+    @require_access(write=True)
+    def config():
+        connector_id = request.args.get("connector_id", type=int)
+        selected = fetchone("SELECT * FROM ad_connectors WHERE id=?", (connector_id,)) if connector_id else None
+        connectors = fetchall("SELECT * FROM ad_connectors ORDER BY id")
+        body = render_template_string(
+            """
+            <div class="adg-card">
+              <div class="d-flex justify-content-between align-items-center gap-2">
+                <div><h5>Configuración del conector</h5><div class="adg-muted">La contraseña se cifra localmente y nunca se muestra.</div></div>
+                <a class="adg-btn adg-btn-outline" href="{{ url_for('adgov.config') }}"><i class="bi bi-plus-circle"></i> Nuevo</a>
+              </div>
+              <form class="adg-form mt-3" method="post" action="{{ url_for('adgov.save_connector') }}">
+                <input type="hidden" name="connector_id" value="{{ selected.id if selected else '' }}">
+                <div class="row g-3">
+                  <div class="col-md-4"><label>Nombre</label><input class="form-control" name="name" required value="{{ selected.name if selected else 'Samba AD GRAC LAB' }}"></div>
+                  <div class="col-md-4"><label>Host o IP</label><input class="form-control" name="host" required value="{{ selected.host if selected else '10.211.55.9' }}"></div>
+                  <div class="col-md-2"><label>Puerto</label><input class="form-control" type="number" name="port" value="{{ selected.port if selected else 389 }}"></div>
+                  <div class="col-md-2"><label>Timeout (s)</label><input class="form-control" type="number" min="5" max="120" name="connect_timeout" value="{{ selected.connect_timeout if selected else 15 }}"></div>
+                  <div class="col-md-6"><label>Base DN</label><input class="form-control" name="base_dn" required value="{{ selected.base_dn if selected else 'DC=ad,DC=grac,DC=test' }}"></div>
+                  <div class="col-md-6"><label>Usuario de enlace</label><input class="form-control" name="bind_user" required value="{{ selected.bind_user if selected else 'svc_grac_read@ad.grac.test' }}"></div>
+                  <div class="col-md-6"><label>Contraseña {% if selected %}(dejar vacía para conservar){% endif %}</label><input class="form-control" type="password" name="bind_password" {% if not selected %}required{% endif %} autocomplete="new-password"></div>
+                  <div class="col-md-6"><label>Ruta CA para validar LDAPS</label><input class="form-control" name="ca_cert_path" value="{{ selected.ca_cert_path if selected else '' }}" placeholder="/ruta/ca.pem"></div>
+                  <div class="col-md-3"><label>Inactividad máxima (días)</label><input class="form-control" type="number" min="1" name="inactive_days" value="{{ selected.inactive_days if selected else 90 }}"></div>
+                  <div class="col-md-3"><label>Antigüedad contraseña (días)</label><input class="form-control" type="number" min="1" name="password_age_days" value="{{ selected.password_age_days if selected else 90 }}"></div>
+                  <div class="col-md-2"><label>Protocolo</label><select class="form-select" name="use_ssl"><option value="0" {% if not selected or not selected.use_ssl %}selected{% endif %}>LDAP</option><option value="1" {% if selected and selected.use_ssl %}selected{% endif %}>LDAPS</option></select></div>
+                  <div class="col-md-2"><label>Validar certificado</label><select class="form-select" name="verify_ssl"><option value="1" {% if selected and selected.verify_ssl %}selected{% endif %}>Sí</option><option value="0" {% if not selected or not selected.verify_ssl %}selected{% endif %}>No (solo laboratorio)</option></select></div>
+                  <div class="col-md-2"><label>Estado</label><select class="form-select" name="enabled"><option value="1" {% if not selected or selected.enabled %}selected{% endif %}>Habilitado</option><option value="0" {% if selected and not selected.enabled %}selected{% endif %}>Deshabilitado</option></select></div>
+                </div>
+                <div class="mt-4 text-center"><button class="adg-btn adg-btn-primary"><i class="bi bi-save"></i> Guardar configuración</button></div>
+              </form>
+            </div>
+            <div class="adg-card">
+              <h5>Conectores registrados</h5>
+              <div class="table-responsive"><table class="table adg-table">
+                <thead><tr><th>Nombre</th><th>Destino</th><th>Base DN</th><th>Estado</th><th>Última sincronización</th><th>Acciones</th></tr></thead>
+                <tbody>{% for c in connectors %}<tr><td>{{ c.name }}</td><td>{{ 'LDAPS' if c.use_ssl else 'LDAP' }}://{{ c.host }}:{{ c.port }}</td><td class="adg-code">{{ c.base_dn }}</td><td>{{ c.last_status }}</td><td>{{ c.last_sync_at or '—' }}</td>
+                  <td><div class="adg-actions-vertical">
+                    <a class="adg-btn adg-btn-outline" href="{{ url_for('adgov.config',connector_id=c.id) }}">Editar</a>
+                    <form method="post" action="{{ url_for('adgov.test',connector_id=c.id) }}"><button class="adg-btn adg-btn-outline">Probar conexión</button></form>
+                    <form method="post" action="{{ url_for('adgov.sync',connector_id=c.id) }}"><button class="adg-btn adg-btn-primary">Sincronizar ahora</button></form>
+                    <form method="post" action="{{ url_for('adgov.delete_connector',connector_id=c.id) }}" onsubmit="return confirm('¿Eliminar el conector y todo su inventario AD?');"><button class="adg-btn adg-btn-danger">Eliminar</button></form>
+                  </div></td></tr>{% else %}<tr><td colspan="6" class="text-center text-muted py-4">Sin conectores registrados.</td></tr>{% endfor %}</tbody>
+              </table></div>
+            </div>
+            """,
+            selected=selected,
+            connectors=connectors,
+        )
+        return page(body, "Configuración de Active Directory", "Conexión LDAP/LDAPS, cifrado de credenciales y umbrales de gobierno.")
+
+    @bp.route("/conector/guardar", methods=["POST"])
+    @require_access(write=True)
+    def save_connector():
+        connector_id = request.form.get("connector_id", type=int)
+        existing = fetchone("SELECT * FROM ad_connectors WHERE id=?", (connector_id,)) if connector_id else None
+        try:
+            name = (request.form.get("name") or "").strip()
+            host = (request.form.get("host") or "").strip()
+            base_dn = (request.form.get("base_dn") or "").strip()
+            bind_user = (request.form.get("bind_user") or "").strip()
+            if not all((name, host, base_dn, bind_user)):
+                raise ValueError("Nombre, host, Base DN y usuario de enlace son obligatorios.")
+            socket.getaddrinfo(host, int(request.form.get("port") or 389))
+            password = (request.form.get("bind_password") or "").strip()
+            encrypted = encrypt_secret(password) if password else (existing["bind_password_encrypted"] if existing else None)
+            if not encrypted:
+                raise ValueError("Debe ingresar la contraseña del usuario de enlace.")
+            now = now_iso()
+            values_tuple = (
+                name, host, int(request.form.get("port") or 389),
+                int(request.form.get("use_ssl") or 0), int(request.form.get("verify_ssl") or 0),
+                (request.form.get("ca_cert_path") or "").strip(), base_dn, bind_user, encrypted,
+                max(5, min(120, int(request.form.get("connect_timeout") or 15))),
+                max(1, int(request.form.get("inactive_days") or 90)),
+                max(1, int(request.form.get("password_age_days") or 90)),
+                int(request.form.get("enabled") or 0), now,
+            )
+            with db_conn() as sql:
+                if existing:
+                    sql.execute(
+                        """UPDATE ad_connectors SET name=?,host=?,port=?,use_ssl=?,verify_ssl=?,
+                           ca_cert_path=?,base_dn=?,bind_user=?,bind_password_encrypted=?,connect_timeout=?,
+                           inactive_days=?,password_age_days=?,enabled=?,updated_at=? WHERE id=?""",
+                        values_tuple + (connector_id,),
+                    )
+                else:
+                    cur = sql.execute(
+                        """INSERT INTO ad_connectors
+                           (name,host,port,use_ssl,verify_ssl,ca_cert_path,base_dn,bind_user,
+                            bind_password_encrypted,connect_timeout,inactive_days,password_age_days,
+                            enabled,created_at,updated_at)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        values_tuple[:-1] + (now, now),
+                    )
+                    connector_id = cur.lastrowid
+                sql.commit()
+            audit(f"Guardó configuración del conector Active Directory {name}.", current_user())
+            flash("Conector de Active Directory guardado correctamente.", "success")
+            return redirect(url_for("adgov.config", connector_id=connector_id))
+        except Exception as exc:
+            flash(f"No fue posible guardar el conector: {exc}", "danger")
+            return redirect(url_for("adgov.config", connector_id=connector_id) if connector_id else url_for("adgov.config"))
+
+    @bp.route("/conector/<int:connector_id>/eliminar", methods=["POST"])
+    @require_access(write=True)
+    def delete_connector(connector_id):
+        connector = connector_or_404(connector_id)
+        with db_conn() as sql:
+            sql.execute("DELETE FROM ad_connectors WHERE id=?", (connector_id,))
+            sql.commit()
+        audit(f"Eliminó el conector Active Directory {connector['name']}.", current_user())
+        flash("Conector e inventario asociado eliminados.", "success")
+        return redirect(url_for("adgov.config"))
+
+    @bp.route("/conector/<int:connector_id>/probar", methods=["POST"])
+    @require_access(write=True)
+    def test(connector_id):
+        connector = connector_or_404(connector_id)
+        ok, message = test_connector(connector)
+        now = now_iso()
+        with db_conn() as sql:
+            sql.execute(
+                """UPDATE ad_connectors SET last_status=?,last_message=?,last_test_at=?,updated_at=?
+                   WHERE id=?""",
+                ("Conectado" if ok else "Error", message, now, now, connector_id),
+            )
+            sql.commit()
+        audit(f"Probó conexión Active Directory {connector['name']}: {message}", current_user())
+        flash(message, "success" if ok else "danger")
+        return redirect(url_for("adgov.config", connector_id=connector_id))
+
+    @bp.route("/conector/<int:connector_id>/sincronizar", methods=["POST"])
+    @require_access(write=True)
+    def sync(connector_id):
+        connector = connector_or_404(connector_id)
+        if not connector["enabled"]:
+            flash("El conector está deshabilitado.", "warning")
+            return redirect(url_for("adgov.dashboard", connector_id=connector_id))
+        try:
+            result = sync_connector(connector, username(current_user()))
+            audit(
+                f"Sincronizó Active Directory {connector['name']}: "
+                f"{result['users']} usuarios, {result['groups']} grupos y {result['findings']} hallazgos.",
+                current_user(),
+            )
+            flash(
+                f"Sincronización completada: {result['users']} usuarios, "
+                f"{result['groups']} grupos, {result['findings']} hallazgos y score {result['score']}%.",
+                "success",
+            )
+        except Exception as exc:
+            audit(f"Error sincronizando Active Directory {connector['name']}: {exc}", current_user())
+            flash(f"No fue posible sincronizar Active Directory: {exc}", "danger")
+        return redirect(url_for("adgov.dashboard", connector_id=connector_id))
+
+    @bp.route("/usuarios")
+    @require_access()
+    def users():
+        q = (request.args.get("q") or "").strip()
+        state = (request.args.get("state") or "").strip()
+        connector_id = request.args.get("connector_id", type=int)
+        clauses = ["u.active=1"]
+        params = []
+        if connector_id:
+            clauses.append("u.connector_id=?")
+            params.append(connector_id)
+        if q:
+            clauses.append("(u.sam_account_name LIKE ? OR u.display_name LIKE ? OR u.mail LIKE ? OR u.department LIKE ?)")
+            like = f"%{q}%"
+            params.extend([like, like, like, like])
+        if state == "enabled":
+            clauses.append("u.enabled=1")
+        elif state == "disabled":
+            clauses.append("u.enabled=0")
+        elif state == "privileged":
+            clauses.append("u.privileged=1")
+        elif state == "service":
+            clauses.append("u.service_account=1")
+        elif state == "generic":
+            clauses.append("u.generic_account=1")
+        rows = fetchall(
+            f"""SELECT u.*,c.name connector_name,
+                (SELECT COUNT(*) FROM ad_findings f WHERE f.user_id=u.id AND f.active=1) finding_count
+                FROM ad_users u JOIN ad_connectors c ON c.id=u.connector_id
+                WHERE {' AND '.join(clauses)}
+                ORDER BY u.privileged DESC,u.enabled DESC,u.display_name LIMIT 3000""",
+            tuple(params),
+        )
+        connectors = fetchall("SELECT id,name FROM ad_connectors ORDER BY name")
+        body = render_template_string(
+            """
+            <div class="adg-card">
+              <div class="d-flex flex-wrap justify-content-between align-items-center gap-2"><div><h5>Inventario de usuarios</h5><div class="adg-muted">{{ rows|length }} registros visibles</div></div>
+              <form class="d-flex flex-wrap gap-2" method="get">
+                <select class="form-select form-select-sm" name="connector_id"><option value="">Todos los conectores</option>{% for c in connectors %}<option value="{{ c.id }}" {% if connector_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select>
+                <select class="form-select form-select-sm" name="state"><option value="">Todos</option>{% for key,label in [('enabled','Activos'),('disabled','Deshabilitados'),('privileged','Privilegiados'),('service','Servicio'),('generic','Genéricos')] %}<option value="{{ key }}" {% if state==key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+                <input class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="Cuenta, nombre, correo o área"><button class="adg-btn adg-btn-outline">Filtrar</button>
+              </form></div>
+              <div class="adg-table-wrap mt-3"><table class="table adg-table table-hover">
+                <thead><tr><th>Cuenta</th><th>Nombre</th><th>Área / cargo</th><th>Estado</th><th>Privilegio</th><th>Último acceso</th><th>Contraseña</th><th>Grupos directos</th><th>Hallazgos</th></tr></thead>
+                <tbody>{% for u in rows %}<tr>
+                  <td><strong>{{ u.sam_account_name }}</strong><div class="adg-code">{{ u.user_principal_name }}</div></td>
+                  <td>{{ u.display_name }}<div class="adg-muted">{{ u.mail or 'Sin correo' }}</div></td><td>{{ u.department or '—' }}<div class="adg-muted">{{ u.title or '—' }}</div></td>
+                  <td>{% if u.enabled %}<span class="adg-chip adg-chip-ok">Activo</span>{% else %}<span class="adg-chip adg-chip-bad">Deshabilitado</span>{% endif %}{% if u.locked %} <span class="adg-chip adg-chip-warn">Bloqueado</span>{% endif %}</td>
+                  <td>{% if u.privileged %}<span class="adg-chip adg-chip-bad">{{ u.privilege_type }}</span><div class="adg-muted">{{ u.privilege_path }}</div>{% else %}<span class="adg-chip adg-chip-ok">Estándar</span>{% endif %}</td>
+                  <td>{{ u.last_logon or 'Nunca / sin dato' }}</td>
+                  <td>{% if u.password_never_expires %}<span class="adg-chip adg-chip-warn">No expira</span>{% else %}{{ u.pwd_last_set or '—' }}{% endif %}</td>
+                  <td class="adg-muted">{{ (u.direct_groups_json or '[]')|safe }}</td>
+                  <td>{% if u.finding_count %}<a class="adg-btn adg-btn-warning" href="{{ url_for('adgov.findings',user_id=u.id) }}">{{ u.finding_count }} hallazgo(s)</a>{% else %}<span class="adg-chip adg-chip-ok">0</span>{% endif %}</td>
+                </tr>{% else %}<tr><td colspan="9" class="text-center py-4 text-muted">Sin usuarios sincronizados.</td></tr>{% endfor %}</tbody>
+              </table></div>
+            </div>
+            """,
+            rows=rows, connectors=connectors, connector_id=connector_id, q=q, state=state,
+        )
+        return page(body, "Inventario de usuarios AD", "Estado, atributos, accesos, privilegios y grupos de cada identidad.")
+
+    @bp.route("/grupos")
+    @require_access()
+    def groups():
+        q = (request.args.get("q") or "").strip()
+        connector_id = request.args.get("connector_id", type=int)
+        clauses = ["g.active=1"]
+        params = []
+        if connector_id:
+            clauses.append("g.connector_id=?")
+            params.append(connector_id)
+        if q:
+            clauses.append("(g.sam_account_name LIKE ? OR g.display_name LIKE ? OR g.description LIKE ?)")
+            like = f"%{q}%"
+            params.extend([like, like, like])
+        rows = fetchall(
+            f"""SELECT g.*,c.name connector_name FROM ad_groups g
+                JOIN ad_connectors c ON c.id=g.connector_id
+                WHERE {' AND '.join(clauses)}
+                ORDER BY g.privileged DESC,g.sam_account_name LIMIT 3000""",
+            tuple(params),
+        )
+        body = render_template_string(
+            """
+            <div class="adg-card">
+              <div class="d-flex flex-wrap justify-content-between gap-2"><div><h5>Inventario de grupos</h5><div class="adg-muted">{{ rows|length }} grupos sincronizados</div></div>
+              <form class="d-flex gap-2"><input class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="Buscar grupo"><button class="adg-btn adg-btn-outline">Filtrar</button></form></div>
+              <div class="adg-table-wrap mt-3"><table class="table adg-table table-hover">
+                <thead><tr><th>Grupo</th><th>Descripción</th><th>Miembros</th><th>Clasificación</th><th>DN</th></tr></thead>
+                <tbody>{% for g in rows %}<tr><td><strong>{{ g.sam_account_name }}</strong><div class="adg-muted">{{ g.connector_name }}</div></td><td>{{ g.description or '—' }}</td><td>{{ g.member_count }}</td>
+                <td>{% if g.privileged %}<span class="adg-chip adg-chip-bad">Privilegiado</span>{% else %}<span class="adg-chip adg-chip-info">Estándar</span>{% endif %}</td><td class="adg-code">{{ g.distinguished_name }}</td></tr>
+                {% else %}<tr><td colspan="5" class="text-center text-muted py-4">Sin grupos sincronizados.</td></tr>{% endfor %}</tbody>
+              </table></div>
+            </div>
+            """, rows=rows, q=q,
+        )
+        return page(body, "Inventario de grupos AD", "Grupos, membresías y clasificación de privilegios.")
+
+    @bp.route("/hallazgos")
+    @require_access()
+    def findings():
+        severity = (request.args.get("severity") or "").strip()
+        status = (request.args.get("status") or "").strip()
+        q = (request.args.get("q") or "").strip()
+        user_id = request.args.get("user_id", type=int)
+        clauses = ["f.active=1"]
+        params = []
+        if severity:
+            clauses.append("f.severity=?"); params.append(severity)
+        if status:
+            clauses.append("f.status=?"); params.append(status)
+        if user_id:
+            clauses.append("f.user_id=?"); params.append(user_id)
+        if q:
+            clauses.append("(f.title LIKE ? OR f.finding_code LIKE ? OR u.sam_account_name LIKE ?)")
+            like = f"%{q}%"; params.extend([like, like, like])
+        rows = fetchall(
+            f"""SELECT f.*,u.sam_account_name,u.display_name,c.name connector_name
+                FROM ad_findings f LEFT JOIN ad_users u ON u.id=f.user_id
+                JOIN ad_connectors c ON c.id=f.connector_id
+                WHERE {' AND '.join(clauses)}
+                ORDER BY CASE f.severity WHEN 'Crítica' THEN 4 WHEN 'Alta' THEN 3 WHEN 'Media' THEN 2 ELSE 1 END DESC,f.id DESC LIMIT 3000""",
+            tuple(params),
+        )
+        body = render_template_string(
+            """
+            <div class="alert alert-info border-0 shadow-sm">
+              <i class="bi bi-diagram-3-fill me-1"></i>
+              Estos hallazgos alimentan <strong>Modelamiento de Amenazas</strong> y <strong>Superficie de Ataque y Escenarios</strong>. La creación o actualización del riesgo se realiza únicamente desde Superficie de Ataque.
+            </div>
+            <div class="adg-card">
+              <div class="d-flex flex-wrap justify-content-between gap-2"><div><h5>Matriz de hallazgos AD</h5><div class="adg-muted">{{ rows|length }} hallazgos activos</div></div>
+              <form class="d-flex flex-wrap gap-2"><select class="form-select form-select-sm" name="severity"><option value="">Severidades</option>{% for x in ['Crítica','Alta','Media','Baja'] %}<option {% if severity==x %}selected{% endif %}>{{ x }}</option>{% endfor %}</select>
+              <select class="form-select form-select-sm" name="status"><option value="">Estados</option>{% for x in ['Abierto','En tratamiento','Riesgo aceptado','Falso positivo','Resuelto'] %}<option {% if status==x %}selected{% endif %}>{{ x }}</option>{% endfor %}</select>
+              <input class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="Código, cuenta o hallazgo"><button class="adg-btn adg-btn-outline">Filtrar</button>
+              <a class="adg-btn adg-btn-success" href="{{ url_for('adgov.export_findings') }}">CSV</a></form></div>
+              <div class="adg-table-wrap mt-3"><table class="table adg-table table-hover">
+                <thead><tr><th>Severidad</th><th>Código</th><th>Cuenta</th><th>Hallazgo</th><th>Controles</th><th>Estado</th><th>Acciones</th></tr></thead>
+                <tbody>{% for f in rows %}<tr><td>{{ severity_badge(f.severity) }}</td><td class="adg-code">{{ f.finding_code }}</td><td>{{ f.sam_account_name or '—' }}<div class="adg-muted">{{ f.display_name or '' }}</div></td>
+                <td><strong>{{ f.title }}</strong><div class="adg-muted">{{ f.description }}</div></td><td>{{ f.control_mapping }}</td><td>{{ f.status }}</td>
+                <td><div class="adg-actions-vertical"><a class="adg-btn adg-btn-outline" href="{{ url_for('adgov.finding_detail',finding_id=f.id) }}">Ver / gestionar</a>
+                {% if f.plan_id %}<a class="adg-btn adg-btn-success" href="{{ url_for('planes_accion_dashboard',plan_id=f.plan_id) }}">Ir al plan</a>{% endif %}</div></td></tr>
+                {% else %}<tr><td colspan="7" class="text-center text-muted py-4">Sin hallazgos.</td></tr>{% endfor %}</tbody>
+              </table></div>
+            </div>
+            """,
+            rows=rows, severity=severity, status=status, q=q, severity_badge=severity_badge,
+        )
+        return page(body, "Hallazgos de Gobierno AD", "Evaluaciones determinísticas, mapeo de controles y tratamiento.")
+
+    @bp.route("/hallazgo/<int:finding_id>", methods=["GET", "POST"])
+    @require_access()
+    def finding_detail(finding_id):
+        finding = fetchone(
+            """SELECT f.*,u.sam_account_name,u.display_name,u.distinguished_name,u.privilege_path,
+               u.department,u.title,u.mail,c.name connector_name
+               FROM ad_findings f LEFT JOIN ad_users u ON u.id=f.user_id
+               JOIN ad_connectors c ON c.id=f.connector_id WHERE f.id=?""",
+            (finding_id,),
+        )
+        if not finding:
+            abort(404)
+        user = current_user()
+        if request.method == "POST":
+            if not can_write(user):
+                flash("El perfil actual es de solo lectura.", "danger")
+                return redirect(url_for("adgov.finding_detail", finding_id=finding_id))
+            allowed = {"Abierto", "En tratamiento", "Riesgo aceptado", "Falso positivo", "Resuelto", "Descartado"}
+            new_status = (request.form.get("status") or "Abierto").strip()
+            if new_status not in allowed:
+                new_status = "Abierto"
+            resolved = now_iso() if new_status in ("Resuelto", "Descartado") else None
+            with db_conn() as sql:
+                sql.execute(
+                    """UPDATE ad_findings SET status=?,assigned_to=?,management_comment=?,resolved_at=?
+                       WHERE id=?""",
+                    (
+                        new_status, (request.form.get("assigned_to") or "").strip(),
+                        (request.form.get("management_comment") or "").strip(), resolved, finding_id,
+                    ),
+                )
+                sql.commit()
+            audit(f"Actualizó hallazgo AD {finding['finding_code']} a {new_status}.", user)
+            flash("Hallazgo actualizado.", "success")
+            return redirect(url_for("adgov.finding_detail", finding_id=finding_id))
+        body = render_template_string(
+            """
+            <div class="adg-card">
+              <div class="d-flex justify-content-between gap-2"><div><h5>{{ finding.title }}</h5><div class="adg-muted">{{ finding.connector_name }} · {{ finding.finding_code }}</div></div>{{ severity_badge(finding.severity) }}</div>
+              <div class="adg-detail mt-3">
+                {% for label,val in [('Cuenta',finding.sam_account_name),('Nombre',finding.display_name),('Área',finding.department),('Cargo',finding.title),('Correo',finding.mail),('Ruta de privilegio',finding.privilege_path),('DN',finding.distinguished_name),('Estado',finding.status)] %}
+                <div class="adg-detail-item"><span>{{ label }}</span><strong>{{ val or '—' }}</strong></div>{% endfor %}
+              </div>
+              <hr><h6 class="fw-bold text-primary">Descripción</h6><p>{{ finding.description }}</p>
+              <h6 class="fw-bold text-primary">Recomendación determinística</h6><p>{{ finding.recommendation }}</p>
+              <h6 class="fw-bold text-primary">Mapeo de controles</h6><p>{{ finding.control_mapping }}</p>
+              {% if finding.ai_analysis %}<div class="alert alert-info"><strong>Análisis complementario de IA:</strong><br>{{ finding.ai_analysis }}</div>{% endif %}
+              {% if can_write %}
+              <div class="adg-actions">
+                {% if not finding.plan_id %}<form method="post" action="{{ url_for('adgov.create_plan',finding_id=finding.id) }}"><button class="adg-btn adg-btn-success"><i class="bi bi-clipboard2-plus"></i> Asignar plan de acción</button></form>{% else %}<a class="adg-btn adg-btn-success" href="{{ url_for('planes_accion_dashboard',plan_id=finding.plan_id) }}">Ir al plan de acción</a>{% endif %}
+                <form method="post" action="{{ url_for('adgov.generate_ai',finding_id=finding.id) }}"><button class="adg-btn adg-btn-primary"><i class="bi bi-stars"></i> Analizar con IA</button></form>
+              </div>
+              <form class="adg-form mt-4" method="post">
+                <div class="row g-3"><div class="col-md-4"><label>Estado</label><select class="form-select" name="status">{% for x in ['Abierto','En tratamiento','Riesgo aceptado','Falso positivo','Resuelto','Descartado'] %}<option {% if finding.status==x %}selected{% endif %}>{{ x }}</option>{% endfor %}</select></div>
+                <div class="col-md-8"><label>Responsable</label><input class="form-control" name="assigned_to" value="{{ finding.assigned_to or '' }}"></div>
+                <div class="col-12"><label>Comentario de gestión</label><textarea class="form-control" rows="4" name="management_comment">{{ finding.management_comment or '' }}</textarea></div></div>
+                <div class="text-center mt-3"><button class="adg-btn adg-btn-primary">Guardar gestión</button></div>
+              </form>{% endif %}
+            </div>
+            """,
+            finding=finding,
+            severity_badge=severity_badge,
+            can_write=can_write(user),
+        )
+        return page(body, "Detalle del hallazgo AD", "Análisis, gestión, escenarios de ataque y plan de acción.")
+
+    @bp.route("/hallazgo/<int:finding_id>/plan", methods=["POST"])
+    @require_access(write=True)
+    def create_plan(finding_id):
+        if not plan_model or not orm_db:
+            flash("La integración con Planes de Acción no está disponible.", "danger")
+            return redirect(url_for("adgov.finding_detail", finding_id=finding_id))
+        finding = fetchone(
+            """SELECT f.*,u.sam_account_name,u.display_name FROM ad_findings f
+               LEFT JOIN ad_users u ON u.id=f.user_id WHERE f.id=?""",
+            (finding_id,),
+        )
+        if not finding:
+            abort(404)
+        source_ref = f"adgov-finding:{finding['connector_id']}:{finding['finding_key']}"
+        existing = plan_model.query.filter_by(source_ref=source_ref).first()
+        if existing:
+            plan_id = existing.id
+        else:
+            plan = plan_model(
+                origin="Gobierno de Active Directory",
+                standard="MULTI",
+                control_code=finding["finding_code"],
+                title=f"Remediar: {finding['title']}",
+                description=f"{finding['description']}\n\nRecomendación: {finding['recommendation']}\n\nControles: {finding['control_mapping']}",
+                asset=finding["sam_account_name"] or finding["display_name"] or "Active Directory",
+                severity=finding["severity"],
+                action_type="Remediación IAM",
+                responsible=finding["assigned_to"] or username(current_user()),
+                status="Abierto",
+                source_ref=source_ref,
+                raw_json=json.dumps({"ad_finding_id": finding_id}, ensure_ascii=False),
+            )
+            orm_db.session.add(plan)
+            orm_db.session.commit()
+            plan_id = plan.id
+        with db_conn() as sql:
+            sql.execute("UPDATE ad_findings SET plan_id=?,status='En tratamiento' WHERE id=?", (plan_id, finding_id))
+            sql.commit()
+        audit(f"Creó plan de acción desde hallazgo AD {finding['finding_code']}.", current_user())
+        flash("Plan de acción creado correctamente.", "success")
+        return redirect(url_for("planes_accion_dashboard", plan_id=plan_id))
+
+    # El registro de riesgos de hallazgos AD se realiza exclusivamente desde
+    # Superficie de Ataque y Escenarios, después de generar o actualizar el escenario.
+
+    @bp.route("/hallazgo/<int:finding_id>/ia", methods=["POST"])
+    @require_access(write=True)
+    def generate_ai(finding_id):
+        finding = fetchone(
+            """SELECT f.*,u.sam_account_name,u.display_name,u.department,u.privilege_path
+               FROM ad_findings f LEFT JOIN ad_users u ON u.id=f.user_id WHERE f.id=?""",
+            (finding_id,),
+        )
+        if not finding:
+            abort(404)
+        if not ai_helper:
+            flash("El servicio de IA no está disponible en esta instalación.", "warning")
+            return redirect(url_for("adgov.finding_detail", finding_id=finding_id))
+        prompt = f"""
+Eres especialista en gobierno de identidades, Active Directory, ISO 27001, NIST CSF y SOC 2.
+Analiza este hallazgo ya confirmado por reglas determinísticas de GRAC. No cambies su existencia ni severidad.
+Entrega: causa probable, riesgo de negocio, validaciones, remediación priorizada, evidencia de cierre y métricas.
+Cuenta: {finding['sam_account_name'] or finding['display_name']}
+Área: {finding['department'] or 'No informada'}
+Código: {finding['finding_code']}
+Severidad: {finding['severity']}
+Hallazgo: {finding['title']}
+Descripción: {finding['description']}
+Recomendación base: {finding['recommendation']}
+Ruta de privilegio: {finding['privilege_path'] or 'No aplica'}
+Controles: {finding['control_mapping']}
+"""
+        try:
+            analysis = ai_helper(prompt, temperature=0.15, max_tokens=700)
+            with db_conn() as sql:
+                sql.execute("UPDATE ad_findings SET ai_analysis=? WHERE id=?", (str(analysis), finding_id))
+                sql.commit()
+            audit(f"Generó análisis IA para hallazgo AD {finding['finding_code']}.", current_user())
+            flash("Análisis complementario generado por IA.", "success")
+        except Exception as exc:
+            flash(f"No fue posible generar el análisis IA: {exc}", "danger")
+        return redirect(url_for("adgov.finding_detail", finding_id=finding_id))
+
+    @bp.route("/historial")
+    @require_access()
+    def history():
+        rows = fetchall(
+            """SELECT l.*,c.name connector_name FROM ad_sync_logs l
+               JOIN ad_connectors c ON c.id=l.connector_id ORDER BY l.id DESC LIMIT 1000"""
+        )
+        body = render_template_string(
+            """
+            <div class="adg-card"><h5>Historial de sincronización</h5>
+              <div class="adg-table-wrap mt-3"><table class="table adg-table">
+                <thead><tr><th>Conector</th><th>Inicio</th><th>Estado</th><th>Usuarios</th><th>Grupos</th><th>Membresías</th><th>Hallazgos</th><th>Score</th><th>Ejecutado por</th><th>Mensaje</th><th>Acción</th></tr></thead>
+                <tbody>{% for l in rows %}<tr><td>{{ l.connector_name }}</td><td>{{ l.started_at }}</td><td>{{ l.status }}</td><td>{{ l.users_received }}</td><td>{{ l.groups_received }}</td><td>{{ l.memberships_received }}</td><td>{{ l.findings_active }}</td><td>{{ l.compliance_score }}%</td><td>{{ l.executed_by }}</td><td>{{ l.message }}</td>
+                <td>{% if can_write %}<form method="post" action="{{ url_for('adgov.delete_history',log_id=l.id) }}" onsubmit="return confirm('¿Eliminar este registro del historial?');"><button class="adg-btn adg-btn-danger">Eliminar</button></form>{% endif %}</td></tr>
+                {% else %}<tr><td colspan="11" class="text-center text-muted py-4">Sin sincronizaciones.</td></tr>{% endfor %}</tbody>
+              </table></div>
+            </div>
+            """, rows=rows, can_write=can_write(current_user()),
+        )
+        return page(body, "Historial de Active Directory", "Trazabilidad de conexiones, sincronizaciones y resultados.")
+
+    @bp.route("/historial/<int:log_id>/eliminar", methods=["POST"])
+    @require_access(write=True)
+    def delete_history(log_id):
+        with db_conn() as sql:
+            sql.execute("DELETE FROM ad_sync_logs WHERE id=?", (log_id,))
+            sql.commit()
+        audit(f"Eliminó registro {log_id} del historial Active Directory.", current_user())
+        flash("Registro del historial eliminado.", "success")
+        return redirect(url_for("adgov.history"))
+
+    @bp.route("/hallazgos.csv")
+    @require_access()
+    def export_findings():
+        rows = fetchall(
+            """SELECT c.name connector,u.sam_account_name,u.display_name,f.*
+               FROM ad_findings f JOIN ad_connectors c ON c.id=f.connector_id
+               LEFT JOIN ad_users u ON u.id=f.user_id WHERE f.active=1
+               ORDER BY f.severity,f.id"""
+        )
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "Conector", "Cuenta", "Nombre", "Código", "Severidad", "Título",
+            "Descripción", "Recomendación", "Controles", "Estado", "Responsable",
+            "Primera detección", "Última detección", "Plan ID", "Riesgo ID",
+        ])
+        for row in rows:
+            writer.writerow([
+                row["connector"], row["sam_account_name"], row["display_name"],
+                row["finding_code"], row["severity"], row["title"], row["description"],
+                row["recommendation"], row["control_mapping"], row["status"],
+                row["assigned_to"], row["first_detected_at"], row["last_detected_at"],
+                row["plan_id"], row["risk_id"],
+            ])
+        data = io.BytesIO(output.getvalue().encode("utf-8-sig"))
+        data.seek(0)
+        return send_file(
+            data,
+            mimetype="text/csv",
+            as_attachment=True,
+            download_name=f"hallazgos_active_directory_{date.today().isoformat()}.csv",
+        )
+
+    app.register_blueprint(bp)
+    app.extensions["ad_governance"] = {
+        "db_path": db_path,
+        "module": "Gobierno de Active Directory",
+    }
+    return bp
+
+
+register_ad_governance(
+    app=app,
+    base_template=BASE,
+    user_model=User,
+    permission_checker=verificar_permiso,
+    audit_logger=registrar_log,
+    plan_model=ContinuousActionPlan,
+    orm_db=db,
+    risk_model=Riesgo,
+    risk_type_model=TipoRiesgo,
+    ai_helper=ai_text_general,
+)
+
+
+# ============================================================
+# INTEGRACIÓN MULTIFUENTE DE CUMPLIMIENTO CONTINUO
+# Herramienta XDR (Wazuh) + Gobierno de Firewall + Gobierno AD
+# ============================================================
+
+CONT_COMP_GOVERNANCE_SOURCES = (
+    "Gobierno de Firewall",
+    "Gobierno de Active Directory",
+)
+CONT_COMP_STANDARD_CATALOG_CACHE = {}
+
+
+def cont_comp_parse_control_mapping(mapping_text):
+    """Convierte el texto de mapeo de un hallazgo en pares estándar/control."""
+    text_value = str(mapping_text or "").strip()
+    if not text_value:
+        return []
+
+    label_pattern = re.compile(
+        r"(ISO(?:/IEC)?\s*27001|NIST\s*CSF(?:\s*2\.0)?|SOC\s*2|PCI\s*DSS(?:\s*(?:V)?4\.0(?:\.1)?)?)",
+        re.IGNORECASE,
+    )
+    matches = list(label_pattern.finditer(text_value))
+    pairs = []
+
+    for index, match in enumerate(matches):
+        label = match.group(1).upper()
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text_value)
+        body = text_value[start:end].strip(" ;,:|-\n\t")
+
+        if label.startswith("ISO"):
+            standard = "ISO27001"
+            codes = re.findall(r"A\.\d+(?:\.\d+)?", body, flags=re.IGNORECASE)
+        elif label.startswith("NIST"):
+            standard = "NISTCSF"
+            codes = re.findall(r"[A-Z]{2}\.[A-Z]{2}(?:-\d+)?", body, flags=re.IGNORECASE)
+        elif label.startswith("SOC"):
+            standard = "SOC2"
+            codes = re.findall(r"CC\d+(?:\.\d+)?", body, flags=re.IGNORECASE)
+        else:
+            standard = "PCIDSS"
+            codes = re.findall(r"\d+(?:\.\d+)*", body)
+
+        for code in codes:
+            normalized = cont_comp_normalize_code(code)
+            if normalized:
+                pairs.append((standard, normalized))
+
+    clean = []
+    seen = set()
+    for pair in pairs:
+        if pair not in seen:
+            seen.add(pair)
+            clean.append(pair)
+    return clean
+
+
+def cont_comp_governance_status(status, severity=None, active=True):
+    status_text = (status or "").strip().lower()
+    severity_text = (severity or "").strip().lower()
+
+    if status_text in {"falso positivo", "descartado", "no aplica"}:
+        return "No aplica"
+    if status_text in {"resuelto", "resuelto automáticamente", "resuelto automaticamente", "cerrado", "completado"}:
+        return "Cumple"
+    if not bool(active):
+        return "Cumple"
+    if status_text in {"en tratamiento", "riesgo aceptado", "aceptado"}:
+        return "Parcial"
+    if severity_text in {"crítica", "critica", "alta", "alto", "critical", "high"}:
+        return "No cumple"
+    return "Parcial"
+
+
+def cont_comp_parse_evidence_date(value):
+    if isinstance(value, datetime):
+        return value
+    if not value:
+        return cont_comp_now()
+    text_value = str(value).strip()
+    try:
+        parsed = datetime.fromisoformat(text_value.replace("Z", "+00:00"))
+        if getattr(parsed, "tzinfo", None):
+            parsed = parsed.replace(tzinfo=None)
+        return parsed
+    except Exception:
+        return cont_comp_now()
+
+
+def cont_comp_upsert_governance_evidence(*, source, finding_id, finding_code, title,
+                                          description, recommendation, control_mapping,
+                                          asset, severity, finding_status, active,
+                                          evidence_date, raw_extra=None):
+    desired_refs = set()
+    mapped_pairs = cont_comp_parse_control_mapping(control_mapping)
+    normalized_status = cont_comp_governance_status(finding_status, severity, active)
+
+    for standard, control_code in mapped_pairs:
+        prefix = "firewall-finding" if source == "Gobierno de Firewall" else "ad-finding"
+        event_ref = f"{prefix}:{finding_id}:{standard}:{control_code}"
+        desired_refs.add(event_ref)
+
+        evidence = ContinuousEvidence.query.filter_by(
+            standard=standard,
+            control_code=control_code,
+            event_ref=event_ref,
+        ).first()
+        if not evidence:
+            evidence = ContinuousEvidence(
+                standard=standard,
+                control_code=control_code,
+                event_ref=event_ref,
+            )
+            db.session.add(evidence)
+
+        catalog = CONT_COMP_STANDARD_CATALOG_CACHE.get(standard)
+        if catalog is None:
+            catalog = cont_comp_build_standard_catalog(standard)
+            CONT_COMP_STANDARD_CATALOG_CACHE[standard] = catalog
+        mapped_name = (catalog.get(control_code) or {}).get("name")
+        evidence.control_name = mapped_name or control_code
+        evidence.source = source
+        evidence.source_type = "Hallazgo de gobierno"
+        evidence.asset = (asset or "").strip()[:255]
+        evidence.severity = severity or "Media"
+        evidence.status = normalized_status
+        evidence.description = "\n\n".join([
+            part for part in [
+                f"{finding_code or finding_id} — {title}",
+                description,
+                f"Recomendación: {recommendation}" if recommendation else "",
+                f"Estado del hallazgo: {finding_status or 'Abierto'}",
+            ] if part
+        ])
+        evidence.evidence_date = cont_comp_parse_evidence_date(evidence_date)
+        raw_payload = {
+            "finding_id": finding_id,
+            "finding_code": finding_code,
+            "finding_title": title,
+            "finding_status": finding_status,
+            "control_mapping": control_mapping,
+            "mapped_standard": standard,
+            "mapped_control": control_code,
+            "mapped_control_name": mapped_name,
+            "source": source,
+        }
+        if isinstance(raw_extra, dict):
+            raw_payload.update(raw_extra)
+        evidence.raw_json = json.dumps(raw_payload, ensure_ascii=False)[:100000]
+
+    return desired_refs
+
+
+def cont_comp_sync_governance_findings():
+    """Sincroniza los hallazgos de Firewall y AD con las matrices por estándar."""
+    desired_by_source = {source: set() for source in CONT_COMP_GOVERNANCE_SOURCES}
+    processed_sources = set()
+    CONT_COMP_STANDARD_CATALOG_CACHE.clear()
+
+    try:
+        firewall_findings = FirewallGovFinding.query.order_by(FirewallGovFinding.id.asc()).limit(20000).all()
+        for finding in firewall_findings:
+            desired_by_source["Gobierno de Firewall"].update(
+                cont_comp_upsert_governance_evidence(
+                    source="Gobierno de Firewall",
+                    finding_id=finding.id,
+                    finding_code=finding.finding_code,
+                    title=finding.title,
+                    description=finding.description,
+                    recommendation=finding.recommendation,
+                    control_mapping=finding.control_mapping,
+                    asset=finding.rule_name or finding.rule_external_id,
+                    severity=finding.severity,
+                    finding_status=finding.status,
+                    active=finding.active,
+                    evidence_date=finding.last_detected_at or finding.updated_at,
+                    raw_extra={
+                        "device_id": finding.device_id,
+                        "rule_external_id": finding.rule_external_id,
+                        "rule_name": finding.rule_name,
+                    },
+                )
+            )
+        processed_sources.add("Gobierno de Firewall")
+    except Exception as exc:
+        db.session.rollback()
+        print("No fue posible mapear Gobierno de Firewall en Cumplimiento Continuo:", repr(exc))
+
+    ad_db_path = os.path.join(app.instance_path, "ad_governance.db")
+    if os.path.exists(ad_db_path):
+        conn = None
+        try:
+            conn = sqlite3.connect(ad_db_path, timeout=20)
+            conn.row_factory = sqlite3.Row
+            table_exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ad_findings'"
+            ).fetchone()
+            if table_exists:
+                rows = conn.execute(
+                    """
+                    SELECT f.*,u.sam_account_name,u.display_name,u.department
+                    FROM ad_findings f
+                    LEFT JOIN ad_users u ON u.id=f.user_id
+                    ORDER BY f.id ASC
+                    LIMIT 20000
+                    """
+                ).fetchall()
+                for finding in rows:
+                    asset = finding["sam_account_name"] or finding["display_name"] or "Cuenta Active Directory"
+                    desired_by_source["Gobierno de Active Directory"].update(
+                        cont_comp_upsert_governance_evidence(
+                            source="Gobierno de Active Directory",
+                            finding_id=finding["id"],
+                            finding_code=finding["finding_code"],
+                            title=finding["title"],
+                            description=finding["description"],
+                            recommendation=finding["recommendation"],
+                            control_mapping=finding["control_mapping"],
+                            asset=asset,
+                            severity=finding["severity"],
+                            finding_status=finding["status"],
+                            active=bool(finding["active"]),
+                            evidence_date=finding["last_detected_at"] or finding["resolved_at"],
+                            raw_extra={
+                                "account": asset,
+                                "department": finding["department"],
+                                "connector_id": finding["connector_id"],
+                            },
+                        )
+                    )
+                processed_sources.add("Gobierno de Active Directory")
+        except Exception as exc:
+            db.session.rollback()
+            print("No fue posible mapear Gobierno de Active Directory en Cumplimiento Continuo:", repr(exc))
+        finally:
+            if conn is not None:
+                conn.close()
+
+    try:
+        for source in processed_sources:
+            desired = desired_by_source.get(source, set())
+            existing = ContinuousEvidence.query.filter_by(source=source).all()
+            for evidence in existing:
+                if evidence.event_ref not in desired:
+                    db.session.delete(evidence)
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        print("No fue posible consolidar las evidencias de gobierno:", repr(exc))
+        return 0
+
+    return sum(len(values) for values in desired_by_source.values())
+
+
+def cont_comp_get_ad_dashboard_metrics():
+    result = {"connectors": 0, "findings": 0, "critical": 0, "last_sync": None}
+    db_path = os.path.join(app.instance_path, "ad_governance.db")
+    if not os.path.exists(db_path):
+        return result
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ad_findings'").fetchone():
+            return result
+        result["connectors"] = conn.execute("SELECT COUNT(*) n FROM ad_connectors WHERE enabled=1").fetchone()["n"]
+        result["findings"] = conn.execute("SELECT COUNT(*) n FROM ad_findings WHERE active=1").fetchone()["n"]
+        result["critical"] = conn.execute("SELECT COUNT(*) n FROM ad_findings WHERE active=1 AND severity='Crítica'").fetchone()["n"]
+        row = conn.execute("SELECT finished_at FROM ad_sync_logs ORDER BY id DESC LIMIT 1").fetchone()
+        result["last_sync"] = row["finished_at"] if row else None
+    except Exception:
+        pass
+    finally:
+        if conn is not None:
+            conn.close()
+    return result
+
+
+def cont_comp_collect_evidence_rows(standard="", control_code="", source_filter="", status_filter=""):
+    standard = (standard or "").strip().upper()
+    control_code = cont_comp_normalize_code(control_code)
+    rows = []
+
+    xdr_query = WazuhComplianceControl.query
+    if standard:
+        xdr_query = xdr_query.filter(WazuhComplianceControl.standard == standard)
+    if control_code:
+        xdr_query = xdr_query.filter(func.upper(WazuhComplianceControl.control_code) == control_code)
+
+    # Cuando hay filtro por estándar/control no se aplica el límite histórico que ocultaba
+    # verificaciones Cumple, especialmente en PCI-DSS.
+    if standard or control_code:
+        xdr_items = xdr_query.order_by(WazuhComplianceControl.synced_at.desc()).all()
+    else:
+        xdr_items = xdr_query.order_by(WazuhComplianceControl.synced_at.desc()).limit(5000).all()
+
+    for item in xdr_items:
+        rows.append({
+            "date": item.synced_at,
+            "source": "Herramienta XDR (Wazuh)",
+            "standard": item.standard,
+            "control_code": cont_comp_normalize_code(item.control_code),
+            "status": item.status or "No evaluado",
+            "asset": item.agent_name,
+            "reference": item.rule_id or item.alert_id,
+            "severity": item.severity,
+            "description": item.rule_description or item.control_name,
+        })
+
+    gov_query = ContinuousEvidence.query.filter(
+        ContinuousEvidence.source.in_(CONT_COMP_GOVERNANCE_SOURCES)
+    )
+    if standard:
+        gov_query = gov_query.filter(ContinuousEvidence.standard == standard)
+    if control_code:
+        gov_query = gov_query.filter(func.upper(ContinuousEvidence.control_code) == control_code)
+
+    gov_items = gov_query.order_by(ContinuousEvidence.evidence_date.desc()).all()
+    for item in gov_items:
+        raw = {}
+        if item.raw_json:
+            try:
+                raw = json.loads(item.raw_json) or {}
+            except Exception:
+                raw = {}
+        rows.append({
+            "date": item.evidence_date,
+            "source": item.source,
+            "standard": item.standard,
+            "control_code": cont_comp_normalize_code(item.control_code),
+            "status": item.status or "No evaluado",
+            "asset": item.asset,
+            "reference": raw.get("finding_code") or item.event_ref,
+            "severity": item.severity,
+            "description": item.description or item.control_name,
+        })
+
+    if source_filter:
+        rows = [row for row in rows if row["source"] == source_filter]
+    if status_filter:
+        rows = [row for row in rows if row["status"] == status_filter]
+
+    def sort_key(row):
+        value = row.get("date")
+        if isinstance(value, datetime):
+            return value
+        return datetime.min
+
+    rows.sort(key=sort_key, reverse=True)
+    return rows
+
+
+
 with app.app_context():
     db.create_all()
+    cont_comp_migrate_evidence_schema()
+    cont_comp_sync_governance_findings()
     ensure_attack_auto_db()
     asegurar_columnas_marcos_controles_riesgo()
     init_soc2_madurez_db()
