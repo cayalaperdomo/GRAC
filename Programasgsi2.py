@@ -18163,6 +18163,24 @@ class ConfigImpactoResidual(db.Model):
     bajar = db.Column(db.Integer, nullable=False)
 
 
+class ConfigEvaluacionControl(db.Model):
+    """Porcentajes configurables para la evaluación y eficacia de controles."""
+    __tablename__ = "config_evaluacion_control"
+
+    id = db.Column(db.Integer, primary_key=True)
+    clave = db.Column(db.String(80), nullable=False, unique=True, index=True)
+    grupo = db.Column(db.String(100), nullable=False)
+    opcion = db.Column(db.String(150), nullable=False)
+    porcentaje = db.Column(db.Float, nullable=False)
+    orden = db.Column(db.Integer, nullable=False, default=0)
+    actualizado_en = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+
 # ============================================================
 # MOTOR ÚNICO DE CÁLCULO DE RIESGO RESIDUAL
 # - La solidez se guarda internamente entre 0 y 1.
@@ -18188,23 +18206,195 @@ RISK_IMPACT_LABEL_TO_NUM = {
 }
 RISK_IMPACT_NUM_TO_LABEL = {v: k for k, v in RISK_IMPACT_LABEL_TO_NUM.items()}
 
-RISK_CONTROL_DESIGN_MAPS = {
-    "asignacion": {"asignado": 0.20, "no asignado": 0.0},
-    "tipo_control": {"preventivo": 0.15, "detectivo": 0.10, "correctivo": 0.07},
-    "forma_control": {"automatico": 0.15, "semiautomatico": 0.07, "manual": 0.05},
-    "funcionalidad": {"adecuada": 0.15, "no adecuada": 0.0},
-    "estado_control": {
-        "implementado y documentado": 0.20,
-        "implementado y no documentado": 0.07,
-        "no documentado": 0.0,
-    },
-    "evidencia_control": {"con evidencia": 0.15, "sin evidencia": 0.0},
+# Valores iniciales del instrumento. Se copian a la base de datos la primera vez
+# y posteriormente pueden modificarse desde Gestión de Riesgos > Parámetros.
+RISK_CONTROL_PARAMETER_DEFINITIONS = (
+    {"clave": "asignacion_asignado", "grupo": "Asignación", "opcion": "Asignado", "porcentaje": 20.0, "orden": 10},
+    {"clave": "asignacion_no_asignado", "grupo": "Asignación", "opcion": "No Asignado", "porcentaje": 0.0, "orden": 11},
+
+    {"clave": "tipo_preventivo", "grupo": "Tipo de Control", "opcion": "Preventivo", "porcentaje": 15.0, "orden": 20},
+    {"clave": "tipo_detectivo", "grupo": "Tipo de Control", "opcion": "Detectivo", "porcentaje": 10.0, "orden": 21},
+    {"clave": "tipo_correctivo", "grupo": "Tipo de Control", "opcion": "Correctivo", "porcentaje": 7.0, "orden": 22},
+
+    {"clave": "forma_automatico", "grupo": "Forma de Control", "opcion": "Automático", "porcentaje": 15.0, "orden": 30},
+    {"clave": "forma_semiautomatico", "grupo": "Forma de Control", "opcion": "Semiautomático", "porcentaje": 7.0, "orden": 31},
+    {"clave": "forma_manual", "grupo": "Forma de Control", "opcion": "Manual", "porcentaje": 5.0, "orden": 32},
+
+    {"clave": "funcionalidad_adecuada", "grupo": "Funcionalidad", "opcion": "Adecuada", "porcentaje": 15.0, "orden": 40},
+    {"clave": "funcionalidad_no_adecuada", "grupo": "Funcionalidad", "opcion": "No Adecuada", "porcentaje": 0.0, "orden": 41},
+
+    {"clave": "estado_implementado_documentado", "grupo": "Estado del Control", "opcion": "Implementado y Documentado", "porcentaje": 20.0, "orden": 50},
+    {"clave": "estado_implementado_no_documentado", "grupo": "Estado del Control", "opcion": "Implementado y No Documentado", "porcentaje": 7.0, "orden": 51},
+    {"clave": "estado_no_documentado", "grupo": "Estado del Control", "opcion": "No Documentado", "porcentaje": 0.0, "orden": 52},
+
+    {"clave": "evidencia_con_evidencia", "grupo": "Evidencia del Control", "opcion": "Con Evidencia", "porcentaje": 15.0, "orden": 60},
+    {"clave": "evidencia_sin_evidencia", "grupo": "Evidencia del Control", "opcion": "Sin Evidencia", "porcentaje": 0.0, "orden": 61},
+
+    {"clave": "ejecucion_siempre", "grupo": "Ejecución", "opcion": "Siempre", "porcentaje": 100.0, "orden": 70},
+    {"clave": "ejecucion_casi_siempre", "grupo": "Ejecución", "opcion": "Casi Siempre", "porcentaje": 50.0, "orden": 71},
+    {"clave": "ejecucion_nunca", "grupo": "Ejecución", "opcion": "Nunca", "porcentaje": 0.0, "orden": 72},
+
+    {"clave": "formula_peso_diseno", "grupo": "Fórmula de Solidez Individual", "opcion": "Peso del Diseño", "porcentaje": 60.0, "orden": 80},
+    {"clave": "formula_peso_ejecucion", "grupo": "Fórmula de Solidez Individual", "opcion": "Peso de la Ejecución", "porcentaje": 40.0, "orden": 81},
+)
+
+RISK_CONTROL_DESIGN_GROUP_KEYS = {
+    "Asignación": ("asignacion_asignado", "asignacion_no_asignado"),
+    "Tipo de Control": ("tipo_preventivo", "tipo_detectivo", "tipo_correctivo"),
+    "Forma de Control": ("forma_automatico", "forma_semiautomatico", "forma_manual"),
+    "Funcionalidad": ("funcionalidad_adecuada", "funcionalidad_no_adecuada"),
+    "Estado del Control": (
+        "estado_implementado_documentado",
+        "estado_implementado_no_documentado",
+        "estado_no_documentado",
+    ),
+    "Evidencia del Control": ("evidencia_con_evidencia", "evidencia_sin_evidencia"),
 }
-RISK_CONTROL_EXECUTION_MAP = {
-    "siempre": 1.0,
-    "casi siempre": 0.5,
-    "nunca": 0.0,
-}
+
+
+def riesgo_asegurar_config_evaluacion_control():
+    """Crea la tabla y carga únicamente los parámetros que aún no existan."""
+    try:
+        ConfigEvaluacionControl.__table__.create(bind=db.engine, checkfirst=True)
+        existentes = {
+            fila.clave: fila
+            for fila in ConfigEvaluacionControl.query.all()
+        }
+        cambios = False
+        for definicion in RISK_CONTROL_PARAMETER_DEFINITIONS:
+            fila = existentes.get(definicion["clave"])
+            if fila is None:
+                db.session.add(ConfigEvaluacionControl(**definicion))
+                cambios = True
+                continue
+
+            # Mantiene nombre, agrupación y orden alineados con el formulario,
+            # sin sobrescribir el porcentaje definido por el usuario.
+            if (
+                fila.grupo != definicion["grupo"]
+                or fila.opcion != definicion["opcion"]
+                or fila.orden != definicion["orden"]
+            ):
+                fila.grupo = definicion["grupo"]
+                fila.opcion = definicion["opcion"]
+                fila.orden = definicion["orden"]
+                cambios = True
+
+        if cambios:
+            db.session.commit()
+        return True
+    except Exception as exc:
+        db.session.rollback()
+        print("[WARN] No se pudo inicializar la configuración de evaluación de controles:", repr(exc))
+        return False
+
+
+def riesgo_obtener_config_evaluacion_control():
+    """Devuelve los porcentajes vigentes convertidos a fracciones entre 0 y 1."""
+    riesgo_asegurar_config_evaluacion_control()
+    valores = {
+        item["clave"]: max(0.0, min(1.0, float(item["porcentaje"]) / 100.0))
+        for item in RISK_CONTROL_PARAMETER_DEFINITIONS
+    }
+    try:
+        for fila in ConfigEvaluacionControl.query.all():
+            if fila.clave in valores:
+                valores[fila.clave] = max(0.0, min(1.0, float(fila.porcentaje or 0.0) / 100.0))
+    except Exception as exc:
+        print("[WARN] Se usarán parámetros predeterminados de evaluación de controles:", repr(exc))
+
+    peso_diseno = valores["formula_peso_diseno"]
+    peso_ejecucion = valores["formula_peso_ejecucion"]
+    total_pesos = peso_diseno + peso_ejecucion
+    if total_pesos <= 0:
+        peso_diseno, peso_ejecucion = 0.60, 0.40
+    else:
+        # Protección adicional para configuraciones antiguas o alteradas manualmente.
+        peso_diseno /= total_pesos
+        peso_ejecucion /= total_pesos
+
+    return {
+        "diseno": {
+            "asignacion": {
+                "asignado": valores["asignacion_asignado"],
+                "no asignado": valores["asignacion_no_asignado"],
+            },
+            "tipo_control": {
+                "preventivo": valores["tipo_preventivo"],
+                "detectivo": valores["tipo_detectivo"],
+                "correctivo": valores["tipo_correctivo"],
+            },
+            "forma_control": {
+                "automatico": valores["forma_automatico"],
+                "semiautomatico": valores["forma_semiautomatico"],
+                "manual": valores["forma_manual"],
+            },
+            "funcionalidad": {
+                "adecuada": valores["funcionalidad_adecuada"],
+                "no adecuada": valores["funcionalidad_no_adecuada"],
+            },
+            "estado_control": {
+                "implementado y documentado": valores["estado_implementado_documentado"],
+                "implementado y no documentado": valores["estado_implementado_no_documentado"],
+                "no documentado": valores["estado_no_documentado"],
+            },
+            "evidencia_control": {
+                "con evidencia": valores["evidencia_con_evidencia"],
+                "sin evidencia": valores["evidencia_sin_evidencia"],
+            },
+        },
+        "ejecucion": {
+            "siempre": valores["ejecucion_siempre"],
+            "casi siempre": valores["ejecucion_casi_siempre"],
+            "nunca": valores["ejecucion_nunca"],
+        },
+        "peso_diseno": peso_diseno,
+        "peso_ejecucion": peso_ejecucion,
+        "valores": valores,
+    }
+
+
+def riesgo_parametros_control_frontend(configuracion=None):
+    """Convierte la configuración a las etiquetas exactas utilizadas en el formulario."""
+    cfg = configuracion or riesgo_obtener_config_evaluacion_control()
+    d = cfg["diseno"]
+    e = cfg["ejecucion"]
+    return {
+        "asignacion": {
+            "Asignado": d["asignacion"]["asignado"],
+            "No Asignado": d["asignacion"]["no asignado"],
+        },
+        "tipo": {
+            "Preventivo": d["tipo_control"]["preventivo"],
+            "Detectivo": d["tipo_control"]["detectivo"],
+            "Correctivo": d["tipo_control"]["correctivo"],
+        },
+        "forma": {
+            "Automático": d["forma_control"]["automatico"],
+            "Semiautomático": d["forma_control"]["semiautomatico"],
+            "Manual": d["forma_control"]["manual"],
+        },
+        "funcionalidad": {
+            "Adecuada": d["funcionalidad"]["adecuada"],
+            "No Adecuada": d["funcionalidad"]["no adecuada"],
+        },
+        "estado": {
+            "Implementado y Documentado": d["estado_control"]["implementado y documentado"],
+            "Implementado y No Documentado": d["estado_control"]["implementado y no documentado"],
+            "No Documentado": d["estado_control"]["no documentado"],
+        },
+        "evidencia": {
+            "Con Evidencia": d["evidencia_control"]["con evidencia"],
+            "Sin Evidencia": d["evidencia_control"]["sin evidencia"],
+        },
+        "ejecucion": {
+            "Siempre": e["siempre"],
+            "Casi Siempre": e["casi siempre"],
+            "Nunca": e["nunca"],
+        },
+        "peso_diseno": cfg["peso_diseno"],
+        "peso_ejecucion": cfg["peso_ejecucion"],
+    }
 
 
 def riesgo_normalizar_opcion(valor):
@@ -18397,7 +18587,12 @@ def riesgo_calcular_solidez_control(
     ejecucion_control=None,
     diseno_control=None,
     solidez_existente=None,
+    configuracion_control=None,
 ):
+    configuracion_control = configuracion_control or riesgo_obtener_config_evaluacion_control()
+    mapas_diseno = configuracion_control["diseno"]
+    mapa_ejecucion = configuracion_control["ejecucion"]
+
     valores = {
         "asignacion": asignacion,
         "tipo_control": tipo_control,
@@ -18408,26 +18603,33 @@ def riesgo_calcular_solidez_control(
     }
 
     componentes = {}
-    parametros_reconocidos = False
+    evaluacion_completa = True
     for campo, valor in valores.items():
         clave = riesgo_normalizar_opcion(valor)
-        mapa = RISK_CONTROL_DESIGN_MAPS[campo]
+        mapa = mapas_diseno[campo]
         if clave in mapa:
-            parametros_reconocidos = True
             componentes[campo] = mapa[clave]
         else:
             componentes[campo] = 0.0
+            evaluacion_completa = False
 
-    if parametros_reconocidos:
+    if evaluacion_completa:
         diseno = max(0.0, min(1.0, sum(componentes.values())))
     else:
         diseno = riesgo_normalizar_fraccion(diseno_control, None)
 
     clave_ejecucion = riesgo_normalizar_opcion(ejecucion_control)
-    ejecucion = RISK_CONTROL_EXECUTION_MAP.get(clave_ejecucion)
+    ejecucion = mapa_ejecucion.get(clave_ejecucion)
 
-    if diseno is not None and ejecucion is not None:
-        solidez = max(0.0, min(1.0, (diseno * 0.60) + (ejecucion * 0.40)))
+    if evaluacion_completa and diseno is not None and ejecucion is not None:
+        solidez = max(
+            0.0,
+            min(
+                1.0,
+                (diseno * configuracion_control["peso_diseno"])
+                + (ejecucion * configuracion_control["peso_ejecucion"]),
+            ),
+        )
         calculada = True
     else:
         solidez = riesgo_normalizar_fraccion(solidez_existente, 0.0)
@@ -18531,6 +18733,7 @@ def riesgo_lista_form(form, nombre):
 
 
 def riesgo_extraer_controles_formulario(form):
+    configuracion_control = riesgo_obtener_config_evaluacion_control()
     campos = {
         "estandar": riesgo_lista_form(form, "control_estandar[]"),
         "codigo": riesgo_lista_form(form, "control_catalogo_codigo[]"),
@@ -18609,6 +18812,7 @@ def riesgo_extraer_controles_formulario(form):
             # que la evaluación nueva esté completamente diligenciada.
             diseno_control=valor("diseno_existente", i),
             solidez_existente=valor("solidez_existente", i),
+            configuracion_control=configuracion_control,
         )
         controles.append({
             "orden": len(controles) + 1,
@@ -18807,6 +19011,7 @@ def riesgo_controles_widget_html(controles_iniciales=None, reglas_prob=None, reg
     iniciales_json = riesgo_json_seguro(controles_iniciales or [])
     reglas_prob_json = riesgo_json_seguro(reglas_prob or [])
     reglas_imp_json = riesgo_json_seguro(reglas_imp or [])
+    parametros_control_json = riesgo_json_seguro(riesgo_parametros_control_frontend())
     plantilla = r'''
 <div class="col-12">
   <div class="%SECTION_CLASS% risk-controls-section-header">
@@ -18844,6 +19049,7 @@ def riesgo_controles_widget_html(controles_iniciales=None, reglas_prob=None, reg
   const INICIALES = %INICIALES%;
   const REGLAS_PROB = %REGLAS_PROB%;
   const REGLAS_IMP = %REGLAS_IMP%;
+  const PARAMETROS_CONTROL = %PARAMETROS_CONTROL%;
   const ETIQUETAS = {
     ISO_27001: 'ISO 27001 / Anexo A',
     NIST_CSF: 'NIST CSF 2.0',
@@ -18916,15 +19122,7 @@ def riesgo_controles_widget_html(controles_iniciales=None, reglas_prob=None, reg
 
     function calcularTarjeta(card){
       const get = nombre => card.querySelector(`[name="${nombre}"]`)?.value || '';
-      const mapas = {
-        asignacion: {'Asignado':0.20,'No Asignado':0},
-        tipo: {'Preventivo':0.15,'Detectivo':0.10,'Correctivo':0.07},
-        forma: {'Automático':0.15,'Semiautomático':0.07,'Manual':0.05},
-        funcionalidad: {'Adecuada':0.15,'No Adecuada':0},
-        estado: {'Implementado y Documentado':0.20,'Implementado y No Documentado':0.07,'No Documentado':0},
-        evidencia: {'Con Evidencia':0.15,'Sin Evidencia':0},
-        ejecucion: {'Siempre':1.0,'Casi Siempre':0.5,'Nunca':0}
-      };
+      const mapas = PARAMETROS_CONTROL;
       const valoresDiseno = [
         get('control_asignacion[]'),
         get('control_tipo[]'),
@@ -18954,7 +19152,7 @@ def riesgo_controles_widget_html(controles_iniciales=None, reglas_prob=None, reg
       const puedeRecalcular = evaluacionDisenoCompleta && ejecucion !== undefined;
       const diseno = puedeRecalcular ? disenoCalculado : disenoExistente;
       const solidez = puedeRecalcular
-        ? ((disenoCalculado * 0.60) + (ejecucion * 0.40))
+        ? ((disenoCalculado * PARAMETROS_CONTROL.peso_diseno) + (ejecucion * PARAMETROS_CONTROL.peso_ejecucion))
         : solidezExistente;
 
       const campoDiseno = card.querySelector('[name="control_diseno_visual[]"]');
@@ -19159,7 +19357,8 @@ def riesgo_controles_widget_html(controles_iniciales=None, reglas_prob=None, reg
         .replace("%CATALOGOS%", catalogos_json)
         .replace("%INICIALES%", iniciales_json)
         .replace("%REGLAS_PROB%", reglas_prob_json)
-        .replace("%REGLAS_IMP%", reglas_imp_json))
+        .replace("%REGLAS_IMP%", reglas_imp_json)
+        .replace("%PARAMETROS_CONTROL%", parametros_control_json))
 
 
 def riesgo_controles_detalle_html(riesgo):
@@ -19246,8 +19445,9 @@ def riesgo_calcular_resultados(prob_inh, imp_inh, solidez_grupal, reglas_prob=No
     }
 
 
-def riesgo_actualizar_calculo_objeto(riesgo, reglas_prob=None, reglas_imp=None):
+def riesgo_actualizar_calculo_objeto(riesgo, reglas_prob=None, reglas_imp=None, configuracion_control=None):
     """Recalcula controles individuales, promedio grupal y riesgo residual."""
+    configuracion_control = configuracion_control or riesgo_obtener_config_evaluacion_control()
     campos_control = [
         "diseno_control", "calificacion_asignacion", "calificacion_tipo_control",
         "calificacion_forma_control", "calificacion_funcionalidad",
@@ -19273,6 +19473,7 @@ def riesgo_actualizar_calculo_objeto(riesgo, reglas_prob=None, reglas_imp=None):
                 ejecucion_control=fila.ejecucion_control,
                 diseno_control=fila.diseno_control,
                 solidez_existente=fila.solidez_individual,
+                configuracion_control=configuracion_control,
             )
             fila.diseno_control = calculo["diseno"] or 0.0
             fila.valor_ejecucion_control = calculo["ejecucion"] or 0.0
@@ -19287,7 +19488,7 @@ def riesgo_actualizar_calculo_objeto(riesgo, reglas_prob=None, reglas_imp=None):
         solidez_efectiva = riesgo_sincronizar_campos_legacy(riesgo, controles)
     else:
         evidencia = getattr(riesgo, "evidencia_control", None)
-        if not evidencia and riesgo_normalizar_opcion(getattr(riesgo, "soporte_evidencia", None)) in RISK_CONTROL_DESIGN_MAPS["evidencia_control"]:
+        if not evidencia and riesgo_normalizar_opcion(getattr(riesgo, "soporte_evidencia", None)) in configuracion_control["diseno"]["evidencia_control"]:
             evidencia = getattr(riesgo, "soporte_evidencia", None)
         control = riesgo_calcular_solidez_control(
             asignacion=getattr(riesgo, "asignacion", None),
@@ -19299,6 +19500,7 @@ def riesgo_actualizar_calculo_objeto(riesgo, reglas_prob=None, reglas_imp=None):
             ejecucion_control=getattr(riesgo, "ejecucion_control", None),
             diseno_control=getattr(riesgo, "diseno_control", None),
             solidez_existente=getattr(riesgo, "solidez_individual", None),
+            configuracion_control=configuracion_control,
         )
         componentes = control["componentes"]
         if control["diseno"] is not None and control["calculada"]:
@@ -19346,10 +19548,16 @@ def riesgo_actualizar_calculo_objeto(riesgo, reglas_prob=None, reglas_imp=None):
 def riesgo_recalcular_matriz_existente(commit=True):
     reglas_prob = ConfigProbResidual.query.all()
     reglas_imp = ConfigImpactoResidual.query.all()
+    configuracion_control = riesgo_obtener_config_evaluacion_control()
     actualizados = 0
     for riesgo in Riesgo.query.all():
         try:
-            if riesgo_actualizar_calculo_objeto(riesgo, reglas_prob, reglas_imp):
+            if riesgo_actualizar_calculo_objeto(
+                riesgo,
+                reglas_prob,
+                reglas_imp,
+                configuracion_control=configuracion_control,
+            ):
                 actualizados += 1
         except Exception as exc:
             print(f"[WARN] No se pudo recalcular el riesgo {getattr(riesgo, 'id', '?')}: {exc!r}")
@@ -19715,6 +19923,9 @@ def gestion_riesgos():
                 </a>
                 <a href="{{ url_for('configurar_impacto_residual') }}" onclick="showLoader()">
                   📉 Impacto Residual
+                </a>
+                <a href="{{ url_for('configurar_evaluacion_control') }}" onclick="showLoader()">
+                  🧩 Evaluación y Eficacia del Control
                 </a>
                 <a href="{{ url_for('configurar_tipos_riesgo') }}" onclick="showLoader()">
                   🏷️ Tipos de Riesgo
@@ -22467,6 +22678,287 @@ def configurar_impacto_residual():
     """, reglas=reglas)
 
     return render_template_string(BASE, content=Markup(html))
+
+
+# ===========================================================
+# CONFIGURAR EVALUACIÓN Y EFICACIA DEL CONTROL
+# ===========================================================
+@app.route('/configurar_evaluacion_control', methods=['GET', 'POST'])
+@login_required
+def configurar_evaluacion_control():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede configurar parámetros.", "danger")
+        return redirect(url_for('gestion_riesgos'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Riesgos"):
+        flash("No tiene permiso para configurar parámetros.", "danger")
+        return redirect(url_for('gestion_riesgos'))
+
+    riesgo_asegurar_config_evaluacion_control()
+
+    if request.method == 'POST':
+        accion = (request.form.get('accion') or 'guardar').strip().lower()
+
+        if accion == 'restablecer':
+            db.session.query(ConfigEvaluacionControl).delete()
+            db.session.commit()
+            riesgo_asegurar_config_evaluacion_control()
+            actualizados = riesgo_recalcular_matriz_existente(commit=True)
+            flash(
+                f"✅ Valores predeterminados restablecidos. {actualizados} riesgo(s) recalculado(s).",
+                "success",
+            )
+            return redirect(url_for('configurar_evaluacion_control'))
+
+        definiciones = {item['clave']: item for item in RISK_CONTROL_PARAMETER_DEFINITIONS}
+        valores = {}
+        errores = []
+        for clave, definicion in definiciones.items():
+            raw = request.form.get(f'pct_{clave}')
+            numero = riesgo_float(raw, None)
+            if numero is None:
+                errores.append(f"Debe diligenciar el porcentaje de {definicion['grupo']} - {definicion['opcion']}.")
+                continue
+            if numero < 0 or numero > 100:
+                errores.append(f"El porcentaje de {definicion['opcion']} debe estar entre 0 y 100.")
+                continue
+            valores[clave] = round(float(numero), 4)
+
+        # El máximo alcanzable por el diseño debe representar exactamente 100 %.
+        if not errores:
+            maximo_diseno = sum(
+                max(valores[clave] for clave in claves)
+                for claves in RISK_CONTROL_DESIGN_GROUP_KEYS.values()
+            )
+            if abs(maximo_diseno - 100.0) > 0.01:
+                errores.append(
+                    f"La suma de los máximos de Diseño debe ser 100 %. Actualmente es {maximo_diseno:.2f} %."
+                )
+
+            total_formula = valores['formula_peso_diseno'] + valores['formula_peso_ejecucion']
+            if abs(total_formula - 100.0) > 0.01:
+                errores.append(
+                    f"Los pesos de Diseño y Ejecución deben sumar 100 %. Actualmente suman {total_formula:.2f} %."
+                )
+
+        if errores:
+            for error in errores:
+                flash(error, 'danger')
+        else:
+            filas = {fila.clave: fila for fila in ConfigEvaluacionControl.query.all()}
+            for clave, numero in valores.items():
+                definicion = definiciones[clave]
+                fila = filas.get(clave)
+                if fila is None:
+                    fila = ConfigEvaluacionControl(**definicion)
+                    db.session.add(fila)
+                fila.porcentaje = numero
+                fila.grupo = definicion['grupo']
+                fila.opcion = definicion['opcion']
+                fila.orden = definicion['orden']
+
+            db.session.commit()
+            actualizados = riesgo_recalcular_matriz_existente(commit=True)
+            flash(
+                f"✅ Parámetros de Evaluación y Eficacia del Control guardados. "
+                f"{actualizados} riesgo(s) recalculado(s).",
+                'success',
+            )
+            return redirect(url_for('configurar_evaluacion_control'))
+
+    filas_db = {fila.clave: fila for fila in ConfigEvaluacionControl.query.all()}
+    grupos = []
+    nombres_grupo = [
+        'Asignación', 'Tipo de Control', 'Forma de Control', 'Funcionalidad',
+        'Estado del Control', 'Evidencia del Control', 'Ejecución'
+    ]
+    for nombre in nombres_grupo:
+        filas = []
+        for definicion in RISK_CONTROL_PARAMETER_DEFINITIONS:
+            if definicion['grupo'] != nombre:
+                continue
+            fila_db = filas_db.get(definicion['clave'])
+            filas.append({
+                **definicion,
+                'porcentaje_actual': (
+                    float(fila_db.porcentaje)
+                    if fila_db is not None
+                    else float(definicion['porcentaje'])
+                ),
+            })
+        grupos.append({'nombre': nombre, 'filas': filas})
+
+    formula = []
+    for definicion in RISK_CONTROL_PARAMETER_DEFINITIONS:
+        if definicion['grupo'] != 'Fórmula de Solidez Individual':
+            continue
+        fila_db = filas_db.get(definicion['clave'])
+        formula.append({
+            **definicion,
+            'porcentaje_actual': (
+                float(fila_db.porcentaje)
+                if fila_db is not None
+                else float(definicion['porcentaje'])
+            ),
+        })
+
+    maximo_diseno_actual = sum(
+        max(
+            float(filas_db[clave].porcentaje) if clave in filas_db else next(
+                float(item['porcentaje']) for item in RISK_CONTROL_PARAMETER_DEFINITIONS if item['clave'] == clave
+            )
+            for clave in claves
+        )
+        for claves in RISK_CONTROL_DESIGN_GROUP_KEYS.values()
+    )
+
+    html = render_template_string("""
+    <div class="ctrlcfg-shell">
+      <div class="ctrlcfg-header-card">
+        <div class="ctrlcfg-header-overlay">
+          <div class="ctrlcfg-header-icon">🧩</div>
+          <div>
+            <div class="ctrlcfg-kicker">SGSI · Parámetros de Riesgo</div>
+            <h2 class="ctrlcfg-title">Evaluación y Eficacia del Control</h2>
+            <div class="ctrlcfg-subtitle">
+              Configure la puntuación de cada opción y los pesos utilizados para calcular la solidez individual y grupal.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="mb-3">
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category if category in ['success','danger','warning','info'] else 'info' }} mb-2">{{ message }}</div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
+      <div class="ctrlcfg-info-card">
+        <div><strong>Regla de validación:</strong> la suma de la mejor opción de cada componente de Diseño debe ser 100 %.</div>
+        <div><strong>Diseño máximo actual:</strong> {{ '%.2f'|format(maximo_diseno_actual) }} %.</div>
+        <div><strong>Campos informativos:</strong> Cargo, Frecuencia, Referencia Documental y Soporte de Evidencia no agregan puntuación.</div>
+      </div>
+
+      <form method="POST" id="controlParamsForm">
+        <input type="hidden" name="accion" value="guardar">
+
+        <div class="row g-3">
+          {% for grupo in grupos %}
+          <div class="col-lg-6">
+            <div class="ctrlcfg-card h-100">
+              <div class="ctrlcfg-card-title">{{ grupo.nombre }}</div>
+              <div class="table-responsive">
+                <table class="table align-middle mb-0 ctrlcfg-table">
+                  <thead><tr><th>Opción</th><th class="text-center">Puntuación (%)</th></tr></thead>
+                  <tbody>
+                    {% for fila in grupo.filas %}
+                    <tr>
+                      <td class="fw-semibold">{{ fila.opcion }}</td>
+                      <td style="width:180px">
+                        <div class="input-group input-group-sm">
+                          <input type="number" min="0" max="100" step="0.01"
+                                 class="form-control text-end ctrlcfg-score"
+                                 name="pct_{{ fila.clave }}"
+                                 value="{{ '%.2f'|format(fila.porcentaje_actual) }}" required>
+                          <span class="input-group-text">%</span>
+                        </div>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="ctrlcfg-card mt-3">
+          <div class="ctrlcfg-card-title">Fórmula de Solidez Individual</div>
+          <div class="ctrlcfg-formula">
+            {% for fila in formula %}
+            <div class="ctrlcfg-formula-item">
+              <label class="form-label fw-semibold">{{ fila.opcion }}</label>
+              <div class="input-group">
+                <input type="number" min="0" max="100" step="0.01"
+                       class="form-control text-end ctrlcfg-formula-score"
+                       name="pct_{{ fila.clave }}"
+                       value="{{ '%.2f'|format(fila.porcentaje_actual) }}" required>
+                <span class="input-group-text">%</span>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="ctrlcfg-formula-preview mt-3" id="formulaPreview">
+            Solidez Individual = Diseño × 60 % + Ejecución × 40 %
+          </div>
+        </div>
+
+        <div class="ctrlcfg-actions">
+          <a href="{{ url_for('gestion_riesgos', ver='activos') }}" class="btn btn-outline-secondary rounded-pill px-4">⬅ Volver</a>
+          <button type="button" class="btn btn-outline-danger rounded-pill px-4" onclick="restablecerParametrosControl()">↺ Restablecer valores</button>
+          <button type="submit" class="btn btn-primary rounded-pill px-5 fw-bold">💾 Guardar y recalcular riesgos</button>
+        </div>
+      </form>
+
+      <form method="POST" id="resetControlParamsForm" class="d-none">
+        <input type="hidden" name="accion" value="restablecer">
+      </form>
+    </div>
+
+    <style>
+      body{background-image:url('/static/img/ccsgsi.jpg');background-size:cover;background-position:center;background-attachment:fixed}
+      .ctrlcfg-shell{width:96%;max-width:1280px;margin:22px auto 30px}
+      .ctrlcfg-header-card{background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);border-radius:20px;padding:18px 24px;color:#fff;box-shadow:0 14px 30px rgba(15,23,42,.25);margin-bottom:15px;position:relative;overflow:hidden}
+      .ctrlcfg-header-card:before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 90% 10%,rgba(255,255,255,.22),transparent 28%)}
+      .ctrlcfg-header-overlay{position:relative;display:flex;align-items:center;gap:15px;z-index:1}
+      .ctrlcfg-header-icon{width:56px;height:56px;min-width:56px;border-radius:16px;background:#fff;color:#0b4a8f;display:flex;align-items:center;justify-content:center;font-size:1.55rem;box-shadow:0 8px 20px rgba(0,0,0,.23)}
+      .ctrlcfg-kicker{display:inline-block;background:rgba(255,255,255,.17);padding:4px 10px;border-radius:999px;font-size:.68rem;font-weight:900;margin-bottom:4px}
+      .ctrlcfg-title{font-size:1.45rem;font-weight:950;margin:0;color:#fff!important}
+      .ctrlcfg-subtitle{font-size:.82rem;opacity:.92;margin-top:3px}
+      .ctrlcfg-info-card,.ctrlcfg-card{background:rgba(255,255,255,.97);border:1px solid #d7e5f5;border-radius:18px;box-shadow:0 10px 24px rgba(15,23,42,.12)}
+      .ctrlcfg-info-card{padding:13px 18px;margin-bottom:15px;display:flex;flex-wrap:wrap;gap:10px 24px;font-size:.78rem;color:#475569}
+      .ctrlcfg-card{padding:16px}
+      .ctrlcfg-card-title{font-weight:950;color:#0b4a8f;border-bottom:1px solid #dce8f5;padding-bottom:9px;margin-bottom:8px}
+      .ctrlcfg-table th{font-size:.70rem;color:#64748b;text-transform:uppercase;letter-spacing:.04em;background:#f4f8fd}
+      .ctrlcfg-table td{font-size:.78rem;padding:.50rem .55rem}
+      .ctrlcfg-formula{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}
+      .ctrlcfg-formula-preview{background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:11px 15px;color:#1d4f8f;font-weight:900;text-align:center}
+      .ctrlcfg-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:10px;margin-top:18px}
+      @media(max-width:768px){.ctrlcfg-formula{grid-template-columns:1fr}.ctrlcfg-actions .btn{width:100%}.ctrlcfg-header-overlay{align-items:flex-start}.ctrlcfg-title{font-size:1.20rem}}
+    </style>
+
+    <script>
+      (function(){
+        const designInput = document.querySelector('[name="pct_formula_peso_diseno"]');
+        const executionInput = document.querySelector('[name="pct_formula_peso_ejecucion"]');
+        const preview = document.getElementById('formulaPreview');
+        function actualizarFormula(){
+          const d = parseFloat(String(designInput?.value || 0).replace(',','.')) || 0;
+          const e = parseFloat(String(executionInput?.value || 0).replace(',','.')) || 0;
+          if(preview) preview.textContent = `Solidez Individual = Diseño × ${d.toFixed(2)} % + Ejecución × ${e.toFixed(2)} % · Total: ${(d+e).toFixed(2)} %`;
+        }
+        designInput?.addEventListener('input', actualizarFormula);
+        executionInput?.addEventListener('input', actualizarFormula);
+        actualizarFormula();
+      })();
+
+      function restablecerParametrosControl(){
+        if(confirm('¿Desea restablecer todos los porcentajes predeterminados y recalcular los riesgos existentes?')){
+          document.getElementById('resetControlParamsForm').submit();
+        }
+      }
+    </script>
+    """, grupos=grupos, formula=formula, maximo_diseno_actual=maximo_diseno_actual)
+
+    return render_template_string(BASE, content=Markup(html))
+
 
 # ==============================
 # CONFIGURACIÓN TIPOS DE RIESGO
@@ -189783,6 +190275,7 @@ with app.app_context():
     cont_comp_sync_governance_findings()
     ensure_attack_auto_db()
     asegurar_columnas_marcos_controles_riesgo()
+    riesgo_asegurar_config_evaluacion_control()
     init_soc2_madurez_db()
 
 app.register_blueprint(madurez_bp)
