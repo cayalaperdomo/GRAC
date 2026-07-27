@@ -12215,7 +12215,7 @@ BASE = """
         {% for category, message in messages %}
           Swal.fire({
             title: {{ (
-              'Acceso denegado'
+              'Error'
               if category == 'danger'
               else 'Proceso exitoso'
               if category == 'success'
@@ -71312,13 +71312,21 @@ def lanzar_scan_background(run_id, crear_vulns=True, crear_planes=True):
     return t
 
 def vuln_scan_shell(title, body_html):
+    threat_model_titles = {
+        "Modelamiento de Amenazas",
+        "Matriz MITRE ATT&CK",
+        "No mapeados MITRE",
+        "Clasificación complementaria No Mapeados",
+    }
+    is_threat_model = title in threat_model_titles
+
     shell_html = """
-    <div class="menu-wrap">
+    <div class="menu-wrap{% if is_threat_model %} threat-shell{% endif %}">
       <div class="plan-hero">
         <h2 class="plan-title">{{ title }}</h2>
       </div>
 
-      {% if title not in ["Modelamiento de Amenazas", "Matriz MITRE ATT&CK", "No mapeados MITRE"] %}
+      {% if not is_threat_model %}
         <div class="volver-center">
           <a href="{{ url_for('vulnerabilidades_matriz') }}"
              class="btn btn-light rounded-pill px-4 fw-semibold"
@@ -71345,6 +71353,60 @@ def vuln_scan_shell(title, body_html):
         max-width:1200px;
         margin:26px auto 24px auto;
         overflow:hidden;
+        min-width:0;
+      }
+
+      /* Modelamiento de Amenazas ocupa todo el ancho útil del contenido.
+         El scroll horizontal queda limitado a cada tabla o matriz y no a la página completa. */
+      .menu-wrap.threat-shell{
+        width:calc(100% - 24px);
+        max-width:none;
+        margin:14px 12px 24px 12px;
+        overflow:visible;
+        min-width:0;
+      }
+
+      .menu-wrap.threat-shell,
+      .menu-wrap.threat-shell *,
+      .menu-wrap.threat-shell *::before,
+      .menu-wrap.threat-shell *::after{
+        box-sizing:border-box;
+      }
+
+      .menu-wrap.threat-shell > *,
+      .menu-wrap.threat-shell .glass-card,
+      .menu-wrap.threat-shell .soft-table-wrap,
+      .menu-wrap.threat-shell .table-responsive,
+      .menu-wrap.threat-shell .mitre-shell,
+      .menu-wrap.threat-shell .mitre-board-wrap{
+        width:100%;
+        max-width:100%;
+        min-width:0;
+      }
+
+      .menu-wrap.threat-shell .row{
+        margin-left:0;
+        margin-right:0;
+        width:100%;
+      }
+
+      .menu-wrap.threat-shell .row > [class*="col-"]{
+        min-width:0;
+      }
+
+      .menu-wrap.threat-shell .table-responsive,
+      .menu-wrap.threat-shell .soft-table-wrap,
+      .menu-wrap.threat-shell .mitre-board-wrap{
+        overflow-x:auto;
+        overflow-y:auto;
+        -webkit-overflow-scrolling:touch;
+      }
+
+      .menu-wrap.threat-shell img,
+      .menu-wrap.threat-shell svg,
+      .menu-wrap.threat-shell canvas{
+        max-width:100%;
+        height:auto;
       }
 
       .plan-hero{
@@ -71654,6 +71716,11 @@ def vuln_scan_shell(title, body_html):
           margin:8px auto 22px auto;
         }
 
+        .menu-wrap.threat-shell{
+          width:calc(100% - 16px);
+          margin:8px 8px 22px 8px;
+        }
+
         .plan-hero{
           min-height:88px;
         }
@@ -71664,6 +71731,20 @@ def vuln_scan_shell(title, body_html):
       }
 
       @media (max-width:768px){
+        .menu-wrap.threat-shell{
+          width:100%;
+          margin:6px 0 18px 0;
+        }
+
+        .menu-wrap.threat-shell .glass-card{
+          border-radius:14px;
+        }
+
+        .menu-wrap.threat-shell .table-responsive,
+        .menu-wrap.threat-shell .soft-table-wrap{
+          border-radius:12px;
+        }
+
         .plan-hero{
           flex-direction:column;
           text-align:center;
@@ -71690,7 +71771,12 @@ def vuln_scan_shell(title, body_html):
       }
     </style>
     """
-    inner = render_template_string(shell_html, title=title, body_html=Markup(body_html))
+    inner = render_template_string(
+        shell_html,
+        title=title,
+        body_html=Markup(body_html),
+        is_threat_model=is_threat_model,
+    )
     return render_template_string(BASE, content=Markup(inner))
 
 def badge_severidad_html(valor):
@@ -187104,7 +187190,7 @@ def attack_auto_collect_active_directory():
             SELECT f.id,f.connector_id,f.finding_key,f.finding_code,f.severity,f.title,
                    f.description,f.recommendation,f.control_mapping,f.status,f.assigned_to,
                    f.management_comment,f.first_detected_at,f.last_detected_at,f.resolved_at,
-                   c.name connector_name,c.host connector_host,
+                   c.name connector_name,c.host connector_host,c.platform connector_platform,
                    u.sam_account_name,u.display_name,u.department,u.title account_title,
                    u.privilege_path,u.enabled,u.privileged,u.service_account,u.generic_account
               FROM ad_findings f
@@ -187130,6 +187216,12 @@ def attack_auto_collect_active_directory():
         privilege_path = row["privilege_path"] or "No identificada"
         severity = attack_auto_normalize_severity(row["severity"])
         source_ref = "AD:{}".format(row["id"])
+        connector_platform = str(row["connector_platform"] or "SAMBA").upper()
+        connector_platform_label = (
+            "Microsoft Active Directory Windows"
+            if connector_platform == "WINDOWS"
+            else "Active Directory Samba"
+        )
 
         record = attack_auto_base_record(
             "ACTIVE_DIRECTORY",
@@ -187139,10 +187231,13 @@ def attack_auto_collect_active_directory():
             severity,
         )
         record.update({
+            "source_label": "Gobierno de Active Directory · {}".format(connector_platform_label),
+            "ad_connector_id": int(row["connector_id"] or 0),
+            "ad_platform": connector_platform,
             "source_date": row["last_detected_at"] or row["first_detected_at"] or "",
-            "asset_type": "Identidad / Active Directory",
-            "scope": "Conector: {} ({}). Área: {}. Cargo: {}. Ruta de privilegio: {}.".format(
-                row["connector_name"] or "N/D", row["connector_host"] or "N/D",
+            "asset_type": "Identidad / {}".format(connector_platform_label),
+            "scope": "Tecnología: {}. Conector: {} ({}). Área: {}. Cargo: {}. Ruta de privilegio: {}.".format(
+                connector_platform_label, row["connector_name"] or "N/D", row["connector_host"] or "N/D",
                 row["department"] or "N/D", row["account_title"] or "N/D", privilege_path,
             ),
             "description": row["description"] or row["title"],
@@ -187158,8 +187253,8 @@ def attack_auto_collect_active_directory():
             "control_effectiveness": 85 if closed else 45 if in_treatment else 20,
             "asset_criticality": 5 if severity in {"Crítica", "Alta"} else 3,
             "owner": row["assigned_to"],
-            "evidence": "Hallazgo AD #{}; código {}; cuenta {}; conector {}; estado {}; última detección {}.".format(
-                row["id"], row["finding_code"], account, row["connector_name"] or "N/D",
+            "evidence": "Hallazgo AD #{}; tecnología {}; código {}; cuenta {}; conector {}; estado {}; última detección {}.".format(
+                row["id"], connector_platform_label, row["finding_code"], account, row["connector_name"] or "N/D",
                 row["status"] or "N/D", row["last_detected_at"] or "N/D",
             ),
             "source_snapshot": json.dumps({
@@ -187168,6 +187263,8 @@ def attack_auto_collect_active_directory():
                 "finding_key": row["finding_key"],
                 "connector_id": row["connector_id"],
                 "connector": row["connector_name"],
+                "platform": connector_platform,
+                "platform_label": connector_platform_label,
                 "account": account,
                 "status": row["status"],
                 "management_comment": row["management_comment"],
@@ -187194,6 +187291,60 @@ def attack_auto_collect_active_directory():
         })
         records.append(record)
     return records
+
+
+def attack_auto_sync_active_directory_scenarios(username="Sistema", connector_id=None, platform=None):
+    """Crea o actualiza inmediatamente escenarios desde los hallazgos AD activos."""
+    ensure_attack_auto_db()
+    platform = str(platform or "").strip().upper()
+    if platform not in {"SAMBA", "WINDOWS"}:
+        platform = ""
+
+    selected = []
+    for record in attack_auto_collect_active_directory():
+        record_connector_id = int(record.get("ad_connector_id") or 0)
+        record_platform = str(record.get("ad_platform") or "").strip().upper()
+        if connector_id is not None and record_connector_id != int(connector_id):
+            continue
+        if platform and record_platform != platform:
+            continue
+        selected.append(record)
+
+    counts = {"created": 0, "updated": 0, "unchanged": 0, "closed": 0, "total": len(selected)}
+    active_refs = {str(record.get("source_ref")) for record in selected}
+
+    try:
+        for record in selected:
+            _, result, _ = attack_auto_upsert_record(
+                record,
+                username or "Sistema",
+                use_ai=False,
+                ai_budget=[0],
+            )
+            counts[result] = counts.get(result, 0) + 1
+
+        # Cierra escenarios cuya evidencia AD ya no está activa para el conector/plataforma sincronizado.
+        for scenario in AttackAutoScenario.query.filter_by(source_type="ACTIVE_DIRECTORY").all():
+            try:
+                snapshot = json.loads(scenario.source_snapshot or "{}")
+            except Exception:
+                snapshot = {}
+            scenario_connector = int(snapshot.get("connector_id") or 0)
+            scenario_platform = str(snapshot.get("platform") or "").strip().upper()
+            if connector_id is not None and scenario_connector != int(connector_id):
+                continue
+            if platform and scenario_platform != platform:
+                continue
+            if scenario.source_ref not in active_refs and scenario.status != "Cerrado":
+                scenario.status = "Cerrado"
+                scenario.updated_at = datetime.utcnow()
+                counts["closed"] += 1
+
+        db.session.commit()
+        return counts
+    except Exception:
+        db.session.rollback()
+        raise
 
 
 ATTACK_AUTO_COLLECTORS = (
@@ -187267,7 +187418,7 @@ def attack_auto_code_for(source_type, source_ref):
     prefix = {
         "MITRE": "MIT", "VULNERABILIDAD": "VUL", "INCIDENTE": "INC",
         "TPRM": "TPR", "WAZUH_MITRE": "WMI", "WAZUH_VULN": "WVU",
-        "FIREWALL": "FW",
+        "FIREWALL": "FW", "ACTIVE_DIRECTORY": "AD",
     }.get(source_type, "ESC")
     return "ESC-{}-{}".format(prefix, digest)
 
@@ -187544,7 +187695,48 @@ def attack_auto_shell(title, body):
       .as-section{font-weight:950;font-size:.78rem;color:#0b4a8f;padding:9px 12px;border-radius:12px;background:#eef5ff;border:1px solid #d9eaff;margin:14px 0 12px}
       .as-value{white-space:pre-wrap;overflow-wrap:anywhere;background:#f8fbfd;border:1px solid #e1edf4;border-radius:11px;padding:10px;min-height:44px}
       .as-tech{background:#eef8ff;border:1px solid #cde9fa;border-radius:12px;padding:9px;margin-bottom:7px}
-      .as-note{font-size:.78rem;color:#475569}.as-form .form-label{font-weight:800;color:#24465d;font-size:.78rem}
+      .as-note{font-size:.78rem;color:#475569}
+      .as-risk-method{
+        border:1px solid #cfe3f7;
+        background:linear-gradient(135deg,#f8fbff 0%,#eef6ff 100%);
+        border-radius:16px;
+      }
+      .as-risk-method .formula-box{
+        background:#ffffff;
+        border:1px solid #d9e8f7;
+        border-radius:12px;
+        padding:10px 12px;
+        height:100%;
+        font-size:.76rem;
+        line-height:1.42;
+      }
+      .as-risk-details{margin-top:5px}
+      .as-risk-details summary{
+        cursor:pointer;
+        color:#0b63ce;
+        font-size:.70rem;
+        font-weight:850;
+        list-style:none;
+        white-space:nowrap;
+      }
+      .as-risk-details summary::-webkit-details-marker{display:none}
+      .as-risk-details summary::before{content:"ⓘ ";font-weight:900}
+      .as-risk-details[open]{
+        min-width:240px;
+        padding:7px 8px;
+        border:1px solid #d7e7f5;
+        border-radius:10px;
+        background:#f8fbff;
+      }
+      .as-risk-breakdown{
+        margin-top:6px;
+        font-size:.68rem;
+        line-height:1.38;
+        color:#334155;
+        white-space:normal;
+      }
+      .as-risk-breakdown b{color:#0b4a6f}
+      .as-form .form-label{font-weight:800;color:#24465d;font-size:.78rem}
       .as-form .form-control,.as-form .form-select{border-radius:10px;font-size:.82rem}
       @media(max-width:900px){
         .as-shell{width:98%}
@@ -187586,6 +187778,9 @@ def attack_auto():
     ensure_attack_auto_db()
     query_text = (request.args.get("q") or "").strip()
     source_filter = (request.args.get("source") or "").strip()
+    ad_platform_filter = (request.args.get("ad_platform") or "").strip().upper()
+    if ad_platform_filter not in {"SAMBA", "WINDOWS"}:
+        ad_platform_filter = ""
     severity = (request.args.get("severity") or "").strip()
     status = (request.args.get("status") or "").strip()
     query = AttackAutoScenario.query
@@ -187599,6 +187794,21 @@ def attack_auto():
         ))
     if source_filter:
         query = query.filter_by(source_type=source_filter)
+    if source_filter == "ACTIVE_DIRECTORY" and ad_platform_filter:
+        platform_label_filter = (
+            "Microsoft Active Directory Windows"
+            if ad_platform_filter == "WINDOWS"
+            else "Active Directory Samba"
+        )
+        query = query.filter(or_(
+            AttackAutoScenario.source_snapshot.ilike(
+                '%"platform": "{}"%'.format(ad_platform_filter)
+            ),
+            AttackAutoScenario.source_snapshot.ilike(
+                '%"platform":"{}"%'.format(ad_platform_filter)
+            ),
+            AttackAutoScenario.source_label.ilike("%{}%".format(platform_label_filter)),
+        ))
     if severity:
         query = query.filter_by(severity=severity)
     if status:
@@ -187647,8 +187857,46 @@ def attack_auto():
       <div class="col-6 col-lg"><div class="as-kpi"><small>Pendientes de registrar</small><strong>{{ total-linked }}</strong></div></div>
     </div>
 
+
+    <div class="as-card as-risk-method card mb-3">
+      <div class="card-body p-3">
+        <div class="d-flex align-items-start gap-3 flex-wrap">
+          <div class="flex-grow-1">
+            <h6 class="fw-bold text-primary mb-1"><i class="bi bi-calculator"></i> ¿Cómo se calcula el riesgo inherente?</h6>
+            <div class="as-note">
+              Es la exposición del escenario <strong>antes de considerar la efectividad de los controles</strong>.
+              Se obtiene con una matriz 5×5: <strong>Probabilidad × Impacto</strong>.
+              En cada fila puede desplegar <em>Ver cálculo</em> para revisar los factores utilizados.
+            </div>
+          </div>
+        </div>
+        <div class="row g-2 mt-1">
+          <div class="col-lg-4">
+            <div class="formula-box">
+              <b>1. Probabilidad inherente</b><br>
+              Redondeo de: (Exposición + Explotabilidad + Actividad detectada + Debilidad de control) ÷ 4.
+            </div>
+          </div>
+          <div class="col-lg-4">
+            <div class="formula-box">
+              <b>2. Impacto inherente</b><br>
+              Redondeo de: (Criticidad del activo + Severidad del hallazgo) ÷ 2.
+              Severidad: Baja=2, Media=3, Alta=4, Crítica=5.
+            </div>
+          </div>
+          <div class="col-lg-4">
+            <div class="formula-box">
+              <b>3. Resultado y nivel</b><br>
+              Probabilidad × Impacto. Clasificación: 1–4 Bajo, 5–9 Medio, 10–16 Alto y 17–25 Crítico.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="as-card card mb-3"><div class="card-body p-3">
       <form method="get" class="row g-2 align-items-end">
+        {% if ad_platform_filter %}<input type="hidden" name="ad_platform" value="{{ ad_platform_filter }}">{% endif %}
         <div class="col-md-4"><label class="form-label small fw-bold">Buscar</label><input name="q" value="{{ query_text }}" class="form-control" placeholder="Código, escenario, activo o proveedor"></div>
         <div class="col-md-2"><label class="form-label small fw-bold">Fuente</label><select name="source" class="form-select"><option value="">Todas</option>{% for key,label in source_labels.items() %}<option value="{{ key }}" {{ 'selected' if source_filter==key else '' }}>{{ label }}</option>{% endfor %}</select></div>
         <div class="col-md-2"><label class="form-label small fw-bold">Severidad</label><select name="severity" class="form-select"><option value="">Todas</option>{% for item in ['Crítica','Alta','Media','Baja'] %}<option {{ 'selected' if severity==item else '' }}>{{ item }}</option>{% endfor %}</select></div>
@@ -187658,7 +187906,7 @@ def attack_auto():
     </div></div>
 
     <div class="as-card card"><div class="table-responsive"><table class="table table-hover as-table mb-0">
-      <thead><tr><th>Código</th><th>Fuente</th><th>Escenario / Activo</th><th>MITRE ATT&CK</th><th>Períodos</th><th>Inherente</th><th>Residual</th><th>Estado</th><th>Riesgo</th><th>Acciones</th></tr></thead>
+      <thead><tr><th>Código</th><th>Fuente</th><th>Escenario / Activo</th><th>MITRE ATT&CK</th><th>Períodos</th><th>Riesgo inherente</th><th>Estado</th><th>Riesgo</th><th>Acciones</th></tr></thead>
       <tbody>
       {% for item in scenarios %}
       <tr>
@@ -187667,8 +187915,33 @@ def attack_auto():
         <td style="min-width:250px"><b>{{ item.name }}</b><br><span class="text-muted"><i class="bi bi-hdd"></i> {{ item.asset_name }}</span>{% if item.supplier_name %}<br><span class="text-primary"><i class="bi bi-truck"></i> {{ item.supplier_name }}</span>{% endif %}</td>
         <td style="min-width:180px">{% for tech in item.techniques[:3] %}<span class="badge bg-light text-dark border mb-1">{{ tech.technique_id }} · {{ tech.technique_name }}</span><br>{% endfor %}{% if not item.techniques %}<span class="text-muted">Pendiente</span>{% endif %}</td>
         <td class="text-center"><span class="badge bg-secondary">{{ item.evaluations|length }}</span></td>
-        <td><span class="badge bg-{{ badge(item.inherent_level) }}">{{ item.inherent_score }} · {{ item.inherent_level }}</span></td>
-        <td><span class="badge bg-{{ badge(item.residual_level) }}">{{ item.residual_score }} · {{ item.residual_level }}</span></td>
+        <td style="min-width:210px">
+          <span class="badge bg-{{ badge(item.inherent_level) }}">{{ item.inherent_score }} · {{ item.inherent_level }}</span>
+          <div class="text-muted mt-1" style="font-size:.69rem">
+            P{{ item.inherent_probability }} × I{{ item.inherent_impact }} = {{ item.inherent_score }}
+          </div>
+          <details class="as-risk-details">
+            <summary>Ver cálculo</summary>
+            <div class="as-risk-breakdown">
+              <div><b>Probabilidad:</b> redondeo de
+                ({{ item.exposure_level }} exposición +
+                 {{ item.exploitability }} explotabilidad +
+                 {{ item.detected_activity }} actividad detectada +
+                 {{ item.control_weakness_level }} debilidad de control) ÷ 4
+                = <b>{{ item.inherent_probability }}</b>.
+              </div>
+              <div class="mt-1"><b>Impacto:</b> redondeo de
+                ({{ item.asset_criticality }} criticidad del activo +
+                 {{ severity_factor(item.severity) }} severidad {{ item.severity }}) ÷ 2
+                = <b>{{ item.inherent_impact }}</b>.
+              </div>
+              <div class="mt-1"><b>Resultado:</b>
+                {{ item.inherent_probability }} × {{ item.inherent_impact }}
+                = <b>{{ item.inherent_score }} · {{ item.inherent_level }}</b>.
+              </div>
+            </div>
+          </details>
+        </td>
         <td>{{ item.status }}{% if item.ai_status=='Enriquecido' %}<br><span class="badge bg-info text-dark"><i class="bi bi-stars"></i> IA</span>{% endif %}</td>
         <td>{% if item.risk_code %}<span class="badge bg-success">{{ item.risk_code }}</span>{% else %}<span class="text-muted">No registrado</span>{% endif %}</td>
         <td style="min-width:310px"><div class="as-actions">
@@ -187680,13 +187953,14 @@ def attack_auto():
           {% endif %}
         </div></td>
       </tr>
-      {% else %}<tr><td colspan="10" class="text-center text-muted py-5">No hay escenarios. Use “Generar escenarios automáticamente” para crearlos desde los datos existentes.</td></tr>{% endfor %}
+      {% else %}<tr><td colspan="9" class="text-center text-muted py-5">No hay escenarios. Use “Generar escenarios automáticamente” para crearlos desde los datos existentes.</td></tr>{% endfor %}
       </tbody>
     </table></div></div>
     """, scenarios=scenarios, total=total, linked=linked, critical_high=critical_high,
         sources=sources, last_log=last_log, read_only=read_only, query_text=query_text,
-        source_filter=source_filter, severity=severity, status=status, source_labels=ATTACK_AUTO_SOURCE_LABELS,
-        badge=attack_auto_badge)
+        source_filter=source_filter, ad_platform_filter=ad_platform_filter,
+        severity=severity, status=status, source_labels=ATTACK_AUTO_SOURCE_LABELS,
+        badge=attack_auto_badge, severity_factor=attack_auto_score_from_severity)
     return attack_auto_shell("Superficie de Ataque y Escenarios", body)
 
 
@@ -188269,6 +188543,13 @@ from markupsafe import Markup, escape
 
 
 AD_MODULE_NAME = "Cumplimiento Continuo"
+AD_PLATFORM_SAMBA = "SAMBA"
+AD_PLATFORM_WINDOWS = "WINDOWS"
+AD_CONNECTION_LDAP = "LDAP"
+AD_PLATFORM_LABELS = {
+    AD_PLATFORM_SAMBA: "Active Directory Samba",
+    AD_PLATFORM_WINDOWS: "Active Directory Windows",
+}
 AD_PRIVILEGED_GROUPS = {
     "administrators",
     "domain admins",
@@ -188350,6 +188631,16 @@ AD_STYLE = """
   .adg-detail-item{background:#f5f9fd;border:1px solid #d9e8f6;border-radius:13px;padding:12px}
   .adg-detail-item span{display:block;color:#58718e;font-size:.72rem;font-weight:700}
   .adg-detail-item strong{display:block;color:#173a5e;font-size:.83rem;overflow-wrap:anywhere}
+  .adg-ai-panel{margin-top:16px;border:1px solid #b9d7f2;border-radius:18px;overflow:hidden;background:#f8fbff;box-shadow:0 8px 20px rgba(11,74,143,.09)}
+  .adg-ai-header{display:flex;align-items:center;gap:10px;padding:13px 16px;background:linear-gradient(135deg,#e5f2ff,#f4f9ff);border-bottom:1px solid #cfe3f6;color:#0b4a8f}
+  .adg-ai-header i{font-size:1.2rem}.adg-ai-header strong{font-size:.92rem}.adg-ai-header span{font-size:.72rem;color:#55718d}
+  .adg-ai-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:14px}
+  .adg-ai-section{background:#fff;border:1px solid #d9e8f6;border-radius:14px;padding:13px 14px;min-width:0}
+  .adg-ai-section h6{display:flex;align-items:center;gap:8px;color:#0b4a8f;font-weight:850;font-size:.82rem;margin:0 0 8px}
+  .adg-ai-section p{font-size:.8rem;line-height:1.48;color:#294a68;margin:0;white-space:pre-line}
+  .adg-ai-section ul{padding-left:18px;margin:0}.adg-ai-section li{font-size:.79rem;line-height:1.45;color:#294a68;margin-bottom:5px}
+  .adg-ai-section-wide{grid-column:1/-1}
+  @media(max-width:900px){.adg-ai-grid{grid-template-columns:1fr}.adg-ai-section-wide{grid-column:auto}}
   @media(max-width:1200px){.adg-grid{grid-template-columns:repeat(3,1fr)}}
   @media(max-width:720px){.adg-grid{grid-template-columns:repeat(2,1fr)}.adg-detail{grid-template-columns:1fr}.adg-shell{width:calc(100% - 20px)}.adg-hero{padding:14px 16px}.adg-hero-icon{width:48px;height:48px;min-width:48px}}
 </style>
@@ -188368,7 +188659,7 @@ def register_ad_governance(
     risk_type_model=None,
     ai_helper=None,
 ):
-    """Registra Gobierno de Active Directory sin alterar la base principal de GRAC."""
+    """Registra Gobierno de AD Samba y Microsoft Windows en el mismo archivo de GRAC, mediante LDAP/LDAPS directo."""
 
     db_path = os.path.join(app.instance_path, "ad_governance.db")
     key_path = os.path.join(app.instance_path, "ad_governance.key")
@@ -188386,6 +188677,8 @@ def register_ad_governance(
         CREATE TABLE IF NOT EXISTS ad_connectors (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           name TEXT NOT NULL,
+          platform TEXT NOT NULL DEFAULT 'SAMBA',
+          connection_mode TEXT NOT NULL DEFAULT 'LDAP',
           host TEXT NOT NULL,
           port INTEGER NOT NULL DEFAULT 389,
           use_ssl INTEGER NOT NULL DEFAULT 0,
@@ -188515,11 +188808,104 @@ def register_ad_governance(
         """
         with db_conn() as conn:
             conn.executescript(schema)
+            # Migración compatible con instalaciones existentes.
+            connector_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(ad_connectors)").fetchall()
+            }
+            migrations = {
+                "platform": "TEXT NOT NULL DEFAULT 'SAMBA'",
+                "connection_mode": "TEXT NOT NULL DEFAULT 'LDAP'",
+            }
+            for column_name, definition in migrations.items():
+                if column_name not in connector_columns:
+                    conn.execute(
+                        f"ALTER TABLE ad_connectors ADD COLUMN {column_name} {definition}"
+                    )
+            conn.execute(
+                """UPDATE ad_connectors
+                   SET platform=COALESCE(NULLIF(UPPER(platform),''),'SAMBA'),
+                       connection_mode='LDAP'"""
+            )
+            conn.commit()
 
     init_db()
 
     def now_iso():
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+    def normalize_platform(value, default=AD_PLATFORM_SAMBA):
+        normalized = str(value or "").strip().upper()
+        aliases = {
+            "SAMBA": AD_PLATFORM_SAMBA,
+            "ACTIVE DIRECTORY SAMBA": AD_PLATFORM_SAMBA,
+            "WINDOWS": AD_PLATFORM_WINDOWS,
+            "MICROSOFT": AD_PLATFORM_WINDOWS,
+            "MICROSOFT WINDOWS": AD_PLATFORM_WINDOWS,
+            "ACTIVE DIRECTORY WINDOWS": AD_PLATFORM_WINDOWS,
+        }
+        return aliases.get(normalized, default)
+
+    def platform_label(value):
+        return AD_PLATFORM_LABELS.get(normalize_platform(value), AD_PLATFORM_LABELS[AD_PLATFORM_SAMBA])
+
+    def request_platform(default=AD_PLATFORM_SAMBA):
+        return normalize_platform(request.args.get("platform") or request.form.get("platform"), default)
+
+
+    def normalize_ldap_host(raw_host):
+        """Normaliza host LDAP/LDAPS sin resolverlo durante el guardado."""
+        text = str(raw_host or "").strip()
+        if not text:
+            return ""
+
+        # Permite que el usuario pegue ldap://host:389 o ldaps://host:636.
+        if "://" in text:
+            parsed = urlparse(text)
+            text = parsed.hostname or ""
+        else:
+            text = text.split("/", 1)[0].strip()
+            # Quita :puerto únicamente para host IPv4/FQDN.
+            if text.count(":") == 1:
+                candidate, possible_port = text.rsplit(":", 1)
+                if possible_port.isdigit():
+                    text = candidate
+            # Conserva IPv6 entre corchetes sin los corchetes.
+            if text.startswith("[") and text.endswith("]"):
+                text = text[1:-1]
+
+        return text.strip().rstrip(".")
+
+    def validate_ldap_host(host):
+        if not host:
+            raise ValueError("El host o IP del controlador de dominio es obligatorio.")
+        try:
+            ipaddress.ip_address(host)
+            return
+        except ValueError:
+            pass
+        if len(host) > 253:
+            raise ValueError("El nombre del controlador de dominio es demasiado largo.")
+        labels = host.split(".")
+        hostname_re = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+        if not all(hostname_re.match(label or "") for label in labels):
+            raise ValueError(
+                "Host inválido. Ingrese solamente una IP o un FQDN, por ejemplo "
+                "10.20.1.43 o dc1.adlab.arkyntech.com; no incluya rutas ni espacios."
+            )
+
+    def ldap_resolution_message(connector, exc):
+        host = normalize_ldap_host(connector["host"] if connector else "")
+        platform = normalize_platform(connector["platform"] if connector and "platform" in connector.keys() else AD_PLATFORM_SAMBA)
+        base = f"No fue posible resolver el host '{host}' desde el servidor donde se ejecuta GRAC."
+        if platform == AD_PLATFORM_WINDOWS:
+            return (
+                base + " El nombre dc1.adlab.arkyntech.com pertenece al DNS interno de Active Directory. "
+                "Si GRAC está en Render, use un FQDN o una IP alcanzable desde Internet y publique únicamente "
+                "LDAPS por TCP 636 con certificado y reglas de origen restringidas. Si GRAC está en la misma red "
+                "o conectado por VPN, configure su DNS para resolver la zona adlab.arkyntech.com. "
+                f"Detalle técnico: {exc}"
+            )
+        return base + f" Verifique DNS, VPN, ruta y conectividad. Detalle técnico: {exc}"
 
     def current_user():
         try:
@@ -188641,8 +189027,135 @@ def register_ad_governance(
         }.get(severity, "info")
         return html_badge(severity, kind)
 
-    def page(content, title, subtitle=""):
+    def ad_ai_extract_payload(value):
+        raw = str(value or "").strip()
+        if not raw:
+            return {}
+        cleaned = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.I)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                payload = json.loads(cleaned[start:end + 1])
+                if isinstance(payload, dict):
+                    return payload
+            except Exception:
+                pass
+
+        # Compatibilidad con análisis anteriores en texto libre.
+        headings = {
+            "resumen ejecutivo": "resumen_ejecutivo",
+            "causa probable": "causa_probable",
+            "riesgo de negocio": "riesgo_negocio",
+            "validaciones": "validaciones",
+            "remediacion priorizada": "remediacion_priorizada",
+            "remediación priorizada": "remediacion_priorizada",
+            "evidencia de cierre": "evidencia_cierre",
+            "metricas": "metricas",
+            "métricas": "metricas",
+            "controles relacionados": "controles_relacionados",
+        }
+        parsed = {}
+        current = None
+        for original_line in raw.splitlines():
+            line = original_line.strip()
+            if not line:
+                continue
+            line = re.sub(r"^[#*\-\s]+", "", line).strip()
+            match = re.match(r"^(?:\d+[\.\)]\s*)?([^:]{3,45})\s*:\s*(.*)$", line)
+            if match:
+                heading = unicodedata.normalize("NFKD", match.group(1)).encode("ascii", "ignore").decode().lower().strip()
+                key = headings.get(heading)
+                if key:
+                    current = key
+                    parsed.setdefault(key, [])
+                    if match.group(2).strip():
+                        parsed[key].append(match.group(2).strip())
+                    continue
+            if current:
+                parsed.setdefault(current, []).append(re.sub(r"^[•\-]\s*", "", line))
+            else:
+                parsed.setdefault("resumen_ejecutivo", []).append(line)
+
+        for key, content in list(parsed.items()):
+            if isinstance(content, list) and len(content) == 1:
+                parsed[key] = content[0]
+        return parsed or {"resumen_ejecutivo": raw}
+
+    def ad_ai_value_items(value):
+        if value is None:
+            return []
+        if isinstance(value, list):
+            result = []
+            for item in value:
+                if isinstance(item, dict):
+                    parts = []
+                    for key in ("prioridad", "accion", "responsable", "plazo", "indicador", "meta", "validacion", "evidencia"):
+                        if item.get(key):
+                            label = key.replace("_", " ").capitalize()
+                            parts.append(f"{label}: {item.get(key)}")
+                    if not parts:
+                        parts = [f"{k}: {v}" for k, v in item.items() if v not in (None, "", [], {})]
+                    if parts:
+                        result.append(" · ".join(str(part) for part in parts))
+                elif str(item or "").strip():
+                    result.append(str(item).strip())
+            return result
+        if isinstance(value, dict):
+            return ["{}: {}".format(str(k).replace("_", " ").capitalize(), v) for k, v in value.items()]
+        text_value = str(value or "").strip()
+        if not text_value:
+            return []
+        lines = [re.sub(r"^[•\-]\s*", "", line).strip() for line in text_value.splitlines() if line.strip()]
+        return lines or [text_value]
+
+    def ad_ai_sections(value):
+        payload = ad_ai_extract_payload(value)
+        specs = [
+            ("resumen_ejecutivo", "Resumen ejecutivo", "bi-clipboard-data", True),
+            ("causa_probable", "Causa probable", "bi-search", False),
+            ("riesgo_negocio", "Riesgo para el negocio", "bi-building-exclamation", False),
+            ("validaciones", "Validaciones técnicas", "bi-check2-square", False),
+            ("remediacion_priorizada", "Remediación priorizada", "bi-list-check", True),
+            ("evidencia_cierre", "Evidencia requerida para cierre", "bi-file-earmark-check", False),
+            ("metricas", "Métricas y seguimiento", "bi-graph-up-arrow", False),
+            ("controles_relacionados", "Controles relacionados", "bi-shield-check", False),
+        ]
+        sections = []
+        for key, title, icon, wide in specs:
+            items = ad_ai_value_items(payload.get(key))
+            if items:
+                sections.append({
+                    "key": key,
+                    "title": title,
+                    "icon": icon,
+                    "items": items,
+                    "wide": wide,
+                })
+        if not sections and str(value or "").strip():
+            sections.append({
+                "key": "resumen_ejecutivo",
+                "title": "Análisis complementario",
+                "icon": "bi-stars",
+                "items": [str(value).strip()],
+                "wide": True,
+            })
+        return sections
+
+    def ad_ai_normalized_json(value):
+        payload = ad_ai_extract_payload(value)
+        allowed = {
+            "resumen_ejecutivo", "causa_probable", "riesgo_negocio", "validaciones",
+            "remediacion_priorizada", "evidencia_cierre", "metricas", "controles_relacionados",
+        }
+        normalized = {key: payload.get(key) for key in allowed if payload.get(key) not in (None, "", [], {})}
+        if not normalized:
+            normalized = {"resumen_ejecutivo": str(value or "").strip()}
+        return json.dumps(normalized, ensure_ascii=False, indent=2)
+
+    def page(content, title, subtitle="", platform=None):
         user = current_user()
+        platform = normalize_platform(platform or request.args.get("platform"), AD_PLATFORM_SAMBA)
         header = render_template_string(
             """
             {{ style|safe }}
@@ -188650,21 +189163,25 @@ def register_ad_governance(
               <div class="adg-hero">
                 <div class="adg-hero-icon"><i class="bi bi-person-lock"></i></div>
                 <div class="adg-hero-text">
-                  <span class="adg-module-kicker">SGSI · Gobierno de Identidades</span>
+                  <span class="adg-module-kicker">SGSI · Gobierno de Identidades · {{ platform_label }}</span>
                   <h2>{{ title }}</h2>
                   <p>{{ subtitle }}</p>
                 </div>
               </div>
               <div class="adg-module-nav" data-keep-cumplimiento-nav="true">
+                <div class="adg-actions mb-2">
+                  <a class="adg-btn {{ 'adg-btn-primary' if platform=='SAMBA' else 'adg-btn-light' }}" href="{{ url_for('adgov.samba_home') }}"><i class="bi bi-hdd-network"></i> Active Directory Samba</a>
+                  <a class="adg-btn {{ 'adg-btn-primary' if platform=='WINDOWS' else 'adg-btn-light' }}" href="{{ url_for('adgov.windows_home') }}"><i class="bi bi-windows"></i> Active Directory Windows</a>
+                </div>
                 <div class="adg-actions">
-                  <a class="adg-btn adg-btn-light" href="{{ url_for('adgov.dashboard') }}"><i class="bi bi-speedometer2"></i> Dashboard</a>
-                  <a class="adg-btn adg-btn-light" href="{{ url_for('adgov.users') }}"><i class="bi bi-people"></i> Usuarios</a>
-                  <a class="adg-btn adg-btn-light" href="{{ url_for('adgov.groups') }}"><i class="bi bi-diagram-3"></i> Grupos</a>
-                  <a class="adg-btn adg-btn-light" href="{{ url_for('adgov.findings') }}"><i class="bi bi-shield-exclamation"></i> Hallazgos</a>
-                  <a class="adg-btn adg-btn-light" href="{{ url_for('attack_auto', source='ACTIVE_DIRECTORY') }}"><i class="bi bi-bullseye"></i> Superficie de Ataque</a>
-                  <a class="adg-btn adg-btn-light" href="{{ url_for('threat_model_dashboard', herramienta='active_directory') }}"><i class="bi bi-diagram-3-fill"></i> Modelamiento de Amenazas</a>
-                  <a class="adg-btn adg-btn-light" href="{{ url_for('adgov.history') }}"><i class="bi bi-clock-history"></i> Historial</a>
-                  {% if can_write %}<a class="adg-btn adg-btn-light" href="{{ url_for('adgov.config') }}"><i class="bi bi-gear"></i> Configuración</a>{% endif %}
+                  <a class="adg-btn adg-btn-light" href="{{ url_for('adgov.dashboard', platform=platform) }}"><i class="bi bi-speedometer2"></i> Dashboard</a>
+                  <a class="adg-btn adg-btn-light" href="{{ url_for('adgov.users', platform=platform) }}"><i class="bi bi-people"></i> Usuarios</a>
+                  <a class="adg-btn adg-btn-light" href="{{ url_for('adgov.groups', platform=platform) }}"><i class="bi bi-diagram-3"></i> Grupos</a>
+                  <a class="adg-btn adg-btn-light" href="{{ url_for('adgov.findings', platform=platform) }}"><i class="bi bi-shield-exclamation"></i> Hallazgos</a>
+                  <a class="adg-btn adg-btn-light" href="{{ url_for('attack_auto', source='ACTIVE_DIRECTORY', ad_platform=platform) }}"><i class="bi bi-bullseye"></i> Superficie de Ataque</a>
+                  <a class="adg-btn adg-btn-light" href="{{ url_for('threat_model_dashboard', herramienta='active_directory', ad_platform=platform) }}"><i class="bi bi-diagram-3-fill"></i> Modelamiento de Amenazas</a>
+                  <a class="adg-btn adg-btn-light" href="{{ url_for('adgov.history', platform=platform) }}"><i class="bi bi-clock-history"></i> Historial</a>
+                  {% if can_write %}<a class="adg-btn adg-btn-light" href="{{ url_for('adgov.config', platform=platform) }}"><i class="bi bi-gear"></i> Configuración</a>{% endif %}
                 </div>
               </div>
               {{ content|safe }}
@@ -188675,6 +189192,8 @@ def register_ad_governance(
             subtitle=subtitle,
             content=Markup(content),
             can_write=can_write(user),
+            platform=platform,
+            platform_label=platform_label(platform),
         )
         return render_template_string(base_template, content=Markup(header))
 
@@ -188696,9 +189215,8 @@ def register_ad_governance(
 
     def ldap_connection(connector):
         ldap = require_ldap3()
-        host = (connector["host"] or "").strip()
-        if not host:
-            raise ValueError("El host LDAP es obligatorio.")
+        host = normalize_ldap_host(connector["host"])
+        validate_ldap_host(host)
         password = decrypt_secret(connector["bind_password_encrypted"])
         if not password:
             raise ValueError("No existe una contraseña válida guardada para el conector.")
@@ -188936,7 +189454,12 @@ def register_ad_governance(
         started = datetime.now(timezone.utc)
         connection = None
         try:
-            socket.getaddrinfo(connector["host"], int(connector["port"]))
+            host = normalize_ldap_host(connector["host"])
+            validate_ldap_host(host)
+            try:
+                socket.getaddrinfo(host, int(connector["port"]))
+            except socket.gaierror as exc:
+                return False, ldap_resolution_message(connector, exc)
             connection, ldap = ldap_connection(connector)
             ok = connection.search(
                 search_base=connector["base_dn"],
@@ -189243,12 +189766,45 @@ def register_ad_governance(
                     ),
                 )
                 sql.commit()
+
+            # Actualiza inmediatamente los módulos que consumen los hallazgos AD.
+            for hook_name in (
+                "cont_comp_sync_governance_findings",
+                "asegurar_sincronizacion_active_directory_modelamiento",
+            ):
+                hook = globals().get(hook_name)
+                if callable(hook):
+                    try:
+                        hook()
+                    except Exception as hook_exc:
+                        print(f"No fue posible ejecutar {hook_name} después de sincronizar AD:", repr(hook_exc))
+
+            surface_result = {"created": 0, "updated": 0, "unchanged": 0, "closed": 0, "total": 0}
+            surface_error = ""
+            surface_hook = globals().get("attack_auto_sync_active_directory_scenarios")
+            if callable(surface_hook):
+                try:
+                    surface_result = surface_hook(
+                        executed_by,
+                        connector_id=connector["id"],
+                        platform=connector["platform"],
+                    )
+                except Exception as surface_exc:
+                    surface_error = str(surface_exc)
+                    print("No fue posible actualizar Superficie de Ataque después de sincronizar AD:", repr(surface_exc))
+
             return {
                 "users": len(raw_users),
                 "groups": len(raw_groups),
                 "memberships": sum(len(g["members"]) for g in raw_groups),
                 "findings": total_findings,
                 "score": score,
+                "surface_created": int(surface_result.get("created", 0)),
+                "surface_updated": int(surface_result.get("updated", 0)),
+                "surface_unchanged": int(surface_result.get("unchanged", 0)),
+                "surface_closed": int(surface_result.get("closed", 0)),
+                "surface_total": int(surface_result.get("total", 0)),
+                "surface_error": surface_error,
             }
         except Exception as exc:
             finished = now_iso()
@@ -189274,12 +189830,72 @@ def register_ad_governance(
 
     @bp.route("/")
     @require_access()
+    def home():
+        counts = {
+            AD_PLATFORM_SAMBA: fetchone(
+                "SELECT COUNT(*) n FROM ad_connectors WHERE platform=?", (AD_PLATFORM_SAMBA,)
+            )["n"],
+            AD_PLATFORM_WINDOWS: fetchone(
+                "SELECT COUNT(*) n FROM ad_connectors WHERE platform=?", (AD_PLATFORM_WINDOWS,)
+            )["n"],
+        }
+        body = render_template_string(
+            """
+            <div class="row g-4">
+              <div class="col-lg-6">
+                <div class="adg-card h-100">
+                  <div class="d-flex align-items-center gap-3">
+                    <div class="adg-hero-icon"><i class="bi bi-hdd-network"></i></div>
+                    <div><h5 class="mb-1">Active Directory Samba</h5>
+                    <div class="adg-muted">Conexión LDAP/LDAPS iniciada desde GRAC para Samba AD DC.</div></div>
+                  </div>
+                  <div class="mt-3"><span class="adg-chip adg-chip-info">{{ counts.SAMBA }} conector(es)</span></div>
+                  <a class="adg-btn adg-btn-primary mt-3" href="{{ url_for('adgov.samba_home') }}">Abrir submódulo Samba</a>
+                </div>
+              </div>
+              <div class="col-lg-6">
+                <div class="adg-card h-100">
+                  <div class="d-flex align-items-center gap-3">
+                    <div class="adg-hero-icon"><i class="bi bi-windows"></i></div>
+                    <div><h5 class="mb-1">Active Directory Windows</h5>
+                    <div class="adg-muted">Conexión LDAP/LDAPS directa desde GRAC a Microsoft Active Directory, sin agente ni archivos adicionales.</div></div>
+                  </div>
+                  <div class="mt-3"><span class="adg-chip adg-chip-info">{{ counts.WINDOWS }} conector(es)</span></div>
+                  <a class="adg-btn adg-btn-primary mt-3" href="{{ url_for('adgov.windows_home') }}">Abrir submódulo Windows</a>
+                </div>
+              </div>
+            </div>
+            """,
+            counts=counts,
+        )
+        return page(
+            body,
+            "Gobierno de Active Directory",
+            "Seleccione la tecnología de directorio. Ambos submódulos comparten las mismas validaciones, hallazgos, IA e integraciones.",
+            platform=AD_PLATFORM_SAMBA,
+        )
+
+    @bp.route("/samba")
+    @require_access()
+    def samba_home():
+        return redirect(url_for("adgov.dashboard", platform=AD_PLATFORM_SAMBA))
+
+    @bp.route("/windows")
+    @require_access()
+    def windows_home():
+        return redirect(url_for("adgov.dashboard", platform=AD_PLATFORM_WINDOWS))
+
+    @bp.route("/dashboard")
+    @require_access()
     def dashboard():
+        platform = request_platform()
         connector_id = request.args.get("connector_id", type=int)
-        connectors = fetchall("SELECT * FROM ad_connectors ORDER BY id")
+        connectors = fetchall(
+            "SELECT * FROM ad_connectors WHERE platform=? ORDER BY id", (platform,)
+        )
         if not connector_id and connectors:
             connector_id = connectors[0]["id"]
-        selected = fetchone("SELECT * FROM ad_connectors WHERE id=?", (connector_id,)) if connector_id else None
+        selected = fetchone("SELECT * FROM ad_connectors WHERE id=? AND platform=?", (connector_id, platform)) if connector_id else None
         params = (connector_id,) if connector_id else ()
         where = " WHERE connector_id=?" if connector_id else ""
         metrics = {
@@ -189308,8 +189924,8 @@ def register_ad_governance(
               <div class="adg-card text-center py-5">
                 <i class="bi bi-plug display-5 text-primary"></i>
                 <h5 class="mt-3">Configure el primer conector</h5>
-                <p class="adg-muted">Registre el controlador Samba AD o Microsoft Active Directory para iniciar el inventario.</p>
-                {% if can_write %}<a class="adg-btn adg-btn-primary" href="{{ url_for('adgov.config') }}">Configurar conector</a>{% endif %}
+                <p class="adg-muted">Registre un conector para {{ platform_label }} e inicie el inventario y las evaluaciones de seguridad.</p>
+                {% if can_write %}<a class="adg-btn adg-btn-primary" href="{{ url_for('adgov.config', platform=platform) }}">Configurar conector</a>{% endif %}
               </div>
             {% else %}
               <div class="adg-card">
@@ -189323,6 +189939,7 @@ def register_ad_governance(
                   </div>
                   <div class="d-flex flex-wrap gap-2">
                     <form method="get">
+                      <input type="hidden" name="platform" value="{{ platform }}">
                       <select class="form-select form-select-sm" name="connector_id" onchange="this.form.submit()">
                         {% for c in connectors %}<option value="{{ c.id }}" {% if selected and selected.id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
                       </select>
@@ -189369,32 +189986,53 @@ def register_ad_governance(
             latest_log=latest_log,
             can_write=can_write(current_user()),
             severity_badge=severity_badge,
+            platform=platform,
+            platform_label=platform_label(platform),
         )
-        return page(body, "Gobierno de Active Directory", "Inventario, privilegios, cuentas, hallazgos y trazabilidad del directorio corporativo.")
+        return page(
+            body,
+            "Gobierno de {}".format(platform_label(platform)),
+            "Inventario, privilegios, cuentas, hallazgos y trazabilidad del directorio corporativo.",
+            platform=platform,
+        )
 
     @bp.route("/configuracion")
     @require_access(write=True)
     def config():
+        platform = request_platform()
         connector_id = request.args.get("connector_id", type=int)
-        selected = fetchone("SELECT * FROM ad_connectors WHERE id=?", (connector_id,)) if connector_id else None
-        connectors = fetchall("SELECT * FROM ad_connectors ORDER BY id")
+        selected = fetchone(
+            "SELECT * FROM ad_connectors WHERE id=? AND platform=?", (connector_id, platform)
+        ) if connector_id else None
+        connectors = fetchall(
+            "SELECT * FROM ad_connectors WHERE platform=? ORDER BY id", (platform,)
+        )
+        connection_mode = AD_CONNECTION_LDAP
         body = render_template_string(
             """
             <div class="adg-card">
               <div class="d-flex justify-content-between align-items-center gap-2">
                 <div><h5>Configuración del conector</h5><div class="adg-muted">La contraseña se cifra localmente y nunca se muestra.</div></div>
-                <a class="adg-btn adg-btn-outline" href="{{ url_for('adgov.config') }}"><i class="bi bi-plus-circle"></i> Nuevo</a>
+                <a class="adg-btn adg-btn-outline" href="{{ url_for('adgov.config', platform=platform) }}"><i class="bi bi-plus-circle"></i> Nuevo</a>
               </div>
               <form class="adg-form mt-3" method="post" action="{{ url_for('adgov.save_connector') }}">
                 <input type="hidden" name="connector_id" value="{{ selected.id if selected else '' }}">
+                <input type="hidden" name="platform" value="{{ platform }}">
+                <input type="hidden" name="connection_mode" value="LDAP">
+                {% if platform == 'WINDOWS' %}
+                <div class="alert alert-info">
+                  <strong>Microsoft Active Directory integrado directamente.</strong> Este mismo archivo de GRAC prueba, sincroniza y evalúa Windows AD mediante LDAP/LDAPS, igual que el submódulo Samba. No requiere agente ni otro programa Python.<br>
+                  <span class="small">El nombre interno <code>dc1.adlab.arkyntech.com</code> solo funciona si el servidor de GRAC puede resolver el DNS de AD y tiene ruta hacia Oracle. Desde Render debe utilizarse LDAPS 636 con un FQDN/IP públicamente alcanzable y acceso restringido.</span>
+                </div>
+                {% endif %}
                 <div class="row g-3">
-                  <div class="col-md-4"><label>Nombre</label><input class="form-control" name="name" required value="{{ selected.name if selected else 'Samba AD GRAC LAB' }}"></div>
-                  <div class="col-md-4"><label>Host o IP</label><input class="form-control" name="host" required value="{{ selected.host if selected else '10.211.55.9' }}"></div>
+                  <div class="col-md-4"><label>Nombre</label><input class="form-control" name="name" required value="{{ selected.name if selected else ('Microsoft AD Windows - DC1' if platform=='WINDOWS' else 'Samba AD GRAC LAB') }}"></div>
+                  <div class="col-md-4"><label>Host o IP del controlador</label><input class="form-control" name="host" required value="{{ selected.host if selected else ('dc1.adlab.arkyntech.com' if platform=='WINDOWS' else '10.211.55.9') }}"><div class="adg-muted">Ingrese solo el host o IP, sin ldap://, rutas ni puerto. En Render debe ser alcanzable desde Internet o mediante VPN.</div></div>
                   <div class="col-md-2"><label>Puerto</label><input class="form-control" type="number" name="port" value="{{ selected.port if selected else 389 }}"></div>
                   <div class="col-md-2"><label>Timeout (s)</label><input class="form-control" type="number" min="5" max="120" name="connect_timeout" value="{{ selected.connect_timeout if selected else 15 }}"></div>
-                  <div class="col-md-6"><label>Base DN</label><input class="form-control" name="base_dn" required value="{{ selected.base_dn if selected else 'DC=ad,DC=grac,DC=test' }}"></div>
-                  <div class="col-md-6"><label>Usuario de enlace</label><input class="form-control" name="bind_user" required value="{{ selected.bind_user if selected else 'svc_grac_read@ad.grac.test' }}"></div>
-                  <div class="col-md-6"><label>Contraseña {% if selected %}(dejar vacía para conservar){% endif %}</label><input class="form-control" type="password" name="bind_password" {% if not selected %}required{% endif %} autocomplete="new-password"></div>
+                  <div class="col-md-6"><label>Base DN</label><input class="form-control" name="base_dn" required value="{{ selected.base_dn if selected else ('DC=adlab,DC=arkyntech,DC=com' if platform=='WINDOWS' else 'DC=ad,DC=grac,DC=test') }}"></div>
+                  <div class="col-md-6"><label>Usuario de lectura</label><input class="form-control" name="bind_user" required value="{{ selected.bind_user if selected else ('svc_grac_ldap@adlab.arkyntech.com' if platform=='WINDOWS' else 'svc_grac_read@ad.grac.test') }}"></div>
+                  <div class="col-md-6"><label>Contraseña LDAP {% if selected %}(dejar vacía para conservar){% endif %}</label><input class="form-control" type="password" name="bind_password" {% if not selected %}required{% endif %} autocomplete="new-password"><div class="adg-muted">Se cifra localmente en GRAC y nunca se muestra en pantalla.</div></div>
                   <div class="col-md-6"><label>Ruta CA para validar LDAPS</label><input class="form-control" name="ca_cert_path" value="{{ selected.ca_cert_path if selected else '' }}" placeholder="/ruta/ca.pem"></div>
                   <div class="col-md-3"><label>Inactividad máxima (días)</label><input class="form-control" type="number" min="1" name="inactive_days" value="{{ selected.inactive_days if selected else 90 }}"></div>
                   <div class="col-md-3"><label>Antigüedad contraseña (días)</label><input class="form-control" type="number" min="1" name="password_age_days" value="{{ selected.password_age_days if selected else 90 }}"></div>
@@ -189408,74 +190046,97 @@ def register_ad_governance(
             <div class="adg-card">
               <h5>Conectores registrados</h5>
               <div class="table-responsive"><table class="table adg-table">
-                <thead><tr><th>Nombre</th><th>Destino</th><th>Base DN</th><th>Estado</th><th>Última sincronización</th><th>Acciones</th></tr></thead>
-                <tbody>{% for c in connectors %}<tr><td>{{ c.name }}</td><td>{{ 'LDAPS' if c.use_ssl else 'LDAP' }}://{{ c.host }}:{{ c.port }}</td><td class="adg-code">{{ c.base_dn }}</td><td>{{ c.last_status }}</td><td>{{ c.last_sync_at or '—' }}</td>
+                <thead><tr><th>Nombre</th><th>Tecnología</th><th>Conexión</th><th>Base DN</th><th>Estado</th><th>Última sincronización</th><th>Acciones</th></tr></thead>
+                <tbody>{% for c in connectors %}<tr><td>{{ c.name }}</td><td>{{ platform_label(c.platform) }}</td><td>{{ 'LDAPS' if c.use_ssl else 'LDAP' }}://{{ c.host }}:{{ c.port }}</td><td class="adg-code">{{ c.base_dn }}</td><td>{{ c.last_status }}</td><td>{{ c.last_sync_at or '—' }}</td>
                   <td><div class="adg-actions-vertical">
-                    <a class="adg-btn adg-btn-outline" href="{{ url_for('adgov.config',connector_id=c.id) }}">Editar</a>
+                    <a class="adg-btn adg-btn-outline" href="{{ url_for('adgov.config',connector_id=c.id,platform=platform) }}">Editar</a>
                     <form method="post" action="{{ url_for('adgov.test',connector_id=c.id) }}"><button class="adg-btn adg-btn-outline">Probar conexión</button></form>
                     <form method="post" action="{{ url_for('adgov.sync',connector_id=c.id) }}"><button class="adg-btn adg-btn-primary">Sincronizar ahora</button></form>
                     <form method="post" action="{{ url_for('adgov.delete_connector',connector_id=c.id) }}" onsubmit="return confirm('¿Eliminar el conector y todo su inventario AD?');"><button class="adg-btn adg-btn-danger">Eliminar</button></form>
-                  </div></td></tr>{% else %}<tr><td colspan="6" class="text-center text-muted py-4">Sin conectores registrados.</td></tr>{% endfor %}</tbody>
+                  </div></td></tr>{% else %}<tr><td colspan="7" class="text-center text-muted py-4">Sin conectores registrados.</td></tr>{% endfor %}</tbody>
               </table></div>
             </div>
             """,
             selected=selected,
             connectors=connectors,
+            platform=platform,
+            connection_mode=connection_mode,
+            platform_label=platform_label,
         )
-        return page(body, "Configuración de Active Directory", "Conexión LDAP/LDAPS, cifrado de credenciales y umbrales de gobierno.")
+        subtitle = "Conexión LDAP/LDAPS directa, cifrado de credenciales y umbrales de gobierno."
+        return page(body, "Configuración de {}".format(platform_label(platform)), subtitle, platform=platform)
 
     @bp.route("/conector/guardar", methods=["POST"])
     @require_access(write=True)
     def save_connector():
         connector_id = request.form.get("connector_id", type=int)
         existing = fetchone("SELECT * FROM ad_connectors WHERE id=?", (connector_id,)) if connector_id else None
+        platform = request_platform()
+        connection_mode = AD_CONNECTION_LDAP
         try:
             name = (request.form.get("name") or "").strip()
-            host = (request.form.get("host") or "").strip()
+            host = normalize_ldap_host(request.form.get("host"))
+            validate_ldap_host(host)
             base_dn = (request.form.get("base_dn") or "").strip()
             bind_user = (request.form.get("bind_user") or "").strip()
             if not all((name, host, base_dn, bind_user)):
-                raise ValueError("Nombre, host, Base DN y usuario de enlace son obligatorios.")
-            socket.getaddrinfo(host, int(request.form.get("port") or 389))
+                raise ValueError("Nombre, host, Base DN y usuario de lectura son obligatorios.")
+
+            port = int(request.form.get("port") or 389)
             password = (request.form.get("bind_password") or "").strip()
-            encrypted = encrypt_secret(password) if password else (existing["bind_password_encrypted"] if existing else None)
+            encrypted = encrypt_secret(password) if password else (
+                existing["bind_password_encrypted"] if existing else None
+            )
+            # Guardar la configuración no depende de que el DNS o la red estén disponibles.
+            # La resolución y autenticación se validan en "Probar conexión".
             if not encrypted:
-                raise ValueError("Debe ingresar la contraseña del usuario de enlace.")
+                raise ValueError("Debe ingresar la contraseña del usuario de enlace LDAP.")
             now = now_iso()
             values_tuple = (
-                name, host, int(request.form.get("port") or 389),
-                int(request.form.get("use_ssl") or 0), int(request.form.get("verify_ssl") or 0),
-                (request.form.get("ca_cert_path") or "").strip(), base_dn, bind_user, encrypted,
+                name, platform, connection_mode, host, port,
+                int(request.form.get("use_ssl") or 0),
+                int(request.form.get("verify_ssl") or 0),
+                (request.form.get("ca_cert_path") or "").strip(),
+                base_dn, bind_user, encrypted,
                 max(5, min(120, int(request.form.get("connect_timeout") or 15))),
                 max(1, int(request.form.get("inactive_days") or 90)),
                 max(1, int(request.form.get("password_age_days") or 90)),
-                int(request.form.get("enabled") or 0), now,
+                int(request.form.get("enabled") or 0),
+                now,
             )
             with db_conn() as sql:
                 if existing:
                     sql.execute(
-                        """UPDATE ad_connectors SET name=?,host=?,port=?,use_ssl=?,verify_ssl=?,
-                           ca_cert_path=?,base_dn=?,bind_user=?,bind_password_encrypted=?,connect_timeout=?,
-                           inactive_days=?,password_age_days=?,enabled=?,updated_at=? WHERE id=?""",
+                        """UPDATE ad_connectors
+                           SET name=?,platform=?,connection_mode=?,host=?,port=?,use_ssl=?,verify_ssl=?,
+                               ca_cert_path=?,base_dn=?,bind_user=?,bind_password_encrypted=?,connect_timeout=?,
+                               inactive_days=?,password_age_days=?,enabled=?,updated_at=?
+                           WHERE id=?""",
                         values_tuple + (connector_id,),
                     )
                 else:
                     cur = sql.execute(
                         """INSERT INTO ad_connectors
-                           (name,host,port,use_ssl,verify_ssl,ca_cert_path,base_dn,bind_user,
-                            bind_password_encrypted,connect_timeout,inactive_days,password_age_days,
-                            enabled,created_at,updated_at)
-                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                           (name,platform,connection_mode,host,port,use_ssl,verify_ssl,ca_cert_path,
+                            base_dn,bind_user,bind_password_encrypted,connect_timeout,inactive_days,
+                            password_age_days,enabled,created_at,updated_at)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         values_tuple[:-1] + (now, now),
                     )
                     connector_id = cur.lastrowid
                 sql.commit()
-            audit(f"Guardó configuración del conector Active Directory {name}.", current_user())
+            audit(
+                f"Guardó conector {platform_label(platform)} {name} en modo {connection_mode}.",
+                current_user(),
+            )
             flash("Conector de Active Directory guardado correctamente.", "success")
-            return redirect(url_for("adgov.config", connector_id=connector_id))
+            return redirect(url_for("adgov.config", connector_id=connector_id, platform=platform))
         except Exception as exc:
-            flash(f"No fue posible guardar el conector: {exc}", "danger")
-            return redirect(url_for("adgov.config", connector_id=connector_id) if connector_id else url_for("adgov.config"))
+            flash(f"No fue posible guardar el conector: {exc}", "warning")
+            return redirect(
+                url_for("adgov.config", connector_id=connector_id, platform=platform)
+                if connector_id else url_for("adgov.config", platform=platform)
+            )
 
     @bp.route("/conector/<int:connector_id>/eliminar", methods=["POST"])
     @require_access(write=True)
@@ -189486,7 +190147,7 @@ def register_ad_governance(
             sql.commit()
         audit(f"Eliminó el conector Active Directory {connector['name']}.", current_user())
         flash("Conector e inventario asociado eliminados.", "success")
-        return redirect(url_for("adgov.config"))
+        return redirect(url_for("adgov.config", platform=connector["platform"]))
 
     @bp.route("/conector/<int:connector_id>/probar", methods=["POST"])
     @require_access(write=True)
@@ -189502,8 +190163,8 @@ def register_ad_governance(
             )
             sql.commit()
         audit(f"Probó conexión Active Directory {connector['name']}: {message}", current_user())
-        flash(message, "success" if ok else "danger")
-        return redirect(url_for("adgov.config", connector_id=connector_id))
+        flash(message, "success" if ok else "warning")
+        return redirect(url_for("adgov.config", connector_id=connector_id, platform=connector["platform"]))
 
     @bp.route("/conector/<int:connector_id>/sincronizar", methods=["POST"])
     @require_access(write=True)
@@ -189511,7 +190172,7 @@ def register_ad_governance(
         connector = connector_or_404(connector_id)
         if not connector["enabled"]:
             flash("El conector está deshabilitado.", "warning")
-            return redirect(url_for("adgov.dashboard", connector_id=connector_id))
+            return redirect(url_for("adgov.dashboard", connector_id=connector_id, platform=connector["platform"]))
         try:
             result = sync_connector(connector, username(current_user()))
             audit(
@@ -189519,24 +190180,33 @@ def register_ad_governance(
                 f"{result['users']} usuarios, {result['groups']} grupos y {result['findings']} hallazgos.",
                 current_user(),
             )
+            surface_message = (
+                f" Superficie de Ataque: {result.get('surface_created', 0)} nuevos, "
+                f"{result.get('surface_updated', 0)} actualizados y "
+                f"{result.get('surface_closed', 0)} cerrados."
+            )
+            if result.get("surface_error"):
+                surface_message += " La sincronización de escenarios presentó una alerta técnica."
             flash(
                 f"Sincronización completada: {result['users']} usuarios, "
-                f"{result['groups']} grupos, {result['findings']} hallazgos y score {result['score']}%.",
+                f"{result['groups']} grupos, {result['findings']} hallazgos y score {result['score']}%."
+                + surface_message,
                 "success",
             )
         except Exception as exc:
             audit(f"Error sincronizando Active Directory {connector['name']}: {exc}", current_user())
             flash(f"No fue posible sincronizar Active Directory: {exc}", "danger")
-        return redirect(url_for("adgov.dashboard", connector_id=connector_id))
+        return redirect(url_for("adgov.dashboard", connector_id=connector_id, platform=connector["platform"]))
 
     @bp.route("/usuarios")
     @require_access()
     def users():
+        platform = request_platform()
         q = (request.args.get("q") or "").strip()
         state = (request.args.get("state") or "").strip()
         connector_id = request.args.get("connector_id", type=int)
-        clauses = ["u.active=1"]
-        params = []
+        clauses = ["u.active=1", "c.platform=?"]
+        params = [platform]
         if connector_id:
             clauses.append("u.connector_id=?")
             params.append(connector_id)
@@ -189562,12 +190232,13 @@ def register_ad_governance(
                 ORDER BY u.privileged DESC,u.enabled DESC,u.display_name LIMIT 3000""",
             tuple(params),
         )
-        connectors = fetchall("SELECT id,name FROM ad_connectors ORDER BY name")
+        connectors = fetchall("SELECT id,name FROM ad_connectors WHERE platform=? ORDER BY name", (platform,))
         body = render_template_string(
             """
             <div class="adg-card">
               <div class="d-flex flex-wrap justify-content-between align-items-center gap-2"><div><h5>Inventario de usuarios</h5><div class="adg-muted">{{ rows|length }} registros visibles</div></div>
               <form class="d-flex flex-wrap gap-2" method="get">
+                <input type="hidden" name="platform" value="{{ platform }}">
                 <select class="form-select form-select-sm" name="connector_id"><option value="">Todos los conectores</option>{% for c in connectors %}<option value="{{ c.id }}" {% if connector_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select>
                 <select class="form-select form-select-sm" name="state"><option value="">Todos</option>{% for key,label in [('enabled','Activos'),('disabled','Deshabilitados'),('privileged','Privilegiados'),('service','Servicio'),('generic','Genéricos')] %}<option value="{{ key }}" {% if state==key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
                 <input class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="Cuenta, nombre, correo o área"><button class="adg-btn adg-btn-outline">Filtrar</button>
@@ -189582,22 +190253,23 @@ def register_ad_governance(
                   <td>{{ u.last_logon or 'Nunca / sin dato' }}</td>
                   <td>{% if u.password_never_expires %}<span class="adg-chip adg-chip-warn">No expira</span>{% else %}{{ u.pwd_last_set or '—' }}{% endif %}</td>
                   <td class="adg-muted">{{ (u.direct_groups_json or '[]')|safe }}</td>
-                  <td>{% if u.finding_count %}<a class="adg-btn adg-btn-warning" href="{{ url_for('adgov.findings',user_id=u.id) }}">{{ u.finding_count }} hallazgo(s)</a>{% else %}<span class="adg-chip adg-chip-ok">0</span>{% endif %}</td>
+                  <td>{% if u.finding_count %}<a class="adg-btn adg-btn-warning" href="{{ url_for('adgov.findings',user_id=u.id,platform=platform) }}">{{ u.finding_count }} hallazgo(s)</a>{% else %}<span class="adg-chip adg-chip-ok">0</span>{% endif %}</td>
                 </tr>{% else %}<tr><td colspan="9" class="text-center py-4 text-muted">Sin usuarios sincronizados.</td></tr>{% endfor %}</tbody>
               </table></div>
             </div>
             """,
-            rows=rows, connectors=connectors, connector_id=connector_id, q=q, state=state,
+            rows=rows, connectors=connectors, connector_id=connector_id, q=q, state=state, platform=platform,
         )
-        return page(body, "Inventario de usuarios AD", "Estado, atributos, accesos, privilegios y grupos de cada identidad.")
+        return page(body, "Inventario de usuarios {}".format(platform_label(platform)), "Estado, atributos, accesos, privilegios y grupos de cada identidad.", platform=platform)
 
     @bp.route("/grupos")
     @require_access()
     def groups():
+        platform = request_platform()
         q = (request.args.get("q") or "").strip()
         connector_id = request.args.get("connector_id", type=int)
-        clauses = ["g.active=1"]
-        params = []
+        clauses = ["g.active=1", "c.platform=?"]
+        params = [platform]
         if connector_id:
             clauses.append("g.connector_id=?")
             params.append(connector_id)
@@ -189616,7 +190288,7 @@ def register_ad_governance(
             """
             <div class="adg-card">
               <div class="d-flex flex-wrap justify-content-between gap-2"><div><h5>Inventario de grupos</h5><div class="adg-muted">{{ rows|length }} grupos sincronizados</div></div>
-              <form class="d-flex gap-2"><input class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="Buscar grupo"><button class="adg-btn adg-btn-outline">Filtrar</button></form></div>
+              <form class="d-flex gap-2"><input type="hidden" name="platform" value="{{ platform }}"><input class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="Buscar grupo"><button class="adg-btn adg-btn-outline">Filtrar</button></form></div>
               <div class="adg-table-wrap mt-3"><table class="table adg-table table-hover">
                 <thead><tr><th>Grupo</th><th>Descripción</th><th>Miembros</th><th>Clasificación</th><th>DN</th></tr></thead>
                 <tbody>{% for g in rows %}<tr><td><strong>{{ g.sam_account_name }}</strong><div class="adg-muted">{{ g.connector_name }}</div></td><td>{{ g.description or '—' }}</td><td>{{ g.member_count }}</td>
@@ -189624,19 +190296,20 @@ def register_ad_governance(
                 {% else %}<tr><td colspan="5" class="text-center text-muted py-4">Sin grupos sincronizados.</td></tr>{% endfor %}</tbody>
               </table></div>
             </div>
-            """, rows=rows, q=q,
+            """, rows=rows, q=q, platform=platform,
         )
-        return page(body, "Inventario de grupos AD", "Grupos, membresías y clasificación de privilegios.")
+        return page(body, "Inventario de grupos {}".format(platform_label(platform)), "Grupos, membresías y clasificación de privilegios.", platform=platform)
 
     @bp.route("/hallazgos")
     @require_access()
     def findings():
+        platform = request_platform()
         severity = (request.args.get("severity") or "").strip()
         status = (request.args.get("status") or "").strip()
         q = (request.args.get("q") or "").strip()
         user_id = request.args.get("user_id", type=int)
-        clauses = ["f.active=1"]
-        params = []
+        clauses = ["f.active=1", "c.platform=?"]
+        params = [platform]
         if severity:
             clauses.append("f.severity=?"); params.append(severity)
         if status:
@@ -189662,10 +190335,11 @@ def register_ad_governance(
             </div>
             <div class="adg-card">
               <div class="d-flex flex-wrap justify-content-between gap-2"><div><h5>Matriz de hallazgos AD</h5><div class="adg-muted">{{ rows|length }} hallazgos activos</div></div>
-              <form class="d-flex flex-wrap gap-2"><select class="form-select form-select-sm" name="severity"><option value="">Severidades</option>{% for x in ['Crítica','Alta','Media','Baja'] %}<option {% if severity==x %}selected{% endif %}>{{ x }}</option>{% endfor %}</select>
+              <form class="d-flex flex-wrap gap-2"><input type="hidden" name="platform" value="{{ platform }}"><select class="form-select form-select-sm" name="severity"><option value="">Severidades</option>{% for x in ['Crítica','Alta','Media','Baja'] %}<option {% if severity==x %}selected{% endif %}>{{ x }}</option>{% endfor %}</select>
               <select class="form-select form-select-sm" name="status"><option value="">Estados</option>{% for x in ['Abierto','En tratamiento','Riesgo aceptado','Falso positivo','Resuelto'] %}<option {% if status==x %}selected{% endif %}>{{ x }}</option>{% endfor %}</select>
               <input class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="Código, cuenta o hallazgo"><button class="adg-btn adg-btn-outline">Filtrar</button>
-              <a class="adg-btn adg-btn-success" href="{{ url_for('adgov.export_findings') }}">CSV</a></form></div>
+              <a class="adg-btn adg-btn-success" href="{{ url_for('adgov.export_findings', platform=platform) }}">CSV</a></form>
+              {% if can_write %}<form method="post" action="{{ url_for('adgov.sync_attack_surface') }}"><input type="hidden" name="platform" value="{{ platform }}"><button class="adg-btn adg-btn-primary"><i class="bi bi-bullseye"></i> Actualizar Superficie</button></form>{% endif %}</div>
               <div class="adg-table-wrap mt-3"><table class="table adg-table table-hover">
                 <thead><tr><th>Severidad</th><th>Código</th><th>Cuenta</th><th>Hallazgo</th><th>Controles</th><th>Estado</th><th>Acciones</th></tr></thead>
                 <tbody>{% for f in rows %}<tr><td>{{ severity_badge(f.severity) }}</td><td class="adg-code">{{ f.finding_code }}</td><td>{{ f.sam_account_name or '—' }}<div class="adg-muted">{{ f.display_name or '' }}</div></td>
@@ -189677,15 +190351,39 @@ def register_ad_governance(
             </div>
             """,
             rows=rows, severity=severity, status=status, q=q, severity_badge=severity_badge,
+            platform=platform, can_write=can_write(current_user()),
         )
-        return page(body, "Hallazgos de Gobierno AD", "Evaluaciones determinísticas, mapeo de controles y tratamiento.")
+        return page(body, "Hallazgos de {}".format(platform_label(platform)), "Evaluaciones determinísticas, mapeo de controles y tratamiento.", platform=platform)
+
+    @bp.route("/superficie-ataque/sincronizar", methods=["POST"])
+    @require_access(write=True)
+    def sync_attack_surface():
+        platform = request_platform()
+        hook = globals().get("attack_auto_sync_active_directory_scenarios")
+        if not callable(hook):
+            flash("La integración con Superficie de Ataque no está disponible.", "danger")
+            return redirect(url_for("adgov.findings", platform=platform))
+        try:
+            result = hook(username(current_user()), platform=platform)
+            flash(
+                "Superficie de Ataque actualizada: "
+                f"{result.get('created', 0)} escenarios nuevos, "
+                f"{result.get('updated', 0)} actualizados, "
+                f"{result.get('unchanged', 0)} sin cambios y "
+                f"{result.get('closed', 0)} cerrados.",
+                "success",
+            )
+            return redirect(url_for("attack_auto", source="ACTIVE_DIRECTORY", ad_platform=platform))
+        except Exception as exc:
+            flash(f"No fue posible actualizar Superficie de Ataque: {exc}", "danger")
+            return redirect(url_for("adgov.findings", platform=platform))
 
     @bp.route("/hallazgo/<int:finding_id>", methods=["GET", "POST"])
     @require_access()
     def finding_detail(finding_id):
         finding = fetchone(
             """SELECT f.*,u.sam_account_name,u.display_name,u.distinguished_name,u.privilege_path,
-               u.department,u.title,u.mail,c.name connector_name
+               u.department,u.title AS user_title,u.mail,c.name connector_name,c.platform
                FROM ad_findings f LEFT JOIN ad_users u ON u.id=f.user_id
                JOIN ad_connectors c ON c.id=f.connector_id WHERE f.id=?""",
             (finding_id,),
@@ -189720,13 +190418,29 @@ def register_ad_governance(
             <div class="adg-card">
               <div class="d-flex justify-content-between gap-2"><div><h5>{{ finding.title }}</h5><div class="adg-muted">{{ finding.connector_name }} · {{ finding.finding_code }}</div></div>{{ severity_badge(finding.severity) }}</div>
               <div class="adg-detail mt-3">
-                {% for label,val in [('Cuenta',finding.sam_account_name),('Nombre',finding.display_name),('Área',finding.department),('Cargo',finding.title),('Correo',finding.mail),('Ruta de privilegio',finding.privilege_path),('DN',finding.distinguished_name),('Estado',finding.status)] %}
+                {% for label,val in [('Cuenta',finding.sam_account_name),('Nombre',finding.display_name),('Área',finding.department),('Cargo',finding.user_title),('Correo',finding.mail),('Ruta de privilegio',finding.privilege_path),('DN',finding.distinguished_name),('Estado',finding.status)] %}
                 <div class="adg-detail-item"><span>{{ label }}</span><strong>{{ val or '—' }}</strong></div>{% endfor %}
               </div>
               <hr><h6 class="fw-bold text-primary">Descripción</h6><p>{{ finding.description }}</p>
               <h6 class="fw-bold text-primary">Recomendación determinística</h6><p>{{ finding.recommendation }}</p>
               <h6 class="fw-bold text-primary">Mapeo de controles</h6><p>{{ finding.control_mapping }}</p>
-              {% if finding.ai_analysis %}<div class="alert alert-info"><strong>Análisis complementario de IA:</strong><br>{{ finding.ai_analysis }}</div>{% endif %}
+              {% if ai_sections %}
+              <div class="adg-ai-panel">
+                <div class="adg-ai-header"><i class="bi bi-stars"></i><div><strong>Análisis complementario de IA</strong><br><span>Organizado por secciones para facilitar validación, remediación y seguimiento.</span></div></div>
+                <div class="adg-ai-grid">
+                  {% for section in ai_sections %}
+                  <section class="adg-ai-section {{ 'adg-ai-section-wide' if section['wide'] else '' }}">
+                    <h6><i class="bi {{ section['icon'] }}"></i>{{ section['title'] }}</h6>
+                    {% if section['items']|length == 1 and section['key'] in ['resumen_ejecutivo','causa_probable','riesgo_negocio'] %}
+                    <p>{{ section['items'][0] }}</p>
+                    {% else %}
+                    <ul>{% for item in section['items'] %}<li>{{ item }}</li>{% endfor %}</ul>
+                    {% endif %}
+                  </section>
+                  {% endfor %}
+                </div>
+              </div>
+              {% endif %}
               {% if can_write %}
               <div class="adg-actions">
                 {% if not finding.plan_id %}<form method="post" action="{{ url_for('adgov.create_plan',finding_id=finding.id) }}"><button class="adg-btn adg-btn-success"><i class="bi bi-clipboard2-plus"></i> Asignar plan de acción</button></form>{% else %}<a class="adg-btn adg-btn-success" href="{{ url_for('planes_accion_dashboard',plan_id=finding.plan_id) }}">Ir al plan de acción</a>{% endif %}
@@ -189743,8 +190457,9 @@ def register_ad_governance(
             finding=finding,
             severity_badge=severity_badge,
             can_write=can_write(user),
+            ai_sections=list(ad_ai_sections(finding["ai_analysis"]) or []),
         )
-        return page(body, "Detalle del hallazgo AD", "Análisis, gestión, escenarios de ataque y plan de acción.")
+        return page(body, "Detalle del hallazgo {}".format(platform_label(finding["platform"])), "Análisis, gestión, escenarios de ataque y plan de acción.", platform=finding["platform"])
 
     @bp.route("/hallazgo/<int:finding_id>/plan", methods=["POST"])
     @require_access(write=True)
@@ -189805,9 +190520,31 @@ def register_ad_governance(
             flash("El servicio de IA no está disponible en esta instalación.", "warning")
             return redirect(url_for("adgov.finding_detail", finding_id=finding_id))
         prompt = f"""
-Eres especialista en gobierno de identidades, Active Directory, ISO 27001, NIST CSF y SOC 2.
-Analiza este hallazgo ya confirmado por reglas determinísticas de GRAC. No cambies su existencia ni severidad.
-Entrega: causa probable, riesgo de negocio, validaciones, remediación priorizada, evidencia de cierre y métricas.
+Eres especialista senior en gobierno de identidades, Microsoft Active Directory, Samba AD,
+ISO 27001, NIST CSF, SOC 2 y gestión de riesgos.
+
+Analiza el hallazgo confirmado por reglas determinísticas de GRAC. No cambies su existencia,
+código ni severidad. No inventes evidencia. Distingue claramente hechos, validaciones pendientes
+y recomendaciones.
+
+Devuelve EXCLUSIVAMENTE un objeto JSON válido, sin markdown, con esta estructura:
+{{
+  "resumen_ejecutivo": "síntesis breve y clara",
+  "causa_probable": "causa técnica y de gobierno más probable",
+  "riesgo_negocio": "impacto para confidencialidad, integridad, disponibilidad y operación",
+  "validaciones": ["validación técnica 1", "validación técnica 2"],
+  "remediacion_priorizada": [
+    {{"prioridad": "Inmediata/Alta/Media", "accion": "acción concreta", "responsable": "rol sugerido", "plazo": "plazo sugerido"}}
+  ],
+  "evidencia_cierre": ["evidencia verificable 1", "evidencia verificable 2"],
+  "metricas": [
+    {{"indicador": "nombre del indicador", "meta": "meta verificable"}}
+  ],
+  "controles_relacionados": ["control o marco relacionado"]
+}}
+
+Mantén cada sección concisa y accionable.
+
 Cuenta: {finding['sam_account_name'] or finding['display_name']}
 Área: {finding['department'] or 'No informada'}
 Código: {finding['finding_code']}
@@ -189819,9 +190556,10 @@ Ruta de privilegio: {finding['privilege_path'] or 'No aplica'}
 Controles: {finding['control_mapping']}
 """
         try:
-            analysis = ai_helper(prompt, temperature=0.15, max_tokens=700)
+            analysis_raw = ai_helper(prompt, temperature=0.10, max_tokens=900)
+            analysis = ad_ai_normalized_json(analysis_raw)
             with db_conn() as sql:
-                sql.execute("UPDATE ad_findings SET ai_analysis=? WHERE id=?", (str(analysis), finding_id))
+                sql.execute("UPDATE ad_findings SET ai_analysis=? WHERE id=?", (analysis, finding_id))
                 sql.commit()
             audit(f"Generó análisis IA para hallazgo AD {finding['finding_code']}.", current_user())
             flash("Análisis complementario generado por IA.", "success")
@@ -189829,12 +190567,17 @@ Controles: {finding['control_mapping']}
             flash(f"No fue posible generar el análisis IA: {exc}", "danger")
         return redirect(url_for("adgov.finding_detail", finding_id=finding_id))
 
+
+
     @bp.route("/historial")
     @require_access()
     def history():
+        platform = request_platform()
         rows = fetchall(
-            """SELECT l.*,c.name connector_name FROM ad_sync_logs l
-               JOIN ad_connectors c ON c.id=l.connector_id ORDER BY l.id DESC LIMIT 1000"""
+            """SELECT l.*,c.name connector_name,c.platform FROM ad_sync_logs l
+               JOIN ad_connectors c ON c.id=l.connector_id
+               WHERE c.platform=? ORDER BY l.id DESC LIMIT 1000""",
+            (platform,),
         )
         body = render_template_string(
             """
@@ -189848,7 +190591,7 @@ Controles: {finding['control_mapping']}
             </div>
             """, rows=rows, can_write=can_write(current_user()),
         )
-        return page(body, "Historial de Active Directory", "Trazabilidad de conexiones, sincronizaciones y resultados.")
+        return page(body, "Historial de {}".format(platform_label(platform)), "Trazabilidad de conexiones, sincronizaciones y resultados.", platform=platform)
 
     @bp.route("/historial/<int:log_id>/eliminar", methods=["POST"])
     @require_access(write=True)
@@ -189863,11 +190606,14 @@ Controles: {finding['control_mapping']}
     @bp.route("/hallazgos.csv")
     @require_access()
     def export_findings():
+        platform = request_platform()
         rows = fetchall(
-            """SELECT c.name connector,u.sam_account_name,u.display_name,f.*
+            """SELECT c.name connector,c.platform,u.sam_account_name,u.display_name,f.*
                FROM ad_findings f JOIN ad_connectors c ON c.id=f.connector_id
-               LEFT JOIN ad_users u ON u.id=f.user_id WHERE f.active=1
-               ORDER BY f.severity,f.id"""
+               LEFT JOIN ad_users u ON u.id=f.user_id
+               WHERE f.active=1 AND c.platform=?
+               ORDER BY f.severity,f.id""",
+            (platform,),
         )
         output = io.StringIO()
         writer = csv.writer(output)
@@ -189897,6 +190643,8 @@ Controles: {finding['control_mapping']}
     app.extensions["ad_governance"] = {
         "db_path": db_path,
         "module": "Gobierno de Active Directory",
+        "platforms": dict(AD_PLATFORM_LABELS),
+        "connection_mode": "LDAP/LDAPS directo integrado en GRAC",
     }
     return bp
 
@@ -190116,9 +190864,11 @@ def cont_comp_sync_governance_findings():
             if table_exists:
                 rows = conn.execute(
                     """
-                    SELECT f.*,u.sam_account_name,u.display_name,u.department
+                    SELECT f.*,u.sam_account_name,u.display_name,u.department,
+                           c.platform,c.name connector_name
                     FROM ad_findings f
                     LEFT JOIN ad_users u ON u.id=f.user_id
+                    JOIN ad_connectors c ON c.id=f.connector_id
                     ORDER BY f.id ASC
                     LIMIT 20000
                     """
@@ -190143,6 +190893,13 @@ def cont_comp_sync_governance_findings():
                                 "account": asset,
                                 "department": finding["department"],
                                 "connector_id": finding["connector_id"],
+                                "connector_name": finding["connector_name"],
+                                "platform": finding["platform"],
+                                "platform_label": (
+                                    "Microsoft Active Directory Windows"
+                                    if str(finding["platform"] or "").upper() == "WINDOWS"
+                                    else "Active Directory Samba"
+                                ),
                             },
                         )
                     )
