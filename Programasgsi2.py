@@ -189356,7 +189356,7 @@ def register_ad_governance(
                     f"Cuenta bloqueada: {sam}",
                     "La cuenta se encuentra bloqueada por eventos de autenticación fallida.",
                     "Confirmar la identidad del usuario, investigar los intentos fallidos y desbloquear solo después de validar el evento.",
-                    "ISO 27001 A.5.15/A.8.16; NIST CSF PR.AA/DE.CM; SOC 2 CC6/CC7",
+                    "ISO 27001 A.5.15/A.8.16; NIST CSF PR.AA/DE.CM; SOC 2 CC6/CC7; PCI DSS 8.3.4",
                 )
             if item["enabled"] and item["generic_account"]:
                 add_finding(
@@ -189364,7 +189364,7 @@ def register_ad_governance(
                     f"Cuenta genérica o compartida activa: {sam}",
                     "El nombre o la descripción indican que la cuenta puede ser compartida y reducir la trazabilidad individual.",
                     "Sustituirla por cuentas nominativas o documentar excepción, custodio, rotación, MFA y trazabilidad de uso.",
-                    "ISO 27001 A.5.16/A.5.18; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 8.2.1",
+                    "ISO 27001 A.5.16/A.5.18; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 8.2.1/8.2.2",
                 )
             if item["password_not_required"] and item["enabled"]:
                 add_finding(
@@ -189372,7 +189372,7 @@ def register_ad_governance(
                     f"Contraseña no requerida: {sam}",
                     "La bandera de la cuenta permite que no se requiera contraseña.",
                     "Retirar inmediatamente la configuración PASSWD_NOTREQD, establecer una contraseña robusta y revisar actividad reciente.",
-                    "ISO 27001 A.5.17; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 8.3",
+                    "ISO 27001 A.5.17/A.8.5; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 8.3/8.3.6",
                 )
             if item["password_never_expires"] and item["enabled"]:
                 severity = "Media" if item["service_account"] else "Alta"
@@ -189390,7 +189390,7 @@ def register_ad_governance(
                     f"Contraseña con antigüedad elevada: {sam}",
                     f"La contraseña tiene aproximadamente {(now - pwd_date).days} días, superior al umbral de {password_age_days}.",
                     "Rotar la contraseña y validar que la política de credenciales se aplique a la cuenta.",
-                    "ISO 27001 A.5.17; NIST CSF PR.AA; SOC 2 CC6",
+                    "ISO 27001 A.5.17/A.8.5; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 8.3.9",
                 )
             last_logon = parse_iso(item["last_logon"])
             created = parse_iso(item["when_created"])
@@ -189400,7 +189400,7 @@ def register_ad_governance(
                     f"Cuenta activa sin uso reciente: {sam}",
                     f"El último inicio de sesión conocido supera el umbral de {inactive_days} días.",
                     "Validar vigencia con el propietario y deshabilitar o retirar la cuenta si ya no se necesita.",
-                    "ISO 27001 A.5.18; NIST CSF PR.AA; SOC 2 CC6",
+                    "ISO 27001 A.5.18; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 8.2.6",
                 )
             elif item["enabled"] and not last_logon and created and (now - created).days > 30:
                 add_finding(
@@ -189408,7 +189408,7 @@ def register_ad_governance(
                     f"Cuenta activa sin inicio de sesión: {sam}",
                     "La cuenta tiene más de 30 días y no registra un inicio de sesión conocido.",
                     "Confirmar su necesidad; deshabilitarla si fue creada por error o nunca fue entregada.",
-                    "ISO 27001 A.5.18; NIST CSF PR.AA; SOC 2 CC6",
+                    "ISO 27001 A.5.18; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 8.2.6",
                 )
             if item["service_account"] and item["privileged"] and item["enabled"]:
                 add_finding(
@@ -189416,7 +189416,7 @@ def register_ad_governance(
                     f"Cuenta de servicio con privilegios elevados: {sam}",
                     f"La cuenta técnica alcanza un grupo privilegiado por la ruta: {item['privilege_path'] or 'no documentada'}.",
                     "Retirar privilegios no indispensables, restringir inicio interactivo, rotar el secreto y usar una cuenta administrada cuando sea posible.",
-                    "ISO 27001 A.5.15/A.8.2; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 7/8",
+                    "ISO 27001 A.5.15/A.8.2; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 7.2.1/8.6.1",
                 )
             elif item["privileged"] and item["privilege_type"] == "Anidado" and item["enabled"]:
                 add_finding(
@@ -189424,7 +189424,7 @@ def register_ad_governance(
                     f"Privilegio administrativo heredado: {sam}",
                     f"La cuenta obtiene privilegios mediante grupos anidados: {item['privilege_path']}.",
                     "Validar aprobación y necesidad del privilegio; retirar la membresía indirecta si no corresponde.",
-                    "ISO 27001 A.5.15/A.8.2; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 7.2",
+                    "ISO 27001 A.5.15/A.8.2; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 7.2.1/7.2.4",
                 )
             if not item["enabled"] and item["privileged"]:
                 add_finding(
@@ -189432,7 +189432,7 @@ def register_ad_governance(
                     f"Cuenta privilegiada deshabilitada aún existente: {sam}",
                     "La cuenta permanece asociada a privilegios administrativos aunque está deshabilitada.",
                     "Retirar membresías privilegiadas y eliminar la cuenta conforme a la política de retención y baja.",
-                    "ISO 27001 A.5.18/A.8.2; NIST CSF PR.AA; SOC 2 CC6",
+                    "ISO 27001 A.5.18/A.8.2; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 7.2.4/8.2.6",
                 )
             if item["enabled"] and not item["service_account"] and not item["generic_account"]:
                 missing = []
@@ -189446,7 +189446,7 @@ def register_ad_governance(
                         f"Datos de identidad incompletos: {sam}",
                         "Faltan atributos de gobierno: " + ", ".join(missing) + ".",
                         "Completar los atributos para soportar recertificación, propiedad y trazabilidad.",
-                        "ISO 27001 A.5.16/A.5.18; NIST CSF PR.AA; SOC 2 CC6",
+                        "ISO 27001 A.5.16/A.5.18; NIST CSF PR.AA; SOC 2 CC6; PCI DSS 7.2.1/8.2.1",
                     )
         return findings
 
@@ -190675,42 +190675,219 @@ CONT_COMP_GOVERNANCE_SOURCES = (
 CONT_COMP_STANDARD_CATALOG_CACHE = {}
 
 
-def cont_comp_parse_control_mapping(mapping_text):
-    """Convierte el texto de mapeo de un hallazgo en pares estándar/control."""
-    text_value = str(mapping_text or "").strip()
-    if not text_value:
-        return []
+# Mapeo multimarco canónico para hallazgos de Gobierno de Active Directory.
+# Se usa además del texto control_mapping para:
+# - soportar hallazgos históricos que solo tenían ISO 27001;
+# - garantizar trazabilidad en ISO 27001, NIST CSF 2.0, SOC 2 y PCI DSS;
+# - evitar depender de abreviaturas o del formato del texto almacenado.
+CONT_COMP_AD_FINDING_FRAMEWORK_MAP = {
+    "ACCOUNT_LOCKED": {
+        "ISO27001": ("A.5.15", "A.8.16"),
+        "NISTCSF": ("PR.AA", "DE.CM"),
+        "SOC2": ("CC6", "CC7"),
+        "PCIDSS": ("8.3.4",),
+    },
+    "GENERIC_SHARED_ACCOUNT": {
+        "ISO27001": ("A.5.16", "A.5.18"),
+        "NISTCSF": ("PR.AA",),
+        "SOC2": ("CC6",),
+        "PCIDSS": ("8.2.1", "8.2.2"),
+    },
+    "PASSWORD_NOT_REQUIRED": {
+        "ISO27001": ("A.5.17", "A.8.5"),
+        "NISTCSF": ("PR.AA",),
+        "SOC2": ("CC6",),
+        "PCIDSS": ("8.3", "8.3.6"),
+    },
+    "PASSWORD_NEVER_EXPIRES": {
+        "ISO27001": ("A.5.17", "A.8.5"),
+        "NISTCSF": ("PR.AA",),
+        "SOC2": ("CC6",),
+        "PCIDSS": ("8.3.9",),
+    },
+    "STALE_PASSWORD": {
+        "ISO27001": ("A.5.17", "A.8.5"),
+        "NISTCSF": ("PR.AA",),
+        "SOC2": ("CC6",),
+        "PCIDSS": ("8.3.9",),
+    },
+    "STALE_ACTIVE_ACCOUNT": {
+        "ISO27001": ("A.5.18",),
+        "NISTCSF": ("PR.AA",),
+        "SOC2": ("CC6",),
+        "PCIDSS": ("8.2.6",),
+    },
+    "NEVER_USED_ACTIVE_ACCOUNT": {
+        "ISO27001": ("A.5.18",),
+        "NISTCSF": ("PR.AA",),
+        "SOC2": ("CC6",),
+        "PCIDSS": ("8.2.6",),
+    },
+    "PRIVILEGED_SERVICE_ACCOUNT": {
+        "ISO27001": ("A.5.15", "A.8.2"),
+        "NISTCSF": ("PR.AA",),
+        "SOC2": ("CC6",),
+        "PCIDSS": ("7.2.1", "8.6.1"),
+    },
+    "NESTED_PRIVILEGE": {
+        "ISO27001": ("A.5.15", "A.8.2"),
+        "NISTCSF": ("PR.AA",),
+        "SOC2": ("CC6",),
+        "PCIDSS": ("7.2.1", "7.2.4"),
+    },
+    "DISABLED_PRIVILEGED_ACCOUNT": {
+        "ISO27001": ("A.5.18", "A.8.2"),
+        "NISTCSF": ("PR.AA",),
+        "SOC2": ("CC6",),
+        "PCIDSS": ("7.2.4", "8.2.6"),
+    },
+    "INCOMPLETE_IDENTITY_DATA": {
+        "ISO27001": ("A.5.16", "A.5.18"),
+        "NISTCSF": ("PR.AA",),
+        "SOC2": ("CC6",),
+        "PCIDSS": ("7.2.1", "8.2.1"),
+    },
+}
 
-    label_pattern = re.compile(
-        r"(ISO(?:/IEC)?\s*27001|NIST\s*CSF(?:\s*2\.0)?|SOC\s*2|PCI\s*DSS(?:\s*(?:V)?4\.0(?:\.1)?)?)",
-        re.IGNORECASE,
-    )
-    matches = list(label_pattern.finditer(text_value))
+
+def cont_comp_expand_governance_control_pairs(pairs):
+    """
+    Ajusta códigos de mapeo al catálogo real de cada estándar.
+
+    Permite que una categoría como PR.AA, CC6 o REQ-8 se refleje aunque el
+    instrumento esté cargado con subcontroles (PR.AA-01, CC6.1, 8.2.1, etc.).
+    Si el catálogo no está inicializado, conserva el código original para que
+    la evidencia siga apareciendo en Cumplimiento Continuo.
+    """
+    expanded = []
+
+    for standard, raw_code in pairs:
+        standard = (standard or "").strip().upper()
+        code = cont_comp_normalize_code(raw_code)
+        if not standard or not code:
+            continue
+
+        catalog = CONT_COMP_STANDARD_CATALOG_CACHE.get(standard)
+        if catalog is None:
+            try:
+                catalog = cont_comp_build_standard_catalog(standard)
+            except Exception:
+                catalog = {}
+            CONT_COMP_STANDARD_CATALOG_CACHE[standard] = catalog
+
+        catalog_codes = list((catalog or {}).keys())
+        candidates = []
+
+        if code in catalog:
+            candidates = [code]
+
+        elif standard == "NISTCSF":
+            prefix = code.rstrip(".-")
+            candidates = [
+                item for item in catalog_codes
+                if item == prefix or item.startswith(prefix + "-") or item.startswith(prefix + ".")
+            ]
+
+        elif standard == "SOC2":
+            prefix = code.rstrip(".-")
+            candidates = [
+                item for item in catalog_codes
+                if item == prefix or item.startswith(prefix + ".") or item.startswith(prefix + "-")
+            ]
+
+        elif standard == "PCIDSS":
+            pci_code = code
+            if re.fullmatch(r"REQ-\d+", pci_code):
+                req_code = pci_code
+                candidates = [
+                    item for item in catalog_codes
+                    if cont_comp_parent_for_detail("PCIDSS", item) == req_code
+                ]
+            elif re.fullmatch(r"\d+", pci_code):
+                req_code = f"REQ-{pci_code}"
+                candidates = [
+                    item for item in catalog_codes
+                    if cont_comp_parent_for_detail("PCIDSS", item) == req_code
+                ]
+            else:
+                candidates = [
+                    item for item in catalog_codes
+                    if item == pci_code or item.startswith(pci_code + ".")
+                ]
+
+        elif standard == "ISO27001":
+            candidates = [
+                item for item in catalog_codes
+                if item == code or item.startswith(code + ".")
+            ]
+
+        if not candidates:
+            candidates = [code]
+
+        for candidate in candidates:
+            expanded.append((standard, cont_comp_normalize_code(candidate)))
+
+    clean = []
+    seen = set()
+    for pair in expanded:
+        if pair not in seen:
+            seen.add(pair)
+            clean.append(pair)
+    return clean
+
+
+def cont_comp_parse_control_mapping(mapping_text, finding_code=None, source=None):
+    """
+    Convierte el texto de mapeo de un hallazgo en pares estándar/control.
+
+    Para Gobierno de Active Directory complementa el texto con un mapeo
+    canónico por finding_code. Esto corrige registros históricos que solo
+    tenían ISO 27001 y garantiza mapeo contra NIST CSF, SOC 2 y PCI DSS.
+    """
+    text_value = str(mapping_text or "").strip()
     pairs = []
 
-    for index, match in enumerate(matches):
-        label = match.group(1).upper()
-        start = match.end()
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text_value)
-        body = text_value[start:end].strip(" ;,:|-\n\t")
+    if text_value:
+        label_pattern = re.compile(
+            r"(ISO(?:/IEC)?\s*27001|NIST\s*CSF(?:\s*2\.0)?|SOC\s*2|PCI\s*DSS(?:\s*(?:V)?4\.0(?:\.1)?)?)",
+            re.IGNORECASE,
+        )
+        matches = list(label_pattern.finditer(text_value))
 
-        if label.startswith("ISO"):
-            standard = "ISO27001"
-            codes = re.findall(r"A\.\d+(?:\.\d+)?", body, flags=re.IGNORECASE)
-        elif label.startswith("NIST"):
-            standard = "NISTCSF"
-            codes = re.findall(r"[A-Z]{2}\.[A-Z]{2}(?:-\d+)?", body, flags=re.IGNORECASE)
-        elif label.startswith("SOC"):
-            standard = "SOC2"
-            codes = re.findall(r"CC\d+(?:\.\d+)?", body, flags=re.IGNORECASE)
-        else:
-            standard = "PCIDSS"
-            codes = re.findall(r"\d+(?:\.\d+)*", body)
+        for index, match in enumerate(matches):
+            label = match.group(1).upper()
+            start = match.end()
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(text_value)
+            body = text_value[start:end].strip(" ;,:|-\n\t")
 
-        for code in codes:
-            normalized = cont_comp_normalize_code(code)
-            if normalized:
-                pairs.append((standard, normalized))
+            if label.startswith("ISO"):
+                standard = "ISO27001"
+                codes = re.findall(r"A\.\d+(?:\.\d+)?", body, flags=re.IGNORECASE)
+            elif label.startswith("NIST"):
+                standard = "NISTCSF"
+                codes = re.findall(r"[A-Z]{2}\.[A-Z]{2}(?:-\d+)?", body, flags=re.IGNORECASE)
+            elif label.startswith("SOC"):
+                standard = "SOC2"
+                codes = re.findall(r"CC\d+(?:\.\d+)?", body, flags=re.IGNORECASE)
+            else:
+                standard = "PCIDSS"
+                codes = re.findall(r"(?:REQ[-. ]?)?\d+(?:\.\d+)*", body, flags=re.IGNORECASE)
+
+            for code in codes:
+                normalized = cont_comp_normalize_code(code)
+                if normalized:
+                    pairs.append((standard, normalized))
+
+    if (source or "").strip() == "Gobierno de Active Directory":
+        canonical = CONT_COMP_AD_FINDING_FRAMEWORK_MAP.get(
+            str(finding_code or "").strip().upper(),
+            {},
+        )
+        for standard, codes in canonical.items():
+            for code in codes:
+                normalized = cont_comp_normalize_code(code)
+                if normalized:
+                    pairs.append((standard, normalized))
 
     clean = []
     seen = set()
@@ -190718,7 +190895,8 @@ def cont_comp_parse_control_mapping(mapping_text):
         if pair not in seen:
             seen.add(pair)
             clean.append(pair)
-    return clean
+
+    return cont_comp_expand_governance_control_pairs(clean)
 
 
 def cont_comp_governance_status(status, severity=None, active=True):
@@ -190758,7 +190936,11 @@ def cont_comp_upsert_governance_evidence(*, source, finding_id, finding_code, ti
                                           asset, severity, finding_status, active,
                                           evidence_date, raw_extra=None):
     desired_refs = set()
-    mapped_pairs = cont_comp_parse_control_mapping(control_mapping)
+    mapped_pairs = cont_comp_parse_control_mapping(
+        control_mapping,
+        finding_code=finding_code,
+        source=source,
+    )
     normalized_status = cont_comp_governance_status(finding_status, severity, active)
 
     for standard, control_code in mapped_pairs:
