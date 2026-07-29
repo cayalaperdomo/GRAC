@@ -184533,14 +184533,65 @@ def cumplimiento_continuo_firewall():
 
     {{ main_actions|safe }}
 
-    <div class="cc-card mt-3">
-      <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+    <style>
+      .fwgov-validation-details > summary {
+        list-style: none;
+        cursor: pointer;
+        user-select: none;
+      }
+      .fwgov-validation-details > summary::-webkit-details-marker { display: none; }
+      .fwgov-validation-summary {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .fwgov-validation-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 7px 12px;
+        border: 1px solid #2f6fb6;
+        border-radius: 10px;
+        color: #1d4f8f;
+        background: #fff;
+        font-size: .82rem;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+      .fwgov-validation-details[open] .fwgov-validation-toggle {
+        background: #eef5ff;
+      }
+      .fwgov-validation-details .fwgov-toggle-hide { display: none; }
+      .fwgov-validation-details[open] .fwgov-toggle-show { display: none; }
+      .fwgov-validation-details[open] .fwgov-toggle-hide { display: inline; }
+      .fwgov-validation-chevron { transition: transform .2s ease; }
+      .fwgov-validation-details[open] .fwgov-validation-chevron { transform: rotate(180deg); }
+      @media (max-width: 700px) {
+        .fwgov-validation-summary { align-items: flex-start; }
+        .fwgov-validation-summary-actions { width: 100%; justify-content: space-between; }
+      }
+    </style>
+
+    <details class="cc-card mt-3 fwgov-validation-details">
+      <summary class="fwgov-validation-summary" aria-label="Mostrar u ocultar validaciones de Gobierno de Firewall">
         <div>
           <h5 class="cc-section-title mb-1"><i class="bi bi-clipboard2-check me-1"></i> ¿Qué valida Gobierno de Firewall?</h5>
-          <div class="cc-muted">La evaluación analiza automáticamente 21 condiciones técnicas y de gobierno sobre las reglas sincronizadas. Cada hallazgo indica la regla afectada, el riesgo detectado, la recomendación y su mapeo con ISO 27001, NIST CSF y PCI DSS cuando corresponde.</div>
+          <div class="cc-muted">Haz clic para consultar los puntos técnicos y de gobierno evaluados.</div>
         </div>
-        <span class="badge rounded-pill text-bg-primary">21 validaciones automáticas</span>
-      </div>
+        <div class="d-flex flex-wrap align-items-center gap-2 fwgov-validation-summary-actions">
+          <span class="badge rounded-pill text-bg-primary">21 validaciones automáticas</span>
+          <span class="fwgov-validation-toggle">
+            <span class="fwgov-toggle-show">Ver puntos evaluados</span>
+            <span class="fwgov-toggle-hide">Ocultar puntos evaluados</span>
+            <i class="bi bi-chevron-down fwgov-validation-chevron"></i>
+          </span>
+        </div>
+      </summary>
+
+      <div class="pt-3 mt-3 border-top">
+        <div class="cc-muted mb-3">La evaluación analiza automáticamente 21 condiciones técnicas y de gobierno sobre las reglas sincronizadas. Cada hallazgo indica la regla afectada, el riesgo detectado, la recomendación y su mapeo con ISO 27001, NIST CSF y PCI DSS cuando corresponde.</div>
 
       <div class="row g-3 mt-1">
         <div class="col-xl-3 col-md-6">
@@ -184597,7 +184648,8 @@ def cumplimiento_continuo_firewall():
         </div>
       </div>
       <div class="fwgov-small mt-3"><i class="bi bi-info-circle me-1"></i> La validación se ejecuta sobre el inventario sincronizado del firewall. Los resultados dependen de los campos realmente entregados por el conector y de la calidad de la documentación de cada regla.</div>
-    </div>
+      </div>
+    </details>
 
     <div class="fwgov-kpi-grid">
       <div class="fwgov-kpi-card"><div class="fwgov-kpi-icon"><i class="bi bi-list-check"></i></div><div><div class="fwgov-kpi-number">{{ metrics.rules }}</div><div class="fwgov-kpi-label">Reglas sincronizadas</div></div></div>
@@ -191794,14 +191846,65 @@ def register_ad_governance(
         )
         body = render_template_string(
             """
-            <div class="adg-card">
-              <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+            <style>
+              .adg-validation-details > summary {
+                list-style: none;
+                cursor: pointer;
+                user-select: none;
+              }
+              .adg-validation-details > summary::-webkit-details-marker { display: none; }
+              .adg-validation-summary {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+              }
+              .adg-validation-toggle {
+                display: inline-flex;
+                align-items: center;
+                gap: 7px;
+                padding: 7px 12px;
+                border: 1px solid #2f6fb6;
+                border-radius: 10px;
+                color: #1d4f8f;
+                background: #fff;
+                font-size: .82rem;
+                font-weight: 700;
+                white-space: nowrap;
+              }
+              .adg-validation-details[open] .adg-validation-toggle {
+                background: #eef5ff;
+              }
+              .adg-validation-details .adg-toggle-hide { display: none; }
+              .adg-validation-details[open] .adg-toggle-show { display: none; }
+              .adg-validation-details[open] .adg-toggle-hide { display: inline; }
+              .adg-validation-chevron { transition: transform .2s ease; }
+              .adg-validation-details[open] .adg-validation-chevron { transform: rotate(180deg); }
+              @media (max-width: 700px) {
+                .adg-validation-summary { align-items: flex-start; }
+                .adg-validation-summary-actions { width: 100%; justify-content: space-between; }
+              }
+            </style>
+
+            <details class="adg-card adg-validation-details">
+              <summary class="adg-validation-summary" aria-label="Mostrar u ocultar validaciones de Gobierno de {{ platform_label }}">
                 <div>
                   <h5 class="mb-1"><i class="bi bi-clipboard2-check text-primary me-1"></i> ¿Qué valida Gobierno de {{ platform_label }}?</h5>
-                  <div class="adg-muted">El submódulo ejecuta 11 validaciones automáticas sobre cuentas, credenciales, privilegios, actividad y calidad de los datos de identidad. Los mismos criterios se aplican a Active Directory Samba y Active Directory Windows.</div>
+                  <div class="adg-muted">Haz clic para consultar los controles aplicados a cuentas, credenciales, privilegios y datos de identidad.</div>
                 </div>
-                <span class="adg-chip adg-chip-info">11 validaciones automáticas</span>
-              </div>
+                <div class="d-flex flex-wrap align-items-center gap-2 adg-validation-summary-actions">
+                  <span class="adg-chip adg-chip-info">11 validaciones automáticas</span>
+                  <span class="adg-validation-toggle">
+                    <span class="adg-toggle-show">Ver puntos evaluados</span>
+                    <span class="adg-toggle-hide">Ocultar puntos evaluados</span>
+                    <i class="bi bi-chevron-down adg-validation-chevron"></i>
+                  </span>
+                </div>
+              </summary>
+
+              <div class="pt-3 mt-3 border-top">
+                <div class="adg-muted mb-3">El submódulo ejecuta 11 validaciones automáticas sobre cuentas, credenciales, privilegios, actividad y calidad de los datos de identidad. Los mismos criterios se aplican a Active Directory Samba y Active Directory Windows.</div>
 
               <div class="row g-3 mt-1">
                 <div class="col-xl-3 col-md-6">
@@ -191850,7 +191953,8 @@ def register_ad_governance(
                 </div>
               </div>
               <div class="small text-muted mt-3"><i class="bi bi-info-circle me-1"></i> Los umbrales de inactividad y antigüedad de contraseña se toman de la configuración del conector seleccionado. Cada hallazgo incluye descripción, recomendación y mapeo con ISO 27001, NIST CSF, SOC 2 y PCI DSS cuando corresponde.</div>
-            </div>
+              </div>
+            </details>
 
             {% if not connectors %}
               <div class="adg-card text-center py-5">
