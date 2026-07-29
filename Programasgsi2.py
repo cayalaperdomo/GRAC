@@ -5840,7 +5840,7 @@ PCI_DSS_CONTROLES = [('1.1',
   'Este requisito aplica únicamente cuando la entidad evaluada es un proveedor de servicios.')]
 
 # Catálogo oficial utilizado en Gestión de Riesgos.
-# Fuente: archivo suministrado "NIST CSF V2.0 controls.xlsx" (106 controles).
+# Respaldo autocontenido de 106 subcategorías. En Cumplimiento Continuo, la fuente principal es static/templates/NIST.CSF 2.0.docx.
 NIST_CSF_20_CONTROLES = [('GV.OC-01',
   'Se comprende la misión de la organización y se informa sobre la gestión de riesgos de seguridad cibernética.'),
  ('GV.OC-02',
@@ -178395,6 +178395,25 @@ def cont_comp_sync_alerts(cfg):
     return count
 
 
+
+def cont_comp_classify_nist_reference(value):
+    """
+    Clasifica una etiqueta de cumplimiento Wazuh sin confundir NIST CSF 2.0
+    con NIST SP 800-53.
+    """
+    normalized = re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+    if "nist" not in normalized:
+        return None
+
+    if "80053" in normalized or "sp80053" in normalized:
+        return "NIST80053"
+
+    if "csf" in normalized or normalized in {"nist", "nist2", "nist20", "nistv20"}:
+        return "NISTCSF"
+
+    return None
+
+
 def cont_comp_sync_sca(cfg):
     agents = WazuhAgent.query.all()
     count = 0
@@ -178466,7 +178485,9 @@ def cont_comp_sync_sca(cfg):
                         elif "iso" in key:
                             standard = "ISO27001"
                         elif "nist" in key:
-                            standard = "NISTCSF"
+                            standard = cont_comp_classify_nist_reference(key)
+                            if standard != "NISTCSF":
+                                standard = None
 
                         control_codes = cont_comp_split_control_codes(value)
 
@@ -178481,7 +178502,9 @@ def cont_comp_sync_sca(cfg):
                         elif "iso" in text_lower:
                             standard = "ISO27001"
                         elif "nist" in text_lower:
-                            standard = "NISTCSF"
+                            standard = cont_comp_classify_nist_reference(text)
+                            if standard != "NISTCSF":
+                                standard = None
 
                         if ":" in text:
                             values = text.split(":", 1)[1]
@@ -178493,7 +178516,20 @@ def cont_comp_sync_sca(cfg):
                     if not standard or not control_codes:
                         continue
 
+                    resolved_control_codes = []
                     for control_code in control_codes:
+                        if standard == "NISTCSF":
+                            resolved_control_codes.extend(
+                                cont_comp_nist_csf_expand_codes(control_code)
+                            )
+                        else:
+                            resolved_control_codes.append(control_code)
+
+                    resolved_control_codes = list(dict.fromkeys(resolved_control_codes))
+                    if not resolved_control_codes:
+                        continue
+
+                    for control_code in resolved_control_codes:
                         alert_ref = f"SCA:{unique}:{standard}:{control_code}"
 
                         existing = WazuhComplianceControl.query.filter_by(
@@ -178506,7 +178542,7 @@ def cont_comp_sync_sca(cfg):
                             existing.status = status
                             existing.severity = severity
                             existing.rule_level = level
-                            existing.rule_description = row.title or "Resultado SCA Wazuh"
+                            existing.rule_description = row.title or None
                             existing.agent_id = ag.wazuh_id
                             existing.agent_name = ag.name
                             existing.raw_json = row.raw_json
@@ -178522,7 +178558,7 @@ def cont_comp_sync_sca(cfg):
                             agent_name=ag.name,
                             rule_id=f"SCA-{check_id}",
                             rule_level=level,
-                            rule_description=row.title or "Resultado SCA Wazuh",
+                            rule_description=row.title or None,
                             status=status,
                             severity=severity,
                             raw_json=row.raw_json,
@@ -178532,75 +178568,1612 @@ def cont_comp_sync_sca(cfg):
     db.session.commit()
     return count
 
+CONT_COMP_SUPPLEMENTAL_STANDARD_DESCRIPTIONS = {
+    # Respaldo mínimo para puntos que pueden no venir en las listas estáticas
+    # antiguas. El instrumento cargado en Mejora/Madurez siempre tiene prioridad.
+    "SOC2": {
+        "CC6.8": (
+            "La entidad implementa controles para prevenir o detectar y actuar ante "
+            "la introducción de software no autorizado o malicioso, con el fin de "
+            "cumplir los objetivos de la entidad."
+        ),
+    },
+}
+
+
+def cont_comp_first_text_attr(obj, *attribute_names):
+    """Obtiene el primer atributo textual existente sin asumir el esquema del modelo."""
+    for attribute_name in attribute_names:
+        try:
+            value = getattr(obj, attribute_name, None)
+        except Exception:
+            value = None
+        text_value = str(value or "").strip()
+        if text_value:
+            return text_value
+    return ""
+
+
+def cont_comp_extract_codes_from_instrument_text(standard, value):
+    """Extrae códigos normativos escritos dentro del instrumento cargado."""
+    standard = (standard or "").strip().upper()
+    text_value = str(value or "").upper()
+    if not text_value:
+        return []
+
+    if standard == "ISO27001":
+        patterns = [
+            r"\bA\.\d+(?:\.\d+)?\b",
+            r"\b(?:4|5|6|7|8|9|10)\.\d+(?:\.\d+)*\b",
+        ]
+    elif standard == "NISTCSF":
+        patterns = [r"\b[A-Z]{2}\.[A-Z]{2}(?:-\d{1,2})?\b"]
+    elif standard == "SOC2":
+        patterns = [r"\b(?:CC|A|C|PI|P)\d+(?:\.\d+)+\b"]
+    elif standard == "PCIDSS":
+        patterns = [r"\b(?:A[12]|\d{1,2})(?:\.\d+)+\b"]
+    else:
+        patterns = []
+
+    found = []
+    seen = set()
+    for pattern in patterns:
+        for raw_code in re.findall(pattern, text_value, flags=re.IGNORECASE):
+            code = cont_comp_normalize_code(raw_code)
+            if code and code not in seen:
+                seen.add(code)
+                found.append(code)
+    return found
+
+
+def cont_comp_code_is_valid_for_standard(standard, value):
+    standard = (standard or "").strip().upper()
+    code = cont_comp_normalize_code(value)
+    if not code:
+        return False
+
+    if standard == "ISO27001":
+        if code.startswith("A."):
+            return cont_comp_iso27002_resolve_code(code) is not None
+        return bool(re.fullmatch(r"(?:4|5|6|7|8|9|10)\.\d+(?:\.\d+)*", code))
+
+    if standard == "NISTCSF":
+        return cont_comp_nist_csf_resolve_code(code) is not None
+
+    patterns = {
+        "SOC2": r"^(?:CC|A|C|PI|P)\d+(?:\.\d+)+$",
+        "PCIDSS": r"^(?:A[12]|\d{1,2})(?:\.\d+)+$",
+    }
+    return bool(re.fullmatch(patterns.get(standard, r"$^"), code, flags=re.IGNORECASE))
+
+
+def cont_comp_strip_code_from_description(description, code):
+    text_value = str(description or "").strip()
+    code_value = str(code or "").strip()
+    if not text_value or not code_value:
+        return text_value
+
+    cleaned = re.sub(
+        rf"^\s*{re.escape(code_value)}\s*(?:[-–—:;.]\s*)?",
+        "",
+        text_value,
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip()
+    return cleaned or text_value
+
+
+
+
+# ============================================================
+# CUMPLIMIENTO CONTINUO - ISO 27002 DESDE EXCEL + TEXTOS EN ESPAÑOL
+# ============================================================
+CONT_COMP_ISO27002_XLSX_CACHE = {
+    "path": None,
+    "mtime": None,
+    "entries": [],
+}
+
+
+def cont_comp_normalizar_nombre_archivo(value):
+    text_value = unicodedata.normalize("NFKD", str(value or ""))
+    text_value = "".join(ch for ch in text_value if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", " ", text_value.lower()).strip()
+
+
+
+# ============================================================
+# CUMPLIMIENTO CONTINUO - NIST CSF 2.0 DESDE DOCUMENTO OFICIAL
+# ============================================================
+CONT_COMP_NIST_CSF_DOCX_CACHE = {
+    "path": None,
+    "mtime": None,
+    "entries": [],
+    "functions": {},
+    "categories": {},
+}
+
+CONT_COMP_NIST_CSF_EXPECTED_SUBCATEGORIES = 106
+CONT_COMP_NIST_CSF_EXPECTED_FUNCTIONS = ("GV", "ID", "PR", "DE", "RS", "RC")
+
+
+def cont_comp_nist_csf_docx_path():
+    """
+    Localiza el documento oficial utilizado por Cumplimiento Continuo:
+
+        static/templates/NIST.CSF 2.0.docx
+
+    Se toleran variaciones menores de espacios, puntos, guiones y mayúsculas.
+    """
+    folders = []
+    for folder in (
+        os.path.join(BASE_DIR, "static", "templates"),
+        os.path.join(getattr(app, "root_path", BASE_DIR), "static", "templates"),
+    ):
+        folder = os.path.abspath(folder)
+        if folder not in folders:
+            folders.append(folder)
+
+    preferred_names = (
+        "NIST.CSF 2.0.docx",
+        "NIST CSF 2.0.docx",
+        "NIST_CSF_2.0.docx",
+        "NIST-CSF-2.0.docx",
+        "nist.csf 2.0.docx",
+    )
+
+    for folder in folders:
+        for filename in preferred_names:
+            path = os.path.join(folder, filename)
+            if os.path.isfile(path):
+                return path
+
+    for folder in folders:
+        if not os.path.isdir(folder):
+            continue
+        try:
+            filenames = os.listdir(folder)
+        except Exception:
+            continue
+
+        for filename in filenames:
+            if not filename.lower().endswith(".docx"):
+                continue
+            normalized = cont_comp_normalizar_nombre_archivo(filename)
+            words = set(normalized.split())
+            if "nist" in words and "csf" in words and "2" in words and "0" in words:
+                return os.path.join(folder, filename)
+
+    return None
+
+
+def cont_comp_nist_csf_entries_from_docx(force_reload=False):
+    """
+    Lee las funciones, categorías y 106 subcategorías del documento
+    ``static/templates/NIST.CSF 2.0.docx``.
+
+    La matriz utiliza únicamente las subcategorías XX.XX-00 presentes en ese
+    documento. No se aceptan controles de NIST SP 800-53, como AC-11.
+    """
+    path = cont_comp_nist_csf_docx_path()
+    if not path:
+        return []
+
+    try:
+        mtime = os.path.getmtime(path)
+    except Exception:
+        mtime = None
+
+    if (
+        not force_reload
+        and CONT_COMP_NIST_CSF_DOCX_CACHE.get("path") == path
+        and CONT_COMP_NIST_CSF_DOCX_CACHE.get("mtime") == mtime
+    ):
+        return list(CONT_COMP_NIST_CSF_DOCX_CACHE.get("entries") or [])
+
+    functions = {}
+    categories = {}
+    entries = []
+
+    try:
+        document = Document(path)
+
+        for paragraph in document.paragraphs:
+            text_value = re.sub(
+                r"\s+",
+                " ",
+                str(paragraph.text or "").replace("\ufeff", " "),
+            ).strip()
+            if not text_value:
+                continue
+
+            function_match = re.match(
+                r"^(.+?)\s+\(([A-Z]{2})\)\s*:\s*(.+)$",
+                text_value,
+                flags=re.IGNORECASE,
+            )
+            if function_match:
+                function_code = function_match.group(2).upper()
+                if function_code in CONT_COMP_NIST_CSF_EXPECTED_FUNCTIONS:
+                    functions[function_code] = {
+                        "code": function_code,
+                        "name": function_match.group(1).strip(),
+                        "description": function_match.group(3).strip(),
+                    }
+                continue
+
+            category_match = re.match(
+                r"^(.+?)\s+\(([A-Z]{2}\.[A-Z]{2})\)\s*:\s*(.+)$",
+                text_value,
+                flags=re.IGNORECASE,
+            )
+            if category_match:
+                category_code = category_match.group(2).upper()
+                categories[category_code] = {
+                    "code": category_code,
+                    "name": category_match.group(1).strip(),
+                    "description": category_match.group(3).strip(),
+                    "function_code": category_code.split(".", 1)[0],
+                }
+                continue
+
+            detail_match = re.match(
+                r"^([A-Z]{2}\.[A-Z]{2}-\d{2})\s*:\s*(.+)$",
+                text_value,
+                flags=re.IGNORECASE,
+            )
+            if not detail_match:
+                continue
+
+            code = detail_match.group(1).upper()
+            description = detail_match.group(2).strip()
+            parent = code.split("-", 1)[0]
+            function_code = code.split(".", 1)[0]
+            category_info = categories.get(parent, {})
+            function_info = functions.get(function_code, {})
+
+            entries.append({
+                "code": code,
+                "name": description,
+                "description": description,
+                "parent": parent,
+                "category_code": parent,
+                "category_name": category_info.get("name") or parent,
+                "category_description": category_info.get("description") or "",
+                "function_code": function_code,
+                "function_name": function_info.get("name") or function_code,
+                "function_description": function_info.get("description") or "",
+                "source": "NIST_CSF_20_DOCX",
+                "path": path,
+            })
+
+    except Exception as exc:
+        print(
+            "No se pudo leer static/templates/NIST.CSF 2.0.docx "
+            f"para Cumplimiento Continuo: {repr(exc)}"
+        )
+        return []
+
+    codes = [entry["code"] for entry in entries]
+    expected_functions = set(CONT_COMP_NIST_CSF_EXPECTED_FUNCTIONS)
+
+    if len(entries) != CONT_COMP_NIST_CSF_EXPECTED_SUBCATEGORIES:
+        print(
+            "El documento NIST CSF 2.0 no contiene las 106 subcategorías "
+            f"esperadas. Se encontraron {len(entries)}."
+        )
+        return []
+
+    if len(codes) != len(set(codes)):
+        print("El documento NIST CSF 2.0 contiene códigos duplicados.")
+        return []
+
+    if set(functions) != expected_functions:
+        print(
+            "El documento NIST CSF 2.0 no contiene exactamente las funciones "
+            "GV, ID, PR, DE, RS y RC."
+        )
+        return []
+
+    if len(categories) != 22:
+        print(
+            "El documento NIST CSF 2.0 no contiene las 22 categorías "
+            f"esperadas. Se encontraron {len(categories)}."
+        )
+        return []
+
+    for entry in entries:
+        if entry["parent"] not in categories:
+            print(
+                "El documento NIST CSF 2.0 contiene una subcategoría sin "
+                f"categoría reconocida: {entry['code']}."
+            )
+            return []
+
+    CONT_COMP_NIST_CSF_DOCX_CACHE.update({
+        "path": path,
+        "mtime": mtime,
+        "entries": list(entries),
+        "functions": dict(functions),
+        "categories": dict(categories),
+    })
+    return entries
+
+
+def cont_comp_nist_csf_official_catalog():
+    """
+    Devuelve las 106 subcategorías oficiales de NIST CSF 2.0.
+
+    Cuando el DOCX está disponible, sus códigos y descripciones tienen
+    prioridad absoluta. La lista incorporada solo se usa como respaldo si el
+    archivo no está instalado.
+    """
+    document_entries = cont_comp_nist_csf_entries_from_docx()
+    if document_entries:
+        return {entry["code"]: entry for entry in document_entries}
+
+    fallback = {}
+    for raw_code, normative_description in NIST_CSF_20_CONTROLES:
+        code = cont_comp_normalize_code(raw_code)
+        if not re.fullmatch(r"[A-Z]{2}\.[A-Z]{2}-\d{2}", code or ""):
+            continue
+        fallback[code] = {
+            "code": code,
+            "name": str(normative_description or "").strip() or code,
+            "description": str(normative_description or "").strip() or code,
+            "parent": code.split("-", 1)[0],
+            "category_code": code.split("-", 1)[0],
+            "function_code": code.split(".", 1)[0],
+            "source": "CATALOGO_NIST_CSF_20_INCORPORADO",
+            "path": None,
+        }
+    return fallback
+
+
+def cont_comp_nist_csf_canonical_subcategory(value):
+    """Normaliza una subcategoría NIST CSF y confirma que exista en el DOCX."""
+    raw = str(value or "").strip().upper()
+    if not raw:
+        return None
+
+    raw = raw.replace("_", ".")
+    raw = re.sub(r"\s+", "", raw)
+
+    match = re.fullmatch(
+        r"([A-Z]{2})[.\-]([A-Z]{2})[.\-](\d{1,2})",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    code = f"{match.group(1).upper()}.{match.group(2).upper()}-{int(match.group(3)):02d}"
+    return code if code in cont_comp_nist_csf_official_catalog() else None
+
+
+def cont_comp_nist_csf_expand_codes(value):
+    """
+    Convierte una referencia NIST CSF en subcategorías válidas del documento.
+
+    - PR.AA-01 -> PR.AA-01.
+    - PR.AA    -> todas las subcategorías PR.AA-01 ... PR.AA-06.
+    - PR       -> todas las subcategorías de PROTEGER.
+    - AC-11    -> ninguna, porque corresponde a NIST SP 800-53 y no a CSF 2.0.
+    """
+    official = cont_comp_nist_csf_official_catalog()
+    raw = str(value or "").strip().upper()
+    if not raw:
+        return []
+
+    exact = cont_comp_nist_csf_canonical_subcategory(raw)
+    if exact:
+        return [exact]
+
+    compact = re.sub(r"\s+", "", raw.replace("_", "."))
+
+    category_match = re.fullmatch(
+        r"([A-Z]{2})[.\-]([A-Z]{2})",
+        compact,
+        flags=re.IGNORECASE,
+    )
+    if category_match:
+        prefix = f"{category_match.group(1).upper()}.{category_match.group(2).upper()}"
+        return [
+            code for code in official
+            if code.startswith(prefix + "-")
+        ]
+
+    function_match = re.fullmatch(r"([A-Z]{2})", compact, flags=re.IGNORECASE)
+    if function_match:
+        prefix = function_match.group(1).upper() + "."
+        return [code for code in official if code.startswith(prefix)]
+
+    return []
+
+
+def cont_comp_nist_csf_resolve_code(value):
+    """Devuelve solo una subcategoría exacta válida de NIST CSF 2.0."""
+    return cont_comp_nist_csf_canonical_subcategory(value)
+
+
+def cont_comp_iso27002_xlsx_path():
+    """Localiza static/templates/anexo A 27002.xlsx sin depender de mayúsculas o tildes."""
+    folders = []
+    for folder in (
+        os.path.join(BASE_DIR, "static", "templates"),
+        os.path.join(getattr(app, "root_path", BASE_DIR), "static", "templates"),
+    ):
+        folder = os.path.abspath(folder)
+        if folder not in folders:
+            folders.append(folder)
+
+    preferred_names = (
+        "anexo A 27002.xlsx",
+        "Anexo A 27002.xlsx",
+        "ANEXO A 27002.xlsx",
+        "anexo_a_27002.xlsx",
+        "anexo-a-27002.xlsx",
+    )
+
+    for folder in folders:
+        for filename in preferred_names:
+            path = os.path.join(folder, filename)
+            if os.path.isfile(path):
+                return path
+
+    # Respaldo tolerante a variaciones menores del nombre.
+    for folder in folders:
+        if not os.path.isdir(folder):
+            continue
+        try:
+            filenames = os.listdir(folder)
+        except Exception:
+            continue
+        for filename in filenames:
+            if not filename.lower().endswith(".xlsx"):
+                continue
+            normalized = cont_comp_normalizar_nombre_archivo(filename)
+            words = set(normalized.split())
+            if "anexo" in words and "27002" in words:
+                return os.path.join(folder, filename)
+    return None
+
+
+def cont_comp_iso27002_control_code(value):
+    text_value = str(value or "").replace("\ufeff", " ").strip().upper()
+    if not text_value:
+        return None
+
+    match = re.search(
+        r"(?<!\d)(?:A\s*[.\-]?\s*)?([5-8])\s*[.\-]\s*(\d{1,2})(?!\d)",
+        text_value,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return f"A.{int(match.group(1))}.{int(match.group(2))}"
+
+
+def cont_comp_limpiar_texto_excel_iso(value, code=None):
+    text_value = str(value or "").replace("\ufeff", " ").replace("\r", "\n").strip()
+    if not text_value or text_value.lower() in {"nan", "none", "null"}:
+        return ""
+
+    text_value = re.sub(r"[ \t]+", " ", text_value)
+    text_value = re.sub(r"\n\s*\n+", "\n", text_value).strip()
+
+    if code:
+        raw = code.replace("A.", "")
+        text_value = re.sub(
+            rf"^\s*(?:A\s*[.\-]?\s*)?{re.escape(raw)}\s*(?:[-–—:;.]+\s*)?",
+            "",
+            text_value,
+            count=1,
+            flags=re.IGNORECASE,
+        ).strip()
+
+    normalized = cont_comp_normalizar_nombre_archivo(text_value)
+    ignored_exact = {
+        "codigo", "código", "control", "controles", "numero", "número", "no",
+        "descripcion", "descripción", "descripcion del control", "descripción del control",
+        "nombre", "nombre del control", "titulo", "título", "tema", "dominio",
+        "si", "sí", "no aplica", "parcialmente", "parcial", "comentarios", "comentario",
+        "estado", "resultado", "cumple", "no cumple", "evidencia", "observaciones",
+    }
+    if normalized in {cont_comp_normalizar_nombre_archivo(x) for x in ignored_exact}:
+        return ""
+
+    # No convertir preguntas del instrumento de madurez en texto normativo.
+    if text_value.lstrip().startswith("¿"):
+        return ""
+
+    # Encabezados de familias: 5. Controles organizacionales, etc.
+    if re.fullmatch(r"[5-8]\s*[.]?\s+.+", text_value, flags=re.IGNORECASE):
+        return ""
+
+    ignored_prefixes = (
+        "tipo de control", "atributos", "propiedades", "conceptos de seguridad",
+        "capacidades operativas", "dominios de seguridad", "propósito del control",
+        "orientación", "guía de implementación", "otra información",
+    )
+    if any(normalized.startswith(cont_comp_normalizar_nombre_archivo(prefix)) for prefix in ignored_prefixes):
+        return ""
+
+    return text_value.strip()
+
+
+
+CONT_COMP_ISO27002_FAMILY_COUNTS = {
+    5: 37,  # Controles organizacionales
+    6: 8,   # Controles de personas
+    7: 14,  # Controles físicos
+    8: 34,  # Controles tecnológicos
+}
+
+# Equivalencias únicamente para evidencias históricas que todavía conservan
+# numeración del Anexo A de ISO/IEC 27001:2013. La matriz nunca presenta estos
+# códigos antiguos: los traduce a un control válido de ISO/IEC 27002:2022.
+CONT_COMP_ISO27002_LEGACY_TO_2022 = {
+    "A.5.1.1": "A.5.1",
+    "A.6.1.1": "A.5.2",
+    "A.6.1.2": "A.5.3",
+    "A.6.2.1": "A.6.7",
+    "A.7.1.1": "A.6.1",
+    "A.7.1.2": "A.6.2",
+    "A.7.2.1": "A.6.3",
+    "A.7.2.2": "A.6.4",
+    "A.7.2.3": "A.6.5",
+    "A.8.1.1": "A.5.9",
+    "A.8.1.2": "A.5.9",
+    "A.8.1.3": "A.5.10",
+    "A.8.1.4": "A.5.11",
+    "A.8.2.1": "A.5.12",
+    "A.8.2.2": "A.5.13",
+    "A.8.2.3": "A.5.14",
+    "A.9.1.1": "A.5.15",
+    "A.9.1.2": "A.5.15",
+    "A.9.2.1": "A.5.16",
+    "A.9.2.2": "A.5.18",
+    "A.9.2.3": "A.5.18",
+    "A.9.2.4": "A.5.18",
+    "A.9.2.5": "A.5.18",
+    "A.9.2.6": "A.5.18",
+    "A.9.3.1": "A.5.17",
+    "A.9.4.1": "A.8.3",
+    "A.9.4.2": "A.8.5",
+    "A.9.4.3": "A.8.5",
+    "A.9.4.4": "A.8.5",
+    "A.9.4.5": "A.8.4",
+    "A.10.1.1": "A.8.24",
+    "A.10.1.2": "A.8.24",
+    "A.11.1.1": "A.7.1",
+    "A.11.1.2": "A.7.2",
+    "A.11.1.3": "A.7.3",
+    "A.11.1.4": "A.7.4",
+    "A.11.1.5": "A.7.5",
+    "A.11.1.6": "A.7.6",
+    "A.11.2.1": "A.7.8",
+    "A.11.2.2": "A.7.9",
+    "A.11.2.3": "A.7.9",
+    "A.11.2.4": "A.7.13",
+    "A.11.2.5": "A.7.9",
+    "A.11.2.6": "A.7.10",
+    "A.11.2.7": "A.7.7",
+    "A.11.2.8": "A.7.11",
+    "A.11.2.9": "A.7.14",
+    "A.12.1.1": "A.5.37",
+    "A.12.1.2": "A.8.32",
+    "A.12.1.3": "A.8.6",
+    "A.12.1.4": "A.8.31",
+    "A.12.2.1": "A.8.7",
+    "A.12.3.1": "A.8.13",
+    "A.12.4.1": "A.8.15",
+    "A.12.4.2": "A.8.15",
+    "A.12.4.3": "A.8.15",
+    "A.12.4.4": "A.8.17",
+    "A.12.5.1": "A.8.19",
+    "A.12.6.1": "A.8.8",
+    "A.12.6.2": "A.8.19",
+    "A.12.7.1": "A.8.34",
+    "A.13.1.1": "A.8.20",
+    "A.13.1.2": "A.8.22",
+    "A.13.1.3": "A.8.21",
+    "A.13.2.1": "A.5.14",
+    "A.13.2.2": "A.5.14",
+    "A.13.2.3": "A.5.14",
+    "A.13.2.4": "A.5.14",
+    "A.14.1.1": "A.8.26",
+    "A.14.1.2": "A.8.26",
+    "A.14.1.3": "A.8.24",
+    "A.14.2.1": "A.8.25",
+    "A.14.2.2": "A.8.32",
+    "A.14.2.3": "A.8.32",
+    "A.14.2.4": "A.8.28",
+    "A.14.2.5": "A.8.27",
+    "A.14.2.6": "A.8.29",
+    "A.14.2.7": "A.8.29",
+    "A.14.2.8": "A.8.29",
+    "A.14.2.9": "A.8.30",
+    "A.14.3.1": "A.8.33",
+    "A.15.1.1": "A.5.19",
+    "A.15.1.2": "A.5.20",
+    "A.15.1.3": "A.5.21",
+    "A.15.2.1": "A.5.22",
+    "A.15.2.2": "A.5.22",
+    "A.16.1.1": "A.5.24",
+    "A.16.1.2": "A.6.8",
+    "A.16.1.3": "A.6.8",
+    "A.16.1.4": "A.5.25",
+    "A.16.1.5": "A.5.26",
+    "A.16.1.6": "A.5.27",
+    "A.16.1.7": "A.5.28",
+    "A.17.1.1": "A.5.29",
+    "A.17.1.2": "A.5.30",
+    "A.17.1.3": "A.5.29",
+    "A.17.2.1": "A.8.14",
+    "A.18.1.1": "A.5.31",
+    "A.18.1.2": "A.5.32",
+    "A.18.1.3": "A.5.33",
+    "A.18.1.4": "A.5.34",
+    "A.18.1.5": "A.5.31",
+    "A.18.2.1": "A.5.35",
+    "A.18.2.2": "A.5.36",
+    "A.18.2.3": "A.5.36",
+}
+
+
+def cont_comp_iso27002_entries_from_xlsx(force_reload=False):
+    """
+    Lee exclusivamente los 93 controles oficiales del archivo:
+        static/templates/anexo A 27002.xlsx
+
+    El archivo suministrado guarda algunos códigos como números de Excel. Por
+    eso 5.10 puede recibirse como 5.1, 5.20 como 5.2 y 8.30 como 8.3. Para no
+    inventar controles, el código se reconstruye por la secuencia oficial de
+    cada familia: A.5.1-A.5.37, A.6.1-A.6.8, A.7.1-A.7.14 y A.8.1-A.8.34.
+    """
+    path = cont_comp_iso27002_xlsx_path()
+    if not path:
+        return []
+
+    try:
+        mtime = os.path.getmtime(path)
+    except Exception:
+        mtime = None
+
+    if (
+        not force_reload
+        and CONT_COMP_ISO27002_XLSX_CACHE.get("path") == path
+        and CONT_COMP_ISO27002_XLSX_CACHE.get("mtime") == mtime
+    ):
+        return list(CONT_COMP_ISO27002_XLSX_CACHE.get("entries") or [])
+
+    entries = []
+    family_counts = {family: 0 for family in CONT_COMP_ISO27002_FAMILY_COUNTS}
+
+    def clean(value):
+        text_value = str(value or "").replace("\ufeff", " ").replace("\r", "\n").strip()
+        if not text_value or text_value.lower() in {"nan", "none", "null"}:
+            return ""
+        text_value = re.sub(r"[ \t]+", " ", text_value)
+        return re.sub(r"\n\s*\n+", "\n", text_value).strip()
+
+    def family_from_value(value):
+        if value is None:
+            return None
+        try:
+            number = float(value)
+            if number.is_integer() and int(number) in CONT_COMP_ISO27002_FAMILY_COUNTS:
+                return int(number)
+        except Exception:
+            pass
+        text_value = clean(value)
+        match = re.fullmatch(r"([5-8])(?:\.0+)?", text_value)
+        return int(match.group(1)) if match else None
+
+    try:
+        workbook = load_workbook(path, data_only=True, read_only=True)
+        try:
+            for worksheet in workbook.worksheets:
+                rows = list(worksheet.iter_rows(values_only=True))
+                current_family = None
+                sequence = 0
+                row_index = 0
+
+                while row_index < len(rows):
+                    row = list(rows[row_index] or ())
+                    while len(row) < 4:
+                        row.append(None)
+
+                    code_cell = row[1]
+                    title = clean(row[2])
+                    marker = clean(row[3])
+                    family = family_from_value(code_cell)
+
+                    # Encabezados reales del archivo: 5/6/7/8 y nombre de familia.
+                    if (
+                        family
+                        and title
+                        and marker.lower() != "control"
+                        and not re.search(r"\.\d+", clean(code_cell))
+                    ):
+                        current_family = family
+                        sequence = 0
+                        row_index += 1
+                        continue
+
+                    is_control = bool(
+                        current_family
+                        and title
+                        and marker.lower() == "control"
+                    )
+                    if not is_control:
+                        row_index += 1
+                        continue
+
+                    sequence += 1
+                    expected = CONT_COMP_ISO27002_FAMILY_COUNTS[current_family]
+                    if sequence > expected:
+                        raise ValueError(
+                            f"La familia {current_family} contiene más de {expected} controles."
+                        )
+
+                    code = f"A.{current_family}.{sequence}"
+                    description_parts = []
+                    next_index = row_index + 1
+
+                    while next_index < len(rows):
+                        next_row = list(rows[next_index] or ())
+                        while len(next_row) < 4:
+                            next_row.append(None)
+
+                        next_family = family_from_value(next_row[1])
+                        next_title = clean(next_row[2])
+                        next_marker = clean(next_row[3])
+
+                        if (
+                            next_family
+                            and next_title
+                            and next_marker.lower() != "control"
+                            and not re.search(r"\.\d+", clean(next_row[1]))
+                        ):
+                            break
+                        if next_title and next_marker.lower() == "control":
+                            break
+
+                        normative_text = clean(next_row[3])
+                        if normative_text and normative_text.lower() != "control":
+                            if normative_text not in description_parts:
+                                description_parts.append(normative_text)
+                        next_index += 1
+
+                    normative_body = "\n".join(description_parts).strip()
+                    if not normative_body:
+                        raise ValueError(f"El control {code} no tiene descripción en el archivo.")
+
+                    entries.append({
+                        "code": code,
+                        "name": title,
+                        "description": f"{title}\n{normative_body}",
+                        "parent": code,
+                        "source": "ANEXO_A_27002_XLSX",
+                        "path": path,
+                    })
+                    family_counts[current_family] += 1
+                    row_index = next_index
+        finally:
+            try:
+                workbook.close()
+            except Exception:
+                pass
+
+    except Exception as exc:
+        print(f"No se pudo leer el archivo ISO 27002 {path}: {repr(exc)}")
+        return []
+
+    expected_total = sum(CONT_COMP_ISO27002_FAMILY_COUNTS.values())
+    if len(entries) != expected_total or family_counts != CONT_COMP_ISO27002_FAMILY_COUNTS:
+        print(
+            "El archivo ISO 27002 no coincide con el Anexo A 2022 esperado. "
+            f"Controles leídos: {len(entries)}; familias: {family_counts}."
+        )
+        return []
+
+    codes = [entry["code"] for entry in entries]
+    if len(codes) != len(set(codes)):
+        print("El archivo ISO 27002 contiene códigos duplicados después de normalizar.")
+        return []
+
+    CONT_COMP_ISO27002_XLSX_CACHE.update({
+        "path": path,
+        "mtime": mtime,
+        "entries": list(entries),
+    })
+    return entries
+
+
+def cont_comp_iso27002_official_catalog():
+    """Devuelve el catálogo oficial 2022, prefiriendo siempre el Excel suministrado."""
+    excel_entries = cont_comp_iso27002_entries_from_xlsx()
+    if excel_entries:
+        return {entry["code"]: entry for entry in excel_entries}
+
+    # Respaldo autocontenido: también corresponde a los 93 controles de 2022.
+    fallback = {}
+    for raw_code, normative_description in ISO_27002_CONTROLES:
+        raw_code = str(raw_code or "").strip()
+        code = raw_code if raw_code.upper().startswith("A.") else f"A.{raw_code}"
+        code = cont_comp_normalize_code(code)
+        if not re.fullmatch(r"A\.[5-8]\.\d{1,2}", code or ""):
+            continue
+        lines = [line.strip() for line in str(normative_description or "").splitlines() if line.strip()]
+        name = lines[1] if len(lines) >= 2 else (lines[0] if lines else code)
+        fallback[code] = {
+            "code": code,
+            "name": name,
+            "description": str(normative_description or "").strip(),
+            "parent": code,
+            "source": "CATALOGO_ISO27002_2022_INCORPORADO",
+            "path": None,
+        }
+    return fallback
+
+
+def cont_comp_iso27002_resolve_code(value):
+    """
+    Devuelve únicamente un control válido del Anexo A 2022.
+
+    - Mantiene códigos oficiales A.5.x, A.6.x, A.7.x y A.8.x.
+    - Traduce códigos históricos 2013 cuando existe una equivalencia definida.
+    - Devuelve None para puntos inexistentes, evitando que la matriz los cree.
+    """
+    code = cont_comp_normalize_code(value)
+    if not code or not code.startswith("A."):
+        return code or None
+
+    official = cont_comp_iso27002_official_catalog()
+    if code in official:
+        return code
+
+    mapped = CONT_COMP_ISO27002_LEGACY_TO_2022.get(code)
+    if mapped and mapped in official:
+        return mapped
+
+    return None
+
+
+def cont_comp_resolve_evidence_code(standard, value, catalog=None):
+    """Normaliza el punto de una evidencia antes de incorporarlo a una matriz."""
+    standard = (standard or "").strip().upper()
+    code = cont_comp_normalize_code(value)
+    if not code:
+        return None
+
+    if standard == "NISTCSF":
+        return cont_comp_nist_csf_resolve_code(code)
+
+    if standard != "ISO27001":
+        return code
+
+    if code.startswith("A."):
+        return cont_comp_iso27002_resolve_code(code)
+
+    # Los capítulos 4-10 solo se admiten cuando existen en el instrumento.
+    catalog = catalog or {}
+    return code if code in catalog else None
+
+
+
+CONT_COMP_EVIDENCE_TRANSLATIONS = (
+    (r"\bfile integrity monitoring\b", "monitoreo de integridad de archivos"),
+    (r"\bintegrity monitoring\b", "monitoreo de integridad"),
+    (r"\bsecurity configuration assessment\b", "evaluación de configuración de seguridad"),
+    (r"\bconfiguration assessment\b", "evaluación de configuración"),
+    (r"\bvulnerability detection\b", "detección de vulnerabilidades"),
+    (r"\bvulnerability\b", "vulnerabilidad"),
+    (r"\bvulnerabilities\b", "vulnerabilidades"),
+    (r"\bmalicious software\b", "software malicioso"),
+    (r"\bmalware\b", "software malicioso"),
+    (r"\bunauthorized software\b", "software no autorizado"),
+    (r"\bunauthorized access\b", "acceso no autorizado"),
+    (r"\baccess control\b", "control de acceso"),
+    (r"\buser account\b", "cuenta de usuario"),
+    (r"\buser accounts\b", "cuentas de usuario"),
+    (r"\bservice account\b", "cuenta de servicio"),
+    (r"\bprivileged account\b", "cuenta privilegiada"),
+    (r"\bpassword policy\b", "política de contraseñas"),
+    (r"\bpassword complexity\b", "complejidad de contraseña"),
+    (r"\bminimum password length\b", "longitud mínima de contraseña"),
+    (r"\bpassword expiration\b", "vencimiento de contraseña"),
+    (r"\bpassword age\b", "antigüedad de contraseña"),
+    (r"\bauthentication failure\b", "fallo de autenticación"),
+    (r"\bauthentication\b", "autenticación"),
+    (r"\bauthorization\b", "autorización"),
+    (r"\bmulti-factor authentication\b", "autenticación multifactor"),
+    (r"\bmfa\b", "MFA"),
+    (r"\baudit policy\b", "política de auditoría"),
+    (r"\baudit log\b", "registro de auditoría"),
+    (r"\baudit logs\b", "registros de auditoría"),
+    (r"\blogging\b", "registro de eventos"),
+    (r"\bsecurity event\b", "evento de seguridad"),
+    (r"\bsecurity events\b", "eventos de seguridad"),
+    (r"\bfailed login\b", "inicio de sesión fallido"),
+    (r"\bfailed logins\b", "inicios de sesión fallidos"),
+    (r"\blogin attempt\b", "intento de inicio de sesión"),
+    (r"\blogin attempts\b", "intentos de inicio de sesión"),
+    (r"\baccount lockout\b", "bloqueo de cuenta"),
+    (r"\blocked account\b", "cuenta bloqueada"),
+    (r"\bdisabled account\b", "cuenta deshabilitada"),
+    (r"\binactive account\b", "cuenta inactiva"),
+    (r"\bstale account\b", "cuenta sin uso reciente"),
+    (r"\bgroup membership\b", "pertenencia a grupos"),
+    (r"\badministrators group\b", "grupo de administradores"),
+    (r"\bremote access\b", "acceso remoto"),
+    (r"\bnetwork connection\b", "conexión de red"),
+    (r"\bnetwork connections\b", "conexiones de red"),
+    (r"\bfirewall rule\b", "regla de firewall"),
+    (r"\bfirewall rules\b", "reglas de firewall"),
+    (r"\binbound traffic\b", "tráfico entrante"),
+    (r"\boutbound traffic\b", "tráfico saliente"),
+    (r"\boperating system\b", "sistema operativo"),
+    (r"\bsecurity update\b", "actualización de seguridad"),
+    (r"\bsecurity updates\b", "actualizaciones de seguridad"),
+    (r"\bsoftware update\b", "actualización de software"),
+    (r"\bpatch management\b", "gestión de parches"),
+    (r"\bconfiguration change\b", "cambio de configuración"),
+    (r"\bconfiguration changes\b", "cambios de configuración"),
+    (r"\bpolicy violation\b", "incumplimiento de política"),
+    (r"\bpolicy violations\b", "incumplimientos de política"),
+    (r"\bcompliance check\b", "verificación de cumplimiento"),
+    (r"\bcompliance checks\b", "verificaciones de cumplimiento"),
+    (r"\bshould be enabled\b", "debe estar habilitado"),
+    (r"\bshould be disabled\b", "debe estar deshabilitado"),
+    (r"\bis enabled\b", "está habilitado"),
+    (r"\bis disabled\b", "está deshabilitado"),
+    (r"\bnot configured\b", "no está configurado"),
+    (r"\bmisconfigured\b", "configurado incorrectamente"),
+    (r"\bconfiguration\b", "configuración"),
+    (r"\bdetected\b", "detectado"),
+    (r"\bnot detected\b", "no detectado"),
+    (r"\bpassed\b", "cumple"),
+    (r"\bpass\b", "cumple"),
+    (r"\bfailed\b", "no cumple"),
+    (r"\bfailure\b", "fallo"),
+    (r"\bfail\b", "no cumple"),
+    (r"\bwarning\b", "advertencia"),
+    (r"\bcritical\b", "crítico"),
+    (r"\bhigh\b", "alto"),
+    (r"\bmedium\b", "medio"),
+    (r"\blow\b", "bajo"),
+    (r"\binformational\b", "informativo"),
+    (r"\bensure\b", "verificar que"),
+    (r"\bcheck\b", "verificación"),
+    (r"\brule\b", "regla"),
+    (r"\bsetting\b", "configuración"),
+    (r"\bsettings\b", "configuraciones"),
+)
+
+
+def cont_comp_texto_probablemente_ingles(value):
+    text_value = str(value or "").lower()
+    words = re.findall(r"[a-záéíóúñ]+", text_value)
+    if not words:
+        return False
+
+    english_words = {
+        "the", "and", "or", "is", "are", "was", "were", "be", "been", "being",
+        "to", "from", "for", "with", "without", "of", "on", "in", "into", "by",
+        "this", "that", "these", "those", "should", "must", "ensure", "check",
+        "enabled", "disabled", "failed", "passed", "detected", "account", "user",
+        "password", "policy", "security", "system", "file", "rule", "access",
+    }
+    spanish_words = {
+        "el", "la", "los", "las", "un", "una", "de", "del", "para", "por", "con",
+        "sin", "que", "se", "debe", "deberá", "está", "son", "cuenta", "usuario",
+        "contraseña", "política", "seguridad", "sistema", "archivo", "regla", "acceso",
+    }
+    en_score = sum(1 for word in words if word in english_words)
+    es_score = sum(1 for word in words if word in spanish_words)
+    return en_score >= 3 and en_score > es_score
+
+
+def cont_comp_traducir_frases_tecnicas_es(value):
+    text_value = str(value or "").strip()
+    if not text_value:
+        return ""
+    for pattern, replacement in CONT_COMP_EVIDENCE_TRANSLATIONS:
+        text_value = re.sub(pattern, replacement, text_value, flags=re.IGNORECASE)
+    text_value = re.sub(r"[ \t]+", " ", text_value)
+    text_value = re.sub(r"\n\s*\n+", "\n\n", text_value)
+    return text_value.strip()
+
+
+def cont_comp_estado_es(value):
+    normalized = cont_comp_normalizar_nombre_archivo(value)
+    mapping = {
+        "cumple": "Cumple", "passed": "Cumple", "pass": "Cumple", "ok": "Cumple",
+        "parcial": "Parcial", "partial": "Parcial", "partially": "Parcial",
+        "no cumple": "No cumple", "failed": "No cumple", "fail": "No cumple",
+        "no evaluado": "No evaluado", "not evaluated": "No evaluado",
+        "no aplica": "No aplica", "not applicable": "No aplica", "na": "No aplica",
+    }
+    return mapping.get(normalized, str(value or "No evaluado").strip() or "No evaluado")
+
+
+def cont_comp_severidad_es(value):
+    normalized = cont_comp_normalizar_nombre_archivo(value)
+    mapping = {
+        "critical": "Crítica", "critica": "Crítica", "critico": "Crítica",
+        "high": "Alta", "alta": "Alta", "alto": "Alta",
+        "medium": "Media", "media": "Media", "medio": "Media", "moderate": "Media",
+        "low": "Baja", "baja": "Baja", "bajo": "Baja",
+        "informational": "Informativa", "info": "Informativa", "informativa": "Informativa",
+    }
+    return mapping.get(normalized, str(value or "—").strip() or "—")
+
+
+CONT_COMP_GENERIC_EVIDENCE_TEXTS = {
+    "resultado sca wazuh",
+    "evidencia xdr",
+    "evidencia automatica",
+    "hallazgo automatico",
+    "resultado tecnico",
+    "technical evidence",
+    "wazuh sca result",
+    "wazuh result",
+    "sin descripcion",
+    "descripcion no disponible",
+    "no description available",
+}
+
+
+def cont_comp_texto_evidencia_especifico(value, control_code="", reference=""):
+    """
+    Valida que un texto describa un hallazgo o una comprobación concreta.
+
+    No se consideran evidencia los textos fabricados únicamente con el nombre
+    de la fuente, el código normativo, el estado, la severidad o la referencia.
+    """
+    original = str(value or "").strip()
+    if not original:
+        return ""
+
+    normalized = cont_comp_normalizar_nombre_archivo(original)
+    code_normalized = cont_comp_normalizar_nombre_archivo(
+        cont_comp_normalize_code(control_code) or control_code
+    )
+    reference_normalized = cont_comp_normalizar_nombre_archivo(reference)
+
+    if normalized in CONT_COMP_GENERIC_EVIDENCE_TEXTS:
+        return ""
+
+    generic_prefixes = (
+        "evidencia xdr ",
+        "evidencia automatica ",
+        "hallazgo automatico ",
+        "resultado sca wazuh ",
+        "resultado tecnico ",
+        "technical evidence ",
+        "wazuh sca result ",
+    )
+    if any(normalized.startswith(prefix) for prefix in generic_prefixes):
+        return ""
+
+    if code_normalized and normalized in {
+        code_normalized,
+        f"control {code_normalized}",
+        f"punto {code_normalized}",
+        f"hallazgo {code_normalized}",
+        f"evidencia {code_normalized}",
+    }:
+        return ""
+
+    if reference_normalized and normalized == reference_normalized:
+        return ""
+
+    # Debe contener una explicación legible, no solo un identificador.
+    if len(original) < 8 or not re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", original):
+        return ""
+
+    return original
+
+
+def cont_comp_textos_desde_raw_json(raw_json):
+    """Extrae textos técnicos originales útiles desde un JSON de Wazuh."""
+    if not raw_json:
+        return []
+
+    try:
+        payload = json.loads(raw_json) if isinstance(raw_json, str) else raw_json
+    except Exception:
+        return []
+
+    candidates = []
+    preferred_keys = (
+        "title", "description", "message", "reason", "rationale",
+        "condition", "remediation", "recommendation", "solution",
+    )
+
+    def walk(value, depth=0):
+        if depth > 4:
+            return
+        if isinstance(value, dict):
+            # Primero los campos con mayor probabilidad de contener el hallazgo real.
+            for key in preferred_keys:
+                candidate = value.get(key)
+                if isinstance(candidate, (str, int, float)):
+                    text_candidate = str(candidate).strip()
+                    if text_candidate:
+                        candidates.append(text_candidate)
+            for nested in value.values():
+                if isinstance(nested, (dict, list)):
+                    walk(nested, depth + 1)
+        elif isinstance(value, list):
+            for nested in value[:50]:
+                walk(nested, depth + 1)
+
+    walk(payload)
+
+    unique = []
+    seen = set()
+    for candidate in candidates:
+        key = candidate.casefold()
+        if key not in seen:
+            seen.add(key)
+            unique.append(candidate)
+    return unique
+
+
+def cont_comp_seleccionar_evidencia_especifica(*values, raw_json=None,
+                                                control_code="", reference=""):
+    """
+    Devuelve el primer texto técnico concreto disponible.
+
+    Si no existe una descripción real del hallazgo, devuelve cadena vacía para
+    que la evidencia no sea incluida ni altere el estado consolidado.
+    """
+    candidates = list(values)
+    candidates.extend(cont_comp_textos_desde_raw_json(raw_json))
+
+    for candidate in candidates:
+        specific = cont_comp_texto_evidencia_especifico(
+            candidate,
+            control_code=control_code,
+            reference=reference,
+        )
+        if specific:
+            return specific
+    return ""
+
+
+def cont_comp_traduccion_evidencia_completa(original, translated):
+    """Valida de forma conservadora que no queden fragmentos ingleses sin traducir."""
+    original = str(original or "").strip()
+    translated = str(translated or "").strip()
+    if not translated:
+        return False
+
+    if translated == original:
+        return not cont_comp_texto_probablemente_ingles(original)
+
+    residual_english = {
+        "the", "and", "or", "is", "are", "was", "were", "be", "been", "being",
+        "to", "from", "for", "with", "without", "of", "on", "in", "into", "by",
+        "this", "that", "these", "those", "should", "must", "ensure", "check",
+        "enabled", "disabled", "failed", "passed", "detected", "account", "accounts",
+        "user", "users", "password", "policy", "security", "system", "file", "files",
+        "rule", "rules", "access", "root", "login", "logins", "audit", "installed",
+        "configured", "permissions", "ownership", "service", "services", "package",
+        "packages", "process", "processes", "network", "remote", "default", "group",
+        "groups", "directory", "directories", "logs", "time", "synchronization",
+        "authentication", "authorization", "monitoring", "configuration",
+    }
+    translated_words = set(re.findall(r"[a-z]+", translated.lower()))
+    if translated_words.intersection(residual_english):
+        return False
+
+    return not cont_comp_texto_probablemente_ingles(translated)
+
+
+def cont_comp_evidencia_texto_es(value, standard="", control_code="", source="",
+                                  status="", severity="", reference=""):
+    """
+    Presenta el hallazgo sin inventar contenido.
+
+    Si la traducción automática por glosario queda completamente en español,
+    se utiliza. Cuando la traducción sería parcial o incierta, se conserva el
+    texto original exactamente en su idioma de origen.
+    """
+    original = cont_comp_texto_evidencia_especifico(
+        value,
+        control_code=control_code,
+        reference=reference,
+    )
+    if not original:
+        return ""
+
+    translated = cont_comp_traducir_frases_tecnicas_es(original)
+    if cont_comp_traduccion_evidencia_completa(original, translated):
+        return translated
+
+    return original
+
+
+def cont_comp_descripcion_normativa_es(value, standard="", code=""):
+    """
+    Presenta la descripción normativa sin fabricar traducciones.
+
+    - Si el texto ya está en español, se conserva.
+    - Si el glosario logra una traducción completa, se usa esa traducción.
+    - Si la traducción es parcial o incierta, se muestra el texto original,
+      incluso cuando esté en inglés.
+    - Nunca se genera una frase de relleno como
+      "Descripción en español del punto ...".
+    """
+    original = str(value or "").strip()
+    code_text = cont_comp_normalize_code(code) or str(code or "").strip()
+
+    if not original:
+        return code_text
+
+    # Limpia textos de relleno que hayan podido quedar almacenados por una
+    # versión anterior. No se presentan como si fueran contenido normativo.
+    if re.fullmatch(
+        r"Descripción\s+en\s+español\s+del\s+punto\s+.+?\s+de\s+.+?\.?",
+        original,
+        flags=re.IGNORECASE,
+    ):
+        return code_text
+
+    translated = cont_comp_traducir_frases_tecnicas_es(original)
+    if translated and not cont_comp_texto_probablemente_ingles(translated):
+        return translated
+
+    # Regla solicitada: si no existe una traducción completa y confiable,
+    # conservar exactamente la descripción original.
+    return original
+
+
+def cont_comp_instrument_catalog_entries(standard):
+    """
+    Lee directamente el instrumento cargado en los módulos de Mejora/Madurez.
+
+    Devuelve puntos normativos exactos y sus descripciones sin depender de que
+    las clases de cada instrumento tengan los mismos nombres de atributos.
+    """
+    standard = (standard or "").strip().upper()
+    entries = []
+    seen = set()
+
+    def append_entry(code, description, name=None, parent=None):
+        normalized_code = cont_comp_normalize_code(code)
+        description_text = str(description or "").strip()
+        name_text = str(name or "").strip()
+        if (
+            not normalized_code
+            or not cont_comp_code_is_valid_for_standard(standard, normalized_code)
+            or normalized_code in seen
+        ):
+            return
+
+        description_text = cont_comp_strip_code_from_description(
+            description_text or name_text or normalized_code,
+            normalized_code,
+        )
+        seen.add(normalized_code)
+        entries.append({
+            "code": normalized_code,
+            "name": name_text or description_text or normalized_code,
+            "description": description_text or name_text or normalized_code,
+            "parent": parent or cont_comp_parent_for_detail(standard, normalized_code),
+            "source": "INSTRUMENTO_MEJORA",
+        })
+
+    try:
+        if standard == "PCIDSS":
+            preguntas = PciMadurezPregunta.query.filter_by(activo=True).order_by(
+                PciMadurezPregunta.orden.asc(),
+                PciMadurezPregunta.id.asc(),
+            ).all()
+
+            for p in preguntas:
+                question = cont_comp_first_text_attr(p, "pregunta")
+                section_name = cont_comp_first_text_attr(p, "seccion_nombre")
+                block_name = cont_comp_first_text_attr(p, "bloque_nombre")
+
+                direct_pairs = [
+                    (cont_comp_first_text_attr(p, "pregunta_codigo"), question, section_name or block_name),
+                    (cont_comp_first_text_attr(p, "seccion_codigo"), section_name or question, block_name),
+                ]
+                for code, description, name in direct_pairs:
+                    append_entry(code, description, name)
+
+                for source_text in (question, section_name, block_name):
+                    for code in cont_comp_extract_codes_from_instrument_text(standard, source_text):
+                        append_entry(code, question or section_name or block_name, section_name or block_name)
+
+        elif standard == "SOC2":
+            preguntas = Soc2MadurezPregunta.query.filter_by(activo=True).order_by(
+                Soc2MadurezPregunta.orden.asc(),
+                Soc2MadurezPregunta.id.asc(),
+            ).all()
+
+            for p in preguntas:
+                question = cont_comp_first_text_attr(p, "pregunta")
+                section_name = cont_comp_first_text_attr(p, "seccion_nombre")
+                block_name = cont_comp_first_text_attr(p, "bloque_nombre")
+
+                # Solo se admiten códigos SOC 2 reales. Se ignoran identificadores
+                # internos como SEG-001 creados por algunas versiones del importador.
+                for code_value, description, name in [
+                    (cont_comp_first_text_attr(p, "pregunta_codigo"), question, section_name or block_name),
+                    (cont_comp_first_text_attr(p, "seccion_codigo"), section_name or question, block_name),
+                    (cont_comp_first_text_attr(p, "bloque_codigo"), block_name or question, block_name),
+                ]:
+                    append_entry(code_value, description, name)
+
+                # Muchos instrumentos traen el código (por ejemplo CC6.8) dentro
+                # de la propia pregunta, aunque no exista una columna separada.
+                for source_text in (question, section_name, block_name):
+                    for code in cont_comp_extract_codes_from_instrument_text(standard, source_text):
+                        append_entry(code, question or section_name or block_name, section_name or block_name)
+
+        elif standard == "NISTCSF":
+            preguntas = NistMadurezPregunta.query.filter_by(activo=True).order_by(
+                NistMadurezPregunta.orden.asc(),
+                NistMadurezPregunta.id.asc(),
+            ).all()
+
+            for p in preguntas:
+                # NistMadurezPregunta utiliza pregunta_es / pregunta_en.
+                # No se accede a p.pregunta, porque ese atributo no existe.
+                question = cont_comp_first_text_attr(p, "pregunta_es", "pregunta_en")
+                category_name = cont_comp_first_text_attr(p, "categoria")
+                function_name = cont_comp_first_text_attr(p, "funcion")
+                category_code = cont_comp_first_text_attr(p, "categoria_codigo")
+                function_code = cont_comp_first_text_attr(p, "funcion_codigo")
+
+                append_entry(
+                    category_code,
+                    category_name or question,
+                    category_name or function_name,
+                    function_code or None,
+                )
+
+                for source_text in (question, category_name):
+                    for code in cont_comp_extract_codes_from_instrument_text(standard, source_text):
+                        append_entry(
+                            code,
+                            question or category_name or function_name,
+                            category_name or function_name,
+                            category_code or None,
+                        )
+
+        elif standard == "ISO27001":
+            preguntas = MadurezPregunta.query.order_by(
+                MadurezPregunta.sheet.asc(),
+                MadurezPregunta.orden.asc(),
+                MadurezPregunta.id.asc(),
+            ).all()
+
+            # Los encabezados del instrumento contienen el título del control.
+            # Las preguntas (¿...?) son criterios de evaluación y no deben
+            # mostrarse como descripción normativa.
+            annex_headers = {}
+            clause_headers = {}
+            for p in preguntas:
+                tipo = cont_comp_first_text_attr(p, "tipo")
+                if tipo not in ("", "h"):
+                    continue
+                sheet = cont_comp_first_text_attr(p, "sheet").upper()
+                header_text = cont_comp_first_text_attr(p, "control_desc", "tema", "pregunta", "seccion")
+                control = cont_comp_first_text_attr(p, "control")
+                section = cont_comp_first_text_attr(p, "seccion")
+
+                if sheet == "ANEXO A" and control:
+                    code = control if control.upper().startswith("A.") else f"A.{control}"
+                    cleaned = cont_comp_strip_code_from_description(header_text, code.replace("A.", ""))
+                    if cleaned:
+                        annex_headers[cont_comp_normalize_code(code)] = cleaned
+                else:
+                    for code in cont_comp_extract_codes_from_instrument_text(
+                        standard,
+                        " ".join([section, header_text]),
+                    ):
+                        clause_headers[code] = cont_comp_strip_code_from_description(header_text, code)
+
+            for p in preguntas:
+                tipo = cont_comp_first_text_attr(p, "tipo")
+                sheet = cont_comp_first_text_attr(p, "sheet").upper()
+                control_description = cont_comp_first_text_attr(p, "control_desc")
+                topic = cont_comp_first_text_attr(p, "tema")
+                section = cont_comp_first_text_attr(p, "seccion")
+                control = cont_comp_first_text_attr(p, "control")
+
+                if sheet == "ANEXO A" and control:
+                    code = control if control.upper().startswith("A.") else f"A.{control}"
+                    normalized_code = cont_comp_normalize_code(code)
+                    normative_text = control_description or topic or annex_headers.get(normalized_code)
+                    if normative_text:
+                        append_entry(code, normative_text, topic or annex_headers.get(normalized_code))
+                    continue
+
+                # Para capítulos 4–10 se utiliza el encabezado/sección del
+                # requisito; nunca la pregunta de evaluación como descripción.
+                if tipo not in ("", "q", "h"):
+                    continue
+                for code in cont_comp_extract_codes_from_instrument_text(standard, section):
+                    normative_text = clause_headers.get(code) or section
+                    if normative_text:
+                        append_entry(code, normative_text, normative_text)
+
+    except Exception as exc:
+        # Una inconsistencia de un instrumento no debe volver a tumbar el
+        # dashboard completo de Cumplimiento Continuo.
+        print(
+            f"No se pudo leer completamente el instrumento {standard} "
+            f"para Cumplimiento Continuo: {repr(exc)}"
+        )
+
+    # Los suplementos solo se usan cuando el instrumento cargado y el catálogo
+    # estático no entregan el punto. No reemplazan información del instrumento.
+    for code, description in CONT_COMP_SUPPLEMENTAL_STANDARD_DESCRIPTIONS.get(standard, {}).items():
+        append_entry(code, description, description)
+
+    return entries
+
+
+def cont_comp_lookup_instrument_point(standard, code):
+    """Busca un punto específico cada vez que una evidencia lo requiera."""
+    normalized_code = cont_comp_normalize_code(code)
+    for entry in cont_comp_instrument_catalog_entries(standard):
+        if entry.get("code") == normalized_code:
+            return entry
+    return None
+
+
 def cont_comp_build_standard_catalog(standard):
+    """
+    Construye el catálogo normativo utilizado por las matrices de
+    Cumplimiento Continuo.
+
+    La columna ``description`` contiene exclusivamente el texto del punto
+    del estándar. Los hallazgos y las evidencias se conservan separados y
+    únicamente se muestran en la vista «Ver evidencia».
+    """
     standard = (standard or "").strip().upper()
     rows = {}
-    
-    def add(code, name, parent=None):
+
+    def clean_text(value):
+        return str(value or "").strip()
+
+    def short_title(description, fallback):
+        text_lines = [
+            line.strip()
+            for line in clean_text(description).splitlines()
+            if line.strip()
+        ]
+        if not text_lines:
+            return fallback
+
+        if standard == "ISO27001" and len(text_lines) >= 2:
+            return text_lines[1][:500]
+
+        first = text_lines[0]
+        return (first[:497] + "...") if len(first) > 500 else (first or fallback)
+
+    def add(code, name=None, parent=None, description=None, normative=False, source=None):
         code = cont_comp_normalize_code(code)
         if not code:
             return
+
+        name_text = clean_text(name) or code
+        description_text = clean_text(description) or name_text
+        source_text = source or ("CATALOGO_NORMATIVO" if normative else "INSTRUMENTO_MEJORA")
+
         if code not in rows:
             rows[code] = {
                 "detail_code": code,
                 "parent_code": parent or cont_comp_parent_for_detail(standard, code),
-                "name": name or code,
+                "name": name_text,
+                "description": description_text,
+                "description_source": source_text,
             }
+            return
 
-    if standard == "PCIDSS":
-        preguntas = PciMadurezPregunta.query.filter_by(activo=True).order_by(
-            PciMadurezPregunta.orden.asc(),
-            PciMadurezPregunta.id.asc()
-        ).all()
+        current = rows[code]
 
-        for p in preguntas:
-            code = p.seccion_codigo or p.pregunta_codigo
-            name = p.seccion_nombre or p.bloque_nombre or p.pregunta
-            add(code, name)
+        # Los catálogos oficiales incorporados mantienen prioridad. El
+        # instrumento completa únicamente puntos ausentes.
+        if normative and description_text:
+            current["description"] = description_text
+            current["description_source"] = source_text
 
-    elif standard == "SOC2":
-        preguntas = Soc2MadurezPregunta.query.filter_by(activo=True).order_by(
-            Soc2MadurezPregunta.orden.asc(),
-            Soc2MadurezPregunta.id.asc()
-        ).all()
+        if (
+            name_text
+            and (
+                not current.get("name")
+                or current.get("name") == code
+                or current.get("name") == current.get("description")
+            )
+        ):
+            current["name"] = name_text
 
-        for p in preguntas:
-            code = p.seccion_codigo or p.pregunta_codigo or p.bloque_codigo
-            name = p.seccion_nombre or p.bloque_nombre or p.pregunta
-            add(code, name)
+        if parent and not current.get("parent_code"):
+            current["parent_code"] = parent
+
+    # 1. Catálogos normativos.
+    if standard == "ISO27001":
+        # La matriz del Anexo A se construye EXCLUSIVAMENTE con los 93
+        # controles ISO/IEC 27002:2022 del Excel oficial. No se agregan
+        # controles heredados de 2013 ni códigos encontrados solo en evidencias.
+        for entry in cont_comp_iso27002_official_catalog().values():
+            add(
+                entry.get("code"),
+                entry.get("name"),
+                parent=entry.get("parent"),
+                description=entry.get("description"),
+                normative=True,
+                source=entry.get("source") or "ANEXO_A_27002_XLSX",
+            )
+
+    elif standard == "PCIDSS":
+        for code, normative_description in PCI_DSS_CONTROLES:
+            add(
+                code,
+                short_title(normative_description, code),
+                description=normative_description,
+                normative=True,
+            )
 
     elif standard == "NISTCSF":
-        preguntas = NistMadurezPregunta.query.filter_by(activo=True).order_by(
-            NistMadurezPregunta.orden.asc(),
-            NistMadurezPregunta.id.asc()
-        ).all()
+        # La matriz se construye EXCLUSIVAMENTE con las 106 subcategorías
+        # presentes en static/templates/NIST.CSF 2.0.docx.
+        for entry in cont_comp_nist_csf_official_catalog().values():
+            add(
+                entry.get("code"),
+                entry.get("name"),
+                parent=entry.get("parent"),
+                description=entry.get("description"),
+                normative=True,
+                source=entry.get("source") or "NIST_CSF_20_DOCX",
+            )
 
-        for p in preguntas:
-            code = p.categoria_codigo or p.funcion_codigo
-            name = p.categoria or p.funcion
-            add(code, name)
+    elif standard == "SOC2":
+        for code, normative_description in SOC2_CONTROLES:
+            add(
+                code,
+                short_title(normative_description, code),
+                description=normative_description,
+                normative=True,
+            )
 
-    elif standard == "ISO27001":
-        preguntas = MadurezPregunta.query.order_by(
-            MadurezPregunta.sheet.asc(),
-            MadurezPregunta.orden.asc(),
-            MadurezPregunta.id.asc()
-        ).all()
+    # 2. Complemento dinámico desde el instrumento realmente cargado en
+    #    Mejora/Madurez. Esto agrega, por ejemplo, CC6.8 cuando no figura
+    #    en una versión antigua de la lista estática.
+    if standard != "NISTCSF":
+        for entry in cont_comp_instrument_catalog_entries(standard):
+            entry_code = cont_comp_normalize_code(entry.get("code"))
+            if standard == "ISO27001" and entry_code.startswith("A."):
+                entry_code = cont_comp_iso27002_resolve_code(entry_code)
+                if not entry_code:
+                    continue
+            add(
+                entry_code,
+                entry.get("name"),
+                parent=entry.get("parent"),
+                description=entry.get("description"),
+                normative=False,
+                source=entry.get("source") or "INSTRUMENTO_MEJORA",
+            )
 
-        for p in preguntas:
-            if getattr(p, "tipo", "q") != "q":
-                continue
-
-            if (p.sheet or "").upper() == "ANEXO A":
-                code = f"A.{(p.control or '').strip()}" if p.control else ""
-                name = p.control_desc or p.tema or p.pregunta
-            else:
-                seccion = p.seccion or ""
-                m = re.search(r"(\d+\.\d+)", seccion)
-                code = m.group(1) if m else ""
-                name = p.seccion or p.pregunta
-
-            add(code, name)
+    for code, item in rows.items():
+        item["description"] = cont_comp_descripcion_normativa_es(
+            item.get("description"), standard=standard, code=code
+        )
+        item["name"] = cont_comp_descripcion_normativa_es(
+            item.get("name") or item.get("description"), standard=standard, code=code
+        )
 
     return rows
 
@@ -179072,6 +180645,36 @@ CONT_COMP_CSS = """
     color:#334155;
   }
 
+  .cc-standard-matrix{
+    width:100%;
+    min-width:1480px;
+    table-layout:fixed;
+  }
+
+  .cc-standard-matrix .cc-col-point{ width:9%; }
+  .cc-standard-matrix .cc-col-description{ width:35%; }
+  .cc-standard-matrix .cc-col-status{ width:8%; }
+  .cc-standard-matrix .cc-col-analysis{ width:17%; }
+  .cc-standard-matrix .cc-col-evidence{ width:5%; }
+  .cc-standard-matrix .cc-col-source{ width:11%; }
+  .cc-standard-matrix .cc-col-date{ width:8%; }
+  .cc-standard-matrix .cc-col-action{ width:7%; }
+
+  .cc-standard-matrix tbody td:nth-child(2),
+  .cc-standard-matrix thead th:nth-child(2){
+    min-width:430px;
+    white-space:normal !important;
+  }
+
+  .cc-norm-description{
+    white-space:pre-line;
+    line-height:1.45;
+    text-align:left;
+    overflow-wrap:anywhere;
+    word-break:normal;
+    color:#26384d;
+  }
+
   .cc-pill{
     display:inline-flex;
     align-items:center;
@@ -179346,40 +180949,109 @@ def cont_comp_source_status(source_type, result=None, level=0, severity=None):
 
 
 def cont_comp_final_status_from_evidences(evidences):
-    """Consolida evidencia automática multifuente para un punto normativo."""
+    """
+    Consolida las evidencias automáticas de un punto normativo.
+
+    Reglas:
+    - Todas Cumple       -> Cumple.
+    - Todas No cumple    -> No cumple.
+    - Todas Parcial      -> Parcial.
+    - Cualquier mezcla entre Cumple, Parcial y No cumple -> Parcial.
+
+    «No aplica» se excluye y «No evaluado» no altera el estado operativo.
+    """
     def value(item, field, default=None):
         if isinstance(item, dict):
             return item.get(field, default)
         return getattr(item, field, default)
 
     if not evidences:
-        return "No monitoreado", 0, "No existe evidencia automática desde la herramienta XDR, Gobierno de Firewall o Gobierno de Active Directory para este punto."
+        return (
+            "No monitoreado",
+            0,
+            "No existe evidencia automática desde la herramienta XDR, Gobierno de Firewall "
+            "o Gobierno de Active Directory para este punto.",
+        )
 
-    visibles = [e for e in evidences if (value(e, "status") or "") != "No aplica"]
+    visibles = [
+        evidence
+        for evidence in evidences
+        if str(value(evidence, "status") or "").strip() != "No aplica"
+    ]
 
     if not visibles:
-        return "No aplica", None, "Punto excluido por la evaluación técnica o por la gestión del hallazgo."
+        return (
+            "No aplica",
+            None,
+            "Punto excluido por la evaluación técnica o por la gestión del hallazgo.",
+        )
 
-    fail = [e for e in visibles if (value(e, "status") or "") == "No cumple"]
-    partial = [e for e in visibles if (value(e, "status") or "") == "Parcial"]
-    ok = [e for e in visibles if (value(e, "status") or "") == "Cumple"]
+    valid_statuses = {"Cumple", "Parcial", "No cumple"}
+    operational = [
+        evidence
+        for evidence in visibles
+        if str(value(evidence, "status") or "").strip() in valid_statuses
+    ]
+
+    if not operational:
+        return (
+            "No monitoreado",
+            0,
+            "Las evidencias disponibles todavía no entregan un resultado operativo "
+            "Cumple, Parcial o No cumple para este punto.",
+        )
+
+    counts = {
+        status: sum(
+            1
+            for evidence in operational
+            if str(value(evidence, "status") or "").strip() == status
+        )
+        for status in ("Cumple", "Parcial", "No cumple")
+    }
+
     sources = sorted({
-        (value(e, "source") or "Fuente automática").strip()
-        for e in visibles
-        if (value(e, "source") or "").strip()
+        str(value(evidence, "source") or "Fuente automática").strip()
+        for evidence in operational
+        if str(value(evidence, "source") or "").strip()
     })
     source_text = ", ".join(sources) if sources else "fuentes automáticas"
+    present = {status for status, count in counts.items() if count > 0}
+    total = len(operational)
 
-    if fail:
-        return "No cumple", 0, f"{len(fail)} hallazgo(s) abierto(s) afectan este punto. Origen: {source_text}."
+    if present == {"Cumple"}:
+        return (
+            "Cumple",
+            100,
+            f"Todas las {total} evidencia(s) soportan el cumplimiento. "
+            f"Origen: {source_text}.",
+        )
 
-    if partial:
-        return "Parcial", 60, f"{len(partial)} evidencia(s) o hallazgo(s) requieren tratamiento o revisión. Origen: {source_text}."
+    if present == {"No cumple"}:
+        return (
+            "No cumple",
+            0,
+            f"Todas las {total} evidencia(s) concluyen No cumple. "
+            f"Origen: {source_text}.",
+        )
 
-    if ok:
-        return "Cumple", 100, f"{len(ok)} evidencia(s) soportan el cumplimiento. Origen: {source_text}."
+    if present == {"Parcial"}:
+        return (
+            "Parcial",
+            60,
+            f"Todas las {total} evidencia(s) presentan cumplimiento parcial. "
+            f"Origen: {source_text}.",
+        )
 
-    return "No monitoreado", 0, f"Las fuentes {source_text} no entregaron una conclusión para este punto."
+    # Mezcla de resultados: no se permite que una sola evidencia No cumple
+    # convierta todo el punto en No cumple. El resultado consolidado es Parcial.
+    return (
+        "Parcial",
+        60,
+        "Estado parcial por combinación de resultados: "
+        f"{counts['Cumple']} Cumple, {counts['Parcial']} Parcial y "
+        f"{counts['No cumple']} No cumple. Origen: {source_text}.",
+    )
 
 
 def cont_comp_get_control_eval_map(standard):
@@ -179436,27 +181108,80 @@ def cont_comp_build_standard_detail_rows(standard):
     ).all()
 
     for e in xdr_evidences:
-        code = cont_comp_normalize_code(e.control_code)
+        code = cont_comp_resolve_evidence_code(standard, e.control_code, catalog)
         if not code:
             continue
 
+        reference = e.rule_id or e.alert_id
+        evidence_original = cont_comp_seleccionar_evidencia_especifica(
+            e.rule_description,
+            raw_json=e.raw_json,
+            control_code=code,
+            reference=reference,
+        )
+        if not evidence_original:
+            # Sin descripción técnica concreta no se publica ni se contabiliza.
+            continue
+
+        evidence_visible = cont_comp_evidencia_texto_es(
+            evidence_original,
+            standard=standard,
+            control_code=code,
+            source="Herramienta XDR (Wazuh)",
+            status=e.status,
+            severity=e.severity,
+            reference=reference,
+        )
+        if not evidence_visible:
+            continue
+
         record = {
-            "status": e.status or "No evaluado",
+            "status": cont_comp_estado_es(e.status),
             "source": "Herramienta XDR (Wazuh)",
             "source_type": "SCA" if (e.rule_id or "").startswith("SCA-") else "Alerta / telemetría",
-            "title": e.rule_description or e.control_name or f"Evidencia XDR {code}",
-            "reference": e.rule_id or e.alert_id or "—",
-            "severity": e.severity or "—",
+            "title": evidence_visible,
+            "reference": reference or "—",
+            "severity": cont_comp_severidad_es(e.severity),
             "date": e.synced_at,
             "control_name": e.control_name,
         }
         evidence_by_code.setdefault(code, []).append(record)
 
         if code not in catalog:
+            if standard in ("ISO27001", "NISTCSF"):
+                continue
+            instrument_point = cont_comp_lookup_instrument_point(standard, code)
             catalog[code] = {
                 "detail_code": code,
-                "parent_code": cont_comp_parent_for_detail(standard, code),
-                "name": e.control_name or f"Control detectado por la herramienta XDR: {code}",
+                "parent_code": (
+                    (instrument_point or {}).get("parent")
+                    or cont_comp_parent_for_detail(standard, code)
+                ),
+                "name": cont_comp_descripcion_normativa_es(
+                    (instrument_point or {}).get("name")
+                    or (
+                        e.control_name
+                        if (e.control_name or "").strip()
+                        and cont_comp_normalize_code(e.control_name) != code
+                        else code
+                    ),
+                    standard=standard, code=code,
+                ),
+                "description": cont_comp_descripcion_normativa_es(
+                    (instrument_point or {}).get("description")
+                    or (
+                        e.control_name
+                        if (e.control_name or "").strip()
+                        and cont_comp_normalize_code(e.control_name) != code
+                        else evidence_original
+                    )
+                    or code,
+                    standard=standard, code=code,
+                ),
+                "description_source": (
+                    (instrument_point or {}).get("source")
+                    or "REFERENCIA_CONTROL"
+                ),
             }
 
     governance_evidences = ContinuousEvidence.query.filter_by(
@@ -179469,7 +181194,7 @@ def cont_comp_build_standard_detail_rows(standard):
     ).order_by(ContinuousEvidence.evidence_date.desc()).all()
 
     for e in governance_evidences:
-        code = cont_comp_normalize_code(e.control_code)
+        code = cont_comp_resolve_evidence_code(standard, e.control_code, catalog)
         if not code:
             continue
 
@@ -179480,23 +181205,78 @@ def cont_comp_build_standard_detail_rows(standard):
             except Exception:
                 raw = {}
 
+        reference = raw.get("finding_code") or e.event_ref
+        evidence_original = cont_comp_seleccionar_evidencia_especifica(
+            raw.get("finding_title"),
+            e.description,
+            raw.get("description"),
+            raw.get("recommendation"),
+            control_code=code,
+            reference=reference,
+        )
+        if not evidence_original:
+            continue
+
+        evidence_visible = cont_comp_evidencia_texto_es(
+            evidence_original,
+            standard=standard,
+            control_code=code,
+            source=e.source or "Fuente de gobierno",
+            status=e.status,
+            severity=e.severity,
+            reference=reference,
+        )
+        if not evidence_visible:
+            continue
+
         record = {
-            "status": e.status or "No evaluado",
+            "status": cont_comp_estado_es(e.status),
             "source": e.source or "Fuente de gobierno",
             "source_type": e.source_type or "Hallazgo de gobierno",
-            "title": raw.get("finding_title") or e.description or e.control_name or f"Hallazgo {code}",
-            "reference": raw.get("finding_code") or e.event_ref or "—",
-            "severity": e.severity or "—",
+            "title": evidence_visible,
+            "reference": reference or "—",
+            "severity": cont_comp_severidad_es(e.severity),
             "date": e.evidence_date,
             "control_name": e.control_name,
         }
         evidence_by_code.setdefault(code, []).append(record)
 
         if code not in catalog:
+            if standard in ("ISO27001", "NISTCSF"):
+                continue
+            instrument_point = cont_comp_lookup_instrument_point(standard, code)
+            mapped_name = raw.get("mapped_control_name") or e.control_name or ""
             catalog[code] = {
                 "detail_code": code,
-                "parent_code": cont_comp_parent_for_detail(standard, code),
-                "name": raw.get("mapped_control_name") or e.control_name or f"Control mapeado por hallazgo: {code}",
+                "parent_code": (
+                    (instrument_point or {}).get("parent")
+                    or cont_comp_parent_for_detail(standard, code)
+                ),
+                "name": cont_comp_descripcion_normativa_es(
+                    (instrument_point or {}).get("name")
+                    or (
+                        mapped_name
+                        if mapped_name.strip()
+                        and cont_comp_normalize_code(mapped_name) != code
+                        else code
+                    ),
+                    standard=standard, code=code,
+                ),
+                "description": cont_comp_descripcion_normativa_es(
+                    (instrument_point or {}).get("description")
+                    or (
+                        mapped_name
+                        if mapped_name.strip()
+                        and cont_comp_normalize_code(mapped_name) != code
+                        else evidence_original
+                    )
+                    or code,
+                    standard=standard, code=code,
+                ),
+                "description_source": (
+                    (instrument_point or {}).get("source")
+                    or "REFERENCIA_CONTROL"
+                ),
             }
 
     rows = []
@@ -179529,7 +181309,9 @@ def cont_comp_build_standard_detail_rows(standard):
             if key in seen_details:
                 continue
             seen_details.add(key)
-            title = str(rec.get("title") or "Evidencia automática").strip()
+            title = str(rec.get("title") or "").strip()
+            if not title:
+                continue
             if len(title) > 260:
                 title = title[:257] + "..."
             origin_details.append({
@@ -179546,6 +181328,8 @@ def cont_comp_build_standard_detail_rows(standard):
             "detail_code": code,
             "parent_code": item.get("parent_code"),
             "name": item.get("name"),
+            "description": item.get("description") or item.get("name") or code,
+            "description_source": item.get("description_source") or "INSTRUMENTO",
             "source_type": ", ".join(sources) if sources else "Sin fuente automática",
             "status": status,
             "score": score,
@@ -179657,43 +181441,55 @@ def cont_comp_save_compliance_controls_from_alert(alert_id, agent, rule, raw):
     saved = 0
     level = int(rule.get("level") or 0)
     status, score, severity = cont_comp_source_status("alert", level=level)
+    supported_standards = {"ISO27001", "SOC2", "PCIDSS", "NISTCSF"}
 
     for tag in compliance_tags:
         standard = tag["standard"]
-        control_code = tag["control_code"]
+        raw_control_code = tag["control_code"]
 
-        existing = WazuhComplianceControl.query.filter_by(
-            standard=standard,
-            control_code=control_code,
-            alert_id=str(alert_id)
-        ).first()
-
-        if existing:
-            existing.status = status
-            existing.severity = severity
-            existing.rule_level = level
-            existing.rule_description = rule.get("description")
-            existing.raw_json = json.dumps(raw, ensure_ascii=False)
-            existing.synced_at = cont_comp_now()
+        # NIST SP 800-53 se conserva como un marco distinto y no se mezcla
+        # con la matriz NIST CSF 2.0.
+        if standard not in supported_standards:
             continue
 
-        db.session.add(WazuhComplianceControl(
-            standard=standard,
-            control_code=control_code,
-            control_name=tag.get("control_name") or control_code,
-            alert_id=str(alert_id),
-            agent_id=(agent or {}).get("id"),
-            agent_name=(agent or {}).get("name"),
-            rule_id=str(rule.get("id") or ""),
-            rule_level=level,
-            rule_description=rule.get("description"),
-            status=status,
-            severity=severity,
-            raw_json=json.dumps(raw, ensure_ascii=False),
-            synced_at=cont_comp_now()
-        ))
+        if standard == "NISTCSF":
+            control_codes = cont_comp_nist_csf_expand_codes(raw_control_code)
+        else:
+            control_codes = [raw_control_code]
 
-        saved += 1
+        for control_code in control_codes:
+            existing = WazuhComplianceControl.query.filter_by(
+                standard=standard,
+                control_code=control_code,
+                alert_id=str(alert_id)
+            ).first()
+
+            if existing:
+                existing.status = status
+                existing.severity = severity
+                existing.rule_level = level
+                existing.rule_description = rule.get("description")
+                existing.raw_json = json.dumps(raw, ensure_ascii=False)
+                existing.synced_at = cont_comp_now()
+                continue
+
+            db.session.add(WazuhComplianceControl(
+                standard=standard,
+                control_code=control_code,
+                control_name=tag.get("control_name") or control_code,
+                alert_id=str(alert_id),
+                agent_id=(agent or {}).get("id"),
+                agent_name=(agent or {}).get("name"),
+                rule_id=str(rule.get("id") or ""),
+                rule_level=level,
+                rule_description=rule.get("description"),
+                status=status,
+                severity=severity,
+                raw_json=json.dumps(raw, ensure_ascii=False),
+                synced_at=cont_comp_now()
+            ))
+
+            saved += 1
 
     return saved
 
@@ -180105,7 +181901,17 @@ def cont_comp_standard(standard):
       </p>
 
       <div class="table-responsive">
-        <table class="table cc-table table-hover align-middle">
+        <table class="table cc-table cc-standard-matrix table-hover align-middle">
+          <colgroup>
+            <col class="cc-col-point">
+            <col class="cc-col-description">
+            <col class="cc-col-status">
+            <col class="cc-col-analysis">
+            <col class="cc-col-evidence">
+            <col class="cc-col-source">
+            <col class="cc-col-date">
+            <col class="cc-col-action">
+          </colgroup>
           <thead>
             <tr>
               <th>Punto norma</th>
@@ -180123,7 +181929,9 @@ def cont_comp_standard(standard):
           {% for r in rows %}
             <tr>
               <td><strong>{{ r.detail_code }}</strong><br><small>{{ r.parent_code or "—" }}</small></td>
-              <td>{{ r.name or "—" }}</td>
+              <td>
+                <div class="cc-norm-description">{{ r.description or "—" }}</div>
+              </td>
               <td>{{ status_badge(r.status)|safe }}</td>
               <td><small>{{ r.summary }}</small></td>
               <td><strong>{{ r.evidence_count }}</strong></td>
@@ -182724,6 +184532,72 @@ def cumplimiento_continuo_firewall():
     </div>
 
     {{ main_actions|safe }}
+
+    <div class="cc-card mt-3">
+      <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+        <div>
+          <h5 class="cc-section-title mb-1"><i class="bi bi-clipboard2-check me-1"></i> ¿Qué valida Gobierno de Firewall?</h5>
+          <div class="cc-muted">La evaluación analiza automáticamente 21 condiciones técnicas y de gobierno sobre las reglas sincronizadas. Cada hallazgo indica la regla afectada, el riesgo detectado, la recomendación y su mapeo con ISO 27001, NIST CSF y PCI DSS cuando corresponde.</div>
+        </div>
+        <span class="badge rounded-pill text-bg-primary">21 validaciones automáticas</span>
+      </div>
+
+      <div class="row g-3 mt-1">
+        <div class="col-xl-3 col-md-6">
+          <div class="border rounded-3 p-3 h-100 bg-light">
+            <div class="fw-bold text-primary mb-2"><i class="bi bi-shield-exclamation me-1"></i> Exposición y mínimo privilegio</div>
+            <ul class="mb-0 ps-3 fwgov-small">
+              <li>Reglas permisivas ANY-ANY sin restricción de origen, destino, protocolo o puerto.</li>
+              <li>Reglas de acceso excesivamente amplias.</li>
+              <li>Rangos de puertos demasiado extensos o iniciados en puertos reservados.</li>
+              <li>Servicios administrativos expuestos desde cualquier origen.</li>
+              <li>SMB —puerto 445— accesible desde orígenes amplios.</li>
+              <li>Bases de datos accesibles desde cualquier origen.</li>
+              <li>FTP o Telnet permitidos sin cifrado.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+          <div class="border rounded-3 p-3 h-100 bg-light">
+            <div class="fw-bold text-primary mb-2"><i class="bi bi-journal-check me-1"></i> Monitoreo y trazabilidad</div>
+            <ul class="mb-0 ps-3 fwgov-small">
+              <li>Logging desactivado en reglas que permiten tráfico.</li>
+              <li>Reglas sin nombre o descripción que explique su propósito.</li>
+              <li>Ausencia de propietario responsable.</li>
+              <li>Ausencia de ticket o solicitud de cambio aprobada.</li>
+              <li>Ausencia de justificación de negocio o seguridad.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+          <div class="border rounded-3 p-3 h-100 bg-light">
+            <div class="fw-bold text-primary mb-2"><i class="bi bi-calendar2-check me-1"></i> Vigencia y revisión</div>
+            <ul class="mb-0 ps-3 fwgov-small">
+              <li>Reglas sin fecha de revisión.</li>
+              <li>Fechas de revisión con formato inválido.</li>
+              <li>Revisiones con antigüedad superior a 365 días.</li>
+              <li>Fechas de expiración inválidas.</li>
+              <li>Reglas vencidas que continúan habilitadas.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+          <div class="border rounded-3 p-3 h-100 bg-light">
+            <div class="fw-bold text-primary mb-2"><i class="bi bi-diagram-3 me-1"></i> Calidad y orden de la política</div>
+            <ul class="mb-0 ps-3 fwgov-small">
+              <li>Reglas deshabilitadas pendientes de depuración.</li>
+              <li>Reglas técnicamente duplicadas.</li>
+              <li>Reglas ocultadas por una regla anterior con acción diferente.</li>
+              <li>Reglas redundantes cubiertas por una regla anterior.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="fwgov-small mt-3"><i class="bi bi-info-circle me-1"></i> La validación se ejecuta sobre el inventario sincronizado del firewall. Los resultados dependen de los campos realmente entregados por el conector y de la calidad de la documentación de cada regla.</div>
+    </div>
 
     <div class="fwgov-kpi-grid">
       <div class="fwgov-kpi-card"><div class="fwgov-kpi-icon"><i class="bi bi-list-check"></i></div><div><div class="fwgov-kpi-number">{{ metrics.rules }}</div><div class="fwgov-kpi-label">Reglas sincronizadas</div></div></div>
@@ -189920,6 +191794,64 @@ def register_ad_governance(
         )
         body = render_template_string(
             """
+            <div class="adg-card">
+              <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                <div>
+                  <h5 class="mb-1"><i class="bi bi-clipboard2-check text-primary me-1"></i> ¿Qué valida Gobierno de {{ platform_label }}?</h5>
+                  <div class="adg-muted">El submódulo ejecuta 11 validaciones automáticas sobre cuentas, credenciales, privilegios, actividad y calidad de los datos de identidad. Los mismos criterios se aplican a Active Directory Samba y Active Directory Windows.</div>
+                </div>
+                <span class="adg-chip adg-chip-info">11 validaciones automáticas</span>
+              </div>
+
+              <div class="row g-3 mt-1">
+                <div class="col-xl-3 col-md-6">
+                  <div class="border rounded-3 p-3 h-100 bg-light">
+                    <div class="fw-bold text-primary mb-2"><i class="bi bi-person-check me-1"></i> Estado y uso de cuentas</div>
+                    <ul class="mb-0 ps-3 small">
+                      <li>Cuentas habilitadas que se encuentran bloqueadas.</li>
+                      <li>Cuentas activas sin uso reciente según el umbral configurado.</li>
+                      <li>Cuentas habilitadas por más de 30 días que nunca han iniciado sesión.</li>
+                      <li>Cuentas deshabilitadas que aún conservan privilegios administrativos.</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div class="col-xl-3 col-md-6">
+                  <div class="border rounded-3 p-3 h-100 bg-light">
+                    <div class="fw-bold text-primary mb-2"><i class="bi bi-key me-1"></i> Credenciales</div>
+                    <ul class="mb-0 ps-3 small">
+                      <li>Cuentas habilitadas con la opción de contraseña no requerida.</li>
+                      <li>Cuentas con contraseña configurada para no expirar.</li>
+                      <li>Contraseñas cuya antigüedad supera el umbral definido en el conector.</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div class="col-xl-3 col-md-6">
+                  <div class="border rounded-3 p-3 h-100 bg-light">
+                    <div class="fw-bold text-primary mb-2"><i class="bi bi-person-lock me-1"></i> Privilegios y trazabilidad</div>
+                    <ul class="mb-0 ps-3 small">
+                      <li>Cuentas genéricas o compartidas que reducen la trazabilidad individual.</li>
+                      <li>Cuentas de servicio con privilegios elevados.</li>
+                      <li>Privilegios administrativos heredados mediante grupos anidados.</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div class="col-xl-3 col-md-6">
+                  <div class="border rounded-3 p-3 h-100 bg-light">
+                    <div class="fw-bold text-primary mb-2"><i class="bi bi-person-vcard me-1"></i> Calidad de identidad</div>
+                    <ul class="mb-0 ps-3 small">
+                      <li>Usuarios nominativos activos sin correo electrónico registrado.</li>
+                      <li>Usuarios nominativos activos sin área o departamento informado.</li>
+                    </ul>
+                    <div class="small text-muted mt-2">Esta validación no se aplica a cuentas técnicas ni a cuentas identificadas como genéricas.</div>
+                  </div>
+                </div>
+              </div>
+              <div class="small text-muted mt-3"><i class="bi bi-info-circle me-1"></i> Los umbrales de inactividad y antigüedad de contraseña se toman de la configuración del conector seleccionado. Cada hallazgo incluye descripción, recomendación y mapeo con ISO 27001, NIST CSF, SOC 2 y PCI DSS cuando corresponde.</div>
+            </div>
+
             {% if not connectors %}
               <div class="adg-card text-center py-5">
                 <i class="bi bi-plug display-5 text-primary"></i>
@@ -190822,7 +192754,13 @@ def cont_comp_expand_governance_control_pairs(pairs):
             ]
 
         if not candidates:
-            candidates = [code]
+            if standard == "ISO27001" and code.startswith("A."):
+                resolved = cont_comp_iso27002_resolve_code(code)
+                candidates = [resolved] if resolved else []
+            elif standard == "NISTCSF":
+                candidates = cont_comp_nist_csf_expand_codes(code)
+            else:
+                candidates = [code]
 
         for candidate in candidates:
             expanded.append((standard, cont_comp_normalize_code(candidate)))
@@ -190936,6 +192874,28 @@ def cont_comp_upsert_governance_evidence(*, source, finding_id, finding_code, ti
                                           asset, severity, finding_status, active,
                                           evidence_date, raw_extra=None):
     desired_refs = set()
+
+    reference_value = finding_code or finding_id
+    title_original = cont_comp_seleccionar_evidencia_especifica(
+        title,
+        control_code="",
+        reference=reference_value,
+    )
+    description_original = cont_comp_seleccionar_evidencia_especifica(
+        description,
+        control_code="",
+        reference=reference_value,
+    )
+    recommendation_original = cont_comp_seleccionar_evidencia_especifica(
+        recommendation,
+        control_code="",
+        reference=reference_value,
+    )
+
+    # Un mapeo normativo sin descripción real del hallazgo no es evidencia.
+    if not any((title_original, description_original, recommendation_original)):
+        return desired_refs
+
     mapped_pairs = cont_comp_parse_control_mapping(
         control_mapping,
         finding_code=finding_code,
@@ -190966,20 +192926,52 @@ def cont_comp_upsert_governance_evidence(*, source, finding_id, finding_code, ti
             catalog = cont_comp_build_standard_catalog(standard)
             CONT_COMP_STANDARD_CATALOG_CACHE[standard] = catalog
         mapped_name = (catalog.get(control_code) or {}).get("name")
-        evidence.control_name = mapped_name or control_code
+        evidence.control_name = cont_comp_descripcion_normativa_es(
+            mapped_name or control_code, standard=standard, code=control_code
+        )
         evidence.source = source
         evidence.source_type = "Hallazgo de gobierno"
         evidence.asset = (asset or "").strip()[:255]
-        evidence.severity = severity or "Media"
-        evidence.status = normalized_status
-        evidence.description = "\n\n".join([
-            part for part in [
-                f"{finding_code or finding_id} — {title}",
-                description,
-                f"Recomendación: {recommendation}" if recommendation else "",
-                f"Estado del hallazgo: {finding_status or 'Abierto'}",
-            ] if part
-        ])
+        evidence.severity = cont_comp_severidad_es(severity or "Media")
+        evidence.status = cont_comp_estado_es(normalized_status)
+        title_es = cont_comp_evidencia_texto_es(
+            title_original,
+            standard=standard,
+            control_code=control_code,
+            source=source,
+            status=normalized_status,
+            severity=severity,
+            reference=reference_value,
+        ) if title_original else ""
+        description_es = cont_comp_evidencia_texto_es(
+            description_original,
+            standard=standard,
+            control_code=control_code,
+            source=source,
+            status=normalized_status,
+            severity=severity,
+            reference=reference_value,
+        ) if description_original else ""
+        recommendation_es = cont_comp_evidencia_texto_es(
+            recommendation_original,
+            standard=standard,
+            control_code=control_code,
+            source=source,
+            status=normalized_status,
+            severity=severity,
+            reference=reference_value,
+        ) if recommendation_original else ""
+
+        evidence_parts = []
+        if title_es:
+            evidence_parts.append(
+                f"{reference_value} — {title_es}" if reference_value else title_es
+            )
+        if description_es and description_es != title_es:
+            evidence_parts.append(description_es)
+        if recommendation_es:
+            evidence_parts.append(f"Recomendación: {recommendation_es}")
+        evidence.description = "\n\n".join(evidence_parts)
         evidence.evidence_date = cont_comp_parse_evidence_date(evidence_date)
         raw_payload = {
             "finding_id": finding_id,
@@ -191137,11 +193129,21 @@ def cont_comp_collect_evidence_rows(standard="", control_code="", source_filter=
     standard = (standard or "").strip().upper()
     control_code = cont_comp_normalize_code(control_code)
     rows = []
+    catalog_cache = {}
+
+    def catalog_for(std):
+        key = (std or "").strip().upper()
+        if key not in catalog_cache:
+            catalog_cache[key] = cont_comp_build_standard_catalog(key)
+        return catalog_cache[key]
 
     xdr_query = WazuhComplianceControl.query
     if standard:
         xdr_query = xdr_query.filter(WazuhComplianceControl.standard == standard)
-    if control_code:
+    requested_control_code = control_code
+    if standard == "ISO27001" and requested_control_code:
+        requested_control_code = cont_comp_iso27002_resolve_code(requested_control_code)
+    if control_code and standard != "ISO27001":
         xdr_query = xdr_query.filter(func.upper(WazuhComplianceControl.control_code) == control_code)
 
     # Cuando hay filtro por estándar/control no se aplica el límite histórico que ocultaba
@@ -191152,16 +193154,47 @@ def cont_comp_collect_evidence_rows(standard="", control_code="", source_filter=
         xdr_items = xdr_query.order_by(WazuhComplianceControl.synced_at.desc()).limit(5000).all()
 
     for item in xdr_items:
+        normalized_code = cont_comp_resolve_evidence_code(
+            item.standard,
+            item.control_code,
+            catalog_for(item.standard),
+        )
+        if not normalized_code:
+            continue
+        if requested_control_code and normalized_code != requested_control_code:
+            continue
+        reference = item.rule_id or item.alert_id
+        evidence_original = cont_comp_seleccionar_evidencia_especifica(
+            item.rule_description,
+            raw_json=item.raw_json,
+            control_code=normalized_code,
+            reference=reference,
+        )
+        if not evidence_original:
+            continue
+
+        evidence_visible = cont_comp_evidencia_texto_es(
+            evidence_original,
+            standard=item.standard,
+            control_code=normalized_code,
+            source="Herramienta XDR (Wazuh)",
+            status=item.status,
+            severity=item.severity,
+            reference=reference,
+        )
+        if not evidence_visible:
+            continue
+
         rows.append({
             "date": item.synced_at,
             "source": "Herramienta XDR (Wazuh)",
             "standard": item.standard,
-            "control_code": cont_comp_normalize_code(item.control_code),
-            "status": item.status or "No evaluado",
+            "control_code": normalized_code,
+            "status": cont_comp_estado_es(item.status),
             "asset": item.agent_name,
-            "reference": item.rule_id or item.alert_id,
-            "severity": item.severity,
-            "description": item.rule_description or item.control_name,
+            "reference": reference,
+            "severity": cont_comp_severidad_es(item.severity),
+            "description": evidence_visible,
         })
 
     gov_query = ContinuousEvidence.query.filter(
@@ -191169,7 +193202,7 @@ def cont_comp_collect_evidence_rows(standard="", control_code="", source_filter=
     )
     if standard:
         gov_query = gov_query.filter(ContinuousEvidence.standard == standard)
-    if control_code:
+    if control_code and standard != "ISO27001":
         gov_query = gov_query.filter(func.upper(ContinuousEvidence.control_code) == control_code)
 
     gov_items = gov_query.order_by(ContinuousEvidence.evidence_date.desc()).all()
@@ -191180,16 +193213,49 @@ def cont_comp_collect_evidence_rows(standard="", control_code="", source_filter=
                 raw = json.loads(item.raw_json) or {}
             except Exception:
                 raw = {}
+        normalized_code = cont_comp_resolve_evidence_code(
+            item.standard,
+            item.control_code,
+            catalog_for(item.standard),
+        )
+        if not normalized_code:
+            continue
+        if requested_control_code and normalized_code != requested_control_code:
+            continue
+        reference = raw.get("finding_code") or item.event_ref
+        evidence_original = cont_comp_seleccionar_evidencia_especifica(
+            item.description,
+            raw.get("finding_title"),
+            raw.get("description"),
+            raw.get("recommendation"),
+            control_code=normalized_code,
+            reference=reference,
+        )
+        if not evidence_original:
+            continue
+
+        evidence_visible = cont_comp_evidencia_texto_es(
+            evidence_original,
+            standard=item.standard,
+            control_code=normalized_code,
+            source=item.source,
+            status=item.status,
+            severity=item.severity,
+            reference=reference,
+        )
+        if not evidence_visible:
+            continue
+
         rows.append({
             "date": item.evidence_date,
             "source": item.source,
             "standard": item.standard,
-            "control_code": cont_comp_normalize_code(item.control_code),
-            "status": item.status or "No evaluado",
+            "control_code": normalized_code,
+            "status": cont_comp_estado_es(item.status),
             "asset": item.asset,
-            "reference": raw.get("finding_code") or item.event_ref,
-            "severity": item.severity,
-            "description": item.description or item.control_name,
+            "reference": reference,
+            "severity": cont_comp_severidad_es(item.severity),
+            "description": evidence_visible,
         })
 
     if source_filter:
