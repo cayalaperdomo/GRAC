@@ -2068,6 +2068,39 @@ class DashboardPreference(db.Model):
         nullable=False,
     )
 
+
+
+class DashboardCustomWidget(db.Model):
+    """Visualización creada por un usuario a partir de una fuente segura de GRAC."""
+    __tablename__ = "dashboard_custom_widgets"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=False,
+        index=True,
+    )
+    title = db.Column(db.String(140), nullable=False)
+    subtitle = db.Column(db.String(220), nullable=True)
+    source_key = db.Column(db.String(90), nullable=False, index=True)
+    # Compatibilidad: kpi / gauge (versiones anteriores).
+    # Nuevos valores: radar / gauge / donut / line / pie /
+    # bar_vertical / bar_horizontal.
+    widget_type = db.Column(db.String(20), nullable=False, default="gauge")
+    icon = db.Column(db.String(80), nullable=False, default="bi-speedometer2")
+    color = db.Column(db.String(20), nullable=False, default="blue")
+    target_value = db.Column(db.Float, nullable=True)
+    suffix = db.Column(db.String(20), nullable=True)
+    decimals = db.Column(db.Integer, nullable=False, default=2)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
 class OpenRouterKey(db.Model):
     __tablename__ = "openrouter_keys"
     id = db.Column(db.Integer, primary_key=True)
@@ -11552,9 +11585,13 @@ def _dashboard_latest_nist_data():
 
 
 
+
 # ============================================================
-# CONFIGURACIÓN PERSONAL DEL CENTRO DE CONTROL
+# CONSTRUCTOR PERSONAL DEL CENTRO DE CONTROL
 # ============================================================
+# El catálogo fijo conserva las visualizaciones originales y agrega fuentes
+# de madurez y métricas que ya existen en GRAC. Los elementos adicionales
+# creados por cada usuario se almacenan en dashboard_custom_widgets.
 DASHBOARD_WIDGET_CATALOG = [
     {
         "key": "kpi_iso",
@@ -11567,7 +11604,10 @@ DASHBOARD_WIDGET_CATALOG = [
         "icon": "bi-shield-check",
         "color": "blue",
         "value_key": "iso_pct",
+        "suffix": "%",
+        "decimals": 2,
         "element_id": "dash_iso_stat",
+        "default_enabled": True,
     },
     {
         "key": "kpi_nist",
@@ -11580,7 +11620,10 @@ DASHBOARD_WIDGET_CATALOG = [
         "icon": "bi-compass",
         "color": "orange",
         "value_key": "nist_pct",
+        "suffix": "%",
+        "decimals": 2,
         "element_id": "dash_nist_stat",
+        "default_enabled": True,
     },
     {
         "key": "kpi_datos",
@@ -11593,7 +11636,10 @@ DASHBOARD_WIDGET_CATALOG = [
         "icon": "bi-lock-fill",
         "color": "green",
         "value_key": "datos_pct",
+        "suffix": "%",
+        "decimals": 2,
         "element_id": "dash_datos_stat",
+        "default_enabled": True,
     },
     {
         "key": "kpi_scorecard",
@@ -11606,109 +11652,390 @@ DASHBOARD_WIDGET_CATALOG = [
         "icon": "bi-shield-fill-check",
         "color": "purple",
         "value_key": "scorecard_terceros_pct",
+        "suffix": "%",
+        "decimals": 2,
         "element_id": "dash_scorecard_terceros_stat",
+        "default_enabled": True,
+    },
+    {
+        "key": "kpi_pci",
+        "kind": "kpi",
+        "group": "Madurez y cumplimiento",
+        "label": "Madurez PCI-DSS",
+        "description": "Nivel promedio general de la última evaluación PCI-DSS.",
+        "title": "PCI-DSS",
+        "subtitle": "Nivel de madurez",
+        "icon": "bi-credit-card-2-front",
+        "color": "orange",
+        "value_key": "pci_pct",
+        "suffix": "%",
+        "decimals": 2,
+        "element_id": "dash_pci_stat",
+        "default_enabled": False,
+    },
+    {
+        "key": "kpi_soc2",
+        "kind": "kpi",
+        "group": "Madurez y cumplimiento",
+        "label": "Madurez SOC 2",
+        "description": "Porcentaje general de la última evaluación de madurez SOC 2.",
+        "title": "SOC 2",
+        "subtitle": "Nivel de madurez",
+        "icon": "bi-patch-check-fill",
+        "color": "purple",
+        "value_key": "soc2_pct",
+        "suffix": "%",
+        "decimals": 2,
+        "element_id": "dash_soc2_stat",
+        "default_enabled": False,
+    },
+    {
+        "key": "kpi_ai",
+        "kind": "kpi",
+        "group": "Madurez y cumplimiento",
+        "label": "Madurez del Sistema de Gestión de IA",
+        "description": "Porcentaje general de la última revisión ISO/IEC 42001 del sistema de gestión de IA.",
+        "title": "Gestión de IA",
+        "subtitle": "Madurez ISO/IEC 42001",
+        "icon": "bi-robot",
+        "color": "blue",
+        "value_key": "ai_maturity_pct",
+        "suffix": "%",
+        "decimals": 2,
+        "element_id": "dash_ai_stat",
+        "default_enabled": False,
+    },
+    {
+        "key": "kpi_riesgos_activos",
+        "kind": "kpi",
+        "group": "Métricas operativas",
+        "label": "Total de riesgos activos",
+        "description": "Cantidad de riesgos no archivados registrados en la matriz.",
+        "title": "Riesgos activos",
+        "subtitle": "Matriz de riesgos",
+        "icon": "bi-exclamation-diamond-fill",
+        "color": "orange",
+        "value_key": "risks_active_count",
+        "suffix": "",
+        "decimals": 0,
+        "element_id": "dash_risks_active",
+        "default_enabled": False,
+    },
+    {
+        "key": "kpi_riesgos_fuera_apetito",
+        "kind": "kpi",
+        "group": "Métricas operativas",
+        "label": "Riesgos fuera del apetito",
+        "description": "Riesgos activos cuyo nivel residual supera el apetito configurado.",
+        "title": "Fuera del apetito",
+        "subtitle": "Riesgo residual",
+        "icon": "bi-exclamation-triangle-fill",
+        "color": "purple",
+        "value_key": "risks_outside_appetite_count",
+        "suffix": "",
+        "decimals": 0,
+        "element_id": "dash_risks_outside",
+        "default_enabled": False,
+    },
+    {
+        "key": "kpi_incidentes_abiertos",
+        "kind": "kpi",
+        "group": "Métricas operativas",
+        "label": "Incidentes abiertos",
+        "description": "Cantidad de incidentes que todavía no están cerrados o resueltos.",
+        "title": "Incidentes abiertos",
+        "subtitle": "Gestión de incidentes",
+        "icon": "bi-broadcast-pin",
+        "color": "orange",
+        "value_key": "incidents_open_count",
+        "suffix": "",
+        "decimals": 0,
+        "element_id": "dash_incidents_open",
+        "default_enabled": False,
+    },
+    {
+        "key": "kpi_incidentes_cumplimiento",
+        "kind": "kpi",
+        "group": "Métricas operativas",
+        "label": "Cumplimiento promedio de incidentes",
+        "description": "Promedio del cumplimiento global MTCD/MTIR calculado en métricas de incidentes.",
+        "title": "Cumplimiento incidentes",
+        "subtitle": "Promedio MTCD / MTIR",
+        "icon": "bi-stopwatch-fill",
+        "color": "green",
+        "value_key": "incidents_compliance_pct",
+        "suffix": "%",
+        "decimals": 2,
+        "element_id": "dash_incidents_compliance",
+        "default_enabled": False,
+    },
+    {
+        "key": "kpi_vulnerabilidades_abiertas",
+        "kind": "kpi",
+        "group": "Métricas operativas",
+        "label": "Vulnerabilidades abiertas",
+        "description": "Cantidad de vulnerabilidades cuyo estado continúa abierto.",
+        "title": "Vulnerabilidades abiertas",
+        "subtitle": "Gestión de vulnerabilidades",
+        "icon": "bi-bug-fill",
+        "color": "orange",
+        "value_key": "vulnerabilities_open_count",
+        "suffix": "",
+        "decimals": 0,
+        "element_id": "dash_vulns_open",
+        "default_enabled": False,
+    },
+    {
+        "key": "kpi_vulnerabilidades_criticas",
+        "kind": "kpi",
+        "group": "Métricas operativas",
+        "label": "Vulnerabilidades críticas abiertas",
+        "description": "Cantidad de vulnerabilidades críticas que permanecen abiertas.",
+        "title": "Críticas abiertas",
+        "subtitle": "Vulnerabilidades",
+        "icon": "bi-radioactive",
+        "color": "purple",
+        "value_key": "vulnerabilities_critical_count",
+        "suffix": "",
+        "decimals": 0,
+        "element_id": "dash_vulns_critical",
+        "default_enabled": False,
+    },
+    {
+        "key": "kpi_planes_abiertos",
+        "kind": "kpi",
+        "group": "Métricas operativas",
+        "label": "Planes de acción abiertos",
+        "description": "Cantidad de actividades de mejora o acciones correctivas abiertas.",
+        "title": "Planes abiertos",
+        "subtitle": "Planes de acción",
+        "icon": "bi-list-check",
+        "color": "blue",
+        "value_key": "plans_open_count",
+        "suffix": "",
+        "decimals": 0,
+        "element_id": "dash_plans_open",
+        "default_enabled": False,
+    },
+    {
+        "key": "kpi_planes_vencidos",
+        "kind": "kpi",
+        "group": "Métricas operativas",
+        "label": "Planes de acción vencidos",
+        "description": "Planes abiertos cuya fecha propuesta de ejecución ya venció.",
+        "title": "Planes vencidos",
+        "subtitle": "Seguimiento de acciones",
+        "icon": "bi-calendar-x-fill",
+        "color": "purple",
+        "value_key": "plans_overdue_count",
+        "suffix": "",
+        "decimals": 0,
+        "element_id": "dash_plans_overdue",
+        "default_enabled": False,
+    },
+    {
+        "key": "kpi_requisitos_no_cumple",
+        "kind": "kpi",
+        "group": "Métricas operativas",
+        "label": "Requisitos legales no cumplidos",
+        "description": "Cantidad de requisitos legales con estado No cumple o Incumple.",
+        "title": "Requisitos no cumplidos",
+        "subtitle": "Cumplimiento legal",
+        "icon": "bi-bank2",
+        "color": "orange",
+        "value_key": "legal_noncompliant_count",
+        "suffix": "",
+        "decimals": 0,
+        "element_id": "dash_legal_noncompliant",
+        "default_enabled": False,
+    },
+    {
+        "key": "kpi_proveedores_alta",
+        "kind": "kpi",
+        "group": "Métricas operativas",
+        "label": "Proveedores de criticidad alta",
+        "description": "Cantidad de evaluaciones de proveedores clasificadas con criticidad alta.",
+        "title": "Proveedores críticos",
+        "subtitle": "Criticidad alta",
+        "icon": "bi-buildings-fill",
+        "color": "purple",
+        "value_key": "providers_high_count",
+        "suffix": "",
+        "decimals": 0,
+        "element_id": "dash_providers_high",
+        "default_enabled": False,
+    },
+    {
+        "key": "kpi_cultura_seguridad",
+        "kind": "kpi",
+        "group": "Métricas operativas",
+        "label": "Última métrica de cultura de seguridad",
+        "description": "Resultado general de la medición más reciente de cultura y formación.",
+        "title": "Cultura de seguridad",
+        "subtitle": "Último resultado",
+        "icon": "bi-people-fill",
+        "color": "green",
+        "value_key": "security_culture_pct",
+        "suffix": "%",
+        "decimals": 2,
+        "element_id": "dash_security_culture",
+        "default_enabled": False,
     },
     {
         "key": "chart_iso",
         "kind": "chart",
-        "group": "Gráficas del tablero",
+        "group": "Gráficas de madurez y cumplimiento",
         "label": "Gráfica de madurez ISO 27001",
         "description": "Araña o gráfica consolidada de madurez ISO 27001.",
         "title": "Madurez ISO 27001",
         "value_key": "iso_pct",
-        "value_format": "percent",
+        "suffix": "%",
+        "decimals": 2,
         "image_key": "iso_radar_b64",
         "image_id": "dash_iso_radar",
+        "default_enabled": True,
     },
     {
         "key": "chart_nist",
         "kind": "chart",
-        "group": "Gráficas del tablero",
+        "group": "Gráficas de madurez y cumplimiento",
         "label": "Gráfica de madurez NIST CSF 2.0",
         "description": "Araña o gráfica consolidada de madurez NIST CSF 2.0.",
         "title": "Madurez NIST CSF 2.0",
         "value_key": "nist_pct",
-        "value_format": "percent",
+        "suffix": "%",
+        "decimals": 2,
         "image_key": "nist_radar_b64",
         "image_id": "dash_nist_radar",
+        "default_enabled": True,
     },
     {
         "key": "chart_datos",
         "kind": "chart",
-        "group": "Gráficas del tablero",
+        "group": "Gráficas de madurez y cumplimiento",
         "label": "Gráfica de Protección de Datos Personales",
         "description": "Medidor del nivel de cumplimiento en protección de datos personales.",
         "title": "Protección de Datos Personales",
         "value_key": "datos_pct",
-        "value_format": "percent",
+        "suffix": "%",
+        "decimals": 2,
         "image_key": "datos_gauge_b64",
         "image_id": "dash_datos_gauge",
+        "default_enabled": True,
+    },
+    {
+        "key": "chart_pci",
+        "kind": "chart",
+        "group": "Gráficas de madurez y cumplimiento",
+        "label": "Gráfica de madurez PCI-DSS",
+        "description": "Medidor de la última evaluación de madurez PCI-DSS.",
+        "title": "Madurez PCI-DSS",
+        "value_key": "pci_pct",
+        "suffix": "%",
+        "decimals": 2,
+        "image_key": "pci_gauge_b64",
+        "image_id": "dash_pci_gauge",
+        "default_enabled": False,
+    },
+    {
+        "key": "chart_soc2",
+        "kind": "chart",
+        "group": "Gráficas de madurez y cumplimiento",
+        "label": "Gráfica de madurez SOC 2",
+        "description": "Araña o medidor de la última evaluación SOC 2.",
+        "title": "Madurez SOC 2",
+        "value_key": "soc2_pct",
+        "suffix": "%",
+        "decimals": 2,
+        "image_key": "soc2_radar_b64",
+        "image_id": "dash_soc2_radar",
+        "default_enabled": False,
+    },
+    {
+        "key": "chart_ai",
+        "kind": "chart",
+        "group": "Gráficas de madurez y cumplimiento",
+        "label": "Gráfica del Sistema de Gestión de IA",
+        "description": "Araña o medidor de la última revisión ISO/IEC 42001.",
+        "title": "Sistema de Gestión de IA",
+        "value_key": "ai_maturity_pct",
+        "suffix": "%",
+        "decimals": 2,
+        "image_key": "ai_radar_b64",
+        "image_id": "dash_ai_radar",
+        "default_enabled": False,
     },
     {
         "key": "chart_riesgos",
         "kind": "chart",
-        "group": "Gráficas del tablero",
+        "group": "Gráficas operativas",
         "label": "Gráfica de Riesgos Residuales",
         "description": "Distribución de los riesgos residuales por nivel.",
         "title": "Riesgos residuales",
         "display_value": "Distribución",
         "image_key": "riesgos_b64",
         "image_id": "dash_riesgos",
+        "default_enabled": True,
     },
     {
         "key": "chart_incidentes",
         "kind": "chart",
-        "group": "Gráficas del tablero",
+        "group": "Gráficas operativas",
         "label": "Gráfica de Incidentes",
         "description": "Clasificación consolidada de incidentes de seguridad.",
         "title": "Incidentes",
         "display_value": "Clasificación",
         "image_key": "incidentes_b64",
         "image_id": "dash_incidentes",
+        "default_enabled": True,
     },
     {
         "key": "chart_vulnerabilidades",
         "kind": "chart",
-        "group": "Gráficas del tablero",
+        "group": "Gráficas operativas",
         "label": "Gráfica de Vulnerabilidades",
         "description": "Distribución de vulnerabilidades por criticidad.",
         "title": "Vulnerabilidades",
         "display_value": "Criticidad",
         "image_key": "vulnerabilidades_b64",
         "image_id": "dash_vulnerabilidades",
+        "default_enabled": True,
     },
     {
         "key": "chart_proveedores",
         "kind": "chart",
-        "group": "Gráficas del tablero",
+        "group": "Gráficas operativas",
         "label": "Gráfica de Proveedores",
         "description": "Distribución de proveedores de acuerdo con su criticidad.",
         "title": "Proveedores",
         "display_value": "Criticidad",
         "image_key": "proveedores_criticidad_b64",
         "image_id": "dash_proveedores_criticidad",
+        "default_enabled": True,
     },
     {
         "key": "chart_planes_accion",
         "kind": "chart",
-        "group": "Gráficas del tablero",
+        "group": "Gráficas operativas",
         "label": "Gráfica de Planes de Acción",
         "description": "Estado consolidado de los planes de acción del SGSI.",
         "title": "Planes de acción",
         "display_value": "Estado",
         "image_key": "planes_accion_estado_b64",
         "image_id": "dash_planes_accion_estado",
+        "default_enabled": True,
     },
     {
         "key": "chart_requisitos_legales",
         "kind": "chart",
-        "group": "Gráficas del tablero",
+        "group": "Gráficas operativas",
         "label": "Gráfica de Requisitos Legales",
         "description": "Estado de cumplimiento de los requisitos legales registrados.",
         "title": "Requisitos legales",
         "display_value": "Cumplimiento",
         "image_key": "requisitos_legales_estado_b64",
         "image_id": "dash_requisitos_legales_estado",
+        "default_enabled": True,
     },
 ]
 
@@ -11717,19 +12044,197 @@ DASHBOARD_WIDGET_MAP = {
     for index, item in enumerate(DASHBOARD_WIDGET_CATALOG)
 }
 
+# Fuentes seguras para que cada usuario construya visualizaciones sencillas.
+# El usuario únicamente selecciona: 1) fuente de datos y 2) presentación.
+# No se permite ingresar SQL, nombres de tablas, código ni expresiones libres.
+DASHBOARD_VISUALIZATION_LABELS = {
+    "radar": "Araña / radar",
+    "gauge": "Velocímetro",
+    "donut": "Aro",
+    "line": "Línea en el tiempo",
+    "pie": "Circular (pie)",
+    "bar_vertical": "Barras verticales",
+    "bar_horizontal": "Barras horizontales",
+    "kpi": "Indicador numérico (anterior)",
+}
+
+DASHBOARD_DATA_SOURCE_CATALOG = [
+    # Niveles de madurez: araña o velocímetro.
+    {"key": "maturity_iso_pct", "group": "Niveles de madurez", "data_kind": "maturity", "label": "Nivel de Madurez — ISO 27001", "description": "Última evaluación de madurez ISO 27001.", "unit": "%", "decimals": 2, "allowed_views": ["radar", "gauge"], "default_title": "Nivel de Madurez — ISO 27001", "default_subtitle": "Última evaluación", "icon": "bi-shield-check", "color": "blue"},
+    {"key": "maturity_nist_pct", "group": "Niveles de madurez", "data_kind": "maturity", "label": "Nivel de Madurez — NIST CSF 2.0", "description": "Última evaluación de madurez NIST CSF 2.0.", "unit": "%", "decimals": 2, "allowed_views": ["radar", "gauge"], "default_title": "Nivel de Madurez — NIST CSF 2.0", "default_subtitle": "Última evaluación", "icon": "bi-compass", "color": "orange"},
+    {"key": "maturity_data_pct", "group": "Niveles de madurez", "data_kind": "maturity", "label": "Nivel de Madurez — Protección de Datos Personales", "description": "Última evaluación de protección de datos personales.", "unit": "%", "decimals": 2, "allowed_views": ["radar", "gauge"], "default_title": "Nivel de Madurez — Datos Personales", "default_subtitle": "Última evaluación", "icon": "bi-lock-fill", "color": "green"},
+    {"key": "maturity_pci_pct", "group": "Niveles de madurez", "data_kind": "maturity", "label": "Nivel de Madurez — PCI-DSS", "description": "Última evaluación de madurez PCI-DSS.", "unit": "%", "decimals": 2, "allowed_views": ["radar", "gauge"], "default_title": "Nivel de Madurez — PCI-DSS", "default_subtitle": "Última evaluación", "icon": "bi-credit-card-2-front", "color": "orange"},
+    {"key": "maturity_soc2_pct", "group": "Niveles de madurez", "data_kind": "maturity", "label": "Nivel de Madurez — SOC 2", "description": "Última evaluación de madurez SOC 2.", "unit": "%", "decimals": 2, "allowed_views": ["radar", "gauge"], "default_title": "Nivel de Madurez — SOC 2", "default_subtitle": "Última evaluación", "icon": "bi-patch-check-fill", "color": "purple"},
+    {"key": "maturity_ai_pct", "group": "Niveles de madurez", "data_kind": "maturity", "label": "Nivel de Madurez — Sistema de Gestión de Inteligencia Artificial", "description": "Última revisión ISO/IEC 42001 del sistema de gestión de IA.", "unit": "%", "decimals": 2, "allowed_views": ["radar", "gauge"], "default_title": "Nivel de Madurez — Gestión de IA", "default_subtitle": "ISO/IEC 42001", "icon": "bi-robot", "color": "blue"},
+
+    # Distribuciones: aro, pie o barras. También pueden resumirse en velocímetro.
+    {"key": "risks_residual_distribution", "group": "Riesgos", "data_kind": "distribution", "label": "Riesgos por nivel residual", "description": "Distribución de los riesgos activos por nivel residual.", "unit": "", "decimals": 0, "allowed_views": ["donut", "pie", "bar_vertical", "bar_horizontal", "gauge"], "default_title": "Riesgos por nivel residual", "default_subtitle": "Distribución de riesgos activos", "icon": "bi-exclamation-diamond-fill", "color": "orange"},
+    {"key": "incidents_classification_distribution", "group": "Incidentes", "data_kind": "distribution", "label": "Incidentes por clasificación", "description": "Distribución de incidentes por clasificación o criticidad.", "unit": "", "decimals": 0, "allowed_views": ["donut", "pie", "bar_vertical", "bar_horizontal", "gauge"], "default_title": "Incidentes por clasificación", "default_subtitle": "Gestión de incidentes", "icon": "bi-broadcast-pin", "color": "orange"},
+    {"key": "vulnerabilities_severity_distribution", "group": "Vulnerabilidades", "data_kind": "distribution", "label": "Vulnerabilidades por criticidad", "description": "Distribución de vulnerabilidades por nivel de criticidad.", "unit": "", "decimals": 0, "allowed_views": ["donut", "pie", "bar_vertical", "bar_horizontal", "gauge"], "default_title": "Vulnerabilidades por criticidad", "default_subtitle": "Gestión de vulnerabilidades", "icon": "bi-bug-fill", "color": "purple"},
+    {"key": "providers_criticality_distribution", "group": "Proveedores", "data_kind": "distribution", "label": "Proveedores por criticidad", "description": "Distribución de proveedores según su criticidad.", "unit": "", "decimals": 0, "allowed_views": ["donut", "pie", "bar_vertical", "bar_horizontal", "gauge"], "default_title": "Proveedores por criticidad", "default_subtitle": "Evaluación de terceros", "icon": "bi-buildings-fill", "color": "purple"},
+    {"key": "plans_status_distribution", "group": "Planes y mejora", "data_kind": "distribution", "label": "Planes de acción por estado", "description": "Distribución de planes de acción abiertos, cerrados o sin estado.", "unit": "", "decimals": 0, "allowed_views": ["donut", "pie", "bar_vertical", "bar_horizontal", "gauge"], "default_title": "Planes de acción por estado", "default_subtitle": "Seguimiento de acciones", "icon": "bi-list-check", "color": "blue"},
+    {"key": "legal_status_distribution", "group": "Cumplimiento", "data_kind": "distribution", "label": "Requisitos legales por estado", "description": "Distribución de requisitos legales por estado de cumplimiento.", "unit": "", "decimals": 0, "allowed_views": ["donut", "pie", "bar_vertical", "bar_horizontal", "gauge"], "default_title": "Requisitos legales por estado", "default_subtitle": "Cumplimiento legal", "icon": "bi-bank2", "color": "green"},
+
+    # Tendencias: líneas en el tiempo o barras.
+    {"key": "risks_timeline", "group": "Líneas en el tiempo", "data_kind": "timeline", "label": "Riesgos registrados en el tiempo", "description": "Cantidad mensual de riesgos identificados.", "unit": "", "decimals": 0, "allowed_views": ["line", "bar_vertical", "bar_horizontal"], "default_title": "Riesgos registrados en el tiempo", "default_subtitle": "Últimos períodos con información", "icon": "bi-graph-up-arrow", "color": "orange"},
+    {"key": "incidents_timeline", "group": "Líneas en el tiempo", "data_kind": "timeline", "label": "Incidentes registrados en el tiempo", "description": "Cantidad mensual de incidentes registrados.", "unit": "", "decimals": 0, "allowed_views": ["line", "bar_vertical", "bar_horizontal"], "default_title": "Incidentes registrados en el tiempo", "default_subtitle": "Últimos períodos con información", "icon": "bi-graph-up-arrow", "color": "orange"},
+    {"key": "vulnerabilities_timeline", "group": "Líneas en el tiempo", "data_kind": "timeline", "label": "Vulnerabilidades identificadas en el tiempo", "description": "Cantidad mensual de vulnerabilidades identificadas.", "unit": "", "decimals": 0, "allowed_views": ["line", "bar_vertical", "bar_horizontal"], "default_title": "Vulnerabilidades en el tiempo", "default_subtitle": "Últimos períodos con información", "icon": "bi-graph-up-arrow", "color": "purple"},
+    {"key": "plans_timeline", "group": "Líneas en el tiempo", "data_kind": "timeline", "label": "Planes de acción registrados en el tiempo", "description": "Cantidad mensual de planes de acción creados.", "unit": "", "decimals": 0, "allowed_views": ["line", "bar_vertical", "bar_horizontal"], "default_title": "Planes de acción en el tiempo", "default_subtitle": "Últimos períodos con información", "icon": "bi-graph-up-arrow", "color": "blue"},
+    {"key": "security_culture_timeline", "group": "Líneas en el tiempo", "data_kind": "timeline", "label": "Cultura de seguridad en el tiempo", "description": "Evolución mensual del resultado de cultura y formación.", "unit": "%", "decimals": 2, "allowed_views": ["line", "bar_vertical", "bar_horizontal"], "default_title": "Cultura de seguridad en el tiempo", "default_subtitle": "Resultado mensual", "icon": "bi-people-fill", "color": "green"},
+
+    # Indicadores puntuales: velocímetro o aro.
+    {"key": "scorecard_average_pct", "group": "Indicadores y métricas", "data_kind": "scalar", "label": "Security Scorecard promedio", "description": "Promedio del score de terceros evaluados.", "unit": "%", "decimals": 2, "allowed_views": ["gauge", "donut"], "default_title": "Security Scorecard promedio", "default_subtitle": "Terceros evaluados", "icon": "bi-shield-fill-check", "color": "purple"},
+    {"key": "risks_active_count", "group": "Indicadores y métricas", "data_kind": "scalar", "label": "Riesgos activos", "description": "Cantidad de riesgos no archivados.", "unit": "", "decimals": 0, "allowed_views": ["gauge", "donut"], "default_title": "Riesgos activos", "default_subtitle": "Matriz de riesgos", "icon": "bi-exclamation-diamond-fill", "color": "orange"},
+    {"key": "risks_outside_appetite_count", "group": "Indicadores y métricas", "data_kind": "scalar", "label": "Riesgos fuera del apetito", "description": "Cantidad de riesgos residuales que superan el apetito definido.", "unit": "", "decimals": 0, "allowed_views": ["gauge", "donut"], "default_title": "Riesgos fuera del apetito", "default_subtitle": "Riesgo residual", "icon": "bi-exclamation-triangle-fill", "color": "purple"},
+    {"key": "incidents_open_count", "group": "Indicadores y métricas", "data_kind": "scalar", "label": "Incidentes abiertos", "description": "Cantidad de incidentes sin cierre o resolución.", "unit": "", "decimals": 0, "allowed_views": ["gauge", "donut"], "default_title": "Incidentes abiertos", "default_subtitle": "Gestión de incidentes", "icon": "bi-broadcast-pin", "color": "orange"},
+    {"key": "incidents_compliance_pct", "group": "Indicadores y métricas", "data_kind": "scalar", "label": "Cumplimiento promedio MTCD/MTIR", "description": "Promedio de cumplimiento global de las métricas de incidentes.", "unit": "%", "decimals": 2, "allowed_views": ["gauge", "donut"], "default_title": "Cumplimiento MTCD / MTIR", "default_subtitle": "Métricas de incidentes", "icon": "bi-stopwatch-fill", "color": "green"},
+    {"key": "vulnerabilities_open_count", "group": "Indicadores y métricas", "data_kind": "scalar", "label": "Vulnerabilidades abiertas", "description": "Cantidad de vulnerabilidades abiertas.", "unit": "", "decimals": 0, "allowed_views": ["gauge", "donut"], "default_title": "Vulnerabilidades abiertas", "default_subtitle": "Gestión de vulnerabilidades", "icon": "bi-bug-fill", "color": "orange"},
+    {"key": "vulnerabilities_critical_count", "group": "Indicadores y métricas", "data_kind": "scalar", "label": "Vulnerabilidades críticas abiertas", "description": "Cantidad de vulnerabilidades críticas no cerradas.", "unit": "", "decimals": 0, "allowed_views": ["gauge", "donut"], "default_title": "Vulnerabilidades críticas", "default_subtitle": "Abiertas", "icon": "bi-radioactive", "color": "purple"},
+    {"key": "plans_open_count", "group": "Indicadores y métricas", "data_kind": "scalar", "label": "Planes de acción abiertos", "description": "Cantidad de planes o actividades de mejora abiertas.", "unit": "", "decimals": 0, "allowed_views": ["gauge", "donut"], "default_title": "Planes de acción abiertos", "default_subtitle": "Seguimiento", "icon": "bi-list-check", "color": "blue"},
+    {"key": "plans_overdue_count", "group": "Indicadores y métricas", "data_kind": "scalar", "label": "Planes de acción vencidos", "description": "Planes abiertos cuya fecha propuesta ya venció.", "unit": "", "decimals": 0, "allowed_views": ["gauge", "donut"], "default_title": "Planes de acción vencidos", "default_subtitle": "Seguimiento", "icon": "bi-calendar-x-fill", "color": "purple"},
+    {"key": "legal_noncompliant_count", "group": "Indicadores y métricas", "data_kind": "scalar", "label": "Requisitos legales no cumplidos", "description": "Cantidad de requisitos en incumplimiento.", "unit": "", "decimals": 0, "allowed_views": ["gauge", "donut"], "default_title": "Requisitos no cumplidos", "default_subtitle": "Cumplimiento legal", "icon": "bi-bank2", "color": "orange"},
+    {"key": "providers_high_count", "group": "Indicadores y métricas", "data_kind": "scalar", "label": "Proveedores de criticidad alta", "description": "Cantidad de proveedores clasificados con criticidad alta.", "unit": "", "decimals": 0, "allowed_views": ["gauge", "donut"], "default_title": "Proveedores de criticidad alta", "default_subtitle": "Evaluación de terceros", "icon": "bi-buildings-fill", "color": "purple"},
+    {"key": "security_culture_pct", "group": "Indicadores y métricas", "data_kind": "scalar", "label": "Última métrica de cultura de seguridad", "description": "Resultado general más reciente de cultura y formación.", "unit": "%", "decimals": 2, "allowed_views": ["gauge", "donut"], "default_title": "Cultura de seguridad", "default_subtitle": "Último resultado", "icon": "bi-people-fill", "color": "green"},
+]
+
+DASHBOARD_DATA_SOURCE_MAP = {item["key"]: dict(item) for item in DASHBOARD_DATA_SOURCE_CATALOG}
+
+DASHBOARD_ALLOWED_COLORS = {
+    "blue": "Azul",
+    "orange": "Naranja",
+    "green": "Verde",
+    "purple": "Morado",
+}
+
+DASHBOARD_ALLOWED_ICONS = {
+    "bi-speedometer2": "Velocímetro",
+    "bi-shield-check": "Escudo",
+    "bi-robot": "Inteligencia artificial",
+    "bi-credit-card-2-front": "PCI-DSS",
+    "bi-patch-check-fill": "Cumplimiento",
+    "bi-bar-chart-line-fill": "Métricas",
+    "bi-graph-up-arrow": "Tendencia",
+    "bi-exclamation-triangle-fill": "Alerta",
+    "bi-exclamation-diamond-fill": "Riesgos",
+    "bi-bug-fill": "Vulnerabilidades",
+    "bi-radioactive": "Crítico",
+    "bi-broadcast-pin": "Incidentes",
+    "bi-stopwatch-fill": "Tiempos",
+    "bi-list-check": "Planes de acción",
+    "bi-calendar-x-fill": "Vencimiento",
+    "bi-bank2": "Requisitos legales",
+    "bi-buildings-fill": "Proveedores",
+    "bi-people-fill": "Cultura",
+    "bi-compass": "NIST",
+    "bi-lock-fill": "Datos personales",
+    "bi-shield-fill-check": "Scorecard",
+}
+
 
 def _dashboard_default_widget_keys():
-    return [item["key"] for item in DASHBOARD_WIDGET_CATALOG]
+    return [item["key"] for item in DASHBOARD_WIDGET_CATALOG if item.get("default_enabled", True)]
+
+
+def _dashboard_custom_key(widget_id):
+    return f"custom:{int(widget_id)}"
+
+
+def _dashboard_custom_id_from_key(key):
+    txt = str(key or "").strip()
+    if not txt.startswith("custom:"):
+        return None
+    try:
+        return int(txt.split(":", 1)[1])
+    except Exception:
+        return None
+
+
+def _dashboard_dom_id(key):
+    return re.sub(r"[^a-zA-Z0-9_-]+", "_", str(key or ""))
+
+
+def _dashboard_custom_widgets_for_user(user_id):
+    if not user_id:
+        return []
+    try:
+        return (
+            DashboardCustomWidget.query
+            .filter_by(user_id=int(user_id))
+            .order_by(DashboardCustomWidget.id.asc())
+            .all()
+        )
+    except Exception as exc:
+        print("No se pudieron cargar las visualizaciones personalizadas:", repr(exc))
+        return []
+
+
+def _dashboard_custom_widget_meta(widget):
+    source = DASHBOARD_DATA_SOURCE_MAP.get(widget.source_key, {})
+    key = _dashboard_custom_key(widget.id)
+    view = (widget.widget_type or "gauge").strip().lower()
+    kind = "kpi" if view == "kpi" else "chart"
+    suffix = widget.suffix if widget.suffix is not None else source.get("unit", "")
+    try:
+        decimals = max(0, min(int(widget.decimals if widget.decimals is not None else source.get("decimals", 2)), 2))
+    except Exception:
+        decimals = int(source.get("decimals", 2) or 0)
+
+    return {
+        "key": key,
+        "dom_id": _dashboard_dom_id(key),
+        "kind": kind,
+        "group": "Visualizaciones creadas por el usuario",
+        "label": source.get("label", widget.title),
+        "description": source.get("description", widget.subtitle or "Visualización personalizada."),
+        "title": widget.title or source.get("default_title", source.get("label", "Visualización")),
+        "subtitle": widget.subtitle or source.get("default_subtitle", ""),
+        "icon": widget.icon if widget.icon in DASHBOARD_ALLOWED_ICONS else source.get("icon", "bi-speedometer2"),
+        "color": widget.color if widget.color in DASHBOARD_ALLOWED_COLORS else source.get("color", "blue"),
+        "source_key": widget.source_key,
+        "source_label": source.get("label", widget.source_key),
+        "widget_type": view,
+        "presentation_label": DASHBOARD_VISUALIZATION_LABELS.get(view, view),
+        "target_value": widget.target_value,
+        "suffix": suffix or "",
+        "decimals": decimals,
+        "element_id": f"dash_custom_{widget.id}",
+        "image_id": f"dash_custom_chart_{widget.id}",
+        "custom": True,
+        "custom_id": widget.id,
+    }
+
+
+def _dashboard_available_widget_map(user_id):
+    result = {key: dict(meta, dom_id=_dashboard_dom_id(key)) for key, meta in DASHBOARD_WIDGET_MAP.items()}
+    for widget in _dashboard_custom_widgets_for_user(user_id):
+        meta = _dashboard_custom_widget_meta(widget)
+        result[meta["key"]] = meta
+    return result
+
+
+def _dashboard_resolve_widget_meta(user_id, key):
+    key = str(key or "").strip()
+    if key in DASHBOARD_WIDGET_MAP:
+        return dict(DASHBOARD_WIDGET_MAP[key], dom_id=_dashboard_dom_id(key))
+
+    widget_id = _dashboard_custom_id_from_key(key)
+    if not widget_id or not user_id:
+        return None
+
+    try:
+        widget = DashboardCustomWidget.query.filter_by(id=widget_id, user_id=int(user_id)).first()
+        return _dashboard_custom_widget_meta(widget) if widget else None
+    except Exception:
+        return None
 
 
 def _dashboard_get_selected_keys(user_id):
-    """Obtiene los elementos visibles y su orden para el usuario autenticado."""
     defaults = _dashboard_default_widget_keys()
-
     if not user_id:
         return defaults
 
     try:
+        available = _dashboard_available_widget_map(user_id)
         pref = DashboardPreference.query.filter_by(user_id=int(user_id)).first()
         if not pref:
             return defaults
@@ -11742,25 +12247,22 @@ def _dashboard_get_selected_keys(user_id):
         seen = set()
         for key in raw:
             key = str(key or "").strip()
-            if key in DASHBOARD_WIDGET_MAP and key not in seen:
+            if key in available and key not in seen:
                 selected.append(key)
                 seen.add(key)
-
-        # Una lista vacía guardada es válida: representa un tablero sin elementos.
         return selected
-
     except Exception as exc:
         print("No se pudo cargar la configuración del Centro de Control:", repr(exc))
         return defaults
 
 
 def _dashboard_save_selected_keys(user_id, selected_keys):
+    available = _dashboard_available_widget_map(user_id)
     clean = []
     seen = set()
-
     for key in selected_keys or []:
         key = str(key or "").strip()
-        if key in DASHBOARD_WIDGET_MAP and key not in seen:
+        if key in available and key not in seen:
             clean.append(key)
             seen.add(key)
 
@@ -11768,11 +12270,22 @@ def _dashboard_save_selected_keys(user_id, selected_keys):
     if not pref:
         pref = DashboardPreference(user_id=int(user_id))
         db.session.add(pref)
-
     pref.widget_keys_json = json.dumps(clean, ensure_ascii=False)
     pref.updated_at = datetime.utcnow()
     db.session.commit()
     return clean
+
+
+def _dashboard_add_key_to_selection(user_id, key):
+    selected = _dashboard_get_selected_keys(user_id)
+    if key not in selected:
+        selected.append(key)
+    return _dashboard_save_selected_keys(user_id, selected)
+
+
+def _dashboard_remove_key_from_selection(user_id, key):
+    selected = [item for item in _dashboard_get_selected_keys(user_id) if item != key]
+    return _dashboard_save_selected_keys(user_id, selected)
 
 
 def _dashboard_reset_selected_keys(user_id):
@@ -11783,18 +12296,56 @@ def _dashboard_reset_selected_keys(user_id):
     return _dashboard_default_widget_keys()
 
 
-def _dashboard_prepare_view(selected_keys, payload):
+def _dashboard_format_value(value, suffix="", decimals=2):
+    try:
+        number = float(value or 0)
+    except Exception:
+        number = 0.0
+    try:
+        decimals = max(0, min(int(decimals), 2))
+    except Exception:
+        decimals = 2
+
+    if decimals == 0:
+        text = f"{int(round(number)):,}".replace(",", ".")
+    else:
+        text = f"{number:.{decimals}f}"
+    suffix = str(suffix or "").strip()
+    if suffix == "%":
+        return text + "%"
+    if suffix:
+        return text + " " + suffix
+    return text
+
+
+def _dashboard_prepare_view(selected_keys, payload, user_id=None):
     kpis = []
     charts = []
+    custom_payload = payload.get("custom_widgets", {}) or {}
 
     for key in selected_keys or []:
-        meta = DASHBOARD_WIDGET_MAP.get(key)
+        meta = _dashboard_resolve_widget_meta(user_id, key)
         if not meta:
+            continue
+
+        if meta.get("custom"):
+            data = custom_payload.get(key, {}) or {}
+            item = dict(meta)
+            item["value"] = data.get("value", 0)
+            item["display_value"] = data.get("display_value", "")
+            if meta.get("kind") == "kpi":
+                if not item["display_value"]:
+                    item["display_value"] = _dashboard_format_value(item["value"], meta.get("suffix", ""), meta.get("decimals", 2))
+                kpis.append(item)
+            else:
+                item["image"] = data.get("image", "") or _dashboard_empty_chart(item.get("title", "Visualización"), "No hay información disponible")
+                charts.append(item)
             continue
 
         if meta.get("kind") == "kpi":
             item = dict(meta)
             item["value"] = float(payload.get(meta.get("value_key"), 0) or 0)
+            item["display_value"] = _dashboard_format_value(item["value"], meta.get("suffix", ""), meta.get("decimals", 2))
             kpis.append(item)
             continue
 
@@ -11802,65 +12353,800 @@ def _dashboard_prepare_view(selected_keys, payload):
         value_key = meta.get("value_key")
         if value_key:
             item["value"] = float(payload.get(value_key, 0) or 0)
-            item["value_is_number"] = True
+            item["display_value"] = _dashboard_format_value(item["value"], meta.get("suffix", "%"), meta.get("decimals", 2))
         else:
             item["value"] = meta.get("display_value", "")
-            item["value_is_number"] = False
-
+            item["display_value"] = meta.get("display_value", "")
         item["image"] = payload.get(meta.get("image_key"), "") or ""
         charts.append(item)
 
     return kpis, charts
 
 
-def _dashboard_build_payload(selected_keys=None):
-    """Construye únicamente los indicadores que el usuario decidió mostrar."""
-    if selected_keys is None:
-        selected = set(_dashboard_default_widget_keys())
+def _dashboard_latest_pci_data():
+    try:
+        model = globals().get("PciAnalysisRun")
+        if model is not None:
+            row = model.query.order_by(model.id.desc()).first()
+            if row:
+                pct = max(0.0, min(100.0, float(getattr(row, "nivel_promedio_general", 0) or 0)))
+                radar = ""
+                try:
+                    resultados = json.loads(getattr(row, "resultados_json", "{}") or "{}")
+                    radar_fn = globals().get("generar_pci_radar_base64")
+                    if radar_fn and resultados:
+                        radar = radar_fn(resultados) or ""
+                except Exception:
+                    radar = ""
+                return {"pct": pct, "radar_b64": radar}
+    except Exception as exc:
+        print("No se pudo leer madurez PCI-DSS para el tablero:", repr(exc))
+    return {"pct": 0.0, "radar_b64": ""}
+
+
+def _dashboard_latest_soc2_data():
+    try:
+        model = globals().get("Soc2MadurezRun")
+        if model is not None:
+            row = (
+                model.query
+                .filter(func.upper(model.estado) == "FINALIZADO")
+                .order_by(model.id.desc())
+                .first()
+            ) or model.query.order_by(model.id.desc()).first()
+            if row:
+                pct = max(0.0, min(100.0, float(getattr(row, "pct_general", 0) or 0)))
+                return {"pct": pct, "radar_b64": getattr(row, "radar_overall_b64", None) or ""}
+    except Exception as exc:
+        print("No se pudo leer madurez SOC 2 para el tablero:", repr(exc))
+    return {"pct": 0.0, "radar_b64": ""}
+
+
+def _dashboard_latest_ai_data():
+    db_path = globals().get("AI_MADUREZ_DB_PATH") or os.path.join(app.instance_path, "ai_madurez_42001.db")
+    try:
+        if not os.path.exists(db_path):
+            return {"pct": 0.0, "radar_b64": ""}
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("""
+            SELECT pct_general, radar_overall_b64
+            FROM ai_madurez_runs
+            WHERE UPPER(COALESCE(estado, '')) = 'FINALIZADO'
+            ORDER BY id DESC LIMIT 1
+        """).fetchone()
+        if row is None:
+            row = conn.execute("""
+                SELECT pct_general, radar_overall_b64
+                FROM ai_madurez_runs
+                ORDER BY id DESC LIMIT 1
+            """).fetchone()
+        conn.close()
+        if row:
+            pct = max(0.0, min(100.0, float(row["pct_general"] or 0)))
+            return {"pct": pct, "radar_b64": row["radar_overall_b64"] or ""}
+    except Exception as exc:
+        print("No se pudo leer madurez de Gestión de IA para el tablero:", repr(exc))
+    return {"pct": 0.0, "radar_b64": ""}
+
+
+def _dashboard_latest_data_maturity_data():
+    try:
+        model = globals().get("DatosMadurezRun")
+        if model is None:
+            return {"pct": 0.0, "radar_b64": ""}
+        row = (
+            model.query
+            .filter(func.upper(model.estado) == "FINALIZADO")
+            .order_by(model.id.desc())
+            .first()
+        ) or model.query.order_by(model.id.desc()).first()
+        if not row:
+            return {"pct": 0.0, "radar_b64": ""}
+        pct = max(0.0, min(100.0, float(getattr(row, "pct_general", 0) or 0)))
+        radar = ""
+        try:
+            resumen = json.loads(getattr(row, "resumen_json", "{}") or "{}")
+            radar_fn = globals().get("generar_radar_datos_base64")
+            if radar_fn and resumen:
+                radar = radar_fn(resumen) or ""
+        except Exception:
+            radar = ""
+        return {"pct": pct, "radar_b64": radar}
+    except Exception as exc:
+        print("No se pudo leer madurez de Datos Personales para el tablero:", repr(exc))
+        return {"pct": 0.0, "radar_b64": ""}
+
+
+def _dashboard_maturity_data(source_key):
+    if source_key == "maturity_iso_pct":
+        data = _dashboard_latest_iso_data() or {}
+        return {"pct": float(data.get("pct", 0) or 0), "radar_b64": data.get("radar_b64", "") or ""}
+    if source_key == "maturity_nist_pct":
+        data = _dashboard_latest_nist_data() or {}
+        return {"pct": float(data.get("pct", 0) or 0), "radar_b64": data.get("radar_b64", "") or ""}
+    if source_key == "maturity_data_pct":
+        return _dashboard_latest_data_maturity_data()
+    if source_key == "maturity_pci_pct":
+        return _dashboard_latest_pci_data()
+    if source_key == "maturity_soc2_pct":
+        return _dashboard_latest_soc2_data()
+    if source_key == "maturity_ai_pct":
+        return _dashboard_latest_ai_data()
+    return {"pct": 0.0, "radar_b64": ""}
+
+
+def _dashboard_risk_rank(raw):
+    txt = str(raw or "").strip().upper()
+    txt = unicodedata.normalize("NFKD", txt)
+    txt = "".join(c for c in txt if not unicodedata.combining(c))
+    if "EXTREMO" in txt or "CRITICO" in txt:
+        return 5
+    if "MUY ALTO" in txt:
+        return 4
+    if re.search(r"\bALTO\b", txt):
+        return 3
+    if "MODERADO" in txt or "MEDIO" in txt:
+        return 2
+    if "BAJO" in txt:
+        return 1
+    return 0
+
+
+def _dashboard_active_risks():
+    try:
+        return [r for r in Riesgo.query.all() if not bool(getattr(r, "archivado", False))]
+    except Exception:
+        return []
+
+
+def _dashboard_metric_value(source_key, user_id=None):
+    source_key = str(source_key or "").strip()
+    try:
+        if source_key.startswith("maturity_"):
+            return float((_dashboard_maturity_data(source_key) or {}).get("pct", 0) or 0)
+        if source_key == "scorecard_average_pct":
+            return float(_dashboard_latest_scorecard_terceros_pct() or 0)
+        if source_key == "risks_active_count":
+            return float(len(_dashboard_active_risks()))
+        if source_key == "risks_outside_appetite_count":
+            risks = _dashboard_active_risks()
+            try:
+                cfg = MetricConfigRiesgos.query.first()
+                appetite_rank = _dashboard_risk_rank(getattr(cfg, "apetito_residual_definido", "") if cfg else "") or 2
+            except Exception:
+                appetite_rank = 2
+            return float(sum(1 for r in risks if _dashboard_risk_rank(getattr(r, "riesgo_residual", "")) > appetite_rank))
+        if source_key == "incidents_open_count":
+            db_path = globals().get("INCIDENTES_DB_PATH") or os.path.join(app.instance_path, "incidentes.db")
+            if not os.path.exists(db_path):
+                return 0.0
+            conn = sqlite3.connect(db_path)
+            row = conn.execute("""
+                SELECT COUNT(*) FROM registro_incidentes
+                WHERE UPPER(TRIM(COALESCE(estado, ''))) NOT IN
+                      ('CERRADO', 'CERRADA', 'CLOSED', 'RESUELTO', 'RESUELTA')
+            """).fetchone()
+            conn.close()
+            return float(row[0] if row else 0)
+        if source_key == "incidents_compliance_pct":
+            model = globals().get("MetricaIncidente")
+            if model is None:
+                return 0.0
+            value = db.session.query(func.avg(model.cumplimiento_global)).filter(model.cumplimiento_global.isnot(None)).scalar()
+            return float(value or 0)
+        if source_key in {"vulnerabilities_open_count", "vulnerabilities_critical_count"}:
+            items = VulnerabilidadRegistro.query.all()
+            open_items = []
+            for item in items:
+                estado = str(getattr(item, "estado", "") or "").strip().upper()
+                if estado not in {"CERRADO", "CERRADA", "CLOSED", "RESUELTO", "RESUELTA"}:
+                    open_items.append(item)
+            if source_key == "vulnerabilities_open_count":
+                return float(len(open_items))
+            return float(sum(1 for item in open_items if "CRIT" in str(getattr(item, "clasificacion", "") or "").upper()))
+        if source_key in {"plans_open_count", "plans_overdue_count"}:
+            items = MejoraPlanRegistro.query.all()
+            open_items = []
+            for item in items:
+                estado = str(getattr(item, "estado_actividad", "") or "").strip().upper()
+                if estado not in {"CERRADO", "CERRADA", "CLOSED", "FINALIZADO", "FINALIZADA"}:
+                    open_items.append(item)
+            if source_key == "plans_open_count":
+                return float(len(open_items))
+            today = datetime.utcnow().date()
+            overdue = 0
+            for item in open_items:
+                due = _dashboard_parse_date(getattr(item, "fecha_ejecucion_propuesta", None))
+                if due and due.date() < today:
+                    overdue += 1
+            return float(overdue)
+        if source_key == "legal_noncompliant_count":
+            return float(sum(1 for item in RequisitoLegal.query.all() if "NO CUMPLE" in str(getattr(item, "estado", "") or "").upper() or "INCUMPLE" in str(getattr(item, "estado", "") or "").upper()))
+        if source_key == "providers_high_count":
+            return float(sum(1 for item in ProveedorEvaluacion.query.all() if "ALTA" in str(getattr(item, "criticidad_texto", "") or "").upper()))
+        if source_key == "security_culture_pct":
+            model = globals().get("MetricasCultura")
+            if model is None:
+                return 0.0
+            row = model.query.order_by(model.anio.desc(), model.mes.desc(), model.id.desc()).first()
+            return float(getattr(row, "resultado_meta_general", 0) or 0) if row else 0.0
+    except Exception as exc:
+        print(f"No se pudo calcular la fuente {source_key}:", repr(exc))
+    return 0.0
+
+
+def _dashboard_parse_date(raw):
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, datetime):
+        return raw
+    try:
+        if isinstance(raw, date):
+            return datetime.combine(raw, datetime.min.time())
+    except Exception:
+        pass
+    txt = str(raw).strip()
+    if not txt:
+        return None
+    txt_iso = txt.replace("Z", "+00:00")
+    try:
+        value = datetime.fromisoformat(txt_iso)
+        if getattr(value, "tzinfo", None):
+            value = value.replace(tzinfo=None)
+        return value
+    except Exception:
+        pass
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M"):
+        try:
+            return datetime.strptime(txt[:19], fmt)
+        except Exception:
+            continue
+    return None
+
+
+_DASHBOARD_MONTHS_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+
+
+def _dashboard_month_label(key):
+    try:
+        year, month = [int(x) for x in str(key).split("-")[:2]]
+        return f"{_DASHBOARD_MONTHS_ES[month - 1]} {year}"
+    except Exception:
+        return str(key)
+
+
+def _dashboard_monthly_count_series(values, limit=12):
+    counts = Counter()
+    for raw in values or []:
+        dt_value = _dashboard_parse_date(raw)
+        if dt_value:
+            counts[dt_value.strftime("%Y-%m")] += 1
+    keys = sorted(counts.keys())[-max(1, int(limit or 12)):]
+    return [_dashboard_month_label(k) for k in keys], [float(counts[k]) for k in keys]
+
+
+def _dashboard_distribution_risks():
+    labels = ["Bajo", "Medio", "Alto", "Muy Alto", "Extremo"]
+    values = {label: 0 for label in labels}
+    for item in _dashboard_active_risks():
+        rank = _dashboard_risk_rank(getattr(item, "riesgo_residual", ""))
+        if rank == 1:
+            values["Bajo"] += 1
+        elif rank == 2:
+            values["Medio"] += 1
+        elif rank == 3:
+            values["Alto"] += 1
+        elif rank == 4:
+            values["Muy Alto"] += 1
+        elif rank == 5:
+            values["Extremo"] += 1
+    return labels, [float(values[label]) for label in labels]
+
+
+def _dashboard_incident_db_rows(columns_candidates):
+    db_path = globals().get("INCIDENTES_DB_PATH") or os.path.join(app.instance_path, "incidentes.db")
+    if not os.path.exists(db_path):
+        return [], None
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(registro_incidentes)").fetchall()]
+        column = next((candidate for candidate in columns_candidates if candidate in cols), None)
+        if not column:
+            return [], None
+        rows = conn.execute(f"SELECT {column} AS value FROM registro_incidentes WHERE {column} IS NOT NULL AND TRIM(CAST({column} AS TEXT)) <> ''").fetchall()
+        return rows, column
+    finally:
+        conn.close()
+
+
+def _dashboard_distribution_incidents():
+    labels = ["Bajo", "Medio", "Alto", "Crítico"]
+    values = {label: 0 for label in labels}
+    rows, _ = _dashboard_incident_db_rows(["clasificacion_incidente", "clasificacion", "criticidad", "nivel", "tipo_incidente", "categoria_incidente"])
+    for row in rows:
+        txt = unicodedata.normalize("NFKD", str(row["value"] or "").upper())
+        txt = "".join(c for c in txt if not unicodedata.combining(c))
+        if "CRIT" in txt:
+            values["Crítico"] += 1
+        elif "ALTO" in txt:
+            values["Alto"] += 1
+        elif "MEDIO" in txt or "MEDIA" in txt or "MODER" in txt:
+            values["Medio"] += 1
+        elif "BAJO" in txt or "BAJA" in txt:
+            values["Bajo"] += 1
+    return labels, [float(values[label]) for label in labels]
+
+
+def _dashboard_distribution_vulnerabilities():
+    labels = ["Baja", "Media", "Alta", "Crítica"]
+    values = {label: 0 for label in labels}
+    try:
+        items = VulnerabilidadRegistro.query.all()
+    except Exception:
+        items = []
+    for item in items:
+        candidates = [
+            getattr(item, "clasificacion", None), getattr(item, "severidad", None),
+            getattr(item, "criticidad", None), getattr(item, "nivel_criticidad", None),
+            getattr(item, "criticidad_vulnerabilidad", None), getattr(item, "impacto", None),
+            getattr(item, "prioridad", None),
+        ]
+        txt = " ".join(str(v or "") for v in candidates).upper()
+        txt = unicodedata.normalize("NFKD", txt)
+        txt = "".join(c for c in txt if not unicodedata.combining(c))
+        if "CRIT" in txt:
+            values["Crítica"] += 1
+        elif "ALTA" in txt or "HIGH" in txt:
+            values["Alta"] += 1
+        elif "MEDIA" in txt or "MEDIUM" in txt or "MODER" in txt:
+            values["Media"] += 1
+        elif "BAJA" in txt or "LOW" in txt or "INFO" in txt:
+            values["Baja"] += 1
+    return labels, [float(values[label]) for label in labels]
+
+
+def _dashboard_distribution_providers():
+    labels = ["Muy baja", "Baja", "Media", "Alta"]
+    values = {label: 0 for label in labels}
+    try:
+        items = ProveedorEvaluacion.query.all()
+    except Exception:
+        items = []
+    for item in items:
+        txt = str(getattr(item, "criticidad_texto", "") or "").lower()
+        if "muy baja" in txt:
+            values["Muy baja"] += 1
+        elif "baja" in txt:
+            values["Baja"] += 1
+        elif "media" in txt:
+            values["Media"] += 1
+        elif "alta" in txt:
+            values["Alta"] += 1
+    return labels, [float(values[label]) for label in labels]
+
+
+def _dashboard_distribution_plans():
+    labels = ["Abierto", "Cerrado", "Sin estado"]
+    values = {label: 0 for label in labels}
+    try:
+        items = MejoraPlanRegistro.query.all()
+    except Exception:
+        items = []
+    for item in items:
+        txt = str(getattr(item, "estado_actividad", "") or "").strip().upper()
+        if txt in {"ABIERTO", "ABIERTA", "OPEN"}:
+            values["Abierto"] += 1
+        elif txt in {"CERRADO", "CERRADA", "CLOSED", "FINALIZADO", "FINALIZADA"}:
+            values["Cerrado"] += 1
+        else:
+            values["Sin estado"] += 1
+    return labels, [float(values[label]) for label in labels]
+
+
+def _dashboard_distribution_legal():
+    labels = ["Cumple", "Parcial", "No cumple", "Sin estado"]
+    values = {label: 0 for label in labels}
+    try:
+        items = RequisitoLegal.query.all()
+    except Exception:
+        items = []
+    for item in items:
+        txt = str(getattr(item, "estado", "") or "").strip().upper()
+        if txt == "CUMPLE":
+            values["Cumple"] += 1
+        elif "PARCIAL" in txt:
+            values["Parcial"] += 1
+        elif "NO CUMPLE" in txt or "INCUMPLE" in txt:
+            values["No cumple"] += 1
+        else:
+            values["Sin estado"] += 1
+    return labels, [float(values[label]) for label in labels]
+
+
+def _dashboard_timeline_risks():
+    return _dashboard_monthly_count_series([getattr(item, "fecha_identificacion", None) for item in _dashboard_active_risks()])
+
+
+def _dashboard_timeline_incidents():
+    rows, _ = _dashboard_incident_db_rows(["fecha_registro", "fecha_incidente", "fecha_reporte", "created_at", "fecha", "fecha_creacion"])
+    return _dashboard_monthly_count_series([row["value"] for row in rows])
+
+
+def _dashboard_timeline_vulnerabilities():
+    try:
+        items = VulnerabilidadRegistro.query.all()
+    except Exception:
+        items = []
+    values = [getattr(item, "fecha_identificacion", None) or getattr(item, "created_at", None) for item in items]
+    return _dashboard_monthly_count_series(values)
+
+
+def _dashboard_timeline_plans():
+    try:
+        items = MejoraPlanRegistro.query.all()
+    except Exception:
+        items = []
+    values = [getattr(item, "fecha", None) or getattr(item, "fecha_ejecucion_propuesta", None) for item in items]
+    return _dashboard_monthly_count_series(values)
+
+
+def _dashboard_timeline_culture():
+    model = globals().get("MetricasCultura")
+    if model is None:
+        return [], []
+    try:
+        rows = model.query.order_by(model.anio.asc(), model.mes.asc(), model.id.asc()).all()
+    except Exception:
+        return [], []
+    values_by_key = {}
+    for row in rows:
+        try:
+            year = int(getattr(row, "anio", 0) or 0)
+            month = int(getattr(row, "mes", 0) or 0)
+            if year > 0 and 1 <= month <= 12:
+                values_by_key[f"{year:04d}-{month:02d}"] = float(getattr(row, "resultado_meta_general", 0) or 0)
+        except Exception:
+            continue
+    keys = sorted(values_by_key.keys())[-12:]
+    return [_dashboard_month_label(key) for key in keys], [values_by_key[key] for key in keys]
+
+
+_DASHBOARD_DISTRIBUTION_SOURCES = {
+    "risks_residual_distribution": _dashboard_distribution_risks,
+    "incidents_classification_distribution": _dashboard_distribution_incidents,
+    "vulnerabilities_severity_distribution": _dashboard_distribution_vulnerabilities,
+    "providers_criticality_distribution": _dashboard_distribution_providers,
+    "plans_status_distribution": _dashboard_distribution_plans,
+    "legal_status_distribution": _dashboard_distribution_legal,
+}
+
+_DASHBOARD_TIMELINE_SOURCES = {
+    "risks_timeline": _dashboard_timeline_risks,
+    "incidents_timeline": _dashboard_timeline_incidents,
+    "vulnerabilities_timeline": _dashboard_timeline_vulnerabilities,
+    "plans_timeline": _dashboard_timeline_plans,
+    "security_culture_timeline": _dashboard_timeline_culture,
+}
+
+
+def _dashboard_source_snapshot(source_key, user_id=None, cache=None):
+    if cache is not None and source_key in cache:
+        return cache[source_key]
+    meta = DASHBOARD_DATA_SOURCE_MAP.get(source_key, {})
+    kind = meta.get("data_kind", "scalar")
+    result = {
+        "source_key": source_key,
+        "data_kind": kind,
+        "value": 0.0,
+        "unit": meta.get("unit", ""),
+        "decimals": int(meta.get("decimals", 2) or 0),
+        "labels": [],
+        "values": [],
+        "radar_b64": "",
+        "meta": meta,
+    }
+    try:
+        if kind == "maturity":
+            data = _dashboard_maturity_data(source_key)
+            result["value"] = float(data.get("pct", 0) or 0)
+            result["radar_b64"] = data.get("radar_b64", "") or ""
+        elif kind == "distribution":
+            labels, values = _DASHBOARD_DISTRIBUTION_SOURCES.get(source_key, lambda: ([], []))()
+            result["labels"] = list(labels or [])
+            result["values"] = [float(v or 0) for v in (values or [])]
+            result["value"] = float(sum(result["values"]))
+        elif kind == "timeline":
+            labels, values = _DASHBOARD_TIMELINE_SOURCES.get(source_key, lambda: ([], []))()
+            result["labels"] = list(labels or [])
+            result["values"] = [float(v or 0) for v in (values or [])]
+            result["value"] = float(result["values"][-1]) if result["values"] else 0.0
+        else:
+            result["value"] = float(_dashboard_metric_value(source_key, user_id) or 0)
+    except Exception as exc:
+        print(f"No se pudo construir la fuente visual {source_key}:", repr(exc))
+    if cache is not None:
+        cache[source_key] = result
+    return result
+
+
+def _dashboard_metric_snapshot(source_key, user_id=None, cache=None):
+    return _dashboard_source_snapshot(source_key, user_id, cache)
+
+
+def _dashboard_nice_scale(value):
+    try:
+        value = max(0.0, float(value or 0))
+    except Exception:
+        value = 0.0
+    if value <= 0:
+        return 10.0
+    magnitude = 10 ** math.floor(math.log10(value))
+    for factor in (1, 2, 5, 10, 20):
+        candidate = factor * magnitude
+        if candidate >= value * 1.15:
+            return float(candidate)
+    return float(10 * magnitude)
+
+
+def _dashboard_scalar_ring_b64(value, title="", subtitle="", unit="", decimals=2):
+    try:
+        value = max(0.0, float(value or 0))
+    except Exception:
+        value = 0.0
+    scale = 100.0 if unit == "%" else _dashboard_nice_scale(value)
+    current = min(value, scale)
+    remaining = max(0.0, scale - current)
+    fig, ax = plt.subplots(figsize=(8.0, 5.6))
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#ffffff")
+    ax.pie(
+        [current, remaining] if scale > 0 else [0, 1],
+        startangle=90,
+        counterclock=False,
+        colors=["#0b5fa5", "#e7edf4"],
+        wedgeprops=dict(width=0.34, edgecolor="white", linewidth=2),
+    )
+    display = _dashboard_format_value(value, unit, decimals)
+    ax.text(0, 0.08, display, ha="center", va="center", fontsize=25, fontweight="bold", color="#0b1220")
+    ax.text(0, -0.14, "Valor actual", ha="center", va="center", fontsize=10, color="#64748b")
+    if title:
+        ax.set_title(title, fontsize=15, fontweight="bold", color="#0b1220", pad=12)
+    if subtitle:
+        fig.text(0.5, 0.03, subtitle, ha="center", fontsize=10, color="#4b5563")
+    ax.set_aspect("equal")
+    return _dashboard_fig_to_b64(fig)
+
+
+def _dashboard_pie_b64(labels, values, title="", subtitle=""):
+    labels = list(labels or [])
+    values = [float(v or 0) for v in (values or [])]
+    if not labels or not values or sum(values) <= 0:
+        return _dashboard_empty_chart(title or "Sin datos", "No hay información para graficar")
+    palette = ["#087c3d", "#84cc16", "#d39b00", "#c95508", "#b91c1c", "#5521a8", "#087ab8"]
+    fig, ax = plt.subplots(figsize=(8.0, 5.6))
+    fig.patch.set_facecolor("#ffffff")
+    wedges, _, autotexts = ax.pie(
+        values,
+        labels=None,
+        autopct=lambda pct: f"{pct:.0f}%" if pct >= 4 else "",
+        startangle=90,
+        counterclock=False,
+        colors=[palette[i % len(palette)] for i in range(len(labels))],
+        wedgeprops=dict(edgecolor="white", linewidth=2),
+    )
+    for txt in autotexts:
+        txt.set_fontsize(9)
+        txt.set_fontweight("bold")
+    ax.legend(wedges, [f"{label}: {_dashboard_format_value(value, '', 0)}" for label, value in zip(labels, values)], loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False, fontsize=9)
+    if title:
+        ax.set_title(title, fontsize=15, fontweight="bold", color="#0b1220", pad=12)
+    if subtitle:
+        fig.text(0.5, 0.03, subtitle, ha="center", fontsize=10, color="#4b5563")
+    ax.set_aspect("equal")
+    return _dashboard_fig_to_b64(fig)
+
+
+def _dashboard_bar_b64(labels, values, title="", subtitle="", horizontal=False, unit=""):
+    labels = [str(label) for label in (labels or [])]
+    values = [float(v or 0) for v in (values or [])]
+    if not labels or not values:
+        return _dashboard_empty_chart(title or "Sin datos", "No hay información para graficar")
+    fig, ax = plt.subplots(figsize=(8.6, 5.4))
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#ffffff")
+    positions = list(range(len(labels)))
+    palette = ["#0b5fa5", "#16855b", "#d48b0b", "#b44747", "#6c4bc2", "#2386b7"]
+    colors = [palette[i % len(palette)] for i in positions]
+    if horizontal:
+        bars = ax.barh(positions, values, color=colors)
+        ax.set_yticks(positions, labels)
+        ax.invert_yaxis()
+        for bar, value in zip(bars, values):
+            ax.text(bar.get_width(), bar.get_y() + bar.get_height() / 2, "  " + _dashboard_format_value(value, unit, 2 if unit == "%" else 0), va="center", fontsize=9, fontweight="bold")
+        ax.grid(axis="x", alpha=.20)
     else:
-        selected = {key for key in selected_keys if key in DASHBOARD_WIDGET_MAP}
+        bars = ax.bar(positions, values, color=colors)
+        ax.set_xticks(positions, labels, rotation=25, ha="right")
+        for bar, value in zip(bars, values):
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), _dashboard_format_value(value, unit, 2 if unit == "%" else 0), ha="center", va="bottom", fontsize=9, fontweight="bold")
+        ax.grid(axis="y", alpha=.20)
+    ax.spines[["top", "right"]].set_visible(False)
+    if title:
+        ax.set_title(title, fontsize=15, fontweight="bold", color="#0b1220", pad=12)
+    if subtitle:
+        fig.text(0.5, 0.01, subtitle, ha="center", fontsize=9.5, color="#4b5563")
+    fig.tight_layout(rect=[0, .05, 1, 1])
+    return _dashboard_fig_to_b64(fig)
+
+
+def _dashboard_line_b64(labels, values, title="", subtitle="", unit=""):
+    labels = [str(label) for label in (labels or [])]
+    values = [float(v or 0) for v in (values or [])]
+    if not labels or not values:
+        return _dashboard_empty_chart(title or "Sin datos", "No hay información histórica para graficar")
+    fig, ax = plt.subplots(figsize=(8.8, 5.4))
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#ffffff")
+    x = list(range(len(labels)))
+    ax.plot(x, values, marker="o", linewidth=2.5, markersize=6, color="#0b5fa5")
+    ax.fill_between(x, values, [0] * len(values), alpha=.10, color="#0b5fa5")
+    ax.set_xticks(x, labels, rotation=28, ha="right")
+    ax.grid(axis="y", alpha=.22)
+    ax.spines[["top", "right"]].set_visible(False)
+    for xi, value in zip(x, values):
+        ax.annotate(_dashboard_format_value(value, unit, 2 if unit == "%" else 0), (xi, value), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=8.5, fontweight="bold")
+    if title:
+        ax.set_title(title, fontsize=15, fontweight="bold", color="#0b1220", pad=12)
+    if subtitle:
+        fig.text(0.5, 0.01, subtitle, ha="center", fontsize=9.5, color="#4b5563")
+    fig.tight_layout(rect=[0, .05, 1, 1])
+    return _dashboard_fig_to_b64(fig)
+
+
+def _dashboard_render_custom_visualization(snapshot, view, title, subtitle):
+    view = str(view or "gauge").strip().lower()
+    kind = snapshot.get("data_kind", "scalar")
+    unit = snapshot.get("unit", "")
+    decimals = snapshot.get("decimals", 2)
+    value = float(snapshot.get("value", 0) or 0)
+    labels = snapshot.get("labels", []) or []
+    values = snapshot.get("values", []) or []
+
+    if view == "radar":
+        return snapshot.get("radar_b64", "") or _dashboard_empty_chart(title, "No se encontró información por dominio para generar la araña")
+    if view == "gauge":
+        if unit == "%":
+            gauge_pct = max(0.0, min(100.0, value))
+            gauge_subtitle = subtitle
+        else:
+            scale = _dashboard_nice_scale(value)
+            gauge_pct = max(0.0, min(100.0, (value / scale * 100.0) if scale > 0 else 0.0))
+            gauge_subtitle = f"{subtitle} · Valor actual: {_dashboard_format_value(value, unit, decimals)}".strip(" ·")
+        return _dashboard_gauge_b64(gauge_pct, title, gauge_subtitle)
+    if view == "donut":
+        if kind == "distribution":
+            return _dashboard_donut_b64(labels, values, title=title, subtitle=subtitle)
+        return _dashboard_scalar_ring_b64(value, title, subtitle, unit, decimals)
+    if view == "pie":
+        return _dashboard_pie_b64(labels, values, title, subtitle)
+    if view == "bar_vertical":
+        if not labels:
+            labels, values = [snapshot.get("meta", {}).get("label", "Valor")], [value]
+        return _dashboard_bar_b64(labels, values, title, subtitle, horizontal=False, unit=unit if kind == "timeline" else "")
+    if view == "bar_horizontal":
+        if not labels:
+            labels, values = [snapshot.get("meta", {}).get("label", "Valor")], [value]
+        return _dashboard_bar_b64(labels, values, title, subtitle, horizontal=True, unit=unit if kind == "timeline" else "")
+    if view == "line":
+        return _dashboard_line_b64(labels, values, title, subtitle, unit=unit)
+    return ""
+
+
+def _dashboard_custom_widget_form_data(form):
+    source_key = str(form.get("source_key") or "").strip()
+    source = DASHBOARD_DATA_SOURCE_MAP.get(source_key)
+    if not source:
+        return None, "Seleccione una fuente de datos válida."
+
+    widget_type = str(form.get("widget_type") or "").strip().lower()
+    allowed = list(source.get("allowed_views", []))
+    if widget_type not in allowed:
+        return None, "Seleccione una presentación válida para la fuente de datos."
+
+    return {
+        "title": source.get("default_title") or source.get("label") or "Visualización",
+        "subtitle": source.get("default_subtitle") or "",
+        "source_key": source_key,
+        "widget_type": widget_type,
+        "icon": source.get("icon", "bi-speedometer2"),
+        "color": source.get("color", "blue"),
+        "target_value": None,
+        "suffix": source.get("unit", ""),
+        "decimals": int(source.get("decimals", 2) or 0),
+    }, None
+
+
+def _dashboard_build_payload(selected_keys=None, user_id=None):
+    if selected_keys is None:
+        selected_keys = _dashboard_default_widget_keys()
+
+    selected = {key for key in selected_keys if key in DASHBOARD_WIDGET_MAP}
+    selected_custom = [key for key in selected_keys if _dashboard_custom_id_from_key(key)]
 
     payload = {
-        "iso_radar_b64": "",
-        "iso_pct": 0.0,
-        "nist_radar_b64": "",
-        "nist_pct": 0.0,
-        "datos_gauge_b64": "",
-        "datos_pct": 0.0,
+        "iso_radar_b64": "", "iso_pct": 0.0,
+        "nist_radar_b64": "", "nist_pct": 0.0,
+        "datos_gauge_b64": "", "datos_pct": 0.0,
         "scorecard_terceros_pct": 0.0,
-        "riesgos_b64": "",
-        "incidentes_b64": "",
-        "vulnerabilidades_b64": "",
-        "proveedores_criticidad_b64": "",
-        "planes_accion_estado_b64": "",
-        "requisitos_legales_estado_b64": "",
+        "pci_pct": 0.0, "pci_gauge_b64": "",
+        "soc2_pct": 0.0, "soc2_radar_b64": "",
+        "ai_maturity_pct": 0.0, "ai_radar_b64": "",
+        "risks_active_count": 0.0,
+        "risks_outside_appetite_count": 0.0,
+        "incidents_open_count": 0.0,
+        "incidents_compliance_pct": 0.0,
+        "vulnerabilities_open_count": 0.0,
+        "vulnerabilities_critical_count": 0.0,
+        "plans_open_count": 0.0,
+        "plans_overdue_count": 0.0,
+        "legal_noncompliant_count": 0.0,
+        "providers_high_count": 0.0,
+        "security_culture_pct": 0.0,
+        "riesgos_b64": "", "incidentes_b64": "", "vulnerabilidades_b64": "",
+        "proveedores_criticidad_b64": "", "planes_accion_estado_b64": "",
+        "requisitos_legales_estado_b64": "", "custom_widgets": {},
     }
 
     if selected.intersection({"kpi_iso", "chart_iso"}):
         iso_data = _dashboard_latest_iso_data()
         payload["iso_radar_b64"] = iso_data["radar_b64"] if "chart_iso" in selected else ""
         payload["iso_pct"] = round(float(iso_data["pct"] or 0), 2)
-
     if selected.intersection({"kpi_nist", "chart_nist"}):
         nist_data = _dashboard_latest_nist_data()
         payload["nist_radar_b64"] = nist_data["radar_b64"] if "chart_nist" in selected else ""
         payload["nist_pct"] = round(float(nist_data["pct"] or 0), 2)
-
     if selected.intersection({"kpi_datos", "chart_datos"}):
         datos_pct = _dashboard_latest_datos_pct()
         payload["datos_pct"] = round(float(datos_pct or 0), 2)
         if "chart_datos" in selected:
-            payload["datos_gauge_b64"] = _dashboard_gauge_b64(
-                datos_pct,
-                "Cumplimiento",
-                "Protección de datos personales",
-            )
-
+            payload["datos_gauge_b64"] = _dashboard_gauge_b64(datos_pct, "Cumplimiento", "Protección de datos personales")
     if "kpi_scorecard" in selected:
-        payload["scorecard_terceros_pct"] = round(
-            float(_dashboard_latest_scorecard_terceros_pct() or 0),
-            2,
-        )
+        payload["scorecard_terceros_pct"] = round(float(_dashboard_latest_scorecard_terceros_pct() or 0), 2)
+    if selected.intersection({"kpi_pci", "chart_pci"}):
+        pci_data = _dashboard_latest_pci_data()
+        payload["pci_pct"] = round(float(pci_data.get("pct", 0) or 0), 2)
+        if "chart_pci" in selected:
+            payload["pci_gauge_b64"] = _dashboard_gauge_b64(payload["pci_pct"], "Madurez", "PCI-DSS")
+    if selected.intersection({"kpi_soc2", "chart_soc2"}):
+        soc2_data = _dashboard_latest_soc2_data()
+        payload["soc2_pct"] = round(float(soc2_data.get("pct", 0) or 0), 2)
+        if "chart_soc2" in selected:
+            payload["soc2_radar_b64"] = soc2_data.get("radar_b64") or _dashboard_gauge_b64(payload["soc2_pct"], "Madurez", "SOC 2")
+    if selected.intersection({"kpi_ai", "chart_ai"}):
+        ai_data = _dashboard_latest_ai_data()
+        payload["ai_maturity_pct"] = round(float(ai_data.get("pct", 0) or 0), 2)
+        if "chart_ai" in selected:
+            payload["ai_radar_b64"] = ai_data.get("radar_b64") or _dashboard_gauge_b64(payload["ai_maturity_pct"], "Madurez", "ISO/IEC 42001")
+
+    metric_to_payload = {
+        "kpi_riesgos_activos": ("risks_active_count", "risks_active_count"),
+        "kpi_riesgos_fuera_apetito": ("risks_outside_appetite_count", "risks_outside_appetite_count"),
+        "kpi_incidentes_abiertos": ("incidents_open_count", "incidents_open_count"),
+        "kpi_incidentes_cumplimiento": ("incidents_compliance_pct", "incidents_compliance_pct"),
+        "kpi_vulnerabilidades_abiertas": ("vulnerabilities_open_count", "vulnerabilities_open_count"),
+        "kpi_vulnerabilidades_criticas": ("vulnerabilities_critical_count", "vulnerabilities_critical_count"),
+        "kpi_planes_abiertos": ("plans_open_count", "plans_open_count"),
+        "kpi_planes_vencidos": ("plans_overdue_count", "plans_overdue_count"),
+        "kpi_requisitos_no_cumple": ("legal_noncompliant_count", "legal_noncompliant_count"),
+        "kpi_proveedores_alta": ("providers_high_count", "providers_high_count"),
+        "kpi_cultura_seguridad": ("security_culture_pct", "security_culture_pct"),
+    }
+    source_cache = {}
+    for widget_key, (payload_key, source_key) in metric_to_payload.items():
+        if widget_key in selected:
+            payload[payload_key] = _dashboard_metric_snapshot(source_key, user_id, source_cache)["value"]
 
     if "chart_riesgos" in selected:
         payload["riesgos_b64"] = _dashboard_riesgos_residuales_chart()
@@ -11874,6 +13160,32 @@ def _dashboard_build_payload(selected_keys=None):
         payload["planes_accion_estado_b64"] = _dashboard_planes_accion_estado_chart()
     if "chart_requisitos_legales" in selected:
         payload["requisitos_legales_estado_b64"] = _dashboard_requisitos_legales_estado_chart()
+
+    custom_map = {_dashboard_custom_key(widget.id): widget for widget in _dashboard_custom_widgets_for_user(user_id)}
+    for key in selected_custom:
+        widget = custom_map.get(key)
+        if not widget:
+            continue
+        meta = _dashboard_custom_widget_meta(widget)
+        snapshot = _dashboard_source_snapshot(widget.source_key, user_id, source_cache)
+        value = float(snapshot.get("value", 0) or 0)
+        data_kind = snapshot.get("data_kind", "scalar")
+        if data_kind == "distribution":
+            display_value = f"Total {_dashboard_format_value(value, '', 0)}"
+        elif data_kind == "timeline":
+            display_value = "Último: " + _dashboard_format_value(value, snapshot.get("unit", ""), snapshot.get("decimals", 0))
+        else:
+            display_value = _dashboard_format_value(value, snapshot.get("unit", ""), snapshot.get("decimals", 2))
+        image = ""
+        if meta.get("kind") == "chart":
+            image = _dashboard_render_custom_visualization(snapshot, widget.widget_type, widget.title, widget.subtitle or "")
+        payload["custom_widgets"][key] = {
+            "value": value,
+            "display_value": display_value,
+            "image": image,
+            "source_key": widget.source_key,
+            "widget_type": widget.widget_type,
+        }
 
     return payload
 
@@ -13034,7 +14346,7 @@ MENU_SECTIONS = [
             },
             {"label": "Configuración AI", "desc": "Configurar llave cifrada para IA (solo admin).", "href": "/admin/openrouter_key", "icon": "bi-key-fill", "btn": "btn-warning text-dark", "admin_only": True},
             {"label": "Gestión de Usuarios", "href": "/usuarios", "icon": "bi-people", "btn": "btn-success", "module": "Gestión de Usuarios"},
-            {"label": "Personalizar Centro de Control", "href": "/admin/dashboard_config", "icon": "bi-sliders", "btn": "btn-primary"},
+            {"label": "Constructor del Centro de Control", "href": "/admin/dashboard_config", "icon": "bi-sliders", "btn": "btn-primary"},
             {"label": "Logs de Auditoría", "href": "/admin/logs_auditoria", "icon": "bi-journal-text", "btn": "btn-dark", "admin_only": True},
             {"label": "Chat con Asistente", "href": "/chatgpt_view", "icon": "bi-chat-dots", "btn": "btn-info text-white", "module": "Chat con Asistente"},
         ],
@@ -13708,7 +15020,7 @@ def _sgsi_build_global_menu_html():
                 "paths": ["/usuarios"],
                 "endpoints": ["usuarios"]
             },
-            "Personalizar Centro de Control": {
+            "Constructor del Centro de Control": {
                 "paths": ["/admin/dashboard_config"],
                 "endpoints": ["dashboard_config"],
                 "exact": True
@@ -14349,8 +15661,9 @@ def inject_sgsi_global_vertical_menu(response):
 
 
 
+
 # ============================================================
-# ADMINISTRACIÓN: PERSONALIZAR CENTRO DE CONTROL POR USUARIO
+# ADMINISTRACIÓN: DISEÑO SENCILLO DEL CENTRO DE CONTROL
 # ============================================================
 @app.route('/admin/dashboard_config', methods=['GET', 'POST'])
 @login_required
@@ -14362,285 +15675,394 @@ def dashboard_config():
 
     if request.method == 'POST':
         action = (request.form.get('action') or 'save').strip().lower()
-
         try:
-            if action == 'reset':
+            if action in {'create_custom', 'update_custom'}:
+                data, error = _dashboard_custom_widget_form_data(request.form)
+                if error:
+                    flash(error, "danger")
+                    return redirect(url_for('dashboard_config'))
+
+                if action == 'create_custom':
+                    existing = DashboardCustomWidget.query.filter_by(
+                        user_id=usuario_actual.id,
+                        source_key=data['source_key'],
+                        widget_type=data['widget_type'],
+                    ).first()
+                    if existing:
+                        _dashboard_add_key_to_selection(usuario_actual.id, _dashboard_custom_key(existing.id))
+                        flash("Esa fuente ya estaba creada con la misma presentación. Se dejó visible en el Centro de Control.", "info")
+                    else:
+                        widget = DashboardCustomWidget(user_id=usuario_actual.id, **data)
+                        db.session.add(widget)
+                        db.session.commit()
+                        _dashboard_add_key_to_selection(usuario_actual.id, _dashboard_custom_key(widget.id))
+                        flash("Visualización creada y agregada al Centro de Control.", "success")
+                else:
+                    widget_id = int(request.form.get('custom_id') or 0)
+                    widget = DashboardCustomWidget.query.filter_by(id=widget_id, user_id=usuario_actual.id).first()
+                    if not widget:
+                        flash("La visualización no existe o no pertenece al usuario.", "danger")
+                        return redirect(url_for('dashboard_config'))
+                    duplicate = DashboardCustomWidget.query.filter(
+                        DashboardCustomWidget.user_id == usuario_actual.id,
+                        DashboardCustomWidget.source_key == data['source_key'],
+                        DashboardCustomWidget.widget_type == data['widget_type'],
+                        DashboardCustomWidget.id != widget.id,
+                    ).first()
+                    if duplicate:
+                        flash("Ya existe otra visualización con esa fuente y presentación.", "warning")
+                        return redirect(url_for('dashboard_config', edit_widget=widget.id))
+                    for field, value in data.items():
+                        setattr(widget, field, value)
+                    widget.updated_at = datetime.utcnow()
+                    db.session.commit()
+                    flash("Visualización actualizada correctamente.", "success")
+
+            elif action == 'delete_custom':
+                widget_id = int(request.form.get('custom_id') or 0)
+                widget = DashboardCustomWidget.query.filter_by(id=widget_id, user_id=usuario_actual.id).first()
+                if not widget:
+                    flash("La visualización no existe o no pertenece al usuario.", "danger")
+                    return redirect(url_for('dashboard_config'))
+                key = _dashboard_custom_key(widget.id)
+                _dashboard_remove_key_from_selection(usuario_actual.id, key)
+                db.session.delete(widget)
+                db.session.commit()
+                flash("Visualización eliminada.", "success")
+
+            elif action == 'reset':
                 _dashboard_reset_selected_keys(usuario_actual.id)
-                flash("El Centro de Control volvió a su configuración inicial.", "success")
+                flash("El Centro de Control volvió a su diseño inicial.", "success")
+
             else:
-                selected = []
-                seen = set()
+                available = _dashboard_available_widget_map(usuario_actual.id)
                 default_position = {}
                 kind_order = {"kpi": 0, "chart": 1}
                 kind_counters = {"kpi": 0, "chart": 0}
-                for item in DASHBOARD_WIDGET_CATALOG:
-                    kind = item.get("kind")
+                for key, item in available.items():
+                    kind = item.get("kind", "chart")
                     kind_counters[kind] = kind_counters.get(kind, 0) + 1
-                    default_position[item["key"]] = kind_counters[kind]
+                    default_position[key] = kind_counters[kind]
 
+                seen = set()
                 sortable = []
                 for key in request.form.getlist('widgets'):
                     key = str(key or '').strip()
-                    if key not in DASHBOARD_WIDGET_MAP or key in seen:
+                    if key not in available or key in seen:
                         continue
-
                     seen.add(key)
-                    meta = DASHBOARD_WIDGET_MAP[key]
-                    kind = meta.get("kind")
+                    meta = available[key]
+                    kind = meta.get("kind", "chart")
                     try:
-                        order_value = int(request.form.get(f'order_{key}', default_position[key]))
+                        order_value = int(request.form.get(f'order_{key}', default_position.get(key, 1)))
                     except Exception:
-                        order_value = default_position[key]
-
-                    order_value = max(1, min(order_value, 999))
-                    sortable.append((kind_order.get(kind, 99), order_value, default_position[key], key))
+                        order_value = default_position.get(key, 1)
+                    sortable.append((kind_order.get(kind, 99), max(1, min(order_value, 999)), default_position.get(key, 999), key))
 
                 sortable.sort(key=lambda row: (row[0], row[1], row[2]))
-                selected = [row[3] for row in sortable]
-                _dashboard_save_selected_keys(usuario_actual.id, selected)
-                flash("Configuración del Centro de Control guardada correctamente.", "success")
+                _dashboard_save_selected_keys(usuario_actual.id, [row[3] for row in sortable])
+                flash("Elementos visibles y orden guardados correctamente.", "success")
 
             try:
-                registrar_log(
-                    usuario_actual.username,
-                    "Actualizó la configuración personal del Centro de Control.",
-                )
+                registrar_log(usuario_actual.username, "Actualizó el diseño de su Centro de Control personal.")
             except Exception:
                 pass
-
             return redirect(url_for('dashboard_config'))
 
         except Exception as exc:
             db.session.rollback()
-            flash(f"No se pudo guardar la configuración: {exc}", "danger")
+            flash(f"No se pudo aplicar la configuración: {exc}", "danger")
 
     selected_keys = _dashboard_get_selected_keys(usuario_actual.id)
     selected_set = set(selected_keys)
+    available = _dashboard_available_widget_map(usuario_actual.id)
 
     position_map = {}
     selected_kind_counters = {"kpi": 0, "chart": 0}
     for key in selected_keys:
-        meta = DASHBOARD_WIDGET_MAP.get(key)
+        meta = available.get(key)
         if not meta:
             continue
-        kind = meta.get("kind")
+        kind = meta.get("kind", "chart")
         selected_kind_counters[kind] = selected_kind_counters.get(kind, 0) + 1
         position_map[key] = selected_kind_counters[kind]
 
+    group_order = [
+        "Indicadores superiores", "Madurez y cumplimiento", "Métricas operativas",
+        "Gráficas de madurez y cumplimiento", "Gráficas operativas",
+        "Visualizaciones creadas por el usuario", "Elementos creados por el usuario",
+    ]
     widget_groups = []
-    for group_name in ("Indicadores superiores", "Gráficas del tablero"):
+    for group_name in group_order:
         widgets = []
         group_position = 0
-        for item in DASHBOARD_WIDGET_CATALOG:
+        for key, item in available.items():
             if item.get("group") != group_name:
                 continue
             group_position += 1
             widget = dict(item)
+            widget["key"] = key
+            widget["dom_id"] = widget.get("dom_id") or _dashboard_dom_id(key)
             widget["default_order"] = group_position
+            widget["presentation_label"] = widget.get("presentation_label") or ("Indicador" if widget.get("kind") == "kpi" else "Gráfica original")
             widgets.append(widget)
-        widget_groups.append({"title": group_name, "widgets": widgets})
+        if widgets:
+            widget_groups.append({"title": group_name, "widgets": widgets})
+
+    custom_widgets = _dashboard_custom_widgets_for_user(usuario_actual.id)
+    custom_rows = []
+    for widget in custom_widgets:
+        source = DASHBOARD_DATA_SOURCE_MAP.get(widget.source_key, {})
+        custom_rows.append({
+            "id": widget.id,
+            "key": _dashboard_custom_key(widget.id),
+            "source_label": source.get("label", widget.source_key),
+            "type_label": DASHBOARD_VISUALIZATION_LABELS.get(widget.widget_type, widget.widget_type),
+            "visible": _dashboard_custom_key(widget.id) in selected_set,
+        })
+
+    edit_widget = None
+    edit_id = request.args.get('edit_widget', type=int)
+    if edit_id:
+        edit_widget = DashboardCustomWidget.query.filter_by(id=edit_id, user_id=usuario_actual.id).first()
+
+    first_source = DASHBOARD_DATA_SOURCE_CATALOG[0]
+    if edit_widget:
+        edit_source = DASHBOARD_DATA_SOURCE_MAP.get(edit_widget.source_key, first_source)
+        allowed = edit_source.get("allowed_views", [])
+        current_view = edit_widget.widget_type if edit_widget.widget_type in allowed else (allowed[0] if allowed else "gauge")
+        builder_values = {"custom_id": edit_widget.id, "source_key": edit_widget.source_key, "widget_type": current_view}
+    else:
+        builder_values = {"custom_id": "", "source_key": first_source["key"], "widget_type": first_source.get("allowed_views", ["gauge"])[0]}
+
+    source_groups = []
+    names = []
+    for source in DASHBOARD_DATA_SOURCE_CATALOG:
+        name = source.get("group", "Otras fuentes")
+        if name not in names:
+            names.append(name)
+    for name in names:
+        source_groups.append({"title": name, "sources": [dict(item) for item in DASHBOARD_DATA_SOURCE_CATALOG if item.get("group") == name]})
 
     content = render_template_string("""
-    <div class="dashcfg-shell">
-      <div class="dashcfg-header-card">
-        <div class="dashcfg-header-overlay">
-          <div class="dashcfg-header-icon"><i class="bi bi-grid-1x2-fill"></i></div>
-          <div class="dashcfg-header-text">
-            <div class="dashcfg-eyebrow">SGSI · Administración</div>
-            <h3 class="dashcfg-title">Configurar Centro de Control</h3>
-            <div class="dashcfg-subtitle">
-              Selecciona y ordena los indicadores y gráficas que aparecerán al iniciar sesión.
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="dashcfg-info-card">
+    <div class="dashsimple-shell">
+      <div class="dashsimple-header">
+        <div class="dashsimple-header-icon"><i class="bi bi-grid-1x2-fill"></i></div>
         <div>
-          <div class="dashcfg-info-title"><i class="bi bi-person-check me-1"></i> Configuración personal</div>
-          <div class="dashcfg-info-text">
-            Los cambios se aplican únicamente al tablero del usuario <strong>{{ usuario.username }}</strong>.
-            Los elementos desmarcados no se muestran ni se procesan al cargar el inicio.
-          </div>
+          <div class="dashsimple-eyebrow">SGSI · Administración</div>
+          <h3>Diseñar Centro de Control</h3>
+          <p>Seleccione una fuente de datos y la forma en que desea verla. Nada más.</p>
         </div>
-        <a href="{{ url_for('menu') }}" class="btn btn-outline-primary rounded-pill px-4 fw-bold">
+        <a href="{{ url_for('menu') }}" class="btn btn-light rounded-pill px-4 fw-bold ms-auto">
           <i class="bi bi-speedometer2 me-1"></i> Ver Centro de Control
         </a>
       </div>
 
-      <form method="post" id="dashboardConfigForm">
-        {% for group in widget_groups %}
-          <section class="dashcfg-group-card">
-            <div class="dashcfg-group-head">
-              <div>
-                <h4>{{ group.title }}</h4>
-                <span>
-                  {% if group.title == 'Indicadores superiores' %}
-                    Tarjetas de resumen ubicadas en la parte superior.
-                  {% else %}
-                    Gráficas operativas y de cumplimiento del tablero.
-                  {% endif %}
-                </span>
-              </div>
-              <span class="badge rounded-pill text-bg-primary">{{ group.widgets|length }} opciones</span>
-            </div>
+      <section class="dashsimple-builder" id="customBuilder">
+        <div class="dashsimple-builder-title">
+          <div>
+            <h4>{{ 'Editar visualización' if edit_widget else 'Agregar una visualización' }}</h4>
+            <p>Los niveles de madurez permiten araña o velocímetro. Las demás fuentes muestran únicamente las opciones compatibles.</p>
+          </div>
+          {% if edit_widget %}
+            <a href="{{ url_for('dashboard_config') }}#customBuilder" class="btn btn-outline-secondary rounded-pill btn-sm">Cancelar</a>
+          {% endif %}
+        </div>
 
-            <div class="dashcfg-grid">
-              {% for widget in group.widgets %}
-                <div class="dashcfg-widget-row">
-                  <div class="form-check form-switch dashcfg-switch">
-                    <input class="form-check-input dashboard-widget-check"
-                           type="checkbox"
-                           role="switch"
-                           name="widgets"
-                           value="{{ widget.key }}"
-                           id="widget_{{ widget.key }}"
-                           {% if widget.key in selected_set %}checked{% endif %}>
-                    <label class="form-check-label" for="widget_{{ widget.key }}">
-                      <span class="dashcfg-widget-title">{{ widget.label }}</span>
-                      <span class="dashcfg-widget-desc">{{ widget.description }}</span>
-                    </label>
-                  </div>
+        <form method="post" class="dashsimple-two-fields">
+          <input type="hidden" name="action" value="{{ 'update_custom' if edit_widget else 'create_custom' }}">
+          <input type="hidden" name="custom_id" value="{{ builder.custom_id }}">
 
-                  <div class="dashcfg-order-wrap">
-                    <label for="order_{{ widget.key }}">Orden</label>
-                    <input type="number"
-                           min="1"
-                           max="99"
-                           name="order_{{ widget.key }}"
-                           id="order_{{ widget.key }}"
-                           class="form-control dashboard-widget-order"
-                           value="{{ position_map.get(widget.key, widget.default_order) }}">
-                  </div>
-                </div>
+          <div class="dashsimple-field">
+            <label>1. Fuente de datos</label>
+            <select name="source_key" id="dashsimpleSource" class="form-select" required>
+              {% for group in source_groups %}
+                <optgroup label="{{ group.title }}">
+                  {% for source in group.sources %}
+                    <option value="{{ source.key }}"
+                            data-views="{{ source.allowed_views|join(',') }}"
+                            data-kind="{{ source.data_kind }}"
+                            data-description="{{ source.description }}"
+                            {% if builder.source_key == source.key %}selected{% endif %}>
+                      {{ source.label }}
+                    </option>
+                  {% endfor %}
+                </optgroup>
               {% endfor %}
+            </select>
+            <small id="dashsimpleSourceHelp"></small>
+          </div>
+
+          <div class="dashsimple-field">
+            <label>2. ¿Cómo lo quiere presentar?</label>
+            <select name="widget_type" id="dashsimpleView" class="form-select" required>
+              {% for key, label in visualization_options.items() %}
+                {% if key != 'kpi' %}
+                  <option value="{{ key }}" {% if builder.widget_type == key %}selected{% endif %}>{{ label }}</option>
+                {% endif %}
+              {% endfor %}
+            </select>
+            <small id="dashsimpleViewHelp"></small>
+          </div>
+
+          <div class="dashsimple-submit">
+            <button type="submit" class="btn btn-primary rounded-pill px-4 fw-bold">
+              <i class="bi {{ 'bi-save2' if edit_widget else 'bi-plus-circle' }} me-1"></i>
+              {{ 'Guardar cambio' if edit_widget else 'Agregar al Centro de Control' }}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {% if custom_rows %}
+        <section class="dashsimple-created">
+          <div class="dashsimple-section-head">
+            <div><h4>Visualizaciones creadas</h4><p>Fuente y presentación seleccionadas por el usuario.</p></div>
+            <span class="badge rounded-pill text-bg-primary">{{ custom_rows|length }}</span>
+          </div>
+          <div class="dashsimple-created-grid">
+            {% for row in custom_rows %}
+              <div class="dashsimple-created-row">
+                <div>
+                  <strong>{{ row.source_label }}</strong>
+                  <span>{{ row.type_label }}</span>
+                  <span class="badge rounded-pill {{ 'text-bg-success' if row.visible else 'text-bg-secondary' }}">{{ 'Visible' if row.visible else 'Oculta' }}</span>
+                </div>
+                <div class="dashsimple-row-actions">
+                  <a href="{{ url_for('dashboard_config', edit_widget=row.id) }}#customBuilder" class="btn btn-outline-primary rounded-pill btn-sm"><i class="bi bi-pencil-square"></i> Editar</a>
+                  <form method="post" class="m-0" onsubmit="return confirm('¿Eliminar esta visualización?');">
+                    <input type="hidden" name="action" value="delete_custom">
+                    <input type="hidden" name="custom_id" value="{{ row.id }}">
+                    <button type="submit" class="btn btn-outline-danger rounded-pill btn-sm"><i class="bi bi-trash3"></i> Eliminar</button>
+                  </form>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
+
+      <form method="post" id="dashboardConfigForm">
+        <section class="dashsimple-current">
+          <div class="dashsimple-section-head">
+            <div><h4>Qué aparece en el inicio</h4><p>Active, desactive y ordene las visualizaciones del Centro de Control.</p></div>
+            <div class="dashsimple-quick-actions">
+              <button type="button" id="dashsimpleSelectAll" class="btn btn-outline-primary rounded-pill btn-sm">Seleccionar todo</button>
+              <button type="button" id="dashsimpleClearAll" class="btn btn-outline-secondary rounded-pill btn-sm">Desmarcar todo</button>
             </div>
-          </section>
-        {% endfor %}
-
-        <div class="dashcfg-actions-card">
-          <div class="dashcfg-selection-actions">
-            <button type="button" class="btn btn-outline-primary rounded-pill" id="dashcfgSelectAll">
-              <i class="bi bi-check2-square me-1"></i> Seleccionar todo
-            </button>
-            <button type="button" class="btn btn-outline-secondary rounded-pill" id="dashcfgClearAll">
-              <i class="bi bi-square me-1"></i> Desmarcar todo
-            </button>
           </div>
 
-          <div class="dashcfg-save-actions">
-            <button type="submit" name="action" value="reset"
-                    class="btn btn-outline-danger rounded-pill"
-                    onclick="return confirm('¿Restablecer el Centro de Control y volver a mostrar todos los elementos?');">
-              <i class="bi bi-arrow-counterclockwise me-1"></i> Restablecer diseño inicial
-            </button>
-            <button type="submit" name="action" value="save"
-                    class="btn btn-success rounded-pill px-4 fw-bold">
-              <i class="bi bi-save2 me-1"></i> Guardar configuración
-            </button>
-          </div>
+          {% for group in widget_groups %}
+            <details class="dashsimple-group" {% if group.title in ['Visualizaciones creadas por el usuario','Elementos creados por el usuario'] %}open{% endif %}>
+              <summary>{{ group.title }} <span>{{ group.widgets|length }}</span></summary>
+              <div class="dashsimple-options">
+                {% for widget in group.widgets %}
+                  <div class="dashsimple-option">
+                    <div class="form-check form-switch">
+                      <input class="form-check-input dashboard-widget-check" type="checkbox" role="switch"
+                             name="widgets" value="{{ widget.key }}" id="widget_{{ widget.dom_id }}"
+                             data-order-id="order_{{ widget.dom_id }}" data-kind="{{ widget.kind }}"
+                             {% if widget.key in selected_set %}checked{% endif %}>
+                      <label class="form-check-label" for="widget_{{ widget.dom_id }}">
+                        <strong>{{ widget.label }}</strong>
+                        <span>{{ widget.presentation_label }}</span>
+                      </label>
+                    </div>
+                    <div class="dashsimple-order">
+                      <label>Orden</label>
+                      <input type="number" min="1" max="99" name="order_{{ widget.key }}"
+                             id="order_{{ widget.dom_id }}" class="form-control"
+                             value="{{ position_map.get(widget.key, widget.default_order) }}">
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+            </details>
+          {% endfor %}
+        </section>
+
+        <div class="dashsimple-savebar">
+          <button type="submit" name="action" value="reset" class="btn btn-outline-danger rounded-pill"
+                  onclick="return confirm('¿Restablecer el Centro de Control al diseño inicial?');">
+            <i class="bi bi-arrow-counterclockwise me-1"></i> Restablecer
+          </button>
+          <button type="submit" name="action" value="save" class="btn btn-success rounded-pill px-4 fw-bold">
+            <i class="bi bi-save2 me-1"></i> Guardar lo que aparece
+          </button>
         </div>
       </form>
     </div>
 
     <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-      .dashcfg-shell{width:96%;max-width:1450px;margin:24px auto 34px;}
-      .dashcfg-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:20px;padding:18px 24px;box-shadow:0 16px 32px rgba(15,23,42,.24);
-        position:relative;overflow:hidden;margin-bottom:14px;
-      }
-      .dashcfg-header-card::before{
-        content:"";position:absolute;inset:0;
-        background:radial-gradient(circle at 90% 10%,rgba(255,255,255,.22),transparent 26%),
-                   repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0 1px,transparent 1px 14px);
-      }
-      .dashcfg-header-overlay{position:relative;z-index:1;display:flex;align-items:center;gap:15px;}
-      .dashcfg-header-icon{width:58px;height:58px;min-width:58px;border-radius:17px;background:#fff;color:#0b4a8f;display:flex;align-items:center;justify-content:center;font-size:1.45rem;box-shadow:0 10px 22px rgba(0,0,0,.22);}
-      .dashcfg-header-text{min-width:0;}
-      .dashcfg-eyebrow{display:inline-flex;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.18);color:#fff;font-size:.67rem;font-weight:850;margin-bottom:4px;}
-      .dashcfg-title{margin:0;color:#fff!important;font-size:1.38rem;font-weight:950;line-height:1.1;}
-      .dashcfg-subtitle{margin-top:4px;color:rgba(255,255,255,.94);font-size:.80rem;}
-      .dashcfg-info-card,.dashcfg-group-card,.dashcfg-actions-card{
-        background:rgba(255,255,255,.96);border:1px solid #bdd7ee;border-radius:18px;box-shadow:0 12px 28px rgba(15,55,95,.12);
-      }
-      .dashcfg-info-card{padding:16px 20px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:18px;}
-      .dashcfg-info-title{font-weight:950;color:#0b4a8f;font-size:.92rem;}
-      .dashcfg-info-text{margin-top:3px;color:#53677f;font-size:.78rem;line-height:1.35;}
-      .dashcfg-group-card{padding:18px 20px;margin-bottom:14px;}
-      .dashcfg-group-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding-bottom:12px;border-bottom:1px solid #d8e6f3;margin-bottom:14px;}
-      .dashcfg-group-head h4{margin:0;color:#153b68;font-size:1rem;font-weight:950;}
-      .dashcfg-group-head span:not(.badge){display:block;margin-top:3px;color:#687d94;font-size:.73rem;}
-      .dashcfg-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
-      .dashcfg-widget-row{display:flex;align-items:center;justify-content:space-between;gap:14px;border:1px solid #d4e3f0;border-radius:15px;padding:13px 14px;background:linear-gradient(180deg,#fff,#f7fbff);min-width:0;}
-      .dashcfg-switch{display:flex;align-items:flex-start;gap:9px;min-width:0;flex:1;}
-      .dashcfg-switch .form-check-input{width:2.35em;height:1.25em;margin-top:3px;flex:0 0 auto;cursor:pointer;}
-      .dashcfg-switch .form-check-label{display:flex;flex-direction:column;min-width:0;cursor:pointer;}
-      .dashcfg-widget-title{font-size:.82rem;font-weight:950;color:#183c66;line-height:1.2;}
-      .dashcfg-widget-desc{font-size:.69rem;color:#6a7d91;line-height:1.28;margin-top:3px;}
-      .dashcfg-order-wrap{width:76px;flex:0 0 76px;text-align:center;}
-      .dashcfg-order-wrap label{font-size:.64rem;font-weight:900;color:#60748a;margin-bottom:3px;display:block;}
-      .dashcfg-order-wrap input{text-align:center;font-weight:850;font-size:.78rem;min-height:36px;padding:5px;}
-      .dashcfg-actions-card{padding:15px 18px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;}
-      .dashcfg-selection-actions,.dashcfg-save-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;}
-      .dashcfg-actions-card .btn{min-height:38px;padding:7px 17px!important;font-size:.78rem;font-weight:900;}
-      @media(max-width:1000px){.dashcfg-grid{grid-template-columns:1fr;}}
-      @media(max-width:700px){
-        .dashcfg-shell{width:98%;margin-top:8px;}
-        .dashcfg-header-overlay,.dashcfg-info-card{flex-direction:column;text-align:center;}
-        .dashcfg-widget-row{align-items:flex-start;}
-        .dashcfg-actions-card,.dashcfg-selection-actions,.dashcfg-save-actions{justify-content:center;width:100%;}
-        .dashcfg-actions-card .btn{width:100%;}
-      }
+      body{background-image:url('/static/img/ccsgsi.jpg');background-size:cover;background-position:center;background-attachment:fixed;background-repeat:no-repeat;}
+      .dashsimple-shell{width:96%;max-width:1450px;margin:22px auto 36px;}
+      .dashsimple-header{display:flex;align-items:center;gap:15px;background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);border-radius:20px;padding:17px 22px;color:#fff;box-shadow:0 16px 32px rgba(15,23,42,.24);margin-bottom:14px;}
+      .dashsimple-header-icon{width:54px;height:54px;min-width:54px;border-radius:16px;background:#fff;color:#0b4a8f;display:flex;align-items:center;justify-content:center;font-size:1.35rem;}
+      .dashsimple-eyebrow{font-size:.67rem;font-weight:900;text-transform:uppercase;letter-spacing:.06em;opacity:.88;}.dashsimple-header h3{margin:2px 0 3px;color:#fff!important;font-size:1.36rem;font-weight:950;}.dashsimple-header p{margin:0;font-size:.79rem;opacity:.95;}
+      .dashsimple-builder,.dashsimple-created,.dashsimple-current,.dashsimple-savebar{background:rgba(255,255,255,.98);border:1px solid #bdd7ee;border-radius:18px;box-shadow:0 12px 28px rgba(15,55,95,.12);}
+      .dashsimple-builder{padding:18px 20px;margin-bottom:14px;}.dashsimple-builder-title,.dashsimple-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding-bottom:12px;border-bottom:1px solid #d7e6f3;margin-bottom:14px;}.dashsimple-builder-title h4,.dashsimple-section-head h4{margin:0;color:#123f72;font-size:1rem;font-weight:950;}.dashsimple-builder-title p,.dashsimple-section-head p{margin:4px 0 0;color:#637991;font-size:.73rem;}
+      .dashsimple-two-fields{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) auto;gap:14px;align-items:end;}.dashsimple-field label{display:block;color:#294d72;font-size:.74rem;font-weight:950;margin-bottom:6px;}.dashsimple-field .form-select{min-height:44px;font-size:.82rem;}.dashsimple-field small{display:block;min-height:18px;margin-top:5px;color:#6a7d91;font-size:.66rem;}.dashsimple-submit .btn{min-height:44px;white-space:nowrap;font-size:.80rem;}
+      .dashsimple-created{padding:18px 20px;margin-bottom:14px;}.dashsimple-created-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}.dashsimple-created-row{border:1px solid #d4e4f1;border-radius:14px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px;background:#fff;}.dashsimple-created-row strong{display:block;color:#173d69;font-size:.81rem;}.dashsimple-created-row span:not(.badge){display:block;color:#6b7f94;font-size:.69rem;margin:3px 0 6px;}.dashsimple-row-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap;justify-content:flex-end;}
+      .dashsimple-current{padding:18px 20px;}.dashsimple-quick-actions{display:flex;gap:8px;flex-wrap:wrap;}.dashsimple-group{border:1px solid #d6e4f0;border-radius:14px;margin-bottom:10px;background:#fbfdff;overflow:hidden;}.dashsimple-group summary{cursor:pointer;padding:12px 14px;color:#173d69;font-size:.80rem;font-weight:950;display:flex;justify-content:space-between;align-items:center;}.dashsimple-group summary span{font-size:.67rem;background:#dcecff;color:#0b4a8f;padding:3px 9px;border-radius:999px;}.dashsimple-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;padding:0 12px 12px;}.dashsimple-option{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #dbe7f1;border-radius:12px;padding:10px 12px;background:#fff;}.dashsimple-option .form-check{display:flex;align-items:flex-start;gap:9px;min-width:0;}.dashsimple-option .form-check-input{width:2.2em;height:1.18em;margin-top:2px;}.dashsimple-option label{min-width:0;}.dashsimple-option strong{display:block;color:#173d69;font-size:.76rem;line-height:1.2;}.dashsimple-option label span{display:block;color:#75869a;font-size:.65rem;margin-top:2px;}.dashsimple-order{width:68px;flex:0 0 68px;text-align:center;}.dashsimple-order label{display:block;font-size:.60rem;font-weight:900;color:#687b90;margin-bottom:3px;}.dashsimple-order input{text-align:center;min-height:34px;padding:4px;font-size:.75rem;font-weight:850;}
+      .dashsimple-savebar{margin-top:14px;padding:14px 18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;}
+      @media(max-width:1050px){.dashsimple-two-fields{grid-template-columns:1fr 1fr;}.dashsimple-submit{grid-column:span 2;}.dashsimple-submit .btn{width:100%;}.dashsimple-options,.dashsimple-created-grid{grid-template-columns:1fr;}}
+      @media(max-width:700px){.dashsimple-shell{width:98%;margin-top:8px;}.dashsimple-header{flex-direction:column;text-align:center;}.dashsimple-header .btn{margin-left:0!important;width:100%;}.dashsimple-two-fields{grid-template-columns:1fr;}.dashsimple-submit{grid-column:span 1;}.dashsimple-builder-title,.dashsimple-section-head{flex-direction:column;text-align:center;align-items:center;}.dashsimple-created-row{flex-direction:column;text-align:center;}.dashsimple-row-actions{justify-content:center;}.dashsimple-option{align-items:flex-start;}.dashsimple-savebar .btn{width:100%;}}
     </style>
 
     <script>
       (function(){
+        const source = document.getElementById('dashsimpleSource');
+        const view = document.getElementById('dashsimpleView');
+        const sourceHelp = document.getElementById('dashsimpleSourceHelp');
+        const viewHelp = document.getElementById('dashsimpleViewHelp');
         const checks = Array.from(document.querySelectorAll('.dashboard-widget-check'));
-        const selectAll = document.getElementById('dashcfgSelectAll');
-        const clearAll = document.getElementById('dashcfgClearAll');
+        const selectAll = document.getElementById('dashsimpleSelectAll');
+        const clearAll = document.getElementById('dashsimpleClearAll');
 
-        function renumberChecked(){
-          let position = 1;
+        function refreshViews(){
+          if(!source || !view) return;
+          const option = source.options[source.selectedIndex];
+          if(!option) return;
+          const allowed = (option.dataset.views || '').split(',').filter(Boolean);
+          Array.from(view.options).forEach(function(item){item.disabled = !allowed.includes(item.value);});
+          if(!allowed.includes(view.value)){view.value = allowed[0] || '';}
+          if(sourceHelp) sourceHelp.textContent = option.dataset.description || '';
+          if(viewHelp){
+            const kind = option.dataset.kind || '';
+            viewHelp.textContent = kind === 'maturity' ? 'Disponible: araña o velocímetro.' : (kind === 'timeline' ? 'Disponible: línea en el tiempo o barras.' : 'Se muestran únicamente las presentaciones compatibles.');
+          }
+        }
+
+        function renumber(){
+          const counters = {kpi:1, chart:1};
           checks.forEach(function(check){
             if(!check.checked) return;
-            const order = document.getElementById('order_' + check.value);
-            if(order) order.value = position++;
+            const kind = check.dataset.kind || 'chart';
+            const input = document.getElementById(check.dataset.orderId);
+            if(input){input.value = counters[kind] || 1;}
+            counters[kind] = (counters[kind] || 1) + 1;
           });
         }
 
-        if(selectAll){
-          selectAll.addEventListener('click', function(){
-            checks.forEach(function(check){ check.checked = true; });
-            renumberChecked();
-          });
-        }
-
-        if(clearAll){
-          clearAll.addEventListener('click', function(){
-            checks.forEach(function(check){ check.checked = false; });
-          });
-        }
+        if(source) source.addEventListener('change', refreshViews);
+        if(selectAll) selectAll.addEventListener('click', function(){checks.forEach(function(check){check.checked=true;});renumber();});
+        if(clearAll) clearAll.addEventListener('click', function(){checks.forEach(function(check){check.checked=false;});});
+        refreshViews();
       })();
     </script>
     """,
     usuario=usuario_actual,
     widget_groups=widget_groups,
     selected_set=selected_set,
-    position_map=position_map)
+    position_map=position_map,
+    source_groups=source_groups,
+    custom_rows=custom_rows,
+    edit_widget=edit_widget,
+    builder=builder_values,
+    visualization_options=DASHBOARD_VISUALIZATION_LABELS)
 
-    return render_template_string(
-        BASE,
-        content=content,
-        current_user=usuario_actual,
-    )
+    return render_template_string(BASE, content=content, current_user=usuario_actual)
+
 
 # =========================
 # API JSON TABLERO PRINCIPAL
@@ -14649,38 +16071,47 @@ def dashboard_config():
 @login_required
 def dashboard_status():
     try:
-        selected_keys = _dashboard_get_selected_keys(session.get("user_id"))
-        payload = _dashboard_build_payload(selected_keys)
+        user_id = session.get("user_id")
+        selected_keys = _dashboard_get_selected_keys(user_id)
+        payload = _dashboard_build_payload(selected_keys, user_id)
         return jsonify({
             "ok": True,
-
             "iso_radar_b64": payload.get("iso_radar_b64", ""),
             "iso_pct": float(payload.get("iso_pct", 0) or 0),
-
             "nist_radar_b64": payload.get("nist_radar_b64", ""),
             "nist_pct": float(payload.get("nist_pct", 0) or 0),
-
             "datos_gauge_b64": payload.get("datos_gauge_b64", ""),
             "datos_pct": float(payload.get("datos_pct", 0) or 0),
-
-            # NUEVO: Security Scorecard de Terceros
             "scorecard_terceros_pct": float(payload.get("scorecard_terceros_pct", 0) or 0),
-
+            "pci_pct": float(payload.get("pci_pct", 0) or 0),
+            "pci_gauge_b64": payload.get("pci_gauge_b64", ""),
+            "soc2_pct": float(payload.get("soc2_pct", 0) or 0),
+            "soc2_radar_b64": payload.get("soc2_radar_b64", ""),
+            "ai_maturity_pct": float(payload.get("ai_maturity_pct", 0) or 0),
+            "ai_radar_b64": payload.get("ai_radar_b64", ""),
+            "risks_active_count": float(payload.get("risks_active_count", 0) or 0),
+            "risks_outside_appetite_count": float(payload.get("risks_outside_appetite_count", 0) or 0),
+            "incidents_open_count": float(payload.get("incidents_open_count", 0) or 0),
+            "incidents_compliance_pct": float(payload.get("incidents_compliance_pct", 0) or 0),
+            "vulnerabilities_open_count": float(payload.get("vulnerabilities_open_count", 0) or 0),
+            "vulnerabilities_critical_count": float(payload.get("vulnerabilities_critical_count", 0) or 0),
+            "plans_open_count": float(payload.get("plans_open_count", 0) or 0),
+            "plans_overdue_count": float(payload.get("plans_overdue_count", 0) or 0),
+            "legal_noncompliant_count": float(payload.get("legal_noncompliant_count", 0) or 0),
+            "providers_high_count": float(payload.get("providers_high_count", 0) or 0),
+            "security_culture_pct": float(payload.get("security_culture_pct", 0) or 0),
             "riesgos_b64": payload.get("riesgos_b64", ""),
             "incidentes_b64": payload.get("incidentes_b64", ""),
             "vulnerabilidades_b64": payload.get("vulnerabilidades_b64", ""),
-
             "proveedores_criticidad_b64": payload.get("proveedores_criticidad_b64", ""),
             "planes_accion_estado_b64": payload.get("planes_accion_estado_b64", ""),
             "requisitos_legales_estado_b64": payload.get("requisitos_legales_estado_b64", ""),
+            "custom_widgets": payload.get("custom_widgets", {}),
             "selected_widgets": selected_keys,
         })
     except Exception as e:
-        return jsonify({
-            "ok": False,
-            "error": str(e)
-        }), 500
-    
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 # ====================
 # Menú principal con tablero compacto
 # ====================
@@ -14690,10 +16121,11 @@ def dashboard_status():
 def menu():
     usuario_actual = User.query.get(session.get('user_id'))
     selected_widget_keys = _dashboard_get_selected_keys(session.get('user_id'))
-    dashboard = _dashboard_build_payload(selected_widget_keys)
+    dashboard = _dashboard_build_payload(selected_widget_keys, session.get('user_id'))
     dashboard_kpis, dashboard_charts = _dashboard_prepare_view(
         selected_widget_keys,
         dashboard,
+        session.get('user_id'),
     )
 
     if usuario_actual and usuario_actual.role == "admin":
@@ -14783,11 +16215,11 @@ def menu():
           <div class="sgsi-dashboard-toolbar">
             <div class="sgsi-dashboard-toolbar-text">
               <i class="bi bi-speedometer2 me-1"></i>
-              Vista personalizada del Centro de Control
+              Centro de Control personalizado
             </div>
             <a href="{{ url_for('dashboard_config') }}"
                class="btn btn-outline-primary rounded-pill sgsi-dashboard-config-btn">
-              <i class="bi bi-sliders me-1"></i> Personalizar tablero
+              <i class="bi bi-sliders me-1"></i> Diseñar tablero
             </a>
           </div>
 
@@ -14801,7 +16233,7 @@ def menu():
                   <div class="sgsi-stat-text">
                     <div class="sgsi-stat-title">{{ item.title }}</div>
                     <div class="sgsi-stat-value {{ item.color }}-text" id="{{ item.element_id }}">
-                      {{ "%.2f"|format(item.value) }}%
+                      {{ item.display_value }}
                     </div>
                     <div class="sgsi-stat-link">{{ item.subtitle }}</div>
                   </div>
@@ -14816,13 +16248,7 @@ def menu():
                 <div class="sgsi-chart-card">
                   <div class="sgsi-chart-head">
                     <h3>{{ item.title }}</h3>
-                    <span>
-                      {% if item.value_is_number %}
-                        {{ "%.2f"|format(item.value) }}%
-                      {% else %}
-                        {{ item.value }}
-                      {% endif %}
-                    </span>
+                    <span>{{ item.display_value }}</span>
                   </div>
                   <div class="sgsi-chart-body">
                     <img id="{{ item.image_id }}"
@@ -14839,9 +16265,9 @@ def menu():
             <section class="sgsi-dashboard-empty">
               <div class="sgsi-dashboard-empty-icon"><i class="bi bi-layout-wtf"></i></div>
               <h3>Tu Centro de Control no tiene elementos seleccionados</h3>
-              <p>Ingresa a Administración y selecciona los indicadores o gráficas que deseas visualizar.</p>
+              <p>Ingresa al diseñador, selecciona una fuente de datos y elige cómo presentarla.</p>
               <a href="{{ url_for('dashboard_config') }}" class="btn btn-primary rounded-pill px-4 fw-bold">
-                Configurar Centro de Control
+                Construir Centro de Control
               </a>
             </section>
           {% endif %}
