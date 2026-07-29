@@ -34111,6 +34111,203 @@ def _autollenar_dofa_desde_contexto():
     )
 
 
+# ==========================================
+# Generación de estrategias DOFA con IA
+# ==========================================
+
+def _dofa_ai_clean(value, limit=9000):
+    text_value = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    return text_value[:limit]
+
+
+def _dofa_ai_normalize_strategy(value):
+    if isinstance(value, list):
+        items = []
+        for item in value:
+            item_text = _dofa_ai_clean(item, 1800)
+            if item_text:
+                items.append(item_text if item_text.startswith(("-", "•")) else f"- {item_text}")
+        return "\n".join(items).strip()
+
+    if isinstance(value, dict):
+        items = []
+        for item in value.values():
+            item_text = _dofa_ai_clean(item, 1800)
+            if item_text:
+                items.append(item_text if item_text.startswith(("-", "•")) else f"- {item_text}")
+        return "\n".join(items).strip()
+
+    text_value = _dofa_ai_clean(value, 5000)
+    text_value = re.sub(r"^\s*(?:ESTRATEGIAS?\s*)?(?:FO|FA|DO|DA)\s*[:\-]\s*", "", text_value, flags=re.I)
+    return text_value.strip()
+
+
+def _dofa_ai_extract_result(raw_text):
+    raw_text = _dofa_ai_clean(raw_text, 20000)
+    if not raw_text:
+        raise ValueError("La IA no devolvió contenido.")
+
+    cleaned = re.sub(r"^```(?:json)?\s*", "", raw_text, flags=re.I)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+
+    data = None
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            data = json.loads(cleaned[start:end + 1])
+        except Exception:
+            data = None
+
+    if not isinstance(data, dict):
+        # Respaldo para modelos que respondan con secciones FO / FA / DO / DA.
+        section_pattern = re.compile(
+            r"(?ims)^\s*(?:#{1,6}\s*)?(FO|FA|DO|DA)\s*(?:\([^)]*\))?\s*[:\-]\s*(.*?)(?=^\s*(?:#{1,6}\s*)?(?:FO|FA|DO|DA)\s*(?:\([^)]*\))?\s*[:\-]|\Z)"
+        )
+        sections = {}
+        for match in section_pattern.finditer(cleaned):
+            sections[match.group(1).lower()] = match.group(2).strip()
+        if len(sections) == 4:
+            data = sections
+
+    if not isinstance(data, dict):
+        raise ValueError("La IA no devolvió las cuatro estrategias en un formato válido.")
+
+    aliases = {
+        "estrategias_fo": ("estrategias_fo", "estrategia_fo", "fo", "FO"),
+        "estrategias_fa": ("estrategias_fa", "estrategia_fa", "fa", "FA"),
+        "estrategias_do": ("estrategias_do", "estrategia_do", "do", "DO"),
+        "estrategias_da": ("estrategias_da", "estrategia_da", "da", "DA"),
+    }
+
+    result = {}
+    for target, possible_keys in aliases.items():
+        value = None
+        for key in possible_keys:
+            if key in data:
+                value = data.get(key)
+                break
+        normalized = _dofa_ai_normalize_strategy(value)
+        if not normalized:
+            raise ValueError(f"La IA no generó contenido para {target.replace('estrategias_', '').upper()}.")
+        result[target] = normalized
+
+    return result
+
+
+def _dofa_generate_strategies_with_ai(fortalezas, oportunidades, debilidades, amenazas):
+    quadrants = {
+        "fortalezas": _dofa_ai_clean(fortalezas),
+        "oportunidades": _dofa_ai_clean(oportunidades),
+        "debilidades": _dofa_ai_clean(debilidades),
+        "amenazas": _dofa_ai_clean(amenazas),
+    }
+
+    missing_labels = {
+        "fortalezas": "Fortalezas",
+        "oportunidades": "Oportunidades",
+        "debilidades": "Debilidades",
+        "amenazas": "Amenazas",
+    }
+    missing = [missing_labels[key] for key, value in quadrants.items() if not value]
+    if missing:
+        raise ValueError(
+            "Complete los cuatro cuadrantes antes de generar estrategias con IA. "
+            "Falta información en: " + ", ".join(missing) + "."
+        )
+
+    expected_format = {
+        "estrategias_fo": "- Estrategia 1\n- Estrategia 2",
+        "estrategias_fa": "- Estrategia 1\n- Estrategia 2",
+        "estrategias_do": "- Estrategia 1\n- Estrategia 2",
+        "estrategias_da": "- Estrategia 1\n- Estrategia 2",
+    }
+
+    prompt = f"""
+Genere estrategias cruzadas para una matriz DOFA de una organización, utilizando únicamente
+la información proporcionada. No invente capacidades, tecnologías, contratos, certificaciones,
+presupuestos, incidentes ni condiciones que no estén presentes en los cuadrantes.
+
+Criterios:
+- FO: utilizar fortalezas para aprovechar oportunidades.
+- FA: utilizar fortalezas para reducir o afrontar amenazas.
+- DO: superar debilidades aprovechando oportunidades.
+- DA: reducir debilidades y evitar o mitigar amenazas.
+- Genere exactamente dos estrategias concretas y accionables por cada cuadrante.
+- Cada estrategia debe indicar una acción organizacional clara.
+- Responda en español.
+- No agregue explicaciones, encabezados ni texto fuera del JSON.
+- Devuelva exclusivamente un objeto JSON válido con estas cuatro claves:
+{json.dumps(expected_format, ensure_ascii=False, indent=2)}
+
+MATRIZ DOFA:
+{json.dumps(quadrants, ensure_ascii=False, indent=2)}
+""".strip()
+
+    raw_result = ai_text_general(
+        prompt=prompt,
+        system_prompt=(
+            "Eres un consultor senior en planeación estratégica, gestión de riesgos y seguridad "
+            "de la información. Genera estrategias DOFA realistas y responde solo JSON válido."
+        ),
+        temperature=0.2,
+        max_tokens=350,
+    )
+    return _dofa_ai_extract_result(raw_result)
+
+
+@app.route('/dofa/generar_estrategias_ia', methods=['POST'])
+@login_required
+def dofa_generar_estrategias_ia():
+    user = User.query.get(session.get('user_id'))
+
+    if not user:
+        return jsonify(ok=False, message="La sesión de usuario no es válida."), 401
+
+    if user.role not in ('admin', 'auditor') and not verificar_permiso(user, "DOFA"):
+        return jsonify(ok=False, message="No tiene permiso para utilizar la IA del módulo DOFA."), 403
+
+    if user.role == 'auditor':
+        return jsonify(ok=False, message="Perfil auditor: solo lectura."), 403
+
+    data = request.get_json(silent=True) or request.form.to_dict()
+
+    try:
+        strategies = _dofa_generate_strategies_with_ai(
+            fortalezas=data.get("fortalezas"),
+            oportunidades=data.get("oportunidades"),
+            debilidades=data.get("debilidades"),
+            amenazas=data.get("amenazas"),
+        )
+
+        try:
+            registrar_log(
+                user.username,
+                "Generó estrategias FO, FA, DO y DA con IA en el módulo DOFA."
+            )
+        except Exception:
+            pass
+
+        return jsonify(
+            ok=True,
+            message=(
+                "Estrategias generadas. Revise y edite el contenido antes de guardar la matriz DOFA."
+            ),
+            estrategias=strategies,
+        )
+    except ValueError as exc:
+        return jsonify(ok=False, message=str(exc)), 400
+    except Exception as exc:
+        print("Error generando estrategias DOFA con IA:", repr(exc))
+        return jsonify(
+            ok=False,
+            message=(
+                "No fue posible generar las estrategias con IA. Verifique la configuración "
+                "de OpenRouter u Ollama e inténtelo nuevamente."
+            ),
+        ), 500
+
+
 # =================================
 # Agregar DOFA
 # =================================
@@ -34227,6 +34424,25 @@ def dofa_new():
 
           <hr class="my-4">
 
+
+          <div class="dofa-ai-panel">
+            <div class="dofa-ai-copy">
+              <div class="dofa-ai-title">✨ Generación de estrategias con IA</div>
+              <div class="dofa-ai-help">
+                La IA utiliza el contenido actual de Fortalezas, Oportunidades, Debilidades y Amenazas.
+                El resultado se coloca en campos editables: puede ajustarlo, reemplazarlo o ingresar
+                las estrategias manualmente.
+              </div>
+            </div>
+            <button type="button"
+                    class="btn dofa-ai-btn"
+                    data-no-progress="true"
+                    onclick="generarEstrategiasDofaIA(this, 'cE')">
+              <span class="dofa-ai-btn-label">🧠 Generar FO / FA / DO / DA con IA</span>
+            </button>
+          </div>
+          <div class="dofa-ai-status" role="status" aria-live="polite"></div>
+
           <div class="accordion dofa-accordion" id="accEstrategias">
             <div class="accordion-item">
               <h2 class="accordion-header" id="hE">
@@ -34276,6 +34492,202 @@ def dofa_new():
       </form>
 
     </div>
+
+
+    <script>
+    (function () {
+      if (window.__GRAC_DOFA_AI_READY__) return;
+      window.__GRAC_DOFA_AI_READY__ = true;
+
+      function showStrategySection(collapseId) {
+        const collapseElement = document.getElementById(collapseId);
+        if (!collapseElement) return;
+
+        try {
+          if (window.bootstrap && window.bootstrap.Collapse) {
+            window.bootstrap.Collapse
+              .getOrCreateInstance(collapseElement, {toggle: false})
+              .show();
+          } else {
+            collapseElement.classList.add('show');
+          }
+        } catch (_error) {
+          collapseElement.classList.add('show');
+        }
+
+        const toggle = document.querySelector('[data-bs-target="#' + collapseId + '"]');
+        if (toggle) {
+          toggle.classList.remove('collapsed');
+          toggle.setAttribute('aria-expanded', 'true');
+        }
+      }
+
+      function setDofaAiStatus(statusElement, message, kind) {
+        if (!statusElement) return;
+        statusElement.textContent = message || '';
+        statusElement.className = 'dofa-ai-status is-visible ' + (kind || 'is-info');
+      }
+
+      window.generarEstrategiasDofaIA = async function (button, collapseId) {
+        const form = button ? button.closest('form') : null;
+        const panel = button ? button.closest('.dofa-ai-panel') : null;
+        const statusElement = panel && panel.nextElementSibling &&
+          panel.nextElementSibling.classList.contains('dofa-ai-status')
+            ? panel.nextElementSibling
+            : null;
+
+        if (!form) {
+          setDofaAiStatus(statusElement, 'No se encontró el formulario de la matriz DOFA.', 'is-error');
+          return;
+        }
+
+        const names = [
+          'fortalezas',
+          'oportunidades',
+          'debilidades',
+          'amenazas',
+          'estrategias_fo',
+          'estrategias_fa',
+          'estrategias_do',
+          'estrategias_da'
+        ];
+
+        const fields = {};
+        names.forEach(function (name) {
+          fields[name] = form.querySelector('[name="' + name + '"]');
+        });
+
+        const sourceLabels = {
+          fortalezas: 'Fortalezas',
+          oportunidades: 'Oportunidades',
+          debilidades: 'Debilidades',
+          amenazas: 'Amenazas'
+        };
+
+        const missing = Object.keys(sourceLabels).filter(function (name) {
+          return !fields[name] || !String(fields[name].value || '').trim();
+        });
+
+        if (missing.length) {
+          setDofaAiStatus(
+            statusElement,
+            'Complete los cuatro cuadrantes. Falta información en: ' +
+              missing.map(function (name) { return sourceLabels[name]; }).join(', ') + '.',
+            'is-error'
+          );
+          return;
+        }
+
+        const strategyNames = [
+          'estrategias_fo',
+          'estrategias_fa',
+          'estrategias_do',
+          'estrategias_da'
+        ];
+        const hasExistingStrategies = strategyNames.some(function (name) {
+          return fields[name] && String(fields[name].value || '').trim();
+        });
+
+        if (
+          hasExistingStrategies &&
+          !window.confirm(
+            'Ya existen estrategias registradas. La generación con IA reemplazará temporalmente ' +
+            'el contenido actual de FO, FA, DO y DA. Podrá editarlo antes de guardar. ¿Desea continuar?'
+          )
+        ) {
+          return;
+        }
+
+        const originalHtml = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML =
+          '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Generando...';
+        setDofaAiStatus(
+          statusElement,
+          'Analizando la matriz y construyendo estrategias FO, FA, DO y DA...',
+          'is-info'
+        );
+
+        const payload = {
+          fortalezas: fields.fortalezas.value,
+          oportunidades: fields.oportunidades.value,
+          debilidades: fields.debilidades.value,
+          amenazas: fields.amenazas.value
+        };
+
+        try {
+          const response = await fetch("{{ url_for('dofa_generar_estrategias_ia') }}", {
+            method: 'POST',
+            credentials: 'same-origin',
+            cache: 'no-store',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify(payload)
+          });
+
+          let data = {};
+          try {
+            data = await response.json();
+          } catch (_jsonError) {
+            data = {};
+          }
+
+          if (!response.ok || !data.ok) {
+            throw new Error(
+              data.message || 'No fue posible generar las estrategias con IA.'
+            );
+          }
+
+          const strategies = data.estrategias || {};
+          const labels = {
+            estrategias_fo: 'FO',
+            estrategias_fa: 'FA',
+            estrategias_do: 'DO',
+            estrategias_da: 'DA'
+          };
+
+          strategyNames.forEach(function (name) {
+            if (!fields[name] || !String(strategies[name] || '').trim()) {
+              throw new Error('La IA no devolvió una estrategia válida para ' + labels[name] + '.');
+            }
+          });
+
+          strategyNames.forEach(function (name) {
+            fields[name].value = strategies[name];
+            fields[name].dispatchEvent(new Event('input', {bubbles: true}));
+          });
+
+          showStrategySection(collapseId);
+          setDofaAiStatus(
+            statusElement,
+            data.message ||
+              'Estrategias generadas. Puede editarlas antes de guardar la matriz DOFA.',
+            'is-success'
+          );
+
+          if (fields.estrategias_fo) {
+            setTimeout(function () {
+              fields.estrategias_fo.focus();
+              fields.estrategias_fo.scrollIntoView({behavior: 'smooth', block: 'center'});
+            }, 250);
+          }
+        } catch (error) {
+          setDofaAiStatus(
+            statusElement,
+            error && error.message
+              ? error.message
+              : 'No fue posible generar las estrategias con IA.',
+            'is-error'
+          );
+        } finally {
+          button.disabled = false;
+          button.innerHTML = originalHtml;
+        }
+      };
+    })();
+    </script>
 
     <style>
       body{
@@ -34489,6 +34901,92 @@ def dofa_new():
         box-shadow:none;
       }
 
+
+      .dofa-ai-panel{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:18px;
+        padding:13px 15px;
+        margin-bottom:10px;
+        border:1px solid #b9d5f4;
+        border-radius:14px;
+        background:linear-gradient(135deg,#eef6ff,#f8fbff);
+        box-shadow:0 6px 14px rgba(15,72,133,.08);
+      }
+
+      .dofa-ai-copy{
+        min-width:0;
+      }
+
+      .dofa-ai-title{
+        color:#0b4a8f;
+        font-size:.86rem;
+        font-weight:950;
+        margin-bottom:3px;
+      }
+
+      .dofa-ai-help{
+        color:#516174;
+        font-size:.76rem;
+        line-height:1.35;
+      }
+
+      .dofa-ai-btn{
+        flex:0 0 auto;
+        border:none;
+        border-radius:10px !important;
+        padding:9px 16px !important;
+        color:#ffffff !important;
+        background:linear-gradient(135deg,#6f42c1,#3b82f6);
+        font-size:.78rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(76,81,191,.20);
+      }
+
+      .dofa-ai-btn:hover,
+      .dofa-ai-btn:focus{
+        color:#ffffff !important;
+        transform:translateY(-1px);
+        box-shadow:0 10px 19px rgba(76,81,191,.26);
+      }
+
+      .dofa-ai-btn:disabled{
+        opacity:.75;
+        transform:none;
+      }
+
+      .dofa-ai-status{
+        display:none;
+        margin:0 0 12px 0;
+        padding:9px 12px;
+        border-radius:10px;
+        font-size:.76rem;
+        font-weight:700;
+      }
+
+      .dofa-ai-status.is-visible{
+        display:block;
+      }
+
+      .dofa-ai-status.is-info{
+        color:#0b4a8f;
+        background:#eaf4ff;
+        border:1px solid #b9d5f4;
+      }
+
+      .dofa-ai-status.is-success{
+        color:#166534;
+        background:#ecfdf3;
+        border:1px solid #a7e2bd;
+      }
+
+      .dofa-ai-status.is-error{
+        color:#991b1b;
+        background:#fff1f2;
+        border:1px solid #fecdd3;
+      }
+
       .dofa-bottom-actions{
         display:flex;
         justify-content:center;
@@ -34552,6 +35050,17 @@ def dofa_new():
       }
 
       @media (max-width:768px){
+
+        .dofa-ai-panel{
+          align-items:stretch;
+          flex-direction:column;
+          gap:10px;
+        }
+
+        .dofa-ai-btn{
+          width:100%;
+        }
+
         .dofa-header-overlay{
           flex-direction:column;
           text-align:center;
@@ -35505,6 +36014,24 @@ def dofa_edit(dofa_id):
 
           <hr class="my-4">
 
+
+          <div class="dofa-ai-panel">
+            <div class="dofa-ai-copy">
+              <div class="dofa-ai-title">✨ Generación y actualización con IA</div>
+              <div class="dofa-ai-help">
+                La IA toma los cuatro cuadrantes tal como aparecen en esta edición. Las estrategias
+                generadas quedan completamente editables y también pueden escribirse manualmente.
+              </div>
+            </div>
+            <button type="button"
+                    class="btn dofa-ai-btn"
+                    data-no-progress="true"
+                    onclick="generarEstrategiasDofaIA(this, 'cEE')">
+              <span class="dofa-ai-btn-label">🧠 Generar o regenerar con IA</span>
+            </button>
+          </div>
+          <div class="dofa-ai-status" role="status" aria-live="polite"></div>
+
           <div class="accordion dofaedit-accordion" id="accEstrategiasEdit">
             <div class="accordion-item">
               <h2 class="accordion-header" id="hEE">
@@ -35566,6 +36093,202 @@ def dofa_edit(dofa_id):
       </form>
 
     </div>
+
+
+    <script>
+    (function () {
+      if (window.__GRAC_DOFA_AI_READY__) return;
+      window.__GRAC_DOFA_AI_READY__ = true;
+
+      function showStrategySection(collapseId) {
+        const collapseElement = document.getElementById(collapseId);
+        if (!collapseElement) return;
+
+        try {
+          if (window.bootstrap && window.bootstrap.Collapse) {
+            window.bootstrap.Collapse
+              .getOrCreateInstance(collapseElement, {toggle: false})
+              .show();
+          } else {
+            collapseElement.classList.add('show');
+          }
+        } catch (_error) {
+          collapseElement.classList.add('show');
+        }
+
+        const toggle = document.querySelector('[data-bs-target="#' + collapseId + '"]');
+        if (toggle) {
+          toggle.classList.remove('collapsed');
+          toggle.setAttribute('aria-expanded', 'true');
+        }
+      }
+
+      function setDofaAiStatus(statusElement, message, kind) {
+        if (!statusElement) return;
+        statusElement.textContent = message || '';
+        statusElement.className = 'dofa-ai-status is-visible ' + (kind || 'is-info');
+      }
+
+      window.generarEstrategiasDofaIA = async function (button, collapseId) {
+        const form = button ? button.closest('form') : null;
+        const panel = button ? button.closest('.dofa-ai-panel') : null;
+        const statusElement = panel && panel.nextElementSibling &&
+          panel.nextElementSibling.classList.contains('dofa-ai-status')
+            ? panel.nextElementSibling
+            : null;
+
+        if (!form) {
+          setDofaAiStatus(statusElement, 'No se encontró el formulario de la matriz DOFA.', 'is-error');
+          return;
+        }
+
+        const names = [
+          'fortalezas',
+          'oportunidades',
+          'debilidades',
+          'amenazas',
+          'estrategias_fo',
+          'estrategias_fa',
+          'estrategias_do',
+          'estrategias_da'
+        ];
+
+        const fields = {};
+        names.forEach(function (name) {
+          fields[name] = form.querySelector('[name="' + name + '"]');
+        });
+
+        const sourceLabels = {
+          fortalezas: 'Fortalezas',
+          oportunidades: 'Oportunidades',
+          debilidades: 'Debilidades',
+          amenazas: 'Amenazas'
+        };
+
+        const missing = Object.keys(sourceLabels).filter(function (name) {
+          return !fields[name] || !String(fields[name].value || '').trim();
+        });
+
+        if (missing.length) {
+          setDofaAiStatus(
+            statusElement,
+            'Complete los cuatro cuadrantes. Falta información en: ' +
+              missing.map(function (name) { return sourceLabels[name]; }).join(', ') + '.',
+            'is-error'
+          );
+          return;
+        }
+
+        const strategyNames = [
+          'estrategias_fo',
+          'estrategias_fa',
+          'estrategias_do',
+          'estrategias_da'
+        ];
+        const hasExistingStrategies = strategyNames.some(function (name) {
+          return fields[name] && String(fields[name].value || '').trim();
+        });
+
+        if (
+          hasExistingStrategies &&
+          !window.confirm(
+            'Ya existen estrategias registradas. La generación con IA reemplazará temporalmente ' +
+            'el contenido actual de FO, FA, DO y DA. Podrá editarlo antes de guardar. ¿Desea continuar?'
+          )
+        ) {
+          return;
+        }
+
+        const originalHtml = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML =
+          '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Generando...';
+        setDofaAiStatus(
+          statusElement,
+          'Analizando la matriz y construyendo estrategias FO, FA, DO y DA...',
+          'is-info'
+        );
+
+        const payload = {
+          fortalezas: fields.fortalezas.value,
+          oportunidades: fields.oportunidades.value,
+          debilidades: fields.debilidades.value,
+          amenazas: fields.amenazas.value
+        };
+
+        try {
+          const response = await fetch("{{ url_for('dofa_generar_estrategias_ia') }}", {
+            method: 'POST',
+            credentials: 'same-origin',
+            cache: 'no-store',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify(payload)
+          });
+
+          let data = {};
+          try {
+            data = await response.json();
+          } catch (_jsonError) {
+            data = {};
+          }
+
+          if (!response.ok || !data.ok) {
+            throw new Error(
+              data.message || 'No fue posible generar las estrategias con IA.'
+            );
+          }
+
+          const strategies = data.estrategias || {};
+          const labels = {
+            estrategias_fo: 'FO',
+            estrategias_fa: 'FA',
+            estrategias_do: 'DO',
+            estrategias_da: 'DA'
+          };
+
+          strategyNames.forEach(function (name) {
+            if (!fields[name] || !String(strategies[name] || '').trim()) {
+              throw new Error('La IA no devolvió una estrategia válida para ' + labels[name] + '.');
+            }
+          });
+
+          strategyNames.forEach(function (name) {
+            fields[name].value = strategies[name];
+            fields[name].dispatchEvent(new Event('input', {bubbles: true}));
+          });
+
+          showStrategySection(collapseId);
+          setDofaAiStatus(
+            statusElement,
+            data.message ||
+              'Estrategias generadas. Puede editarlas antes de guardar la matriz DOFA.',
+            'is-success'
+          );
+
+          if (fields.estrategias_fo) {
+            setTimeout(function () {
+              fields.estrategias_fo.focus();
+              fields.estrategias_fo.scrollIntoView({behavior: 'smooth', block: 'center'});
+            }, 250);
+          }
+        } catch (error) {
+          setDofaAiStatus(
+            statusElement,
+            error && error.message
+              ? error.message
+              : 'No fue posible generar las estrategias con IA.',
+            'is-error'
+          );
+        } finally {
+          button.disabled = false;
+          button.innerHTML = originalHtml;
+        }
+      };
+    })();
+    </script>
 
     <style>
       body{
@@ -35790,6 +36513,92 @@ def dofa_edit(dofa_id):
         box-shadow:none;
       }
 
+
+      .dofa-ai-panel{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:18px;
+        padding:13px 15px;
+        margin-bottom:10px;
+        border:1px solid #b9d5f4;
+        border-radius:14px;
+        background:linear-gradient(135deg,#eef6ff,#f8fbff);
+        box-shadow:0 6px 14px rgba(15,72,133,.08);
+      }
+
+      .dofa-ai-copy{
+        min-width:0;
+      }
+
+      .dofa-ai-title{
+        color:#0b4a8f;
+        font-size:.86rem;
+        font-weight:950;
+        margin-bottom:3px;
+      }
+
+      .dofa-ai-help{
+        color:#516174;
+        font-size:.76rem;
+        line-height:1.35;
+      }
+
+      .dofa-ai-btn{
+        flex:0 0 auto;
+        border:none;
+        border-radius:10px !important;
+        padding:9px 16px !important;
+        color:#ffffff !important;
+        background:linear-gradient(135deg,#6f42c1,#3b82f6);
+        font-size:.78rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(76,81,191,.20);
+      }
+
+      .dofa-ai-btn:hover,
+      .dofa-ai-btn:focus{
+        color:#ffffff !important;
+        transform:translateY(-1px);
+        box-shadow:0 10px 19px rgba(76,81,191,.26);
+      }
+
+      .dofa-ai-btn:disabled{
+        opacity:.75;
+        transform:none;
+      }
+
+      .dofa-ai-status{
+        display:none;
+        margin:0 0 12px 0;
+        padding:9px 12px;
+        border-radius:10px;
+        font-size:.76rem;
+        font-weight:700;
+      }
+
+      .dofa-ai-status.is-visible{
+        display:block;
+      }
+
+      .dofa-ai-status.is-info{
+        color:#0b4a8f;
+        background:#eaf4ff;
+        border:1px solid #b9d5f4;
+      }
+
+      .dofa-ai-status.is-success{
+        color:#166534;
+        background:#ecfdf3;
+        border:1px solid #a7e2bd;
+      }
+
+      .dofa-ai-status.is-error{
+        color:#991b1b;
+        background:#fff1f2;
+        border:1px solid #fecdd3;
+      }
+
       .dofaedit-bottom-actions{
         display:flex;
         justify-content:center;
@@ -35853,6 +36662,17 @@ def dofa_edit(dofa_id):
       }
 
       @media (max-width:768px){
+
+        .dofa-ai-panel{
+          align-items:stretch;
+          flex-direction:column;
+          gap:10px;
+        }
+
+        .dofa-ai-btn{
+          width:100%;
+        }
+
         .dofaedit-header-overlay{
           flex-direction:column;
           text-align:center;
