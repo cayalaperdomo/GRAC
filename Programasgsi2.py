@@ -8880,11 +8880,6 @@ def perfil():
         </div>
       </div>
 
-      <!-- BOTÓN VOLVER -->
-      <div class="perfil-header-actions">
-        <a href="/" class="btn perfil-btn-main rounded-pill px-4 fw-bold">⬅ Volver</a>
-      </div>
-
       <div class="perfil-card">
         <div class="card-body">
 
