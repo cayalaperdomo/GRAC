@@ -192222,25 +192222,77 @@ def attack_auto_code_for(source_type, source_ref):
 
 
 def attack_auto_replace_techniques(scenario, techniques):
-    manual = [item for item in scenario.techniques if item.origin == "Manual"]
+    """
+    Sincroniza técnicas automáticas sin borrar y volver a insertar las que ya
+    existen. Así se evita violar la restricción única:
+    escenario + técnica + táctica.
+    Las técnicas validadas manualmente siempre se preservan.
+    """
+    manual_keys = set()
+    automatic_by_key = {}
+    duplicate_automatic = []
+
     for item in list(scenario.techniques):
-        if item.origin != "Manual":
+        key = (
+            attack_auto_clean(item.technique_id, 40),
+            attack_auto_clean(item.tactic_id, 40),
+        )
+        if not key[0]:
             db.session.delete(item)
-    existing = {(item.technique_id, item.tactic_id or "") for item in manual}
-    for tech in techniques or attack_auto_default_technique():
-        key = (attack_auto_clean(tech.get("technique_id"), 40), attack_auto_clean(tech.get("tactic_id"), 40))
-        if not key[0] or key in existing:
             continue
-        scenario.techniques.append(AttackAutoTechnique(
-            technique_id=key[0],
-            technique_name=attack_auto_clean(tech.get("technique_name"), 255) or "Técnica MITRE",
-            tactic_id=key[1],
-            tactic_name=attack_auto_clean(tech.get("tactic_name"), 120),
-            rationale=attack_auto_clean(tech.get("rationale"), 4000),
-            confidence=max(0, min(100, int(tech.get("confidence") or 60))),
-            origin="Automático",
-        ))
-        existing.add(key)
+
+        if item.origin == "Manual":
+            manual_keys.add(key)
+            continue
+
+        if key in automatic_by_key:
+            duplicate_automatic.append(item)
+        else:
+            automatic_by_key[key] = item
+
+    desired_keys = set()
+    for tech in techniques or attack_auto_default_technique():
+        key = (
+            attack_auto_clean(tech.get("technique_id"), 40),
+            attack_auto_clean(tech.get("tactic_id"), 40),
+        )
+        if not key[0] or key in desired_keys:
+            continue
+        desired_keys.add(key)
+
+        # Una validación manual tiene prioridad sobre el mapeo automático.
+        if key in manual_keys:
+            old_automatic = automatic_by_key.pop(key, None)
+            if old_automatic is not None:
+                db.session.delete(old_automatic)
+            continue
+
+        item = automatic_by_key.pop(key, None)
+        if item is None:
+            item = AttackAutoTechnique(
+                technique_id=key[0],
+                technique_name="Técnica MITRE",
+                tactic_id=key[1],
+                tactic_name=None,
+                rationale=None,
+                confidence=60,
+                origin="Automático",
+            )
+            scenario.techniques.append(item)
+
+        item.technique_id = key[0]
+        item.technique_name = attack_auto_clean(tech.get("technique_name"), 255) or "Técnica MITRE"
+        item.tactic_id = key[1]
+        item.tactic_name = attack_auto_clean(tech.get("tactic_name"), 120)
+        item.rationale = attack_auto_clean(tech.get("rationale"), 4000)
+        item.confidence = max(0, min(100, int(tech.get("confidence") or 60)))
+        item.origin = "Automático"
+
+    # Eliminar únicamente técnicas automáticas que ya no vienen de la fuente.
+    for item in automatic_by_key.values():
+        db.session.delete(item)
+    for item in duplicate_automatic:
+        db.session.delete(item)
 
 
 def attack_auto_apply_record(scenario, record, preserve_manual=True):
@@ -192845,17 +192897,35 @@ def attack_auto_technique_lines(item):
 
 
 def attack_auto_parse_technique_lines(raw):
+    """
+    Convierte las líneas del formulario en técnicas MITRE y elimina
+    combinaciones repetidas de técnica + táctica antes de guardar.
+    """
     parsed = []
+    seen = set()
+
     for line in str(raw or "").splitlines():
         parts = [attack_auto_clean(value) for value in line.split("|")]
         if not parts or not parts[0]:
             continue
         while len(parts) < 4:
             parts.append("")
+
+        technique_id = parts[0][:40]
+        tactic_id = parts[2][:40]
+        key = (technique_id, tactic_id)
+
+        if key in seen:
+            continue
+        seen.add(key)
+
         parsed.append({
-            "technique_id": parts[0][:40], "technique_name": (parts[1] or "Técnica MITRE")[:255],
-            "tactic_id": parts[2][:40], "tactic_name": parts[3][:120],
+            "technique_id": technique_id,
+            "technique_name": (parts[1] or "Técnica MITRE")[:255],
+            "tactic_id": tactic_id,
+            "tactic_name": parts[3][:120],
         })
+
     return parsed
 
 
@@ -192889,14 +192959,52 @@ def attack_auto_apply_scenario_form(item, form):
             item.supplier_id = int(form.get("supplier_id")) if form.get("supplier_id") else item.supplier_id
         except Exception:
             pass
-    for tech in list(item.techniques):
-        db.session.delete(tech)
+    # Reconciliar técnicas existentes en lugar de borrarlas y reinsertarlas.
+    # Esto evita que SQLite intente insertar una combinación única antes de
+    # ejecutar el DELETE del registro anterior.
+    existing_by_key = {}
+    duplicate_existing = []
+
+    for current in list(item.techniques):
+        key = (
+            attack_auto_clean(current.technique_id, 40),
+            attack_auto_clean(current.tactic_id, 40),
+        )
+        if key in existing_by_key:
+            duplicate_existing.append(current)
+        else:
+            existing_by_key[key] = current
+
+    desired_keys = set()
     for tech in attack_auto_parse_technique_lines(form.get("technique_lines")):
-        item.techniques.append(AttackAutoTechnique(
-            technique_id=tech["technique_id"], technique_name=tech["technique_name"],
-            tactic_id=tech["tactic_id"], tactic_name=tech["tactic_name"],
-            rationale="Mapeo validado manualmente por el analista.", confidence=100, origin="Manual",
-        ))
+        key = (tech["technique_id"], tech["tactic_id"])
+        desired_keys.add(key)
+
+        current = existing_by_key.pop(key, None)
+        if current is None:
+            current = AttackAutoTechnique(
+                technique_id=tech["technique_id"],
+                technique_name=tech["technique_name"],
+                tactic_id=tech["tactic_id"],
+                tactic_name=tech["tactic_name"],
+                rationale="Mapeo validado manualmente por el analista.",
+                confidence=100,
+                origin="Manual",
+            )
+            item.techniques.append(current)
+        else:
+            current.technique_name = tech["technique_name"]
+            current.tactic_name = tech["tactic_name"]
+            current.rationale = "Mapeo validado manualmente por el analista."
+            current.confidence = 100
+            current.origin = "Manual"
+
+    # Las técnicas retiradas del formulario sí se eliminan.
+    for current in existing_by_key.values():
+        db.session.delete(current)
+    for current in duplicate_existing:
+        db.session.delete(current)
+
     item.manually_edited = True
     item.updated_at = datetime.utcnow()
 
