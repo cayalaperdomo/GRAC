@@ -16207,17 +16207,6 @@ def menu():
         <!-- TABLERO -->
         <main class="sgsi-dashboard-zone">
 
-          <div class="sgsi-dashboard-toolbar">
-            <div class="sgsi-dashboard-toolbar-text">
-              <i class="bi bi-speedometer2 me-1"></i>
-              Centro de Control personalizado
-            </div>
-            <a href="{{ url_for('dashboard_config') }}"
-               class="btn btn-outline-primary rounded-pill sgsi-dashboard-config-btn">
-              <i class="bi bi-sliders me-1"></i> Diseñar tablero
-            </a>
-          </div>
-
           {% if dashboard_kpis %}
             <section class="sgsi-stats-grid">
               {% for item in dashboard_kpis %}
