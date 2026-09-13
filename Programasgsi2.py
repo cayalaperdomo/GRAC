@@ -150919,7 +150919,7 @@ ISO22301_STATUS_SCORE = {
     "SI": 100,
     "PARCIAL": 50,
     "NO": 0,
-    "NA": None,  # N/A no suma ni resta; se excluye del cálculo
+    "NA": 0,  # Valor visible 0; se excluye explícitamente del denominador.
 }
 
 ISO22301_BLOCK_ORDER = ["4", "5", "6", "7", "8", "9", "10"]
@@ -152397,7 +152397,8 @@ def iso22301_pct_from_estados(estados: list[str]) -> float:
     for e in estados:
         estado = (e or "").strip().upper()
 
-        # N/A no suma ni afecta el promedio
+        # N/A tiene valor 0, pero no es una pregunta aplicable y por eso
+        # no suma ni aumenta el denominador del promedio.
         if estado == "NA":
             continue
 
@@ -152477,8 +152478,9 @@ def _iso22301_build_resumen(run_id: int) -> dict:
         por_bloque[b]["total"] += 1
         if estado in ("SI", "PARCIAL", "NO", "NA"):
             por_bloque[b][estado] += 1
-        score = ISO22301_STATUS_SCORE.get(estado)
-        if score is not None:
+        # Solo Sí, Parcial y No forman el denominador. N/A queda registrado
+        # en el detalle, pero no participa en el nivel de madurez.
+        if estado in ("SI", "PARCIAL", "NO"):
             por_bloque[b]["validas"] += 1
         por_bloque[b]["items"].append({
             "pregunta_id": p.id,
@@ -152493,15 +152495,34 @@ def _iso22301_build_resumen(run_id: int) -> dict:
     for b, d in por_bloque.items():
         estados = [it["estado"] for it in d["items"]]
         pct = iso22301_pct_from_estados(estados)
-        nivel = iso22301_resolver_nivel(pct)
+        nivel = (
+            iso22301_resolver_nivel(pct)
+            if int(d.get("validas", 0) or 0) > 0
+            else {
+                "nivel": "No aplica",
+                "score": 0,
+                "color": "#6c757d",
+                "descripcion": "Todas las preguntas del capítulo fueron marcadas N/A.",
+            }
+        )
         d["pct"] = pct
         d["madurez"] = nivel["nivel"]
         d["score"] = nivel.get("score", 0)
         d["color"] = nivel["color"]
         d["descripcion"] = nivel.get("descripcion", "")
-        d["brecha_pct"] = round(100.0 - pct, 2)
+        d["brecha_pct"] = round(100.0 - pct, 2) if d["validas"] > 0 else 0.0
         resumen[b] = d
     return resumen
+
+
+def iso22301_pct_general_from_resumen(resumen: dict) -> float:
+    """Calcula el resultado global solo con preguntas distintas de N/A."""
+    estados = [
+        item.get("estado", "")
+        for bloque in (resumen or {}).values()
+        for item in (bloque.get("items", []) or [])
+    ]
+    return iso22301_pct_from_estados(estados)
 
 
 def iso22301_pct_por_criterio(resumen: dict, order: list[str] = None):
@@ -152509,10 +152530,15 @@ def iso22301_pct_por_criterio(resumen: dict, order: list[str] = None):
     labels, values = [], []
     for b in order:
         if b in (resumen or {}):
+            d = (resumen or {}).get(b, {}) or {}
+            if int(d.get("validas", 0) or 0) <= 0:
+                continue
             labels.append(iso22301_block_title(b) or b)
-            values.append(float((resumen or {}).get(b, {}).get("pct", 0) or 0))
+            values.append(float(d.get("pct", 0) or 0))
     for b, d in (resumen or {}).items():
         if b not in order:
+            if int(d.get("validas", 0) or 0) <= 0:
+                continue
             labels.append(d.get("nombre") or b)
             values.append(float(d.get("pct", 0) or 0))
     return labels, values
@@ -152710,6 +152736,109 @@ def _extraer_json_objeto_iso22301(raw: str) -> dict:
     return {}
 
 
+def _iso22301_texto_informe_desde_valor(valor) -> str:
+    """Obtiene texto útil desde respuestas de IA con estructuras variables."""
+    if valor is None:
+        return ""
+
+    if isinstance(valor, str):
+        return iso22301_normalizar_texto_rico_guardado(valor)
+
+    if isinstance(valor, list):
+        partes = []
+        for item in valor:
+            texto_item = _iso22301_texto_informe_desde_valor(item)
+            if texto_item:
+                partes.append(texto_item)
+        return "\n\n".join(partes).strip()
+
+    if not isinstance(valor, dict):
+        return ""
+
+    aliases = (
+        "informe_ejecutivo",
+        "informe_ejecutivo_iso_22301",
+        "informe",
+        "resumen_ejecutivo",
+        "executive_summary",
+        "executive_report",
+        "report",
+        "summary",
+        "texto",
+        "contenido",
+        "content",
+        "respuesta",
+        "response",
+        "resultado",
+        "result",
+        "output",
+        "answer",
+    )
+
+    claves_normalizadas = {}
+    for clave in valor.keys():
+        clave_txt = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", str(clave))
+        clave_norm = re.sub(r"[^a-z0-9]+", "_", clave_txt.lower()).strip("_")
+        claves_normalizadas[clave_norm] = clave
+
+    # Primero busca los nombres de campo conocidos, incluidos formatos
+    # alternativos frecuentes de OpenRouter y Ollama.
+    for alias in aliases:
+        clave_real = claves_normalizadas.get(alias)
+        if clave_real is None:
+            continue
+        texto = _iso22301_texto_informe_desde_valor(valor.get(clave_real))
+        if texto:
+            return texto
+
+    # Si el proveedor anidó el contenido bajo otra clave, conserva el texto
+    # más completo en lugar de descartar toda la respuesta.
+    candidatos = []
+    for contenido in valor.values():
+        texto = _iso22301_texto_informe_desde_valor(contenido)
+        if texto:
+            candidatos.append(texto)
+
+    return max(candidatos, key=len) if candidatos else ""
+
+
+def _iso22301_extraer_informe_ai(raw) -> str:
+    """Acepta JSON, JSON anidado, bloques Markdown o texto plano de la IA."""
+    if raw is None:
+        return ""
+
+    if isinstance(raw, (dict, list)):
+        return _iso22301_texto_informe_desde_valor(raw)
+
+    raw_txt = str(raw).strip()
+    if not raw_txt:
+        return ""
+
+    limpio = raw_txt.replace("```json", "").replace("```", "").strip()
+    obj = None
+    try:
+        obj = json.loads(limpio)
+    except Exception:
+        try:
+            inicio = limpio.find("{")
+            fin = limpio.rfind("}")
+            if inicio != -1 and fin != -1 and fin > inicio:
+                obj = json.loads(limpio[inicio:fin + 1])
+        except Exception:
+            obj = None
+
+    # Si el JSON sí fue válido, una estructura vacía o sin contenido debe
+    # provocar el reintento; no debe guardarse como si fuera un informe.
+    if obj is not None:
+        return _iso22301_texto_informe_desde_valor(obj)
+
+    # Fallback para texto plano o JSON incompleto por límite de tokens.
+    texto = iso22301_normalizar_texto_rico_guardado(raw_txt)
+    if texto.strip() in ("", "{}", "[]"):
+        return ""
+    return texto.strip()
+
+
 def _build_plan_accion_iso22301_texto(plan_list) -> str:
     if not isinstance(plan_list, list):
         return ""
@@ -152755,7 +152884,7 @@ def _iso22301_prompt_plan_trabajo(run: "Iso22301MadurezRun", resumen: dict) -> s
 
     for code in ISO22301_BLOCK_ORDER:
         d = (resumen or {}).get(code)
-        if not d:
+        if not d or int(d.get("validas", 0) or 0) <= 0:
             continue
 
         lineas.append(
@@ -152895,7 +153024,12 @@ def _iso22301_ai_prompt_criterio(
 
     bullets = []
 
-    for it in items[:30]:
+    applicable_items = [
+        it for it in (items or [])
+        if (it.get("estado") or "").strip().upper() != "NA"
+    ]
+
+    for it in applicable_items[:30]:
         pregunta = (it.get("pregunta") or "")[:260].replace("\n", " ")
         comentario = (it.get("comentario") or "")[:260].replace("\n", " ")
         estado = (it.get("estado") or "").strip().upper()
@@ -153125,8 +153259,9 @@ def importar_instrumento_iso22301():
 def run_analysis_from_iso22301_run(iso22301_run_id: int):
     run = Iso22301MadurezRun.query.get_or_404(iso22301_run_id)
     resumen = _iso22301_build_resumen(run.id)
-    valores = [float(v.get("pct", 0) or 0) for v in resumen.values()]
-    pct_general = round(sum(valores) / len(valores), 2) if valores else 0.0
+    # Cálculo general ponderado por pregunta aplicable. N/A se conserva
+    # en el historial, pero no suma ni forma parte del denominador.
+    pct_general = iso22301_pct_general_from_resumen(resumen)
     labels, values = iso22301_pct_por_criterio(resumen, ISO22301_BLOCK_ORDER)
     run.resumen_json = json.dumps(resumen, ensure_ascii=False)
     run.pct_general = pct_general
@@ -154012,6 +154147,25 @@ def historial():
         .all()
     )
 
+    # Actualiza evaluaciones históricas creadas con la fórmula anterior,
+    # sin incluir N/A en el denominador. Se reconstruye el resumen para
+    # corregir también capítulos que tienen únicamente respuestas N/A.
+    historial_actualizado = False
+    for run in runs:
+        resumen_corregido = _iso22301_build_resumen(run.id)
+        resumen_json_corregido = json.dumps(resumen_corregido, ensure_ascii=False)
+        pct_corregido = iso22301_pct_general_from_resumen(resumen_corregido)
+
+        if (run.resumen_json or "{}") != resumen_json_corregido:
+            run.resumen_json = resumen_json_corregido
+            historial_actualizado = True
+
+        if abs(float(run.pct_general or 0) - pct_corregido) > 0.005:
+            run.pct_general = pct_corregido
+            historial_actualizado = True
+    if historial_actualizado:
+        db.session.commit()
+
     # =========================================================
     # BOTÓN NUEVA REVISIÓN
     # =========================================================
@@ -154450,7 +154604,12 @@ def detalle_criterio(run_id: int, bloque_codigo: str):
     items = d.get("items", []) or []
     nombre = d.get("nombre") or iso22301_block_title(bloque_codigo) or bloque_codigo
     pct = float(d.get("pct", 0) or 0)
-    nivel = iso22301_nivel_visual_por_pct(pct)
+    aplicables = int(d.get("validas", 0) or 0)
+    nivel = (
+        iso22301_nivel_visual_por_pct(pct)
+        if aplicables > 0
+        else {"nivel": "No aplica", "score": 0, "color": "#6c757d"}
+    )
 
     rows = []
     for it in items:
@@ -154556,6 +154715,7 @@ def analisis_criterio(run_id: int, bloque_codigo: str):
     nombre = d.get("nombre") or iso22301_block_title(bloque_codigo) or bloque_codigo
     pct = float(d.get("pct", 0) or 0)
     items = d.get("items", []) or []
+    aplicables = int(d.get("validas", 0) or 0)
 
     analisis = Iso22301MadurezCriterioAnalisis.query.filter_by(
         run_id=run.id,
@@ -154565,6 +154725,10 @@ def analisis_criterio(run_id: int, bloque_codigo: str):
     if request.method == "POST":
         if not iso22301_user_can_execute(user):
             return iso22301_deny_execute("El rol Auditor no puede generar análisis con IA.")
+
+        if aplicables <= 0:
+            flash("Este capítulo no tiene preguntas aplicables; todas fueron marcadas N/A.", "warning")
+            return redirect(url_for("madurez_iso22301.analisis_criterio", run_id=run.id, bloque_codigo=bloque_codigo))
 
         prompt = _iso22301_ai_prompt_criterio(run, bloque_codigo, nombre, pct, items)
 
@@ -154693,20 +154857,13 @@ def detalle(run_id: int):
     if not iso22301_user_can_access(user):
         return iso22301_deny_access("No tiene permiso para ver el detalle ISO 22301.")
 
+    # Recalcula también las evaluaciones anteriores con la fórmula vigente.
+    run_analysis_from_iso22301_run(run_id)
     run = Iso22301MadurezRun.query.get_or_404(run_id)
-
     try:
         resumen = json.loads(run.resumen_json or "{}")
     except Exception:
         resumen = {}
-
-    if not resumen:
-        run_analysis_from_iso22301_run(run.id)
-        run = Iso22301MadurezRun.query.get_or_404(run.id)
-        try:
-            resumen = json.loads(run.resumen_json or "{}")
-        except Exception:
-            resumen = {}
 
     def _nl2br_iso22301(s: str) -> str:
         txt = iso22301_normalizar_texto_rico_guardado(s or "")
@@ -154855,9 +155012,15 @@ def detalle(run_id: int):
 
         pct = float(d.get("pct", 0) or 0)
         total = int(d.get("total", 0) or 0)
+        aplicables = int(d.get("validas", 0) or 0)
+        no_aplica = int(d.get("NA", 0) or 0)
         nombre_criterio = (d.get("nombre") or iso22301_block_title(code) or code).strip()
 
-        nivel_data = iso22301_nivel_visual_por_pct(pct)
+        nivel_data = (
+            iso22301_nivel_visual_por_pct(pct)
+            if aplicables > 0
+            else {"nivel": "No aplica", "score": 0, "color": "#6c757d"}
+        )
         nivel_score = nivel_data.get("score", "")
         nivel_texto = (nivel_data.get("nivel") or "").strip()
         nivel_nombre = nivel_texto.split(":", 1)[1].strip() if ":" in nivel_texto else nivel_texto
@@ -154905,8 +155068,13 @@ def detalle(run_id: int):
               </div>
 
               <div class="nistdet-row">
-                <div class="nistdet-label">Ítems</div>
-                <div class="nistdet-value fw-bold">{total}</div>
+                <div class="nistdet-label">Ítems aplicables</div>
+                <div class="nistdet-value fw-bold">{aplicables}</div>
+              </div>
+
+              <div class="nistdet-row">
+                <div class="nistdet-label">N/A excluidos</div>
+                <div class="nistdet-value fw-bold">{no_aplica} de {total}</div>
               </div>
 
               <div class="nistdet-row nistdet-row-actions">
@@ -155083,6 +155251,7 @@ def informe_ejecutivo_generar(run_id: int):
     if not iso22301_user_can_execute(user):
         return iso22301_deny_execute("El perfil Auditor no puede generar el informe ejecutivo con IA.")
 
+    run_analysis_from_iso22301_run(run_id)
     run = Iso22301MadurezRun.query.get_or_404(run_id)
 
     try:
@@ -155095,28 +155264,29 @@ def informe_ejecutivo_generar(run_id: int):
         return redirect(url_for("madurez_iso22301.detalle", run_id=run.id))
 
     try:
-        raw = _iso22301_ai_text(
-            _iso22301_prompt_informe_ejecutivo(run, resumen),
-            max_tokens=1200
-        )
+        prompt_informe = _iso22301_prompt_informe_ejecutivo(run, resumen)
+        raw = _iso22301_ai_text(prompt_informe, max_tokens=1800)
+        informe_ai = _iso22301_extraer_informe_ai(raw)
 
-        obj = _extraer_json_objeto_iso22301(raw)
+        # Un segundo intento solo se realiza cuando la respuesta existe pero
+        # no contiene texto utilizable. Evita que una variación de formato
+        # obligue al usuario a iniciar nuevamente la generación.
+        if not informe_ai:
+            prompt_reintento = f"""
+{prompt_informe}
 
-        if isinstance(obj, dict):
-            informe_ai = (
-                obj.get("informe_ejecutivo")
-                or obj.get("informe")
-                or obj.get("resumen_ejecutivo")
-                or obj.get("texto")
-                or ""
-            )
-        else:
-            informe_ai = raw or ""
-
-        informe_ai = iso22301_normalizar_texto_rico_guardado(informe_ai)
+CORRECCIÓN DE FORMATO OBLIGATORIA:
+La respuesta anterior no contenía texto utilizable. Devuelve un único objeto
+JSON con la clave exacta \"informe_ejecutivo\" y un valor de texto no vacío.
+""".strip()
+            raw = _iso22301_ai_text(prompt_reintento, max_tokens=1800)
+            informe_ai = _iso22301_extraer_informe_ai(raw)
 
         if not informe_ai:
-            raise RuntimeError("La IA no devolvió un informe válido.")
+            raise RuntimeError(
+                "La IA respondió sin contenido utilizable después de dos intentos. "
+                "Verifique el modelo configurado e intente nuevamente."
+            )
 
         run.informe_ejecutivo_ai = informe_ai
         run.informe_ejecutivo_editado = informe_ai
@@ -155415,7 +155585,7 @@ def _iso22301_build_pdf_run(run: "Iso22301MadurezRun") -> io.BytesIO:
         "Parcial",
         "NO",
         "N/A",
-        "Ítems"
+        "Ítems aplicables"
     ]]
 
     for code in ISO22301_BLOCK_ORDER:
@@ -155431,7 +155601,7 @@ def _iso22301_build_pdf_run(run: "Iso22301MadurezRun") -> io.BytesIO:
             str(d.get("PARCIAL", 0)),
             str(d.get("NO", 0)),
             str(d.get("NA", 0)),
-            str(d.get("total", 0)),
+            str(d.get("validas", 0)),
         ])
 
     tbl = Table(
@@ -155494,6 +155664,9 @@ def exportar_pdf(run_id: int):
     if denied:
         return denied
 
+    # Garantiza que el PDF use la fórmula vigente incluso si la revisión
+    # fue creada antes de excluir N/A del denominador.
+    run_analysis_from_iso22301_run(run_id)
     run = Iso22301MadurezRun.query.get_or_404(run_id)
 
     pdf = _iso22301_build_pdf_run(run)
