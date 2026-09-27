@@ -10679,7 +10679,6 @@ AUDITOR_MODULES_DENY = {
     "Configuración Parámetros de la Empresa",
     "OpenRouter API Key",
     "Gestión de Usuarios",
-    "Aplicación móvil",
     "Chat con Asistente",
 }
 
@@ -12547,23 +12546,21 @@ def _dashboard_metric_value(source_key, user_id=None):
                 return float(len(open_items))
             return float(sum(1 for item in open_items if "CRIT" in str(getattr(item, "clasificacion", "") or "").upper()))
         if source_key in {"plans_open_count", "plans_overdue_count"}:
-            # IMPORTANTE: usar la MISMA fuente del módulo web /planes_accion.
-            # Antes el dashboard/mobile consultaba MejoraPlanRegistro (mejora_planes),
-            # mientras el módulo real de Planes de Acción usa ContinuousActionPlan
-            # en instance/planes_accion.db. Esa diferencia generaba conteos incongruentes.
-            items = ContinuousActionPlan.query.order_by(ContinuousActionPlan.id.desc()).limit(10000).all()
-            today = date.today()
-            effective = [pa_effective_status(item, today) for item in items]
-
+            items = MejoraPlanRegistro.query.all()
+            open_items = []
+            for item in items:
+                estado = str(getattr(item, "estado_actividad", "") or "").strip().upper()
+                if estado not in {"CERRADO", "CERRADA", "CLOSED", "FINALIZADO", "FINALIZADA"}:
+                    open_items.append(item)
             if source_key == "plans_open_count":
-                # Todo plan que todavía requiere seguimiento, incluidos En proceso,
-                # Pendiente y Vencido. Se excluyen únicamente estados cerrados/cancelados.
-                return float(sum(
-                    1 for status in effective
-                    if not pa_status_closed(status)
-                ))
-
-            return float(sum(1 for status in effective if status == "Vencido"))
+                return float(len(open_items))
+            today = datetime.utcnow().date()
+            overdue = 0
+            for item in open_items:
+                due = _dashboard_parse_date(getattr(item, "fecha_ejecucion_propuesta", None))
+                if due and due.date() < today:
+                    overdue += 1
+            return float(overdue)
         if source_key == "legal_noncompliant_count":
             return float(sum(1 for item in RequisitoLegal.query.all() if "NO CUMPLE" in str(getattr(item, "estado", "") or "").upper() or "INCUMPLE" in str(getattr(item, "estado", "") or "").upper()))
         if source_key == "providers_high_count":
@@ -12731,22 +12728,20 @@ def _dashboard_distribution_providers():
 
 
 def _dashboard_distribution_plans():
-    # Misma fuente y mismo estado efectivo del módulo /planes_accion.
-    labels = ["Abierto", "En proceso", "Vencido", "Cerrado", "Cancelado", "Otros"]
+    labels = ["Abierto", "Cerrado", "Sin estado"]
     values = {label: 0 for label in labels}
     try:
-        items = ContinuousActionPlan.query.order_by(ContinuousActionPlan.id.desc()).limit(10000).all()
-        today = date.today()
+        items = MejoraPlanRegistro.query.all()
     except Exception:
         items = []
-        today = date.today()
-
     for item in items:
-        status = pa_effective_status(item, today)
-        if status in values and status != "Otros":
-            values[status] += 1
+        txt = str(getattr(item, "estado_actividad", "") or "").strip().upper()
+        if txt in {"ABIERTO", "ABIERTA", "OPEN"}:
+            values["Abierto"] += 1
+        elif txt in {"CERRADO", "CERRADA", "CLOSED", "FINALIZADO", "FINALIZADA"}:
+            values["Cerrado"] += 1
         else:
-            values["Otros"] += 1
+            values["Sin estado"] += 1
     return labels, [float(values[label]) for label in labels]
 
 
@@ -12790,10 +12785,10 @@ def _dashboard_timeline_vulnerabilities():
 
 def _dashboard_timeline_plans():
     try:
-        items = ContinuousActionPlan.query.order_by(ContinuousActionPlan.id.asc()).limit(10000).all()
+        items = MejoraPlanRegistro.query.all()
     except Exception:
         items = []
-    values = [getattr(item, "created_at", None) or getattr(item, "due_date", None) for item in items]
+    values = [getattr(item, "fecha", None) or getattr(item, "fecha_ejecucion_propuesta", None) for item in items]
     return _dashboard_monthly_count_series(values)
 
 
@@ -13514,20 +13509,21 @@ def _dashboard_proveedores_criticidad_chart():
 
 
 def _dashboard_planes_accion_estado_chart():
-    # Fuente única: ContinuousActionPlan / instance/planes_accion.db.
-    buckets = ["Abierto", "En proceso", "Vencido", "Cerrado", "Cancelado", "Otros"]
+    buckets = ["Abierto", "Cerrado", "Sin estado"]
     conteos = {k: 0 for k in buckets}
 
     try:
-        items = ContinuousActionPlan.query.order_by(ContinuousActionPlan.id.desc()).limit(10000).all()
-        today = date.today()
+        items = MejoraPlanRegistro.query.order_by(MejoraPlanRegistro.id.desc()).all()
 
         for it in items:
-            status = pa_effective_status(it, today)
-            if status in conteos and status != "Otros":
-                conteos[status] += 1
+            raw = str(getattr(it, "estado_actividad", "") or "").strip().lower()
+
+            if raw == "abierto":
+                conteos["Abierto"] += 1
+            elif raw == "cerrado":
+                conteos["Cerrado"] += 1
             else:
-                conteos["Otros"] += 1
+                conteos["Sin estado"] += 1
 
     except Exception as e:
         return _dashboard_empty_chart(
@@ -13539,7 +13535,7 @@ def _dashboard_planes_accion_estado_chart():
         buckets,
         [conteos[n] for n in buckets],
         title="Planes de acción por estado",
-        subtitle="Estado efectivo de los planes de acción del SGSI"
+        subtitle="Estado general de los planes de acción del SGSI"
     )
 
 
@@ -14351,7 +14347,6 @@ MENU_SECTIONS = [
             },
             {"label": "Configuración AI", "desc": "Configurar llave cifrada para IA (solo admin).", "href": "/admin/openrouter_key", "icon": "bi-key-fill", "btn": "btn-warning text-dark", "admin_only": True},
             {"label": "Gestión de Usuarios", "href": "/usuarios", "icon": "bi-people", "btn": "btn-success", "module": "Gestión de Usuarios"},
-            {"label": "Aplicación móvil", "desc": "Descarga GRAC Mobile para Android o accede a TestFlight en iOS.", "href": "/admin/mobile-app", "icon": "bi-phone", "btn": "btn-primary", "module": "Aplicación móvil"},
             {"label": "Constructor del Centro de Control", "href": "/admin/dashboard_config", "icon": "bi-sliders", "btn": "btn-primary"},
             {"label": "Logs de Auditoría", "href": "/admin/logs_auditoria", "icon": "bi-journal-text", "btn": "btn-dark", "admin_only": True},
             {"label": "Chat con Asistente", "href": "/chatgpt_view", "icon": "bi-chat-dots", "btn": "btn-info text-white", "module": "Chat con Asistente"},
@@ -15029,10 +15024,6 @@ def _sgsi_build_global_menu_html():
             "Gestión de Usuarios": {
                 "paths": ["/usuarios"],
                 "endpoints": ["usuarios"]
-            },
-            "Aplicación móvil": {
-                "paths": ["/admin/mobile-app"],
-                "endpoints": ["admin_mobile_app", "admin_mobile_app_download"]
             },
             "Constructor del Centro de Control": {
                 "paths": ["/admin/dashboard_config"],
@@ -16129,663 +16120,6 @@ def dashboard_status():
 # ====================
 # Menú principal con tablero compacto
 # ====================
-
-
-# ============================================================================
-# GRAC MOBILE — DISTRIBUCIÓN DESDE ADMINISTRACIÓN (ANDROID + IOS TESTFLIGHT)
-# ============================================================================
-# Android: el APK se almacena fuera de /static y se entrega únicamente a
-# usuarios autenticados con permiso "Aplicación móvil".
-# iOS: se publica el enlace de invitación de TestFlight (no se almacena IPA).
-# El historial se conserva en una DB independiente para no modificar sgsi.db.
-
-MOBILE_RELEASE_DB_PATH = os.path.join(app.instance_path, "mobile_app.db")
-MOBILE_RELEASE_DIR = os.path.join(app.instance_path, "mobile_releases")
-os.makedirs(MOBILE_RELEASE_DIR, exist_ok=True)
-
-# Un APK release puede superar los 50 MB. La ruta valida además un máximo propio.
-app.config["MAX_CONTENT_LENGTH"] = max(
-    int(app.config.get("MAX_CONTENT_LENGTH") or 0),
-    300 * 1024 * 1024,
-)
-
-
-def get_mobile_release_db_connection():
-    os.makedirs(app.instance_path, exist_ok=True)
-    conn = sqlite3.connect(MOBILE_RELEASE_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_mobile_release_db():
-    conn = get_mobile_release_db_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS mobile_releases (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            platform TEXT NOT NULL,
-            version TEXT NOT NULL,
-            build_number INTEGER NOT NULL DEFAULT 1,
-            min_version TEXT,
-            min_build INTEGER NOT NULL DEFAULT 1,
-            mandatory INTEGER NOT NULL DEFAULT 0,
-            release_notes TEXT,
-            file_name TEXT,
-            stored_name TEXT,
-            distribution_url TEXT,
-            is_active INTEGER NOT NULL DEFAULT 1,
-            published_at TEXT NOT NULL,
-            published_by TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE INDEX IF NOT EXISTS idx_mobile_releases_platform_active
-        ON mobile_releases(platform, is_active, id DESC)
-    """)
-    conn.commit()
-    conn.close()
-
-
-def _mobile_release_row(release_id):
-    conn = get_mobile_release_db_connection()
-    row = conn.execute(
-        "SELECT * FROM mobile_releases WHERE id = ?",
-        (int(release_id),),
-    ).fetchone()
-    conn.close()
-    return row
-
-
-def _mobile_release_active(platform):
-    init_mobile_release_db()
-    conn = get_mobile_release_db_connection()
-    row = conn.execute("""
-        SELECT *
-        FROM mobile_releases
-        WHERE platform = ? AND is_active = 1
-        ORDER BY id DESC
-        LIMIT 1
-    """, ((platform or "").strip().lower(),)).fetchone()
-    conn.close()
-    return row
-
-
-def _mobile_release_history(limit=50):
-    init_mobile_release_db()
-    conn = get_mobile_release_db_connection()
-    rows = conn.execute("""
-        SELECT *
-        FROM mobile_releases
-        ORDER BY published_at DESC, id DESC
-        LIMIT ?
-    """, (int(limit),)).fetchall()
-    conn.close()
-    return rows
-
-
-def _mobile_release_version_tuple(value):
-    """Convierte 1.2.3 / 1.2 / v1.2.3 en una tupla comparable."""
-    raw = str(value or "0").strip().lower().lstrip("v")
-    nums = re.findall(r"\d+", raw)
-    parts = [int(x) for x in nums[:4]]
-    while len(parts) < 4:
-        parts.append(0)
-    return tuple(parts)
-
-
-def _mobile_release_is_newer(latest_version, latest_build, current_version, current_build):
-    latest_v = _mobile_release_version_tuple(latest_version)
-    current_v = _mobile_release_version_tuple(current_version)
-    if latest_v != current_v:
-        return latest_v > current_v
-    return int(latest_build or 0) > int(current_build or 0)
-
-
-def _mobile_release_is_below_min(current_version, current_build, min_version, min_build):
-    min_v = _mobile_release_version_tuple(min_version or "0")
-    current_v = _mobile_release_version_tuple(current_version)
-    if current_v != min_v:
-        return current_v < min_v
-    return int(current_build or 0) < int(min_build or 0)
-
-
-def _mobile_release_qr_data_uri(value):
-    value = (value or "").strip()
-    if not value:
-        return None
-    try:
-        img = qrcode.make(value)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
-    except Exception:
-        return None
-
-
-def _mobile_release_allowed(user):
-    if not user:
-        return False
-    return user.role == "admin" or verificar_permiso(user, "Aplicación móvil")
-
-
-def _mobile_release_external_download_url(row):
-    if not row:
-        return None
-    if row["platform"] == "ios":
-        return (row["distribution_url"] or "").strip() or None
-    return url_for("admin_mobile_app_download", release_id=row["id"], _external=True)
-
-
-def _mobile_release_publish(
-    *, platform, version, build_number, min_version, min_build,
-    mandatory, release_notes, published_by, file_name=None,
-    stored_name=None, distribution_url=None,
-):
-    init_mobile_release_db()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn = get_mobile_release_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "UPDATE mobile_releases SET is_active = 0 WHERE platform = ?",
-        (platform,),
-    )
-    cur.execute("""
-        INSERT INTO mobile_releases (
-            platform, version, build_number, min_version, min_build,
-            mandatory, release_notes, file_name, stored_name,
-            distribution_url, is_active, published_at, published_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-    """, (
-        platform,
-        version,
-        int(build_number),
-        min_version or version,
-        int(min_build),
-        1 if mandatory else 0,
-        release_notes,
-        file_name,
-        stored_name,
-        distribution_url,
-        now,
-        published_by,
-    ))
-    release_id = cur.lastrowid
-    conn.commit()
-    conn.close()
-    return release_id
-
-
-init_mobile_release_db()
-
-
-@app.route("/admin/mobile-app", methods=["GET", "POST"])
-@login_required
-def admin_mobile_app():
-    user = User.query.get(session.get("user_id"))
-    if not _mobile_release_allowed(user):
-        registrar_log(
-            user.username if user else "Desconocido",
-            "Intento de acceso no autorizado al módulo Aplicación móvil.",
-        )
-        flash("No tiene permiso para acceder a Aplicación móvil.", "danger")
-        return redirect(url_for("menu"))
-
-    if request.method == "POST":
-        # La consulta/descarga es permitida a usuarios con permiso, pero toda
-        # publicación, activación o eliminación es exclusiva del administrador.
-        if user.role != "admin":
-            flash("Solo el administrador puede publicar o modificar versiones.", "danger")
-            return redirect(url_for("admin_mobile_app"))
-
-        action = (request.form.get("action") or "").strip().lower()
-
-        if action in {"publish_android", "publish_ios"}:
-            platform = "android" if action == "publish_android" else "ios"
-            version = (request.form.get("version") or "").strip()
-            min_version = (request.form.get("min_version") or version).strip() or version
-            notes = (request.form.get("release_notes") or "").strip()
-            mandatory = request.form.get("mandatory") == "1"
-
-            try:
-                build_number = max(1, int(request.form.get("build_number") or 1))
-                min_build = max(1, int(request.form.get("min_build") or 1))
-            except Exception:
-                flash("El número de build debe ser un entero mayor a cero.", "warning")
-                return redirect(url_for("admin_mobile_app"))
-
-            if not version:
-                flash("La versión es obligatoria.", "warning")
-                return redirect(url_for("admin_mobile_app"))
-
-            file_name = None
-            stored_name = None
-            distribution_url = None
-
-            if platform == "android":
-                if request.content_length and request.content_length > 260 * 1024 * 1024:
-                    flash("El APK supera el máximo permitido de 260 MB.", "danger")
-                    return redirect(url_for("admin_mobile_app"))
-
-                apk = request.files.get("apk_file")
-                if not apk or not apk.filename:
-                    flash("Debes seleccionar el archivo APK de Android.", "warning")
-                    return redirect(url_for("admin_mobile_app"))
-
-                original = secure_filename(apk.filename)
-                if not original.lower().endswith(".apk"):
-                    flash("Solo se permite publicar archivos .apk.", "danger")
-                    return redirect(url_for("admin_mobile_app"))
-
-                safe_version = re.sub(r"[^0-9A-Za-z._-]+", "-", version).strip("-") or "version"
-                stored_name = f"GRAC-Mobile-{safe_version}-{build_number}-{uuid.uuid4().hex[:10]}.apk"
-                target = os.path.join(MOBILE_RELEASE_DIR, stored_name)
-                apk.save(target)
-
-                if not os.path.isfile(target) or os.path.getsize(target) <= 0:
-                    try:
-                        if os.path.isfile(target):
-                            os.remove(target)
-                    except Exception:
-                        pass
-                    flash("No fue posible guardar el APK.", "danger")
-                    return redirect(url_for("admin_mobile_app"))
-
-                file_name = original
-
-            else:
-                distribution_url = (request.form.get("testflight_url") or "").strip()
-                try:
-                    parsed = urlparse(distribution_url)
-                except Exception:
-                    parsed = None
-                if (
-                    not parsed
-                    or parsed.scheme != "https"
-                    or (parsed.netloc or "").lower() != "testflight.apple.com"
-                ):
-                    flash(
-                        "Ingresa un enlace válido de TestFlight, por ejemplo https://testflight.apple.com/join/XXXXXXXX.",
-                        "warning",
-                    )
-                    return redirect(url_for("admin_mobile_app"))
-
-            release_id = _mobile_release_publish(
-                platform=platform,
-                version=version,
-                build_number=build_number,
-                min_version=min_version,
-                min_build=min_build,
-                mandatory=mandatory,
-                release_notes=notes,
-                published_by=user.username,
-                file_name=file_name,
-                stored_name=stored_name,
-                distribution_url=distribution_url,
-            )
-            registrar_log(
-                user.username,
-                f"Publicó GRAC Mobile {platform.upper()} versión {version} build {build_number} (release #{release_id}).",
-            )
-            flash(
-                f"GRAC Mobile {platform.upper()} {version} (build {build_number}) publicado correctamente.",
-                "success",
-            )
-            return redirect(url_for("admin_mobile_app"))
-
-        if action == "activate":
-            release_id = request.form.get("release_id", type=int)
-            row = _mobile_release_row(release_id)
-            if not row:
-                flash("La versión indicada no existe.", "warning")
-                return redirect(url_for("admin_mobile_app"))
-            conn = get_mobile_release_db_connection()
-            conn.execute(
-                "UPDATE mobile_releases SET is_active = 0 WHERE platform = ?",
-                (row["platform"],),
-            )
-            conn.execute(
-                "UPDATE mobile_releases SET is_active = 1 WHERE id = ?",
-                (release_id,),
-            )
-            conn.commit()
-            conn.close()
-            registrar_log(
-                user.username,
-                f"Activó GRAC Mobile {row['platform'].upper()} versión {row['version']} build {row['build_number']}.",
-            )
-            flash("Versión activada correctamente.", "success")
-            return redirect(url_for("admin_mobile_app"))
-
-        if action == "delete":
-            release_id = request.form.get("release_id", type=int)
-            row = _mobile_release_row(release_id)
-            if not row:
-                flash("La versión indicada no existe.", "warning")
-                return redirect(url_for("admin_mobile_app"))
-            if row["stored_name"]:
-                target = safe_join(MOBILE_RELEASE_DIR, row["stored_name"])
-                try:
-                    if target and os.path.isfile(target):
-                        os.remove(target)
-                except Exception as exc:
-                    print("No se pudo eliminar APK histórico:", repr(exc))
-            conn = get_mobile_release_db_connection()
-            conn.execute("DELETE FROM mobile_releases WHERE id = ?", (release_id,))
-            conn.commit()
-            conn.close()
-            registrar_log(
-                user.username,
-                f"Eliminó release GRAC Mobile #{release_id} ({row['platform']} {row['version']}).",
-            )
-            flash("Versión eliminada del historial.", "success")
-            return redirect(url_for("admin_mobile_app"))
-
-        flash("Acción no reconocida.", "warning")
-        return redirect(url_for("admin_mobile_app"))
-
-    android = _mobile_release_active("android")
-    ios = _mobile_release_active("ios")
-    history = _mobile_release_history(100) if user.role == "admin" else []
-
-    android_url = _mobile_release_external_download_url(android)
-    ios_url = _mobile_release_external_download_url(ios)
-    android_qr = _mobile_release_qr_data_uri(android_url)
-    ios_qr = _mobile_release_qr_data_uri(ios_url)
-
-    inner = render_template_string(r"""
-    <div class="container-fluid mobile-admin-shell">
-      <!-- CABECERA alineada con los demás módulos de Administración -->
-      <div class="mobile-admin-header-card">
-        <div class="mobile-admin-header-overlay">
-          <div class="mobile-admin-header-icon"><i class="bi bi-phone"></i></div>
-          <div class="mobile-admin-header-text">
-            <div class="mobile-admin-header-badge">SGSI · Administración</div>
-            <h2 class="mobile-admin-title">Aplicación móvil</h2>
-            <div class="mobile-admin-subtitle">Distribución controlada de GRAC Mobile para Android y iOS mediante TestFlight.</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="row g-3">
-        <div class="col-xl-6">
-          <div class="card border-0 shadow-sm h-100">
-            <div class="card-body p-4">
-              <div class="d-flex align-items-center gap-3 mb-3">
-                <div class="mobile-platform-icon android"><i class="bi bi-android2"></i></div>
-                <div>
-                  <h4 class="mb-0 fw-bold">Android</h4>
-                  <div class="text-muted small">Descarga directa del APK publicado en GRAC</div>
-                </div>
-              </div>
-              {% if android %}
-                <div class="mobile-version-box mb-3">
-                  <div><b>Versión:</b> {{ android['version'] }} · Build {{ android['build_number'] }}</div>
-                  <div><b>Publicada:</b> {{ android['published_at'] }}</div>
-                  <div><b>Por:</b> {{ android['published_by'] or '—' }}</div>
-                  <div><b>Mínima:</b> {{ android['min_version'] or android['version'] }} · Build {{ android['min_build'] }}</div>
-                  <div><b>Actualización:</b> {% if android['mandatory'] %}<span class="badge bg-danger">Obligatoria</span>{% else %}<span class="badge bg-success">Opcional</span>{% endif %}</div>
-                </div>
-                {% if android['release_notes'] %}<div class="alert alert-light border"><b>Novedades:</b><br>{{ android['release_notes'] }}</div>{% endif %}
-                <div class="d-flex flex-wrap gap-3 align-items-center">
-                  <a class="btn btn-primary rounded-pill px-4" href="{{ android_url }}" data-no-progress="true">
-                    <i class="bi bi-download me-1"></i> Descargar APK
-                  </a>
-                  {% if android_qr %}<img src="{{ android_qr }}" class="mobile-qr" alt="QR Android">{% endif %}
-                </div>
-              {% else %}
-                <div class="alert alert-warning mb-0">Todavía no hay una versión Android publicada.</div>
-              {% endif %}
-            </div>
-          </div>
-        </div>
-
-        <div class="col-xl-6">
-          <div class="card border-0 shadow-sm h-100">
-            <div class="card-body p-4">
-              <div class="d-flex align-items-center gap-3 mb-3">
-                <div class="mobile-platform-icon ios"><i class="bi bi-apple"></i></div>
-                <div>
-                  <h4 class="mb-0 fw-bold">iOS / iPadOS</h4>
-                  <div class="text-muted small">Instalación mediante Apple TestFlight</div>
-                </div>
-              </div>
-              {% if ios %}
-                <div class="mobile-version-box mb-3">
-                  <div><b>Versión:</b> {{ ios['version'] }} · Build {{ ios['build_number'] }}</div>
-                  <div><b>Publicada:</b> {{ ios['published_at'] }}</div>
-                  <div><b>Por:</b> {{ ios['published_by'] or '—' }}</div>
-                  <div><b>Mínima:</b> {{ ios['min_version'] or ios['version'] }} · Build {{ ios['min_build'] }}</div>
-                  <div><b>Actualización:</b> {% if ios['mandatory'] %}<span class="badge bg-danger">Obligatoria</span>{% else %}<span class="badge bg-success">Opcional</span>{% endif %}</div>
-                </div>
-                {% if ios['release_notes'] %}<div class="alert alert-light border"><b>Novedades:</b><br>{{ ios['release_notes'] }}</div>{% endif %}
-                <div class="d-flex flex-wrap gap-3 align-items-center">
-                  <a class="btn btn-dark rounded-pill px-4" href="{{ ios_url }}" target="_blank" rel="noopener" data-no-progress="true">
-                    <i class="bi bi-apple me-1"></i> Abrir en TestFlight
-                  </a>
-                  {% if ios_qr %}<img src="{{ ios_qr }}" class="mobile-qr" alt="QR TestFlight">{% endif %}
-                </div>
-              {% else %}
-                <div class="alert alert-warning mb-0">Todavía no hay un enlace de TestFlight publicado.</div>
-              {% endif %}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {% if is_admin %}
-      <div class="row g-3 mt-1">
-        <div class="col-xl-6">
-          <div class="card border-0 shadow-sm h-100">
-            <div class="card-header bg-white border-0 pt-4 px-4"><h5 class="fw-bold mb-0">Publicar Android</h5></div>
-            <div class="card-body px-4 pb-4">
-              <form method="post" enctype="multipart/form-data" data-progress-text="Publicando APK de GRAC Mobile...">
-                <input type="hidden" name="action" value="publish_android">
-                <div class="row g-3">
-                  <div class="col-md-6"><label class="form-label">Versión</label><input class="form-control" name="version" placeholder="0.2.0" required></div>
-                  <div class="col-md-6"><label class="form-label">Build</label><input class="form-control" type="number" min="1" name="build_number" value="3" required></div>
-                  <div class="col-md-6"><label class="form-label">Versión mínima</label><input class="form-control" name="min_version" placeholder="0.2.0"></div>
-                  <div class="col-md-6"><label class="form-label">Build mínimo</label><input class="form-control" type="number" min="1" name="min_build" value="1"></div>
-                  <div class="col-12"><label class="form-label">APK</label><input class="form-control" type="file" accept=".apk,application/vnd.android.package-archive" name="apk_file" required></div>
-                  <div class="col-12"><label class="form-label">Notas de versión</label><textarea class="form-control" rows="3" name="release_notes" placeholder="Cambios incluidos en esta versión..."></textarea></div>
-                  <div class="col-12 form-check ms-2"><input class="form-check-input" type="checkbox" value="1" name="mandatory" id="androidMandatory"><label class="form-check-label" for="androidMandatory">Actualización obligatoria</label></div>
-                  <div class="col-12"><button class="btn btn-primary rounded-pill px-4" type="submit"><i class="bi bi-cloud-arrow-up me-1"></i> Publicar Android</button></div>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-
-        <div class="col-xl-6">
-          <div class="card border-0 shadow-sm h-100">
-            <div class="card-header bg-white border-0 pt-4 px-4"><h5 class="fw-bold mb-0">Publicar iOS / TestFlight</h5></div>
-            <div class="card-body px-4 pb-4">
-              <form method="post">
-                <input type="hidden" name="action" value="publish_ios">
-                <div class="row g-3">
-                  <div class="col-md-6"><label class="form-label">Versión</label><input class="form-control" name="version" placeholder="0.2.0" required></div>
-                  <div class="col-md-6"><label class="form-label">Build</label><input class="form-control" type="number" min="1" name="build_number" value="3" required></div>
-                  <div class="col-md-6"><label class="form-label">Versión mínima</label><input class="form-control" name="min_version" placeholder="0.2.0"></div>
-                  <div class="col-md-6"><label class="form-label">Build mínimo</label><input class="form-control" type="number" min="1" name="min_build" value="1"></div>
-                  <div class="col-12"><label class="form-label">Enlace público TestFlight</label><input class="form-control" type="url" name="testflight_url" placeholder="https://testflight.apple.com/join/XXXXXXXX" required></div>
-                  <div class="col-12"><label class="form-label">Notas de versión</label><textarea class="form-control" rows="3" name="release_notes" placeholder="Cambios incluidos en esta versión..."></textarea></div>
-                  <div class="col-12 form-check ms-2"><input class="form-check-input" type="checkbox" value="1" name="mandatory" id="iosMandatory"><label class="form-check-label" for="iosMandatory">Actualización obligatoria</label></div>
-                  <div class="col-12"><button class="btn btn-dark rounded-pill px-4" type="submit"><i class="bi bi-apple me-1"></i> Publicar TestFlight</button></div>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card border-0 shadow-sm mt-3">
-        <div class="card-header bg-white border-0 pt-4 px-4 d-flex justify-content-between align-items-center">
-          <h5 class="fw-bold mb-0">Historial de versiones</h5>
-          <span class="badge bg-light text-dark">{{ history|length }} registros</span>
-        </div>
-        <div class="table-responsive">
-          <table class="table table-hover align-middle mb-0">
-            <thead class="table-light"><tr><th>Plataforma</th><th>Versión</th><th>Build</th><th>Publicación</th><th>Estado</th><th>Acciones</th></tr></thead>
-            <tbody>
-            {% for r in history %}
-              <tr>
-                <td>{% if r['platform']=='ios' %}<i class="bi bi-apple me-1"></i> iOS{% else %}<i class="bi bi-android2 me-1"></i> Android{% endif %}</td>
-                <td>{{ r['version'] }}</td>
-                <td>{{ r['build_number'] }}</td>
-                <td>{{ r['published_at'] }}<br><small class="text-muted">{{ r['published_by'] or '' }}</small></td>
-                <td>{% if r['is_active'] %}<span class="badge bg-success">Activa</span>{% else %}<span class="badge bg-secondary">Histórica</span>{% endif %}</td>
-                <td class="text-nowrap">
-                  {% if not r['is_active'] %}
-                  <form method="post" class="d-inline">
-                    <input type="hidden" name="action" value="activate"><input type="hidden" name="release_id" value="{{ r['id'] }}">
-                    <button class="btn btn-sm btn-outline-primary rounded-pill" type="submit">Activar</button>
-                  </form>
-                  {% endif %}
-                  <form method="post" class="d-inline" onsubmit="return confirm('¿Eliminar esta versión del historial?');">
-                    <input type="hidden" name="action" value="delete"><input type="hidden" name="release_id" value="{{ r['id'] }}">
-                    <button class="btn btn-sm btn-outline-danger rounded-pill" type="submit">Eliminar</button>
-                  </form>
-                </td>
-              </tr>
-            {% else %}
-              <tr><td colspan="6" class="text-center text-muted py-4">No hay versiones publicadas todavía.</td></tr>
-            {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      {% endif %}
-    </div>
-
-    <style>
-      .mobile-admin-shell{
-        width:96%;
-        max-width:1100px;
-        margin:26px auto 24px auto;
-        overflow:hidden;
-      }
-      .mobile-admin-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }
-      .mobile-admin-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-      .mobile-admin-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-        min-width:0;
-      }
-      .mobile-admin-header-icon{
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-      .mobile-admin-header-text{
-        max-width:900px;
-        min-width:0;
-      }
-      .mobile-admin-header-badge{
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }
-      .mobile-admin-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem !important;
-        line-height:1.1 !important;
-        margin:0 !important;
-        text-shadow:0 4px 14px rgba(0,0,0,.45);
-        overflow-wrap:break-word;
-      }
-      .mobile-admin-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem !important;
-        line-height:1.25 !important;
-        margin-top:3px;
-        overflow-wrap:break-word;
-      }
-      .mobile-platform-icon{width:54px;height:54px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:1.65rem;}
-      .mobile-platform-icon.android{background:#e7f7ee;color:#198754;}
-      .mobile-platform-icon.ios{background:#edf1f5;color:#111827;}
-      .mobile-version-box{background:#f8fafc;border:1px solid #e7edf4;border-radius:16px;padding:14px 16px;line-height:1.75;}
-      .mobile-qr{width:118px;height:118px;border-radius:14px;border:1px solid #e3e8ef;padding:6px;background:#fff;}
-      .mobile-admin-shell .card{border-radius:20px;overflow:hidden;}
-    </style>
-    """,
-        android=android,
-        ios=ios,
-        history=history,
-        android_url=android_url,
-        ios_url=ios_url,
-        android_qr=android_qr,
-        ios_qr=ios_qr,
-        is_admin=(user.role == "admin"),
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-
-@app.route("/admin/mobile-app/download/<int:release_id>")
-@login_required
-def admin_mobile_app_download(release_id):
-    user = User.query.get(session.get("user_id"))
-    if not _mobile_release_allowed(user):
-        flash("No tiene permiso para descargar GRAC Mobile.", "danger")
-        return redirect(url_for("menu"))
-
-    row = _mobile_release_row(release_id)
-    if not row or row["platform"] != "android" or not row["stored_name"]:
-        abort(404)
-
-    full_path = safe_join(MOBILE_RELEASE_DIR, row["stored_name"])
-    if not full_path or not os.path.isfile(full_path):
-        abort(404)
-
-    registrar_log(
-        user.username,
-        f"Descargó GRAC Mobile Android versión {row['version']} build {row['build_number']}.",
-    )
-    return send_file(
-        full_path,
-        mimetype="application/vnd.android.package-archive",
-        as_attachment=True,
-        download_name=f"GRAC-Mobile-{row['version']}-build-{row['build_number']}.apk",
-        conditional=True,
-    )
-
 
 @app.route('/')
 @login_required
@@ -193057,30 +192391,11 @@ def pa_status_closed(value):
     }
 
 
-def pa_effective_status(plan, today=None):
-    """
-    Estado visible del plan.
-
-    "Vencido" es un estado calculado: aplica cuando la fecha objetivo ya pasó
-    y el plan todavía no está cerrado, cancelado, completado, resuelto o
-    finalizado. No se guarda en la base de datos para evitar que quede
-    desactualizado con el paso del tiempo.
-    """
-    today = today or date.today()
-    stored_status = (getattr(plan, "status", "") or "Abierto").strip()
-    due_date = pa_due_date_obj(getattr(plan, "due_date", ""))
-
-    if due_date and due_date < today and not pa_status_closed(stored_status):
-        return "Vencido"
-    return stored_status or "Abierto"
-
-
 def pa_badge_status(value):
     status = (value or "Abierto").strip()
     cls = {
         "Abierto": "danger",
         "En proceso": "warning text-dark",
-        "Vencido": "danger",
         "Cerrado": "success",
         "Cancelado": "secondary",
     }.get(status, "info text-dark")
@@ -193454,6 +192769,8 @@ def planes_accion_dashboard():
         query = query.filter(ContinuousActionPlan.standard == standard)
     if origin:
         query = query.filter(ContinuousActionPlan.origin == origin)
+    if status:
+        query = query.filter(ContinuousActionPlan.status == status)
     if search:
         like = f"%{search}%"
         query = query.filter(pa_or_(
@@ -193464,24 +192781,20 @@ def planes_accion_dashboard():
             ContinuousActionPlan.responsible.ilike(like),
         ))
 
-    # El estado "Vencido" se calcula con la fecha objetivo; por eso todos los
-    # filtros de estado se aplican sobre el estado efectivo y no únicamente
-    # sobre el valor almacenado en la base de datos.
-    today = date.today()
-    plans = query.order_by(ContinuousActionPlan.id.desc()).limit(10000).all()
-    if status:
-        plans = [plan for plan in plans if pa_effective_status(plan, today) == status]
-    plans = plans[:2000]
+    plans = query.order_by(ContinuousActionPlan.id.desc()).limit(2000).all()
     all_plans = ContinuousActionPlan.query.order_by(ContinuousActionPlan.id.desc()).limit(10000).all()
 
     total = len(all_plans)
-    effective_statuses = {
-        plan.id: pa_effective_status(plan, today) for plan in all_plans
-    }
-    abiertos = sum(1 for p in all_plans if effective_statuses[p.id] == "Abierto")
-    en_proceso = sum(1 for p in all_plans if effective_statuses[p.id] == "En proceso")
-    cerrados = sum(1 for p in all_plans if effective_statuses[p.id] == "Cerrado")
-    vencidos = sum(1 for p in all_plans if effective_statuses[p.id] == "Vencido")
+    abiertos = sum(1 for p in all_plans if (p.status or "").strip() == "Abierto")
+    en_proceso = sum(1 for p in all_plans if (p.status or "").strip() == "En proceso")
+    cerrados = sum(1 for p in all_plans if (p.status or "").strip() == "Cerrado")
+    today = date.today()
+    vencidos = sum(
+        1 for p in all_plans
+        if pa_due_date_obj(p.due_date)
+        and pa_due_date_obj(p.due_date) < today
+        and not pa_status_closed(p.status)
+    )
 
     counts = {key: 0 for key in ["ISO27001", "SOC2", "PCIDSS", "NISTCSF", "RIESGOS", "MULTI"]}
     for plan in all_plans:
@@ -193537,9 +192850,7 @@ def planes_accion_dashboard():
         <div class="pa-kpi"><strong>{{ abiertos }}</strong><span>Abiertos</span></div>
         <div class="pa-kpi"><strong>{{ en_proceso }}</strong><span>En proceso</span></div>
         <div class="pa-kpi"><strong>{{ cerrados }}</strong><span>Cerrados</span></div>
-        <a class="pa-kpi pa-kpi-link danger" href="{{ url_for('planes_accion_dashboard', status='Vencido') }}" title="Ver cuáles planes están vencidos">
-          <strong>{{ vencidos }}</strong><span>Vencidos · Ver planes</span>
-        </a>
+        <div class="pa-kpi danger"><strong>{{ vencidos }}</strong><span>Vencidos</span></div>
       </div>
 
       <div class="pa-standard-grid">
@@ -193575,7 +192886,7 @@ def planes_accion_dashboard():
             <label>Estado</label>
             <select name="status" class="form-select">
               <option value="">Todos</option>
-              {% for value in ['Abierto','En proceso','Vencido','Cerrado','Cancelado'] %}
+              {% for value in ['Abierto','En proceso','Cerrado','Cancelado'] %}
               <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ value }}</option>
               {% endfor %}
             </select>
@@ -193601,8 +192912,7 @@ def planes_accion_dashboard():
             </thead>
             <tbody>
               {% for p in plans %}
-              {% set effective = effective_status(p, today) %}
-              <tr class="{% if effective == 'Vencido' %}pa-row-overdue{% endif %}">
+              <tr>
                 <td>{{ p.id }}</td>
                 <td><span class="pa-origin">{{ p.origin or '—' }}</span></td>
                 <td><span class="pa-standard">{{ standard_label(p.standard) }}</span></td>
@@ -193621,12 +192931,7 @@ def planes_accion_dashboard():
                     {{ p.due_date or '—' }}
                   </span>
                 </td>
-                <td>
-                  {{ status_badge(effective)|safe }}
-                  {% if effective == 'Vencido' %}
-                    <small class="pa-overdue-note">Estado registrado: {{ p.status or 'Abierto' }}</small>
-                  {% endif %}
-                </td>
+                <td>{{ status_badge(p.status)|safe }}</td>
                 <td>
                   <div class="d-flex flex-wrap gap-1 justify-content-center">
                     <a href="{{ url_for('planes_accion_edit', plan_id=p.id) }}" class="btn btn-sm btn-outline-primary">
@@ -193666,7 +192971,6 @@ def planes_accion_dashboard():
       .pa-btn-light{background:#fff;color:#0b4a8f;border:1px solid #cedbea;}
       .pa-kpi-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:11px;margin-bottom:11px;}
       .pa-kpi{background:#fff;border:1px solid #dde7f2;border-radius:16px;padding:13px 15px;box-shadow:0 9px 20px rgba(15,23,42,.10);display:flex;flex-direction:column;}
-      .pa-kpi-link{text-decoration:none!important;transition:transform .18s ease,box-shadow .18s ease}.pa-kpi-link:hover{transform:translateY(-2px);box-shadow:0 13px 26px rgba(15,23,42,.16)}
       .pa-kpi strong{font-size:1.45rem;color:#0b4a8f;line-height:1;}.pa-kpi span{font-size:.72rem;color:#526173;font-weight:850;margin-top:5px}.pa-kpi.danger strong{color:#b42318;}
       .pa-standard-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin-bottom:13px;}
       .pa-standard-grid div{background:#eaf3ff;border:1px solid #cfe0f5;border-radius:13px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;gap:8px;}
@@ -193674,7 +192978,6 @@ def planes_accion_dashboard():
       .pa-card{background:rgba(255,255,255,.98);border:1px solid #dce6f1;border-radius:18px;padding:14px 16px;box-shadow:0 11px 24px rgba(15,23,42,.12);margin-bottom:14px;}
       .pa-card label{font-size:.75rem;font-weight:900;color:#334155;margin-bottom:4px}.pa-card .form-control,.pa-card .form-select{min-height:36px;border-radius:10px;font-size:.78rem;border:1px solid #cfdbea;}
       .pa-table-card{padding:0;overflow:hidden}.pa-table{margin:0;min-width:1500px;font-size:.76rem}.pa-table thead th{background:#eaf3ff;color:#062b55;font-weight:950;text-align:center;white-space:nowrap;padding:9px 7px}.pa-table td{padding:7px;vertical-align:middle;border-color:#e5edf6}.pa-plan-cell{min-width:320px;max-width:470px}.pa-plan-cell strong,.pa-plan-cell small,.pa-plan-cell em{display:block}.pa-plan-cell small{color:#475569;margin-top:3px;white-space:pre-line}.pa-plan-cell em{font-size:.68rem;color:#64748b;margin-top:3px}.pa-origin,.pa-standard{display:inline-block;border-radius:999px;padding:4px 8px;background:#eef4fb;color:#0b4a8f;font-weight:850;white-space:nowrap;}
-      .pa-row-overdue td{background:#fff5f4!important;border-top-color:#f5c2c0!important;border-bottom-color:#f5c2c0!important}.pa-row-overdue:hover td{background:#ffeceb!important}.pa-overdue-note{display:block;color:#9f1c14;font-size:.64rem;font-weight:800;margin-top:4px;white-space:nowrap}
       @media(max-width:1050px){.pa-kpi-grid{grid-template-columns:repeat(2,1fr)}.pa-standard-grid{grid-template-columns:repeat(2,1fr)}}
     </style>
     '''
@@ -193698,7 +193001,6 @@ def planes_accion_dashboard():
         can_write=pa_can_write(user),
         standard_label=pa_standard_label,
         status_badge=pa_badge_status,
-        effective_status=pa_effective_status,
         severity_badge=pa_badge_severity,
         due_date_obj=pa_due_date_obj,
         status_closed=pa_status_closed,
@@ -204248,979 +203550,6 @@ def cont_comp_collect_evidence_rows(standard="", control_code="", source_filter=
     return rows
 
 
-# ============================================================================
-# ARKYNTECH GRAC MOBILE API v1 — WEB (MVP DE SOLO LECTURA)
-# ============================================================================
-# La aplicación móvil nunca accede directamente a SQLite. Todas las consultas
-# pasan por esta API, reutilizan los usuarios/roles/permisos existentes y
-# requieren contraseña + OTP. Los tokens de actualización pueden revocarse.
-
-from flask import g as _mobile_g, jsonify as _mobile_jsonify
-from itsdangerous import URLSafeTimedSerializer as _MobileSerializer
-from itsdangerous import BadSignature as _MobileBadSignature
-from itsdangerous import SignatureExpired as _MobileSignatureExpired
-from threading import Lock as _MobileLock
-
-
-MOBILE_API_VERSION = "1.1.0"
-MOBILE_ACCESS_SECONDS = max(300, int(os.getenv("GRAC_MOBILE_ACCESS_SECONDS", "900")))
-MOBILE_REFRESH_SECONDS = max(3600, int(os.getenv("GRAC_MOBILE_REFRESH_SECONDS", "604800")))
-MOBILE_OTP_CHALLENGE_SECONDS = max(120, int(os.getenv("GRAC_MOBILE_OTP_SECONDS", "300")))
-
-
-class MobileApiSession(db.Model):
-    """Sesión revocable para GRAC Mobile; no almacena tokens en texto claro."""
-
-    __tablename__ = "mobile_api_sessions"
-
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
-    refresh_token_hash = db.Column(db.String(64), nullable=False, unique=True, index=True)
-    device_name = db.Column(db.String(160), nullable=True)
-    platform = db.Column(db.String(40), nullable=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    last_used_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    expires_at = db.Column(db.DateTime, nullable=False, index=True)
-    revoked_at = db.Column(db.DateTime, nullable=True, index=True)
-
-
-mobile_api_bp = Blueprint("mobile_api", __name__, url_prefix="/api/mobile/v1")
-_MOBILE_AUTH_FAILURES = {}
-_MOBILE_AUTH_FAILURES_LOCK = _MobileLock()
-
-
-def _mobile_now():
-    return datetime.utcnow()
-
-
-def _mobile_iso(value):
-    if value is None:
-        return None
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    return str(value)
-
-
-def _mobile_float(value, default=0.0):
-    try:
-        return float(value if value is not None else default)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _mobile_int(value, default=0):
-    try:
-        return int(value if value is not None else default)
-    except (TypeError, ValueError):
-        return int(default)
-
-
-def _mobile_clamp_pct(value):
-    return round(max(0.0, min(100.0, _mobile_float(value))), 2)
-
-
-def _mobile_json_dict(raw):
-    if isinstance(raw, dict):
-        return raw
-    try:
-        parsed = json.loads(raw or "{}")
-        return parsed if isinstance(parsed, dict) else {}
-    except Exception:
-        return {}
-
-
-def _mobile_ok(data=None, status=200, meta=None):
-    body = {"ok": True, "data": data if data is not None else {}}
-    if meta is not None:
-        body["meta"] = meta
-    return _mobile_jsonify(body), status
-
-
-def _mobile_error(code, message, status=400, details=None):
-    error = {"code": code, "message": message}
-    if details:
-        error["details"] = details
-    return _mobile_jsonify({"ok": False, "error": error}), status
-
-
-def _mobile_serializer():
-    secret = (
-        os.getenv("GRAC_MOBILE_TOKEN_SECRET")
-        or app.config.get("SECRET_KEY")
-        or app.secret_key
-    )
-    return _MobileSerializer(str(secret), salt="arkyntech-grac-mobile-v1")
-
-
-def _mobile_token_hash(token):
-    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
-
-
-def _mobile_signed(payload):
-    return _mobile_serializer().dumps(payload)
-
-
-def _mobile_unsign(token, max_age):
-    return _mobile_serializer().loads(token, max_age=max_age)
-
-
-def _mobile_rate_key(username=""):
-    forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
-    ip = forwarded or request.remote_addr or "unknown"
-    return f"{ip}|{(username or '').strip().lower()}"
-
-
-def _mobile_rate_limited(key, limit=6, window_seconds=900):
-    now_ts = time.time()
-    with _MOBILE_AUTH_FAILURES_LOCK:
-        history = [ts for ts in _MOBILE_AUTH_FAILURES.get(key, []) if now_ts - ts < window_seconds]
-        _MOBILE_AUTH_FAILURES[key] = history
-        return len(history) >= limit
-
-
-def _mobile_register_failure(key):
-    with _MOBILE_AUTH_FAILURES_LOCK:
-        _MOBILE_AUTH_FAILURES.setdefault(key, []).append(time.time())
-
-
-def _mobile_clear_failures(key):
-    with _MOBILE_AUTH_FAILURES_LOCK:
-        _MOBILE_AUTH_FAILURES.pop(key, None)
-
-
-def _mobile_issue_session(user, device_name="", platform=""):
-    expires_at = _mobile_now() + timedelta(seconds=MOBILE_REFRESH_SECONDS)
-    row = MobileApiSession(
-        user_id=user.id,
-        refresh_token_hash=hashlib.sha256(secrets.token_bytes(48)).hexdigest(),
-        device_name=(device_name or "")[:160],
-        platform=(platform or "")[:40],
-        expires_at=expires_at,
-    )
-    db.session.add(row)
-    db.session.flush()
-
-    refresh_token = _mobile_signed({
-        "type": "refresh",
-        "sid": row.id,
-        "uid": user.id,
-        "nonce": secrets.token_urlsafe(16),
-    })
-    row.refresh_token_hash = _mobile_token_hash(refresh_token)
-    db.session.commit()
-    return _mobile_tokens_for_session(user, row, refresh_token)
-
-
-def _mobile_tokens_for_session(user, row, refresh_token=None):
-    access_token = _mobile_signed({
-        "type": "access",
-        "sid": row.id,
-        "uid": user.id,
-        "role": user.role,
-        "nonce": secrets.token_urlsafe(12),
-    })
-    data = {
-        "token_type": "Bearer",
-        "access_token": access_token,
-        "access_expires_in": MOBILE_ACCESS_SECONDS,
-        "access_expires_at": _mobile_iso(_mobile_now() + timedelta(seconds=MOBILE_ACCESS_SECONDS)),
-        "refresh_expires_at": _mobile_iso(row.expires_at),
-        "user": _mobile_user_payload(user),
-    }
-    if refresh_token:
-        data["refresh_token"] = refresh_token
-    return data
-
-
-def _mobile_user_payload(user):
-    return {
-        "id": user.id,
-        "username": user.username,
-        "email": getattr(user, "email", None),
-        "role": user.role,
-        "photo_filename": getattr(user, "photo_filename", None),
-    }
-
-
-def _mobile_bearer_token():
-    header = (request.headers.get("Authorization") or "").strip()
-    if not header.lower().startswith("bearer "):
-        return ""
-    return header[7:].strip()
-
-
-def mobile_auth_required(view):
-    @wraps(view)
-    def wrapped(*args, **kwargs):
-        token = _mobile_bearer_token()
-        if not token:
-            return _mobile_error("AUTH_REQUIRED", "Debes iniciar sesión.", 401)
-        try:
-            payload = _mobile_unsign(token, MOBILE_ACCESS_SECONDS)
-        except _MobileSignatureExpired:
-            return _mobile_error("TOKEN_EXPIRED", "La sesión expiró; actualiza el token.", 401)
-        except _MobileBadSignature:
-            return _mobile_error("TOKEN_INVALID", "El token no es válido.", 401)
-
-        if payload.get("type") != "access":
-            return _mobile_error("TOKEN_INVALID", "Tipo de token no válido.", 401)
-
-        row = MobileApiSession.query.get(_mobile_int(payload.get("sid")))
-        user = User.query.get(_mobile_int(payload.get("uid")))
-        if (
-            not row
-            or not user
-            or row.user_id != user.id
-            or row.revoked_at is not None
-            or row.expires_at <= _mobile_now()
-        ):
-            return _mobile_error("SESSION_REVOKED", "La sesión no está activa.", 401)
-
-        row.last_used_at = _mobile_now()
-        db.session.commit()
-        _mobile_g.mobile_user = user
-        _mobile_g.mobile_session = row
-        return view(*args, **kwargs)
-    return wrapped
-
-
-_MOBILE_PERMISSION_ALIASES = {
-    "soa": ["Declaración de Aplicabilidad", "Contexto Interno"],
-    "risks": ["Gestión de Riesgos"],
-    "dofa": ["DOFA"],
-    "metrics": ["Métricas"],
-    "actions": ["Planes de acción del SGSI"],
-    "incidents": ["Registro de Incidentes"],
-    "vulnerabilities": ["Registro de Vulnerabilidades"],
-    "legal": ["Requisitos Legales"],
-    "providers": ["Registro de Proveedores", "Security Scorecard de Terceros"],
-    "culture": ["Plan de Concientización y Formación", "Métricas"],
-    "iso27001": ["Nivel de madurez ISO 27001:2022", "Nivel de Madurez ISO 27001:2022"],
-    "nist": ["Nivel de Madurez NIST CSF V.2.0", "Nivel de Madurez NIST CSF 2.0"],
-    "datos": ["Nivel de Madurez protección de datos personales", "Nivel de madurez protección de datos personales"],
-    "pci": ["Nivel de Madurez PCI-DSS", "Nivel de madurez PCI-DSS"],
-    "soc2": ["Nivel de madurez SOC 2", "Nivel de Madurez SOC 2"],
-    "iso22301": ["Nivel de Madurez ISO 22301"],
-    "ai42001": ["Nivel de Madurez Gestión de Inteligencia Artificial"],
-    "ai_rmf": ["Nivel de Madurez Gestión de Inteligencia Artificial"],
-}
-
-
-def _mobile_can(module_key):
-    user = getattr(_mobile_g, "mobile_user", None)
-    if not user:
-        return False
-    if user.role in ("admin", "auditor"):
-        return True
-    for module_name in _MOBILE_PERMISSION_ALIASES.get(module_key, []):
-        try:
-            if verificar_permiso(user, module_name):
-                return True
-        except Exception:
-            continue
-    return False
-
-
-def mobile_module_required(module_key):
-    def decorator(view):
-        @wraps(view)
-        @mobile_auth_required
-        def wrapped(*args, **kwargs):
-            if not _mobile_can(module_key):
-                return _mobile_error("FORBIDDEN", "No tienes permiso para consultar este módulo.", 403)
-            return view(*args, **kwargs)
-        return wrapped
-    return decorator
-
-
-def _mobile_page_args(default_limit=50, max_limit=200):
-    page = max(1, _mobile_int(request.args.get("page"), 1))
-    limit = max(1, min(max_limit, _mobile_int(request.args.get("limit"), default_limit)))
-    return page, limit, (page - 1) * limit
-
-
-def _mobile_level_name(percent):
-    pct = _mobile_clamp_pct(percent)
-    if pct <= 20:
-        return "Nivel 1: Ejecutado"
-    if pct <= 40:
-        return "Nivel 2: Documentado"
-    if pct <= 60:
-        return "Nivel 3: Gestionado"
-    if pct <= 80:
-        return "Nivel 4: Gestionado cuantitativamente"
-    return "Nivel 5: Optimizado"
-
-
-def _mobile_pct_from_node(node):
-    if isinstance(node, (int, float)):
-        return _mobile_clamp_pct(node)
-    if not isinstance(node, dict):
-        return None
-    for key in ("pct", "porcentaje", "cumplimiento_pct", "pct_general", "promedio"):
-        if key in node and node[key] is not None:
-            return _mobile_clamp_pct(node[key])
-    if "score" in node and node["score"] is not None:
-        score = _mobile_float(node["score"])
-        return _mobile_clamp_pct(score * 20 if score <= 5 else score)
-    values = []
-    for child in node.values():
-        pct = _mobile_pct_from_node(child)
-        if pct is not None:
-            values.append(pct)
-    return round(sum(values) / len(values), 2) if values else None
-
-
-def _mobile_domains_from_summary(summary):
-    if not isinstance(summary, dict):
-        return []
-    rows = []
-    for key, value in summary.items():
-        if str(key).lower() in {"general", "total", "pct_general", "metadata"}:
-            continue
-        pct = _mobile_pct_from_node(value)
-        if pct is not None:
-            label = key
-            if isinstance(value, dict):
-                label = value.get("nombre") or value.get("titulo") or value.get("name") or key
-            rows.append({"code": str(key), "name": str(label), "percent": pct})
-    return rows
-
-
-def _mobile_maturity_item(code, name, percent=0, available=False, run_id=None,
-                          status=None, progress=0, updated_at=None, domains=None):
-    pct = _mobile_clamp_pct(percent)
-    return {
-        "code": code,
-        "name": name,
-        "available": bool(available),
-        "run_id": run_id,
-        "status": status,
-        "progress_percent": _mobile_clamp_pct(progress),
-        "percent": pct,
-        "level": _mobile_level_name(pct),
-        "updated_at": _mobile_iso(updated_at),
-        "domains": domains or [],
-    }
-
-
-def _mobile_latest_maturity(code):
-    try:
-        if code == "iso27001":
-            run = AnalysisRun.query.order_by(AnalysisRun.id.desc()).first()
-            if not run:
-                return _mobile_maturity_item(code, "ISO 27001:2022")
-            summary = _mobile_json_dict(run.chapter_results_json)
-            domains = []
-            for key, value in summary.items():
-                pct = _mobile_pct_from_node(value)
-                domains.append({"code": str(key), "name": str(key), "percent": pct or 0.0})
-            pct = round(sum(x["percent"] for x in domains) / len(domains), 2) if domains else 0.0
-            return _mobile_maturity_item(code, "ISO 27001:2022", pct, True, run.id,
-                                         "FINALIZADO", 100, run.created_at, domains)
-
-        if code == "nist":
-            run = (NistMadurezRun.query.filter(func.upper(NistMadurezRun.estado) == "FINALIZADO")
-                   .order_by(NistMadurezRun.id.desc()).first()
-                   or NistMadurezRun.query.order_by(NistMadurezRun.id.desc()).first())
-            if not run:
-                return _mobile_maturity_item(code, "NIST CSF 2.0")
-            summary = _mobile_json_dict(run.resumen_json)
-            domains = []
-            try:
-                labels, values = nist_pct_por_funcion(summary, NIST_FUNC_ORDER)
-                domains = [{"code": str(label), "name": str(label), "percent": _mobile_clamp_pct(value)}
-                           for label, value in zip(labels, values)]
-            except Exception:
-                domains = _mobile_domains_from_summary(summary)
-            return _mobile_maturity_item(code, "NIST CSF 2.0", run.pct_general, True, run.id,
-                                         run.estado, run.progreso_pct, run.updated_at, domains)
-
-        if code == "datos":
-            run = (DatosMadurezRun.query.filter(func.upper(DatosMadurezRun.estado) == "FINALIZADO")
-                   .order_by(DatosMadurezRun.id.desc()).first()
-                   or DatosMadurezRun.query.order_by(DatosMadurezRun.id.desc()).first())
-            if not run:
-                return _mobile_maturity_item(code, "Protección de Datos Personales")
-            return _mobile_maturity_item(code, "Protección de Datos Personales", run.pct_general,
-                                         True, run.id, run.estado, run.progreso_pct, run.updated_at,
-                                         _mobile_domains_from_summary(_mobile_json_dict(run.resumen_json)))
-
-        if code == "pci":
-            analysis = PciAnalysisRun.query.order_by(PciAnalysisRun.id.desc()).first()
-            if not analysis:
-                return _mobile_maturity_item(code, "PCI DSS")
-            return _mobile_maturity_item(code, "PCI DSS", analysis.nivel_promedio_general,
-                                         True, analysis.id, "FINALIZADO", 100,
-                                         analysis.fecha_calculo,
-                                         _mobile_domains_from_summary(_mobile_json_dict(analysis.resultados_json)))
-
-        if code == "soc2":
-            run = (Soc2MadurezRun.query.filter(func.upper(Soc2MadurezRun.estado) == "FINALIZADO")
-                   .order_by(Soc2MadurezRun.id.desc()).first()
-                   or Soc2MadurezRun.query.order_by(Soc2MadurezRun.id.desc()).first())
-            if not run:
-                return _mobile_maturity_item(code, "SOC 2")
-            return _mobile_maturity_item(code, "SOC 2", run.pct_general, True, run.id,
-                                         run.estado, run.progreso_pct, run.updated_at,
-                                         _mobile_domains_from_summary(_mobile_json_dict(run.resumen_json)))
-
-        if code == "iso22301":
-            run = (Iso22301MadurezRun.query.filter(func.upper(Iso22301MadurezRun.estado) == "FINALIZADO")
-                   .order_by(Iso22301MadurezRun.id.desc()).first()
-                   or Iso22301MadurezRun.query.order_by(Iso22301MadurezRun.id.desc()).first())
-            if not run:
-                return _mobile_maturity_item(code, "ISO 22301")
-            return _mobile_maturity_item(code, "ISO 22301", run.pct_general, True, run.id,
-                                         run.estado, run.progreso_pct, run.updated_at,
-                                         _mobile_domains_from_summary(_mobile_json_dict(run.resumen_json)))
-
-        if code in {"ai42001", "ai_rmf"}:
-            if not os.path.exists(AI_MADUREZ_DB_PATH):
-                name = "ISO/IEC 42001" if code == "ai42001" else "NIST AI RMF"
-                return _mobile_maturity_item(code, name)
-            conn = get_ai_madurez_conn()
-            try:
-                if code == "ai42001":
-                    row = conn.execute("""
-                        SELECT * FROM ai_madurez_runs
-                        ORDER BY CASE WHEN UPPER(COALESCE(estado,''))='FINALIZADO' THEN 0 ELSE 1 END,
-                                 id DESC LIMIT 1
-                    """).fetchone()
-                    if not row:
-                        return _mobile_maturity_item(code, "ISO/IEC 42001")
-                    return _mobile_maturity_item(
-                        code, "ISO/IEC 42001", row["pct_general"], True, row["id"], row["estado"],
-                        row["progreso_pct"], row["updated_at"],
-                        _mobile_domains_from_summary(_mobile_json_dict(row["resumen_json"]))
-                    )
-                row = conn.execute("""
-                    SELECT * FROM ai_risk_evaluaciones
-                    ORDER BY CASE WHEN UPPER(COALESCE(estado,''))='FINALIZADO' THEN 0 ELSE 1 END,
-                             id DESC LIMIT 1
-                """).fetchone()
-                if not row:
-                    return _mobile_maturity_item(code, "NIST AI RMF")
-                return _mobile_maturity_item(
-                    code, "NIST AI RMF", row["cumplimiento_pct"], True, row["id"], row["estado"],
-                    row["progreso_pct"], row["updated_at"],
-                    _mobile_domains_from_summary(_mobile_json_dict(row["resumen_json"]))
-                )
-            finally:
-                conn.close()
-    except Exception as exc:
-        db.session.rollback()
-        app.logger.warning("Mobile API: no se pudo leer madurez %s: %r", code, exc)
-    names = {
-        "iso27001": "ISO 27001:2022", "nist": "NIST CSF 2.0",
-        "datos": "Protección de Datos Personales", "pci": "PCI DSS",
-        "soc2": "SOC 2", "iso22301": "ISO 22301",
-        "ai42001": "ISO/IEC 42001", "ai_rmf": "NIST AI RMF",
-    }
-    return _mobile_maturity_item(code, names.get(code, code))
-
-
-@mobile_api_bp.after_request
-def _mobile_security_headers(response):
-    response.headers["Cache-Control"] = "no-store"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "no-referrer"
-    return response
-
-
-@mobile_api_bp.errorhandler(Exception)
-def _mobile_unhandled_error(exc):
-    db.session.rollback()
-    app.logger.exception("Error no controlado en GRAC Mobile API")
-    return _mobile_error("INTERNAL_ERROR", "No fue posible procesar la solicitud.", 500)
-
-
-
-@mobile_api_bp.route("/version", methods=["GET"])
-def mobile_version_info():
-    """Información pública mínima para que GRAC Mobile compruebe actualizaciones."""
-    platform = str(request.args.get("platform") or "").strip().lower()
-    if platform not in {"android", "ios"}:
-        return _mobile_error("INVALID_PLATFORM", "La plataforma debe ser android o ios.", 400)
-
-    current_version = str(request.args.get("current_version") or "0.0.0").strip()
-    try:
-        current_build = max(0, int(request.args.get("current_build") or 0))
-    except Exception:
-        current_build = 0
-
-    row = _mobile_release_active(platform)
-    if not row:
-        return _mobile_ok({
-            "available": False,
-            "platform": platform,
-            "current_version": current_version,
-            "current_build": current_build,
-            "update_available": False,
-            "required_update": False,
-        })
-
-    update_available = _mobile_release_is_newer(
-        row["version"], row["build_number"], current_version, current_build
-    )
-    below_minimum = _mobile_release_is_below_min(
-        current_version,
-        current_build,
-        row["min_version"] or row["version"],
-        row["min_build"] or 1,
-    )
-    required_update = bool(update_available and (row["mandatory"] or below_minimum))
-
-    return _mobile_ok({
-        "available": True,
-        "platform": platform,
-        "current_version": current_version,
-        "current_build": current_build,
-        "latest_version": row["version"],
-        "latest_build": int(row["build_number"] or 0),
-        "minimum_version": row["min_version"] or row["version"],
-        "minimum_build": int(row["min_build"] or 1),
-        "mandatory": bool(row["mandatory"]),
-        "update_available": bool(update_available),
-        "required_update": bool(required_update),
-        "release_notes": row["release_notes"] or "",
-        "published_at": row["published_at"],
-        "distribution_url": _mobile_release_external_download_url(row),
-    })
-
-
-@mobile_api_bp.route("/health", methods=["GET"])
-def mobile_health():
-    return _mobile_ok({"service": "Arkyntech GRAC Mobile API", "version": MOBILE_API_VERSION})
-
-
-@mobile_api_bp.route("/auth/login", methods=["POST"])
-def mobile_login():
-    body = request.get_json(silent=True) or {}
-    username = str(body.get("username") or "").strip()
-    password = str(body.get("password") or "")
-    key = _mobile_rate_key(username)
-    if _mobile_rate_limited(key):
-        return _mobile_error("TOO_MANY_ATTEMPTS", "Demasiados intentos. Intenta nuevamente más tarde.", 429)
-    if not username or not password:
-        return _mobile_error("INVALID_CREDENTIALS", "Usuario y contraseña son obligatorios.", 400)
-
-    user = User.query.filter(func.lower(User.username) == username.lower()).first()
-    valid = False
-    try:
-        valid = bool(user and user.check_password(password))
-    except Exception:
-        valid = False
-    if not valid:
-        _mobile_register_failure(key)
-        registrar_log(username or "Desconocido", "Intento fallido de acceso desde GRAC Mobile.")
-        return _mobile_error("INVALID_CREDENTIALS", "Usuario o contraseña incorrectos.", 401)
-    if not user.otp_secret:
-        return _mobile_error(
-            "OTP_SETUP_REQUIRED",
-            "Configura primero el segundo factor iniciando sesión en GRAC Web.",
-            428,
-        )
-
-    _mobile_clear_failures(key)
-    challenge = _mobile_signed({
-        "type": "otp_challenge", "uid": user.id, "nonce": secrets.token_urlsafe(16)
-    })
-    return _mobile_ok({
-        "otp_required": True,
-        "challenge_token": challenge,
-        "challenge_expires_in": MOBILE_OTP_CHALLENGE_SECONDS,
-    })
-
-
-@mobile_api_bp.route("/auth/verify-otp", methods=["POST"])
-def mobile_verify_otp():
-    body = request.get_json(silent=True) or {}
-    challenge = str(body.get("challenge_token") or "")
-    otp = re.sub(r"\D", "", str(body.get("otp") or ""))
-    if not challenge or len(otp) != 6:
-        return _mobile_error("OTP_INVALID", "Ingresa un código OTP válido de seis dígitos.", 400)
-    try:
-        payload = _mobile_unsign(challenge, MOBILE_OTP_CHALLENGE_SECONDS)
-    except _MobileSignatureExpired:
-        return _mobile_error("OTP_CHALLENGE_EXPIRED", "La validación expiró. Inicia sesión nuevamente.", 401)
-    except _MobileBadSignature:
-        return _mobile_error("OTP_CHALLENGE_INVALID", "La validación no es válida.", 401)
-    if payload.get("type") != "otp_challenge":
-        return _mobile_error("OTP_CHALLENGE_INVALID", "La validación no es válida.", 401)
-
-    user = User.query.get(_mobile_int(payload.get("uid")))
-    key = _mobile_rate_key(f"otp:{payload.get('uid')}")
-    if _mobile_rate_limited(key, limit=8, window_seconds=600):
-        return _mobile_error("TOO_MANY_ATTEMPTS", "Demasiados códigos incorrectos.", 429)
-    if not user or not user.otp_secret or not pyotp.TOTP(user.otp_secret).verify(otp, valid_window=1):
-        _mobile_register_failure(key)
-        if user:
-            registrar_log(user.username, "Código OTP inválido desde GRAC Mobile.")
-        return _mobile_error("OTP_INVALID", "El código OTP es incorrecto.", 401)
-
-    _mobile_clear_failures(key)
-    tokens = _mobile_issue_session(user, body.get("device_name"), body.get("platform"))
-    registrar_log(user.username, f"Acceso exitoso desde GRAC Mobile ({body.get('platform') or 'móvil'}).")
-    return _mobile_ok(tokens)
-
-
-@mobile_api_bp.route("/auth/refresh", methods=["POST"])
-def mobile_refresh():
-    body = request.get_json(silent=True) or {}
-    refresh_token = str(body.get("refresh_token") or "")
-    try:
-        payload = _mobile_unsign(refresh_token, MOBILE_REFRESH_SECONDS)
-    except _MobileSignatureExpired:
-        return _mobile_error("REFRESH_EXPIRED", "Debes iniciar sesión nuevamente.", 401)
-    except _MobileBadSignature:
-        return _mobile_error("REFRESH_INVALID", "El token de actualización no es válido.", 401)
-    if payload.get("type") != "refresh":
-        return _mobile_error("REFRESH_INVALID", "El token de actualización no es válido.", 401)
-
-    row = MobileApiSession.query.get(_mobile_int(payload.get("sid")))
-    user = User.query.get(_mobile_int(payload.get("uid")))
-    if (
-        not row or not user or row.user_id != user.id or row.revoked_at is not None
-        or row.expires_at <= _mobile_now()
-        or not secrets.compare_digest(row.refresh_token_hash, _mobile_token_hash(refresh_token))
-    ):
-        return _mobile_error("REFRESH_REVOKED", "La sesión no está activa.", 401)
-    row.last_used_at = _mobile_now()
-    db.session.commit()
-    return _mobile_ok(_mobile_tokens_for_session(user, row))
-
-
-@mobile_api_bp.route("/auth/logout", methods=["POST"])
-@mobile_auth_required
-def mobile_logout():
-    row = _mobile_g.mobile_session
-    row.revoked_at = _mobile_now()
-    db.session.commit()
-    registrar_log(_mobile_g.mobile_user.username, "Cierre de sesión desde GRAC Mobile.")
-    return _mobile_ok({"logged_out": True})
-
-
-@mobile_api_bp.route("/me", methods=["GET"])
-@mobile_auth_required
-def mobile_me():
-    user = _mobile_g.mobile_user
-    permissions = {key: _mobile_can(key) for key in _MOBILE_PERMISSION_ALIASES}
-    return _mobile_ok({"user": _mobile_user_payload(user), "permissions": permissions})
-
-
-@mobile_api_bp.route("/dashboard", methods=["GET"])
-@mobile_auth_required
-def mobile_dashboard():
-    user_id = _mobile_g.mobile_user.id
-    maturity = []
-    for code in ("iso27001", "nist", "datos", "pci", "soc2", "iso22301", "ai42001", "ai_rmf"):
-        if _mobile_can(code):
-            item = _mobile_latest_maturity(code)
-            item.pop("domains", None)
-            maturity.append(item)
-
-    metrics = {}
-    metric_permissions = {
-        "risks_active_count": "risks",
-        "risks_outside_appetite_count": "risks",
-        "incidents_open_count": "incidents",
-        "incidents_compliance_pct": "incidents",
-        "vulnerabilities_open_count": "vulnerabilities",
-        "vulnerabilities_critical_count": "vulnerabilities",
-        "plans_open_count": "actions",
-        "plans_overdue_count": "actions",
-        "legal_noncompliant_count": "legal",
-        "providers_high_count": "providers",
-        "security_culture_pct": "culture",
-    }
-    for key, module_key in metric_permissions.items():
-        if _mobile_can(module_key):
-            metrics[key] = _mobile_float(_dashboard_metric_value(key, user_id))
-
-    risks = _dashboard_active_risks() if _mobile_can("risks") else []
-    risk_distribution = {"Bajo": 0, "Medio": 0, "Alto": 0, "Muy Alto": 0, "Extremo": 0}
-    for risk in risks:
-        rank = _dashboard_risk_rank(getattr(risk, "riesgo_residual", ""))
-        label = {1: "Bajo", 2: "Medio", 3: "Alto", 4: "Muy Alto", 5: "Extremo"}.get(rank)
-        if label:
-            risk_distribution[label] += 1
-
-    return _mobile_ok({
-        "generated_at": _mobile_iso(_mobile_now()),
-        "metrics": metrics,
-        "risk_distribution": risk_distribution,
-        "maturity": maturity,
-    })
-
-
-@mobile_api_bp.route("/soa", methods=["GET"])
-@mobile_module_required("soa")
-def mobile_soa():
-    page, limit, offset = _mobile_page_args()
-    query = Control.query
-    search = str(request.args.get("search") or "").strip()
-    applicable = str(request.args.get("applicable") or "").strip()
-    implemented = str(request.args.get("implemented") or "").strip()
-    if search:
-        like = f"%{search}%"
-        query = query.filter(or_(Control.nr.ilike(like), Control.topic.ilike(like), Control.control_text.ilike(like)))
-    if applicable:
-        query = query.filter(func.lower(Control.applicable) == applicable.lower())
-    if implemented:
-        query = query.filter(func.lower(Control.implemented) == implemented.lower())
-    total = query.count()
-    rows = query.order_by(Control.nr.asc()).offset(offset).limit(limit).all()
-    all_controls = Control.query.all()
-    applicable_count = sum(1 for x in all_controls if str(x.applicable or "").strip().lower() in {"sí", "si", "yes"})
-    implemented_count = sum(1 for x in all_controls if str(x.implemented or "").strip().lower() in {"sí", "si", "yes"})
-    return _mobile_ok({
-        "summary": {
-            "total": len(all_controls), "applicable": applicable_count,
-            "implemented": implemented_count,
-            "implementation_percent": round((implemented_count / applicable_count) * 100, 2) if applicable_count else 0.0,
-        },
-        "items": [{
-            "id": x.id, "code": x.nr, "chapter": x.chapter, "topic": x.topic,
-            "control": x.control_text, "applicable": x.applicable,
-            "justification": x.justification, "implemented": x.implemented,
-            "evidence_count": len([v for v in str(x.motivation or "").split(",") if v.strip()]),
-        } for x in rows],
-    }, meta={"page": page, "limit": limit, "total": total, "pages": math.ceil(total / limit) if total else 0})
-
-
-def _mobile_risk_payload(row, detail=False):
-    data = {
-        "id": row.id, "code": row.codigo_riesgo, "risk": row.riesgo,
-        "identified_at": row.fecha_identificacion, "owner": row.propietario_riesgo,
-        "asset_type": row.tipo_activo, "asset": row.nombre_activo,
-        "inherent_level": row.riesgo_inherente, "residual_level": row.riesgo_residual,
-        "treatment": row.tratamiento_riesgo, "responsible": row.responsable,
-        "implementation_date": row.fecha_implementacion, "archived": bool(row.archivado),
-        "risk_type": (
-            getattr(getattr(row, "tipo_riesgo_rel", None), "nombre", None)
-            or getattr(row, "tipo_riesgo", None)
-        ),
-    }
-    if detail:
-        data.update({
-            "threat_code": row.codigo_amenaza, "threat": row.amenaza,
-            "vulnerability_code": row.codigo_vulnerabilidad, "vulnerability": row.vulnerabilidad,
-            "security_dimension": row.dimension_seguridad, "probability": row.probabilidad,
-            "impact": row.impacto, "residual_probability": row.prob_res,
-            "residual_impact": row.impacto_res, "observations": row.observaciones,
-            "action_plans": row.planes_accion, "review_date": row.fecha_revision,
-            "controls": [{
-                "id": c.id, "standard": c.estandar, "code": c.codigo_control,
-                "name": c.nombre_control, "description": c.descripcion_control,
-                "status": c.estado_control, "strength": c.solidez_individual,
-            } for c in (row.controles_detalle or [])],
-        })
-    return data
-
-
-@mobile_api_bp.route("/risks", methods=["GET"])
-@mobile_module_required("risks")
-def mobile_risks():
-    page, limit, offset = _mobile_page_args()
-    query = Riesgo.query
-    if str(request.args.get("include_archived") or "").lower() not in {"1", "true", "yes"}:
-        query = query.filter(or_(Riesgo.archivado.is_(False), Riesgo.archivado.is_(None)))
-    search = str(request.args.get("search") or "").strip()
-    if search:
-        like = f"%{search}%"
-        query = query.filter(or_(Riesgo.codigo_riesgo.ilike(like), Riesgo.riesgo.ilike(like), Riesgo.nombre_activo.ilike(like)))
-    level = str(request.args.get("level") or "").strip()
-    if level:
-        query = query.filter(func.lower(Riesgo.riesgo_residual).like(f"%{level.lower()}%"))
-    total = query.count()
-    rows = query.order_by(Riesgo.id.desc()).offset(offset).limit(limit).all()
-    return _mobile_ok({"items": [_mobile_risk_payload(x) for x in rows]},
-                      meta={"page": page, "limit": limit, "total": total, "pages": math.ceil(total / limit) if total else 0})
-
-
-@mobile_api_bp.route("/risks/<int:risk_id>", methods=["GET"])
-@mobile_module_required("risks")
-def mobile_risk_detail(risk_id):
-    row = Riesgo.query.get(risk_id)
-    if not row:
-        return _mobile_error("NOT_FOUND", "Riesgo no encontrado.", 404)
-    return _mobile_ok(_mobile_risk_payload(row, detail=True))
-
-
-@mobile_api_bp.route("/dofa", methods=["GET"])
-@mobile_module_required("dofa")
-def mobile_dofa():
-    page, limit, offset = _mobile_page_args(default_limit=20, max_limit=100)
-    query = DofaAnalisis.query
-    total = query.count()
-    rows = query.order_by(DofaAnalisis.fecha.desc(), DofaAnalisis.id.desc()).offset(offset).limit(limit).all()
-    return _mobile_ok({"items": [{
-        "id": x.id, "title": x.titulo, "date": _mobile_iso(x.fecha),
-        "strengths": x.fortalezas, "weaknesses": x.debilidades,
-        "opportunities": x.oportunidades, "threats": x.amenazas,
-        "strategies_fo": x.estrategias_fo, "strategies_fa": x.estrategias_fa,
-        "strategies_do": x.estrategias_do, "strategies_da": x.estrategias_da,
-        "created_by": x.creado_por, "created_at": _mobile_iso(x.creado_en),
-    } for x in rows]}, meta={"page": page, "limit": limit, "total": total})
-
-
-@mobile_api_bp.route("/metrics", methods=["GET"])
-@mobile_module_required("metrics")
-def mobile_metrics():
-    user_id = _mobile_g.mobile_user.id
-    definitions = [
-        ("risks_active_count", "Riesgos activos", "cantidad", "risks"),
-        ("risks_outside_appetite_count", "Riesgos fuera del apetito", "cantidad", "risks"),
-        ("incidents_open_count", "Incidentes abiertos", "cantidad", "incidents"),
-        ("incidents_compliance_pct", "Cumplimiento de incidentes", "%", "incidents"),
-        ("vulnerabilities_open_count", "Vulnerabilidades abiertas", "cantidad", "vulnerabilities"),
-        ("vulnerabilities_critical_count", "Vulnerabilidades críticas", "cantidad", "vulnerabilities"),
-        ("plans_open_count", "Planes de acción abiertos", "cantidad", "actions"),
-        ("plans_overdue_count", "Planes de acción vencidos", "cantidad", "actions"),
-        ("legal_noncompliant_count", "Requisitos legales incumplidos", "cantidad", "legal"),
-        ("providers_high_count", "Proveedores de criticidad alta", "cantidad", "providers"),
-        ("security_culture_pct", "Cultura de seguridad", "%", "culture"),
-    ]
-    items = [{"code": code, "name": name, "unit": unit,
-              "value": _mobile_float(_dashboard_metric_value(code, user_id))}
-             for code, name, unit, module_key in definitions if _mobile_can(module_key)]
-    return _mobile_ok({"generated_at": _mobile_iso(_mobile_now()), "items": items})
-
-
-@mobile_api_bp.route("/maturity", methods=["GET"])
-@mobile_auth_required
-def mobile_maturity():
-    items = []
-    for code in ("iso27001", "nist", "datos", "pci", "soc2", "iso22301", "ai42001", "ai_rmf"):
-        if _mobile_can(code):
-            item = _mobile_latest_maturity(code)
-            item.pop("domains", None)
-            items.append(item)
-    return _mobile_ok({"items": items})
-
-
-@mobile_api_bp.route("/maturity/<string:standard_code>", methods=["GET"])
-@mobile_auth_required
-def mobile_maturity_detail(standard_code):
-    standard_code = str(standard_code or "").strip().lower()
-    allowed_standards = {"iso27001", "nist", "datos", "pci", "soc2", "iso22301", "ai42001", "ai_rmf"}
-    if standard_code not in allowed_standards:
-        return _mobile_error("NOT_FOUND", "Estándar no encontrado.", 404)
-    if not _mobile_can(standard_code):
-        return _mobile_error("FORBIDDEN", "No tienes permiso para consultar este estándar.", 403)
-    return _mobile_ok(_mobile_latest_maturity(standard_code))
-
-
-@mobile_api_bp.route("/action-plans", methods=["GET"])
-@mobile_module_required("actions")
-def mobile_action_plans():
-    # Debe reflejar EXACTAMENTE el mismo módulo que /planes_accion.
-    # Se amplía el límite porque la app móvil necesita todos los registros para
-    # calcular/filtar los estados sin quedarse solamente con los últimos 200.
-    page, limit, offset = _mobile_page_args(default_limit=1000, max_limit=10000)
-    status_filter = str(request.args.get("status") or "").strip()
-    today = date.today()
-
-    rows_all = (
-        ContinuousActionPlan.query
-        .order_by(ContinuousActionPlan.id.desc())
-        .limit(10000)
-        .all()
-    )
-
-    if status_filter:
-        wanted = status_filter.casefold()
-        rows_all = [
-            plan for plan in rows_all
-            if pa_effective_status(plan, today).casefold() == wanted
-        ]
-
-    total = len(rows_all)
-    rows = rows_all[offset: offset + limit]
-    items = []
-
-    for x in rows:
-        effective_status = pa_effective_status(x, today)
-        description = (x.description or "").strip()
-        title = (x.title or "Plan de acción").strip()
-        items.append({
-            "id": x.id,
-            "date": _mobile_iso(x.created_at),
-            "title": title,
-            "finding": description or title,
-            "description": description or title,
-            "cause": None,
-            "action_type": x.action_type or "Plan de acción",
-            "action": description or title,
-            "term": None,
-            "due_date": x.due_date,
-            "responsible": x.responsible,
-            "status": x.status or "Abierto",
-            "effective_status": effective_status,
-            "overdue": effective_status == "Vencido",
-            "origin": x.origin,
-            "standard": x.standard,
-            "control_code": x.control_code,
-            "asset": x.asset,
-            "severity": x.severity,
-            "source_ref": x.source_ref,
-            "closed_at": None,
-            "effective": None,
-            "evidence_count": 0,
-        })
-
-    # Resumen calculado sobre la MISMA colección completa para facilitar la
-    # validación de congruencia desde el cliente móvil.
-    all_for_summary = (
-        ContinuousActionPlan.query
-        .order_by(ContinuousActionPlan.id.desc())
-        .limit(10000)
-        .all()
-    )
-    summary = {}
-    for plan in all_for_summary:
-        eff = pa_effective_status(plan, today)
-        summary[eff] = int(summary.get(eff, 0)) + 1
-
-    return _mobile_ok(
-        {"items": items, "status_counts": summary, "total": total},
-        meta={"page": page, "limit": limit, "total": total},
-    )
-
-
-@mobile_api_bp.route("/alerts", methods=["GET"])
-@mobile_auth_required
-def mobile_alerts():
-    alerts = []
-    if _mobile_can("risks"):
-        for row in _dashboard_active_risks():
-            rank = _dashboard_risk_rank(row.riesgo_residual)
-            if rank >= 3:
-                alerts.append({
-                    "type": "risk", "severity": "critical" if rank >= 5 else "high",
-                    "title": f"Riesgo {row.codigo_riesgo or row.id}",
-                    "message": row.riesgo or "Riesgo residual alto",
-                    "reference_id": row.id, "date": row.fecha_revision or row.fecha_identificacion,
-                })
-    if _mobile_can("actions"):
-        today = date.today()
-        for row in ContinuousActionPlan.query.order_by(ContinuousActionPlan.id.desc()).limit(10000).all():
-            if pa_effective_status(row, today) == "Vencido":
-                alerts.append({
-                    "type": "action_plan",
-                    "category_label": "Planes de acción",
-                    "severity": "high",
-                    "title": "Plan de acción vencido",
-                    "message": row.title or row.description or "Acción pendiente",
-                    "reference_id": row.id,
-                    "date": row.due_date,
-                })
-    alerts.sort(key=lambda x: (0 if x["severity"] == "critical" else 1, str(x.get("date") or "")))
-    return _mobile_ok({"items": alerts[:100], "total": len(alerts)})
-
 
 with app.app_context():
     db.create_all()
@@ -205239,7 +203568,6 @@ app.register_blueprint(pci_madurez_bp)
 app.register_blueprint(soc2_madurez_bp)
 app.register_blueprint(iso22301_madurez_bp)
 app.register_blueprint(ai_madurez_bp)
-app.register_blueprint(mobile_api_bp)
 asegurar_columnas_aprobacion_seguridad_rfc()
 
 if __name__ == "__main__":
