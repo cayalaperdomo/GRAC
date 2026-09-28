@@ -204727,15 +204727,6 @@ def _mobile_security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
-    # Flutter Web realiza una solicitud OPTIONS antes de enviar JSON o el
-    # encabezado Authorization. La API usa tokens Bearer y no cookies, por lo
-    # que se permite el origen del cliente sin habilitar credenciales.
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = (
-        "Authorization, Content-Type, Accept"
-    )
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    response.headers["Access-Control-Max-Age"] = "600"
     return response
 
 

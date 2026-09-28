@@ -1,0 +1,8 @@
+{
+  "base_url": "http://localhost:11434",
+  "default_model": "",
+  "temperature": 0.2,
+  "timeout": 240,
+  "summary_max_tokens": 1100,
+  "findings_max_tokens": 4000
+}
