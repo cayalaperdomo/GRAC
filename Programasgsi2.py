@@ -14153,13 +14153,6 @@ MENU_SECTIONS = [
                     },
                     {"label": "Métricas BCP", "href": "/bcp/metricas", "icon": "bi-bar-chart", "btn": "btn-success", "module": "Continuidad del Negocio (BCP/DRP)"},
                     {
-                        "label": "Métricas Planes de Mejora",
-                        "href": "/metricas/mejora",
-                        "icon": "bi-tools",
-                        "btn": "btn-info text-white",
-                        "module": "Métricas"
-                    },
-                    {
                         "label": "Configuración de Parámetros",
                         "href": "#",
                         "icon": "bi-gear",
@@ -125846,7 +125839,6 @@ REPORT_CATALOG = [
     {"key": "metricas_riesgos",    "label": "Métricas de Riesgos",                           "icon": "bi-graph-up"},
     {"key": "metricas_vuln",       "label": "Métricas de Vulnerabilidades",                  "icon": "bi-bar-chart"},
     {"key": "metricas_cultura",    "label": "Métricas de Cultura de Seguridad",              "icon": "bi-people"},
-    {"key": "metricas_mejora",     "label": "Métricas Planes de Mejora",                     "icon": "bi-clipboard-check"},
     {"key": "dofa",                "label": "DOFA",                                          "icon": "bi-grid-3x3-gap"},
 
     {"key": "matriz_riesgos",      "label": "Matriz de Riesgos",                             "icon": "bi-shield-exclamation"},
