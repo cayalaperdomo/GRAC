@@ -75,6 +75,9 @@ from datetime import datetime
 from reportlab.lib.enums import TA_CENTER
 from flask import send_file
 import ssl
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.x509.oid import NameOID
 from flask_login import LoginManager
 from flask_login import current_user
 from sqlalchemy import inspect
@@ -2945,6 +2948,89 @@ class EmailConfig(db.Model):
     smtp_from = db.Column(db.String(255), nullable=True)
     app_name  = db.Column(db.String(120), nullable=False, default="SGSI")
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ============================================================================
+# CENTRO DE ALERTAS ARKYNTECH GRAC
+# ============================================================================
+
+class AlertConfig(db.Model):
+    """Configuración global del Centro de Alertas.
+
+    La conexión y las credenciales SMTP NO se duplican aquí: siempre se leen
+    desde EmailConfig, administrado en Parámetros Generales.
+    """
+    __tablename__ = "alert_config"
+
+    id = db.Column(db.Integer, primary_key=True)
+    recipients = db.Column(db.Text, nullable=True, default="")
+    email_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    in_app_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    subject_prefix = db.Column(db.String(120), nullable=False, default="[Arkyntech GRAC]")
+    evaluation_minutes = db.Column(db.Integer, nullable=False, default=15)
+    base_url = db.Column(db.String(500), nullable=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AlertRule(db.Model):
+    __tablename__ = "alert_rules"
+
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(100), nullable=False, unique=True, index=True)
+    name = db.Column(db.String(255), nullable=False)
+    module = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    metric_key = db.Column(db.String(120), nullable=False)
+    operator = db.Column(db.String(5), nullable=False, default=">")
+    threshold = db.Column(db.Float, nullable=False, default=0)
+    severity = db.Column(db.String(20), nullable=False, default="alta")
+    enabled = db.Column(db.Boolean, nullable=False, default=True)
+    email_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    repeat_minutes = db.Column(db.Integer, nullable=False, default=1440)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AlertEvent(db.Model):
+    __tablename__ = "alert_events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    rule_id = db.Column(db.Integer, db.ForeignKey("alert_rules.id"), nullable=False, index=True)
+    fingerprint = db.Column(db.String(180), nullable=False, unique=True, index=True)
+    title = db.Column(db.String(255), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    module = db.Column(db.String(120), nullable=False)
+    severity = db.Column(db.String(20), nullable=False, default="alta")
+    status = db.Column(db.String(30), nullable=False, default="nueva", index=True)
+    value = db.Column(db.Float, nullable=True)
+    threshold = db.Column(db.Float, nullable=True)
+    reference_url = db.Column(db.String(500), nullable=True)
+    occurrence_count = db.Column(db.Integer, nullable=False, default=1)
+    first_seen_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    last_seen_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    acknowledged_at = db.Column(db.DateTime, nullable=True)
+    acknowledged_by = db.Column(db.String(160), nullable=True)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+    resolved_by = db.Column(db.String(160), nullable=True)
+    last_email_at = db.Column(db.DateTime, nullable=True)
+    last_email_status = db.Column(db.String(30), nullable=True)
+    last_email_error = db.Column(db.Text, nullable=True)
+
+    rule = db.relationship("AlertRule", lazy="joined")
+
+
+class AlertDelivery(db.Model):
+    __tablename__ = "alert_deliveries"
+
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey("alert_events.id"), nullable=False, index=True)
+    recipients = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(30), nullable=False, default="pendiente")
+    error = db.Column(db.Text, nullable=True)
+    sent_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    event = db.relationship("AlertEvent", lazy="joined")
 
 # ==========================
 # DB MODELS
@@ -14061,6 +14147,7 @@ MENU_SECTIONS = [
         "title": "Gestión de Eventos",
         "icon": "bi-exclamation-triangle",
         "items": [
+            {"label": "Centro de Alertas", "href": "/alertas", "icon": "bi-bell-fill", "btn": "btn-warning text-dark"},
             {"label": "Registro de Incidentes", "href": "/incidentes", "icon": "bi-exclamation-triangle", "btn": "btn-danger", "module": "Registro de Incidentes"},
             {"label": "Registro de Vulnerabilidades", "href": "/vulnerabilidades_menu", "icon": "bi-bug", "btn": "btn-danger", "module": "Registro de Vulnerabilidades"},
             {"label": "Modelamiento de Amenazas", "href": "/modelamiento_amenazas", "icon": "bi-diagram-3", "btn": "btn-dark", "module": "Modelamiento de Amenazas"},
@@ -14345,6 +14432,7 @@ MENU_SECTIONS = [
             {"label": "Configuración AI", "desc": "Configurar llave cifrada para IA (solo admin).", "href": "/admin/openrouter_key", "icon": "bi-key-fill", "btn": "btn-warning text-dark", "admin_only": True},
             {"label": "Gestión de Usuarios", "href": "/usuarios", "icon": "bi-people", "btn": "btn-success", "module": "Gestión de Usuarios"},
             {"label": "Aplicación móvil", "desc": "Descarga GRAC Mobile para Android o accede a TestFlight en iOS.", "href": "/admin/mobile-app", "icon": "bi-phone", "btn": "btn-primary", "module": "Aplicación móvil"},
+            {"label": "Administración de Alertas", "desc": "Configurar destinatarios, reglas, severidad y frecuencia.", "href": "/admin/alertas", "icon": "bi-bell-fill", "btn": "btn-warning text-dark", "admin_only": True},
             {"label": "Constructor del Centro de Control", "href": "/admin/dashboard_config", "icon": "bi-sliders", "btn": "btn-primary"},
             {"label": "Logs de Auditoría", "href": "/admin/logs_auditoria", "icon": "bi-journal-text", "btn": "btn-dark", "admin_only": True},
             {"label": "Chat con Asistente", "href": "/chatgpt_view", "icon": "bi-chat-dots", "btn": "btn-info text-white", "module": "Chat con Asistente"},
@@ -15026,6 +15114,16 @@ def _sgsi_build_global_menu_html():
             "Aplicación móvil": {
                 "paths": ["/admin/mobile-app"],
                 "endpoints": ["admin_mobile_app", "admin_mobile_app_download"]
+            },
+            "Centro de Alertas": {
+                "paths": ["/alertas"],
+                "endpoints": ["alert_center"],
+                "exact": True
+            },
+            "Administración de Alertas": {
+                "paths": ["/admin/alertas"],
+                "endpoints": ["admin_alertas"],
+                "exact": True
             },
             "Constructor del Centro de Control": {
                 "paths": ["/admin/dashboard_config"],
@@ -18677,6 +18775,895 @@ def config_email():
     </style>
     """, cfg=cfg)
 
+    return render_template_string(BASE, content=Markup(inner))
+
+
+# ============================================================================
+# CENTRO DE ALERTAS - CONFIGURACIÓN, EVALUACIÓN Y CORREO
+# ============================================================================
+
+ALERT_DEFAULT_RULES = [
+    {
+        "code": "risks_outside_appetite", "name": "Riesgos fuera del apetito",
+        "module": "Riesgos", "metric_key": "risks_outside_appetite_inclusive",
+        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
+        "description": "Riesgos activos cuyo nivel residual es mayor o igual al apetito configurado.",
+        "url": "/riesgos",
+    },
+    {
+        "code": "vulnerabilities_critical", "name": "Vulnerabilidades críticas abiertas",
+        "module": "Vulnerabilidades", "metric_key": "vulnerabilities_critical_count",
+        "operator": ">", "threshold": 0, "severity": "crítica", "enabled": True,
+        "description": "Vulnerabilidades críticas que permanecen abiertas.",
+        "url": "/vulnerabilidades_menu",
+    },
+    {
+        "code": "vulnerabilities_overdue", "name": "Vulnerabilidades abiertas vencidas (fuera de SLA)",
+        "module": "Vulnerabilidades", "metric_key": "vulnerabilities_overdue_count",
+        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
+        "description": "Backlog de vulnerabilidades abiertas que superó el SLA configurado por clasificación.",
+        "url": "/vulnerabilidades_menu",
+    },
+    {
+        "code": "incidents_open", "name": "Incidentes abiertos",
+        "module": "Incidentes", "metric_key": "incidents_open_count",
+        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
+        "description": "Incidentes cuyo estado todavía no está cerrado o resuelto.",
+        "url": "/incidentes",
+    },
+    {
+        "code": "incidents_compliance", "name": "Cumplimiento de incidentes inferior a la meta",
+        "module": "Incidentes", "metric_key": "incidents_compliance_pct",
+        "operator": "<", "threshold": 90, "severity": "media", "enabled": False,
+        "description": "Cumplimiento promedio MTCD/MTIR inferior al porcentaje definido en esta regla.",
+        "url": "/metricas/incidentes/matriz",
+    },
+    {
+        "code": "plans_overdue", "name": "Planes de acción vencidos",
+        "module": "Planes de acción", "metric_key": "plans_overdue_count",
+        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
+        "description": "Planes cuya fecha objetivo venció y todavía no están cerrados.",
+        "url": "/planes_accion",
+    },
+    {
+        "code": "legal_noncompliant", "name": "Requisitos legales incumplidos",
+        "module": "Requisitos legales", "metric_key": "legal_noncompliant_count",
+        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
+        "description": "Requisitos legales o contractuales registrados como no cumplidos.",
+        "url": "/requisitos_menu",
+    },
+    {
+        "code": "providers_high", "name": "Proveedores de criticidad alta",
+        "module": "Proveedores", "metric_key": "providers_high_count",
+        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
+        "description": "Proveedores cuya evaluación presenta criticidad alta.",
+        "url": "/proveedores_menu",
+    },
+    {
+        "code": "documents_overdue", "name": "Documentos con revisión vencida",
+        "module": "Documentación", "metric_key": "documents_overdue_count",
+        "operator": ">", "threshold": 0, "severity": "media", "enabled": True,
+        "description": "Documentos vigentes que el Listado Maestro clasifica con estado de revisión Vencido.",
+        "url": "/docs/matriz?estado_revision=Vencido",
+    },
+    {
+        "code": "documents_due_soon", "name": "Documentos próximos a vencer",
+        "module": "Documentación", "metric_key": "documents_due_soon_count",
+        "operator": ">", "threshold": 0, "severity": "media", "enabled": True,
+        "description": "Documentos vigentes que el Listado Maestro clasifica como Cercano según la periodicidad configurada para su tipo.",
+        "url": "/docs/matriz?estado_revision=Cercano",
+    },
+    {
+        "code": "wazuh_high", "name": "Alertas Wazuh altas o críticas",
+        "module": "Cumplimiento continuo", "metric_key": "wazuh_high_count",
+        "operator": ">", "threshold": 0, "severity": "crítica", "enabled": True,
+        "description": "Alertas Wazuh con nivel de regla igual o superior a 10.",
+        "url": "/cumplimiento_continuo/wazuh",
+    },
+    {
+        "code": "firewall_critical", "name": "Hallazgos críticos de firewall",
+        "module": "Gobierno de Firewall", "metric_key": "firewall_critical_count",
+        "operator": ">", "threshold": 0, "severity": "crítica", "enabled": True,
+        "description": "Hallazgos críticos activos y todavía no resueltos en Gobierno de Firewall.",
+        "url": "/cumplimiento_continuo/firewall",
+    },
+    {
+        "code": "bcp_backups_failed", "name": "Backups fallidos",
+        "module": "Continuidad", "metric_key": "bcp_backups_failed_count",
+        "operator": ">", "threshold": 0, "severity": "crítica", "enabled": True,
+        "description": "Respaldos fallidos registrados en el módulo BCP/DRP.",
+        "url": "/bcp/metricas",
+    },
+    {
+        "code": "bcp_systems_without_drp", "name": "Sistemas críticos sin DRP",
+        "module": "Continuidad", "metric_key": "bcp_systems_without_drp_count",
+        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
+        "description": "Sistemas o procesos críticos sin cobertura de recuperación documentada.",
+        "url": "/bcp/metricas",
+    },
+    {
+        "code": "iso27001_below_target", "name": "Madurez ISO 27001 inferior a la meta",
+        "module": "Madurez", "metric_key": "maturity_iso_pct",
+        "operator": "<", "threshold": 60, "severity": "media", "enabled": False,
+        "description": "Porcentaje de madurez ISO 27001 inferior a la meta definida en la regla.",
+        "url": "/madurez",
+    },
+]
+
+ALERT_RULE_URLS = {item["code"]: item.get("url", "") for item in ALERT_DEFAULT_RULES}
+ALERT_OPERATORS = {">", ">=", "=", "<", "<="}
+ALERT_SEVERITIES = {"informativa", "baja", "media", "alta", "crítica"}
+
+
+def alert_get_config():
+    cfg = AlertConfig.query.first()
+    if not cfg:
+        cfg = AlertConfig()
+        db.session.add(cfg)
+        db.session.commit()
+    return cfg
+
+
+def alert_seed_defaults():
+    """Crea solo las reglas faltantes y conserva toda personalización existente."""
+    existing = {row.code for row in AlertRule.query.all()}
+    created = 0
+    for item in ALERT_DEFAULT_RULES:
+        if item["code"] in existing:
+            continue
+        db.session.add(AlertRule(
+            code=item["code"], name=item["name"], module=item["module"],
+            description=item["description"], metric_key=item["metric_key"],
+            operator=item["operator"], threshold=float(item["threshold"]),
+            severity=item["severity"], enabled=bool(item["enabled"]),
+            email_enabled=True, repeat_minutes=1440,
+        ))
+        created += 1
+    if created:
+        db.session.commit()
+    alert_get_config()
+    return created
+
+
+def alert_parse_recipients(raw):
+    values = re.split(r"[;,\n\r]+", str(raw or ""))
+    valid, invalid = [], []
+    pattern = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+    for value in values:
+        email = value.strip().lower()
+        if not email:
+            continue
+        if pattern.match(email):
+            if email not in valid:
+                valid.append(email)
+        else:
+            invalid.append(email)
+    return valid, invalid
+
+
+def alert_compare(value, operator, threshold):
+    value = float(value or 0)
+    threshold = float(threshold or 0)
+    return {
+        ">": value > threshold,
+        ">=": value >= threshold,
+        "=": value == threshold,
+        "<": value < threshold,
+        "<=": value <= threshold,
+    }.get(operator, False)
+
+
+def alert_plain(value):
+    text_value = unicodedata.normalize("NFKD", str(value or "").strip().lower())
+    return "".join(ch for ch in text_value if not unicodedata.combining(ch))
+
+
+def alert_vulnerabilities_overdue_count():
+    config = MetricasVulnerabilidadesConfig.query.first()
+    if not config:
+        return 0.0
+    sla_by_level = {}
+    for row in (config.clasificaciones or []):
+        days = getattr(row, "tiempo_max_cierre_dias", None)
+        if days is not None and int(days) >= 0:
+            sla_by_level[alert_plain(row.clasificacion)] = int(days)
+    if not sla_by_level:
+        return 0.0
+    today = date.today()
+    total = 0
+    for item in VulnerabilidadRegistro.query.all():
+        status = alert_plain(getattr(item, "estado", ""))
+        if status in {"cerrado", "cerrada", "closed", "resuelto", "resuelta"}:
+            continue
+        identified = getattr(item, "fecha_identificacion", None)
+        if isinstance(identified, datetime):
+            identified = identified.date()
+        if not identified:
+            continue
+        level = alert_plain(getattr(item, "clasificacion", ""))
+        sla_days = sla_by_level.get(level)
+        if sla_days is None:
+            for configured_level, configured_days in sla_by_level.items():
+                if configured_level in level or level in configured_level:
+                    sla_days = configured_days
+                    break
+        if sla_days is not None and identified + datetime_module.timedelta(days=sla_days) < today:
+            total += 1
+    return float(total)
+
+
+def alert_documents_by_review_status(status_text):
+    """Devuelve los documentos con el mismo estado mostrado en el Listado Maestro."""
+    expected = alert_plain(status_text)
+    matches = []
+    for document in DocMaestroDocumento.query.all():
+        # Una versión obsoleta no debe generar alertas de revisión o vigencia.
+        if "obsolet" in alert_plain(getattr(document, "estado", "")):
+            continue
+        try:
+            review_status = calcular_estado_revision(document, getattr(document, "tipo", None)) or {}
+            current = alert_plain(review_status.get("texto", ""))
+        except Exception:
+            current = ""
+        if current == expected:
+            matches.append(document)
+    return matches
+
+
+def alert_documents_overdue_count():
+    return float(len(alert_documents_by_review_status("Vencido")))
+
+
+def alert_documents_due_soon_count():
+    return float(len(alert_documents_by_review_status("Cercano")))
+
+
+def alert_documents_message(metric_key, value):
+    """Construye un mensaje identificable para la alerta en pantalla y por correo."""
+    if metric_key == "documents_overdue_count":
+        status_text = "Vencido"
+        summary_text = "con revisión vencida"
+    elif metric_key == "documents_due_soon_count":
+        status_text = "Cercano"
+        summary_text = "próximos a vencer"
+    else:
+        return None
+
+    documents = alert_documents_by_review_status(status_text)
+    labels = []
+    for document in documents[:10]:
+        code = (getattr(document, "codigo", "") or "").strip()
+        name = (getattr(document, "nombre_documento", "") or "Documento sin nombre").strip()
+        labels.append(f"{code} - {name}" if code else name)
+    detail = "; ".join(labels)
+    if len(documents) > 10:
+        detail += f"; y {len(documents) - 10} documento(s) adicional(es)"
+    base = f"Se detectaron {alert_format_number(value)} documento(s) {summary_text} en el Listado Maestro."
+    return f"{base} Documentos: {detail}." if detail else base
+
+
+def alert_metric_value(metric_key):
+    """Obtiene datos de los módulos reales; no utiliza cifras escritas en la regla."""
+    metric_key = str(metric_key or "").strip()
+    if metric_key == "risks_outside_appetite_inclusive":
+        risks = _dashboard_active_risks()
+        try:
+            cfg = MetricConfigRiesgos.query.first()
+            appetite = _dashboard_risk_rank(
+                getattr(cfg, "apetito_residual_definido", "") if cfg else ""
+            ) or 2
+        except Exception:
+            appetite = 2
+        # Regla corporativa: residual MAYOR O IGUAL al apetito.
+        return float(sum(
+            1 for risk in risks
+            if _dashboard_risk_rank(getattr(risk, "riesgo_residual", "")) >= appetite
+        ))
+    if metric_key == "vulnerabilities_overdue_count":
+        return alert_vulnerabilities_overdue_count()
+    if metric_key == "documents_overdue_count":
+        return alert_documents_overdue_count()
+    if metric_key == "documents_due_soon_count":
+        return alert_documents_due_soon_count()
+    if metric_key == "wazuh_high_count":
+        model = globals().get("WazuhAlert")
+        if not model:
+            return 0.0
+        since = datetime.utcnow() - datetime_module.timedelta(hours=24)
+        return float(model.query.filter(model.rule_level >= 10, model.synced_at >= since).count())
+    if metric_key == "firewall_critical_count":
+        model = globals().get("FirewallGovFinding")
+        if not model:
+            return 0.0
+        try:
+            rows = model.query.filter(model.active.is_(True)).all()
+            return float(sum(
+                1 for row in rows
+                if alert_plain(getattr(row, "severity", "")) in {"critica", "critical"}
+                and alert_plain(getattr(row, "status", ""))
+                not in {"resuelto", "resuelta", "cerrado", "cerrada"}
+            ))
+        except Exception:
+            db.session.rollback()
+            return 0.0
+    if metric_key in {"bcp_backups_failed_count", "bcp_systems_without_drp_count"}:
+        calculator = globals().get("bcp_metricas_actuales")
+        if not calculator:
+            return 0.0
+        try:
+            data = calculator() or {}
+            key = "backups_fallidos" if metric_key == "bcp_backups_failed_count" else "sistemas_sin_drp"
+            return float(data.get(key, 0) or 0)
+        except Exception:
+            return 0.0
+    return float(_dashboard_metric_value(metric_key) or 0)
+
+
+def alert_format_number(value):
+    number = float(value or 0)
+    return str(int(number)) if number.is_integer() else f"{number:.2f}"
+
+
+_SMTP_LETSENCRYPT_Y_CHAIN_CACHE = None
+_SMTP_LETSENCRYPT_Y_CHAIN_LOCK = threading.Lock()
+_SMTP_LETSENCRYPT_Y_CHAIN_CERTS = (
+    {
+        "url": "https://letsencrypt.org/certs/gen-y/int-yr1.pem",
+        "subject_cn": "YR1",
+        "issuer_cn": "Root YR",
+        "serial": "A20253F15F2691C05DC1CE13B9BCCA4E",
+        "sha256": None,
+    },
+    {
+        "url": "https://letsencrypt.org/certs/gen-y/int-yr2.pem",
+        "subject_cn": "YR2",
+        "issuer_cn": "Root YR",
+        "serial": "4EBD24947E24D394802D84A52FD5B319",
+        "sha256": "238B85A0099C65B970477D5724F1A1D475CE5058CFFE4EFA8733899BDB863C47",
+    },
+    {
+        "url": "https://letsencrypt.org/certs/gen-y/root-yr-by-x1.pem",
+        "subject_cn": "Root YR",
+        "issuer_cn": "ISRG Root X1",
+        "serial": "F24B6D17F9D9AD7CB1C9FEA78782699F",
+        "sha256": None,
+    },
+)
+
+
+def _smtp_certificate_common_name(name):
+    values = name.get_attributes_for_oid(NameOID.COMMON_NAME)
+    return values[0].value if values else ""
+
+
+def _smtp_letsencrypt_y_chain():
+    """Descarga y valida la cadena oficial que el servidor SMTP omite.
+
+    Los certificados se obtienen exclusivamente desde letsencrypt.org mediante
+    HTTPS, se validan por identidad/serie y se conservan en memoria. Nunca se
+    desactiva la verificación TLS ni se transmiten credenciales en este proceso.
+    """
+    global _SMTP_LETSENCRYPT_Y_CHAIN_CACHE
+    if _SMTP_LETSENCRYPT_Y_CHAIN_CACHE:
+        return _SMTP_LETSENCRYPT_Y_CHAIN_CACHE
+
+    with _SMTP_LETSENCRYPT_Y_CHAIN_LOCK:
+        if _SMTP_LETSENCRYPT_Y_CHAIN_CACHE:
+            return _SMTP_LETSENCRYPT_Y_CHAIN_CACHE
+
+        certificates = []
+        for expected in _SMTP_LETSENCRYPT_Y_CHAIN_CERTS:
+            response = requests.get(
+                expected["url"],
+                timeout=10,
+                allow_redirects=False,
+                headers={"User-Agent": "Arkyntech-GRAC/SMTP-Chain-Repair"},
+            )
+            response.raise_for_status()
+            if len(response.content) > 32768:
+                raise RuntimeError("El certificado intermedio descargado supera el tamaño permitido.")
+            try:
+                pem = response.content.decode("ascii").strip() + "\n"
+                certificate = x509.load_pem_x509_certificate(pem.encode("ascii"))
+            except Exception as exc:
+                raise RuntimeError("Let’s Encrypt no devolvió un certificado PEM válido.") from exc
+
+            subject_cn = _smtp_certificate_common_name(certificate.subject)
+            issuer_cn = _smtp_certificate_common_name(certificate.issuer)
+            serial = f"{certificate.serial_number:X}"
+            fingerprint = certificate.fingerprint(hashes.SHA256()).hex().upper()
+            if (
+                subject_cn != expected["subject_cn"]
+                or issuer_cn != expected["issuer_cn"]
+                or serial != expected["serial"]
+                or (expected["sha256"] and fingerprint != expected["sha256"])
+            ):
+                raise RuntimeError("La identidad del certificado intermedio descargado no coincide con la publicada.")
+            certificates.append(pem)
+
+        _SMTP_LETSENCRYPT_Y_CHAIN_CACHE = "".join(certificates)
+        return _SMTP_LETSENCRYPT_Y_CHAIN_CACHE
+
+
+def alert_smtp_ssl_context(host):
+    """Contexto TLS estricto con soporte para la cadena incompleta de Arkyntech."""
+    context_ssl = ssl.create_default_context()
+
+    # Permite instalar una CA administrada por el cliente sin cambiar el código.
+    custom_ca_file = (os.getenv("GRAC_SMTP_CA_FILE") or "").strip()
+    if custom_ca_file:
+        context_ssl.load_verify_locations(cafile=custom_ca_file)
+
+    compatibility_enabled = str(
+        os.getenv("GRAC_SMTP_LETSENCRYPT_Y_COMPAT", "1")
+    ).strip().lower() not in {"0", "false", "no", "off"}
+    if compatibility_enabled and str(host or "").strip().lower() == "mail.arkyntech.com":
+        try:
+            context_ssl.load_verify_locations(cadata=_smtp_letsencrypt_y_chain())
+
+            # mail.arkyntech.com no entrega la cadena completa. Los certificados
+            # oficiales de Let's Encrypt cargados y validados arriba se aceptan
+            # como punto de confianza explícito para completar esa cadena, sin
+            # desactivar la verificación del certificado ni del nombre del host.
+            if hasattr(ssl, "VERIFY_X509_PARTIAL_CHAIN"):
+                context_ssl.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
+            if hasattr(ssl, "VERIFY_X509_TRUSTED_FIRST"):
+                context_ssl.verify_flags |= ssl.VERIFY_X509_TRUSTED_FIRST
+        except Exception as exc:
+            # Conserva el contexto seguro normal. Si el servidor continúa con
+            # la cadena incompleta, Python bloqueará el envío antes del login.
+            app.logger.warning(
+                "No fue posible cargar la cadena complementaria SMTP de Let's Encrypt: %r",
+                exc,
+            )
+    return context_ssl
+
+
+def alert_send_email(subject, text_body, html_body=None, recipients=None):
+    smtp = get_email_config()
+    host = smtp.get("SMTP_HOST")
+    port = int(smtp.get("SMTP_PORT") or 587)
+    username = smtp.get("SMTP_USER")
+    password = smtp.get("SMTP_PASS")
+    sender = smtp.get("SMTP_FROM") or username
+    if not host or not username or not password or not sender:
+        raise RuntimeError("La configuración SMTP de Parámetros Generales está incompleta.")
+    recipients = recipients or alert_parse_recipients(alert_get_config().recipients)[0]
+    if not recipients:
+        raise RuntimeError("No hay correos destinatarios configurados en Administración de Alertas.")
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = sender
+    message["To"] = ", ".join(recipients)
+    message.set_content(text_body)
+    if html_body:
+        message.add_alternative(html_body, subtype="html")
+    context_ssl = alert_smtp_ssl_context(host)
+    if port == 465:
+        with smtplib.SMTP_SSL(host, port, context=context_ssl, timeout=30) as smtp_client:
+            smtp_client.login(username, password)
+            smtp_client.send_message(message)
+    else:
+        with smtplib.SMTP(host, port, timeout=30) as smtp_client:
+            smtp_client.ehlo()
+            smtp_client.starttls(context=context_ssl)
+            smtp_client.ehlo()
+            smtp_client.login(username, password)
+            smtp_client.send_message(message)
+
+
+def alert_event_email(event, recipients):
+    cfg = alert_get_config()
+    prefix = (cfg.subject_prefix or "[Arkyntech GRAC]").strip()
+    subject = f"{prefix} {event.severity.upper()} - {event.title}"
+    configured_base = (cfg.base_url or "").strip().rstrip("/")
+    target = (event.reference_url or "").strip()
+    link = f"{configured_base}{target}" if configured_base and target.startswith("/") else target
+    text_body = (
+        f"Arkyntech GRAC - Centro de Alertas\n\n"
+        f"Severidad: {event.severity.title()}\nMódulo: {event.module}\n"
+        f"Alerta: {event.title}\n{event.message}\n"
+        f"Valor observado: {alert_format_number(event.value)}\n"
+        f"Fecha: {event.last_seen_at.strftime('%Y-%m-%d %H:%M')}\n"
+        + (f"Consultar: {link}\n" if link else "")
+    )
+    html_body = f"""
+    <div style="font-family:Arial,sans-serif;background:#f3f7fc;padding:24px;color:#172033">
+      <div style="max-width:680px;margin:auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #dce7f5">
+        <div style="padding:22px;background:linear-gradient(135deg,#063463,#0b63b6);color:#fff">
+          <div style="font-size:12px;font-weight:700;opacity:.9">ARKYNTECH GRAC · CENTRO DE ALERTAS</div>
+          <h2 style="margin:8px 0 0">{escape(event.title)}</h2>
+        </div>
+        <div style="padding:24px">
+          <p><b>Severidad:</b> {escape(event.severity.title())}</p>
+          <p><b>Módulo:</b> {escape(event.module)}</p>
+          <p>{escape(event.message)}</p>
+          <div style="padding:14px;border-radius:10px;background:#eef5ff"><b>Valor observado:</b> {alert_format_number(event.value)}</div>
+          {f'<p style="margin-top:22px"><a href="{escape(link)}" style="background:#0b63b6;color:white;text-decoration:none;padding:11px 18px;border-radius:9px;font-weight:700">Consultar en GRAC</a></p>' if link else ''}
+        </div>
+      </div>
+    </div>"""
+    alert_send_email(subject, text_body, html_body, recipients)
+
+
+def alert_evaluate_all(send_emails=True, force_email=False):
+    alert_seed_defaults()
+    cfg = alert_get_config()
+    recipients, _ = alert_parse_recipients(cfg.recipients)
+    now = datetime.utcnow()
+    summary = {"evaluated": 0, "triggered": 0, "created": 0, "resolved": 0,
+               "emails_sent": 0, "email_errors": 0}
+    for rule in AlertRule.query.filter_by(enabled=True).order_by(AlertRule.id.asc()).all():
+        summary["evaluated"] += 1
+        try:
+            value = alert_metric_value(rule.metric_key)
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("No se pudo evaluar alerta %s: %r", rule.code, exc)
+            continue
+        fingerprint = f"{rule.code}:global"
+        event = AlertEvent.query.filter_by(fingerprint=fingerprint).first()
+        triggered = alert_compare(value, rule.operator, rule.threshold)
+        if not triggered:
+            if event and event.status not in {"resuelta", "descartada"}:
+                event.status = "resuelta"
+                event.resolved_at = now
+                event.resolved_by = "Sistema"
+                event.last_seen_at = now
+                summary["resolved"] += 1
+                db.session.commit()
+            continue
+
+        summary["triggered"] += 1
+        message = alert_documents_message(rule.metric_key, value) or (
+            f"Se detectó {alert_format_number(value)}. "
+            f"La regla configurada es valor {rule.operator} {alert_format_number(rule.threshold)}."
+        )
+        if not event:
+            event = AlertEvent(
+                rule_id=rule.id, fingerprint=fingerprint, title=rule.name,
+                message=message, module=rule.module, severity=rule.severity,
+                status="nueva", value=value, threshold=rule.threshold,
+                reference_url=ALERT_RULE_URLS.get(rule.code, ""),
+                first_seen_at=now, last_seen_at=now,
+            )
+            db.session.add(event)
+            db.session.commit()
+            summary["created"] += 1
+        else:
+            if event.status in {"resuelta", "descartada"}:
+                event.status = "nueva"
+                event.first_seen_at = now
+                event.resolved_at = None
+                event.resolved_by = None
+                event.acknowledged_at = None
+                event.acknowledged_by = None
+            event.rule_id = rule.id
+            event.title = rule.name
+            event.message = message
+            event.module = rule.module
+            event.severity = rule.severity
+            event.value = value
+            event.threshold = rule.threshold
+            event.last_seen_at = now
+            event.occurrence_count = int(event.occurrence_count or 0) + 1
+            event.reference_url = ALERT_RULE_URLS.get(rule.code, event.reference_url or "")
+            db.session.commit()
+
+        repeat_after = datetime_module.timedelta(minutes=max(5, int(rule.repeat_minutes or 1440)))
+        email_due = force_email or not event.last_email_at or (now - event.last_email_at >= repeat_after)
+        if send_emails and cfg.email_enabled and rule.email_enabled and recipients and email_due:
+            delivery = AlertDelivery(event_id=event.id, recipients=", ".join(recipients), status="pendiente")
+            db.session.add(delivery)
+            db.session.commit()
+            try:
+                alert_event_email(event, recipients)
+                delivery.status = "enviado"
+                delivery.sent_at = datetime.utcnow()
+                event.last_email_at = delivery.sent_at
+                event.last_email_status = "enviado"
+                event.last_email_error = None
+                summary["emails_sent"] += 1
+            except Exception as exc:
+                delivery.status = "fallido"
+                delivery.error = str(exc)[:2000]
+                event.last_email_status = "fallido"
+                event.last_email_error = str(exc)[:2000]
+                summary["email_errors"] += 1
+                app.logger.warning("Falló correo de alerta %s: %r", rule.code, exc)
+            db.session.commit()
+    return summary
+
+
+def alert_status_badge(status):
+    return {
+        "nueva": "danger", "leida": "primary", "reconocida": "warning text-dark",
+        "en tratamiento": "info text-dark", "resuelta": "success", "descartada": "secondary",
+    }.get(alert_plain(status), "secondary")
+
+
+ALERT_MODULE_PERMISSIONS = {
+    "Riesgos": "Gestión de Riesgos",
+    "Vulnerabilidades": "Registro de Vulnerabilidades",
+    "Incidentes": "Registro de Incidentes",
+    "Planes de acción": "Planes de acción del SGSI",
+    "Requisitos legales": "Requisitos Legales",
+    "Proveedores": "Registro de Proveedores",
+    "Documentación": "Listado Maestro de Documentos",
+    "Madurez": "Métricas",
+    "Cumplimiento continuo": "Cumplimiento Continuo",
+    "Gobierno de Firewall": "Cumplimiento Continuo",
+    "Continuidad": "Continuidad del Negocio (BCP/DRP)",
+}
+
+
+def alert_user_can_view_module(user, module_name):
+    if not user:
+        return False
+    if user.role in {"admin", "auditor"}:
+        return True
+    permission = ALERT_MODULE_PERMISSIONS.get(module_name)
+    if not permission:
+        return False
+    try:
+        return bool(verificar_permiso(user, permission))
+    except Exception:
+        return False
+
+
+@app.route("/admin/alertas", methods=["GET", "POST"])
+@login_required
+@admin_required
+def admin_alertas():
+    alert_seed_defaults()
+    cfg = alert_get_config()
+    rules = AlertRule.query.order_by(AlertRule.module.asc(), AlertRule.id.asc()).all()
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        if action == "save_config":
+            recipients, invalid = alert_parse_recipients(request.form.get("recipients"))
+            if invalid:
+                flash("Correos no válidos: " + ", ".join(invalid), "danger")
+                return redirect(url_for("admin_alertas"))
+            cfg.recipients = ", ".join(recipients)
+            cfg.email_enabled = bool(request.form.get("email_enabled"))
+            cfg.in_app_enabled = bool(request.form.get("in_app_enabled"))
+            cfg.subject_prefix = re.sub(
+                r"[\r\n]+", " ",
+                (request.form.get("subject_prefix") or "[Arkyntech GRAC]").strip(),
+            )[:120]
+            try:
+                cfg.evaluation_minutes = max(5, min(1440, int(request.form.get("evaluation_minutes") or 15)))
+            except (TypeError, ValueError):
+                cfg.evaluation_minutes = 15
+            base_url = (request.form.get("base_url") or "").strip().rstrip("/")[:500]
+            if base_url and not re.match(r"^https?://", base_url, flags=re.IGNORECASE):
+                flash("La URL de GRAC debe comenzar por http:// o https://.", "danger")
+                return redirect(url_for("admin_alertas"))
+            cfg.base_url = base_url or None
+            db.session.commit()
+            flash("Configuración general de alertas guardada.", "success")
+        elif action == "save_rules":
+            for rule in rules:
+                rule.enabled = bool(request.form.get(f"enabled_{rule.id}"))
+                rule.email_enabled = bool(request.form.get(f"email_{rule.id}"))
+                operator = (request.form.get(f"operator_{rule.id}") or rule.operator).strip()
+                rule.operator = operator if operator in ALERT_OPERATORS else rule.operator
+                try:
+                    rule.threshold = float(request.form.get(f"threshold_{rule.id}") or 0)
+                except ValueError:
+                    pass
+                severity = (request.form.get(f"severity_{rule.id}") or rule.severity).strip().lower()
+                rule.severity = severity if severity in ALERT_SEVERITIES else rule.severity
+                try:
+                    rule.repeat_minutes = max(5, min(43200, int(request.form.get(f"repeat_{rule.id}") or 1440)))
+                except ValueError:
+                    pass
+                if not rule.enabled:
+                    for event in AlertEvent.query.filter_by(rule_id=rule.id).filter(
+                            ~AlertEvent.status.in_(["resuelta", "descartada"])).all():
+                        event.status = "resuelta"
+                        event.resolved_at = datetime.utcnow()
+                        event.resolved_by = "Sistema - regla desactivada"
+            db.session.commit()
+            flash("Reglas de alertamiento actualizadas.", "success")
+        elif action == "evaluate":
+            result = alert_evaluate_all(send_emails=True, force_email=False)
+            flash(
+                f"Evaluación completada: {result['triggered']} activas, "
+                f"{result['created']} nuevas y {result['emails_sent']} correos enviados.",
+                "success",
+            )
+        elif action == "test_email":
+            recipients, invalid = alert_parse_recipients(cfg.recipients)
+            if invalid or not recipients:
+                flash("Configure al menos un correo destinatario válido antes de probar.", "danger")
+            else:
+                try:
+                    alert_send_email(
+                        f"{cfg.subject_prefix} Prueba de correo",
+                        "La configuración SMTP y los destinatarios del Centro de Alertas funcionan correctamente.",
+                        "<h2>Arkyntech GRAC</h2><p>La configuración SMTP y los destinatarios del Centro de Alertas funcionan correctamente.</p>",
+                        recipients,
+                    )
+                    flash("Correo de prueba enviado correctamente.", "success")
+                except Exception as exc:
+                    flash(f"No fue posible enviar el correo de prueba: {exc}", "danger")
+        return redirect(url_for("admin_alertas"))
+
+    smtp_cfg = get_email_config()
+    deliveries = AlertDelivery.query.order_by(AlertDelivery.id.desc()).limit(20).all()
+    inner = render_template_string("""
+    <div class="container-fluid py-3" style="max-width:1500px">
+      <div class="p-4 mb-3 text-white rounded-4 shadow" style="background:linear-gradient(135deg,#063463,#0b63b6,#4535a8)">
+        <div class="small fw-bold opacity-75">SGSI · ADMINISTRACIÓN</div>
+        <h2 class="fw-bold mb-1"><i class="bi bi-bell-fill me-2"></i>Administración de Alertas</h2>
+        <div>Configura destinatarios, umbrales, severidad y frecuencia. La conexión se toma de Parámetros Generales → Configuración del Correo.</div>
+      </div>
+
+      <div class="alert {{ 'alert-success' if smtp_ready else 'alert-warning' }} shadow-sm">
+        <b>SMTP:</b> {{ 'Configurado' if smtp_ready else 'Incompleto' }}
+        {% if smtp_host %} · Servidor: {{ smtp_host }}{% endif %}
+        <a href="{{ url_for('config_email') }}" class="btn btn-sm btn-outline-primary ms-2">Abrir configuración SMTP</a>
+      </div>
+
+      <div class="card border-0 shadow-sm rounded-4 mb-3"><div class="card-body p-4">
+        <h5 class="fw-bold text-primary">Destinatarios y funcionamiento</h5>
+        <form method="post" class="row g-3">
+          <input type="hidden" name="action" value="save_config">
+          <div class="col-lg-7"><label class="form-label fw-bold">Correo o correos destinatarios</label>
+            <textarea class="form-control" name="recipients" rows="3" placeholder="seguridad@empresa.com; gerencia@empresa.com">{{ cfg.recipients or '' }}</textarea>
+            <div class="form-text">Separe los correos con coma, punto y coma o salto de línea.</div>
+          </div>
+          <div class="col-lg-5"><label class="form-label fw-bold">URL pública o interna de GRAC</label>
+            <input class="form-control" name="base_url" value="{{ cfg.base_url or '' }}" placeholder="https://grac.arkyntech.com">
+            <label class="form-label fw-bold mt-3">Prefijo del asunto</label>
+            <input class="form-control" name="subject_prefix" value="{{ cfg.subject_prefix or '[Arkyntech GRAC]' }}">
+          </div>
+          <div class="col-md-4"><label class="form-label fw-bold">Evaluar cada (minutos)</label>
+            <input class="form-control" type="number" min="5" max="1440" name="evaluation_minutes" value="{{ cfg.evaluation_minutes or 15 }}">
+          </div>
+          <div class="col-md-4 d-flex align-items-end"><div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" name="email_enabled" id="email_enabled" {% if cfg.email_enabled %}checked{% endif %}>
+            <label class="form-check-label fw-bold" for="email_enabled">Enviar por correo</label></div></div>
+          <div class="col-md-4 d-flex align-items-end"><div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" name="in_app_enabled" id="in_app_enabled" {% if cfg.in_app_enabled %}checked{% endif %}>
+            <label class="form-check-label fw-bold" for="in_app_enabled">Mostrar en GRAC</label></div></div>
+          <div class="col-12"><button class="btn btn-primary"><i class="bi bi-save me-1"></i>Guardar configuración</button></div>
+        </form>
+      </div></div>
+
+      <div class="card border-0 shadow-sm rounded-4 mb-3"><div class="card-body p-4">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+          <h5 class="fw-bold text-primary m-0">Reglas de alertamiento</h5>
+          <div class="d-flex gap-2">
+            <form method="post"><input type="hidden" name="action" value="test_email"><button class="btn btn-outline-primary"><i class="bi bi-envelope-check"></i> Probar correo</button></form>
+            <form method="post"><input type="hidden" name="action" value="evaluate"><button class="btn btn-success"><i class="bi bi-arrow-repeat"></i> Evaluar ahora</button></form>
+            <a class="btn btn-dark" href="{{ url_for('alert_center') }}"><i class="bi bi-bell"></i> Ver alertas</a>
+          </div>
+        </div>
+        <form method="post"><input type="hidden" name="action" value="save_rules">
+          <div class="table-responsive"><table class="table align-middle table-hover">
+            <thead class="table-primary"><tr><th>Activa</th><th>Regla / módulo</th><th>Condición</th><th>Severidad</th><th>Correo</th><th>Repetir (min)</th></tr></thead>
+            <tbody>{% for rule in rules %}<tr>
+              <td><input class="form-check-input" type="checkbox" name="enabled_{{ rule.id }}" {% if rule.enabled %}checked{% endif %}></td>
+              <td><b>{{ rule.name }}</b><div class="small text-muted">{{ rule.module }} · {{ rule.description }}</div></td>
+              <td><div class="input-group input-group-sm" style="min-width:150px"><select class="form-select" name="operator_{{ rule.id }}">{% for op in operators %}<option {% if rule.operator==op %}selected{% endif %}>{{ op }}</option>{% endfor %}</select><input class="form-control" type="number" step="0.01" name="threshold_{{ rule.id }}" value="{{ rule.threshold }}"></div></td>
+              <td><select class="form-select form-select-sm" name="severity_{{ rule.id }}">{% for sev in severities %}<option value="{{ sev }}" {% if rule.severity==sev %}selected{% endif %}>{{ sev|title }}</option>{% endfor %}</select></td>
+              <td class="text-center"><input class="form-check-input" type="checkbox" name="email_{{ rule.id }}" {% if rule.email_enabled %}checked{% endif %}></td>
+              <td><input class="form-control form-control-sm" type="number" min="5" max="43200" name="repeat_{{ rule.id }}" value="{{ rule.repeat_minutes }}"></td>
+            </tr>{% endfor %}</tbody>
+          </table></div>
+          <button class="btn btn-primary"><i class="bi bi-save me-1"></i>Guardar reglas</button>
+        </form>
+      </div></div>
+
+      <div class="card border-0 shadow-sm rounded-4"><div class="card-body p-4">
+        <h5 class="fw-bold text-primary">Últimos envíos</h5>
+        <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Fecha</th><th>Alerta</th><th>Destinatarios</th><th>Estado</th><th>Error</th></tr></thead><tbody>
+        {% for d in deliveries %}<tr><td>{{ d.created_at.strftime('%Y-%m-%d %H:%M') }}</td><td>{{ d.event.title }}</td><td>{{ d.recipients }}</td><td><span class="badge bg-{{ 'success' if d.status=='enviado' else 'danger' if d.status=='fallido' else 'warning text-dark' }}">{{ d.status }}</span></td><td class="small text-danger">{{ d.error or '' }}</td></tr>{% else %}<tr><td colspan="5" class="text-muted">Todavía no hay envíos registrados.</td></tr>{% endfor %}
+        </tbody></table></div>
+      </div></div>
+    </div>
+    """, cfg=cfg, rules=rules, deliveries=deliveries,
+       smtp_ready=bool(smtp_cfg.get("SMTP_HOST") and smtp_cfg.get("SMTP_USER") and smtp_cfg.get("SMTP_PASS")),
+       smtp_host=smtp_cfg.get("SMTP_HOST"), operators=[">", ">=", "=", "<", "<="],
+       severities=["informativa", "baja", "media", "alta", "crítica"])
+    return render_template_string(BASE, content=Markup(inner))
+
+
+@app.route("/alertas", methods=["GET", "POST"])
+@login_required
+def alert_center():
+    alert_seed_defaults()
+    cfg = alert_get_config()
+    current_alert_user = User.query.get(session.get("user_id"))
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        event_id = request.form.get("event_id", type=int)
+        if action == "refresh":
+            result = alert_evaluate_all(send_emails=False)
+            flash(f"Alertas actualizadas: {result['triggered']} condiciones activas.", "success")
+        elif event_id:
+            event = AlertEvent.query.get_or_404(event_id)
+            if not alert_user_can_view_module(current_alert_user, event.module):
+                abort(403)
+            username = session.get("username") or "Usuario"
+            if action == "acknowledge":
+                event.status = "reconocida"
+                event.acknowledged_at = datetime.utcnow()
+                event.acknowledged_by = username
+                db.session.commit()
+                flash("Alerta reconocida.", "success")
+            elif action == "resolve":
+                event.status = "resuelta"
+                event.resolved_at = datetime.utcnow()
+                event.resolved_by = username
+                db.session.commit()
+                flash("Alerta marcada como resuelta.", "success")
+            elif action == "discard":
+                event.status = "descartada"
+                event.resolved_at = datetime.utcnow()
+                event.resolved_by = username
+                db.session.commit()
+                flash("Alerta descartada.", "success")
+        return redirect(url_for("alert_center", module=request.args.get("module", ""), status=request.args.get("status", "")))
+
+    module_filter = (request.args.get("module") or "").strip()
+    status_filter = (request.args.get("status") or "").strip()
+    severity_filter = (request.args.get("severity") or "").strip()
+    allowed_modules = [
+        module_name for module_name in ALERT_MODULE_PERMISSIONS
+        if alert_user_can_view_module(current_alert_user, module_name)
+    ]
+    if not cfg.in_app_enabled and current_alert_user and current_alert_user.role != "admin":
+        allowed_modules = []
+    query = AlertEvent.query.filter(AlertEvent.module.in_(allowed_modules))
+    if module_filter:
+        query = query.filter(AlertEvent.module == module_filter)
+    if status_filter:
+        query = query.filter(AlertEvent.status == status_filter)
+    if severity_filter:
+        query = query.filter(AlertEvent.severity == severity_filter)
+    events = query.order_by(AlertEvent.last_seen_at.desc()).limit(500).all()
+    modules = [row[0] for row in db.session.query(AlertEvent.module).filter(
+        AlertEvent.module.in_(allowed_modules)
+    ).distinct().order_by(AlertEvent.module).all()]
+    visible_query = AlertEvent.query.filter(AlertEvent.module.in_(allowed_modules))
+    counts = {
+        "active": visible_query.filter(~AlertEvent.status.in_(["resuelta", "descartada"])).count(),
+        "critical": visible_query.filter(AlertEvent.severity == "crítica", ~AlertEvent.status.in_(["resuelta", "descartada"])).count(),
+        "new": visible_query.filter(AlertEvent.status == "nueva").count(),
+        "resolved": visible_query.filter(AlertEvent.status == "resuelta").count(),
+    }
+    inner = render_template_string("""
+    <div class="container-fluid py-3" style="max-width:1500px">
+      <div class="p-4 mb-3 text-white rounded-4 shadow" style="background:linear-gradient(135deg,#063463,#0b63b6,#4535a8)">
+        <div class="small fw-bold opacity-75">SGSI · MONITOREO</div>
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2"><div><h2 class="fw-bold mb-1"><i class="bi bi-bell-fill me-2"></i>Centro de Alertas</h2><div>Seguimiento centralizado de condiciones que requieren atención.</div></div>
+        <form method="post"><input type="hidden" name="action" value="refresh"><button class="btn btn-light fw-bold"><i class="bi bi-arrow-clockwise"></i> Actualizar ahora</button></form></div>
+      </div>
+      <div class="row g-3 mb-3">{% for label,value,color in [('Activas',counts.active,'danger'),('Críticas',counts.critical,'dark'),('Nuevas',counts.new,'primary'),('Resueltas',counts.resolved,'success')] %}<div class="col-6 col-lg-3"><div class="card border-0 shadow-sm rounded-4 h-100"><div class="card-body"><div class="text-muted small fw-bold">{{ label }}</div><div class="display-6 fw-bold text-{{ color }}">{{ value }}</div></div></div></div>{% endfor %}</div>
+      <div class="card border-0 shadow-sm rounded-4 mb-3"><div class="card-body"><form class="row g-2">
+        <div class="col-md-4"><select class="form-select" name="module"><option value="">Todos los módulos</option>{% for item in modules %}<option {% if module_filter==item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+        <div class="col-md-3"><select class="form-select" name="severity"><option value="">Todas las severidades</option>{% for item in ['informativa','baja','media','alta','crítica'] %}<option {% if severity_filter==item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+        <div class="col-md-3"><select class="form-select" name="status"><option value="">Todos los estados</option>{% for item in ['nueva','reconocida','en tratamiento','resuelta','descartada'] %}<option {% if status_filter==item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><button class="btn btn-primary w-100">Filtrar</button></div>
+      </form></div></div>
+      <div class="card border-0 shadow-sm rounded-4"><div class="card-body p-0"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
+        <thead class="table-primary"><tr><th class="ps-3">Severidad</th><th>Alerta</th><th>Valor</th><th>Estado</th><th>Última detección</th><th>Acciones</th></tr></thead><tbody>
+        {% for event in events %}<tr><td class="ps-3"><span class="badge bg-{{ 'danger' if event.severity in ['alta','crítica'] else 'warning text-dark' if event.severity=='media' else 'info text-dark' }}">{{ event.severity|upper }}</span></td>
+          <td><b>{{ event.title }}</b><div class="small text-muted">{{ event.module }} · {{ event.message }}</div>{% if event.reference_url %}<a class="small" href="{{ event.reference_url }}">Abrir registro relacionado</a>{% endif %}</td>
+          <td class="fw-bold">{{ format_number(event.value) }}</td><td><span class="badge bg-{{ badge(event.status) }}">{{ event.status }}</span></td><td>{{ event.last_seen_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td><div class="d-flex flex-wrap gap-1">{% if event.status not in ['resuelta','descartada'] %}<form method="post"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="acknowledge"><button class="btn btn-sm btn-outline-warning" title="Reconocer"><i class="bi bi-eye"></i></button></form><form method="post"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="resolve"><button class="btn btn-sm btn-outline-success" title="Resolver"><i class="bi bi-check2-circle"></i></button></form><form method="post"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="discard"><button class="btn btn-sm btn-outline-secondary" title="Descartar"><i class="bi bi-x-circle"></i></button></form>{% endif %}</div></td></tr>
+        {% else %}<tr><td colspan="6" class="text-center text-muted py-5"><i class="bi bi-bell-slash fs-1 d-block mb-2"></i>No hay alertas para los filtros seleccionados.</td></tr>{% endfor %}
+        </tbody></table></div></div></div>
+      {% if is_admin %}<div class="text-end mt-3"><a class="btn btn-outline-primary" href="{{ url_for('admin_alertas') }}"><i class="bi bi-gear"></i> Administrar alertas</a></div>{% endif %}
+    </div>
+    """, events=events, modules=modules, counts=counts, module_filter=module_filter,
+       status_filter=status_filter, severity_filter=severity_filter,
+       format_number=alert_format_number, badge=alert_status_badge,
+       is_admin=bool(current_alert_user and current_alert_user.role == "admin"))
     return render_template_string(BASE, content=Markup(inner))
 
 # =========================
@@ -205196,6 +206183,52 @@ def mobile_action_plans():
 @mobile_auth_required
 def mobile_alerts():
     alerts = []
+    try:
+        central_cfg = AlertConfig.query.first()
+        if central_cfg and not central_cfg.in_app_enabled:
+            return _mobile_ok({"items": [], "total": 0})
+    except Exception:
+        db.session.rollback()
+    # El Centro de Alertas es la fuente principal para WEB y Mobile.
+    # Se conservan los cálculos anteriores como compatibilidad cuando todavía
+    # no existen eventos centralizados.
+    try:
+        central_events = (
+            AlertEvent.query
+            .filter(~AlertEvent.status.in_(["resuelta", "descartada"]))
+            .order_by(AlertEvent.last_seen_at.desc())
+            .limit(100)
+            .all()
+        )
+        if central_events:
+            module_permissions = {
+                "Riesgos": "risks", "Planes de acción": "actions",
+                "Incidentes": "incidents", "Vulnerabilidades": "vulnerabilities",
+                "Requisitos legales": "legal", "Proveedores": "providers",
+                "Documentación": "soa", "Madurez": "metrics",
+                "Cumplimiento continuo": "metrics", "Gobierno de Firewall": "metrics",
+                "Continuidad": "metrics",
+            }
+            for event in central_events:
+                permission_key = module_permissions.get(event.module)
+                if permission_key and not _mobile_can(permission_key):
+                    continue
+                if not permission_key and getattr(_mobile_g.mobile_user, "role", "") not in {"admin", "auditor"}:
+                    continue
+                alerts.append({
+                    "type": (event.rule.code if event.rule else "grac_alert"),
+                    "category_label": event.module,
+                    "severity": "critical" if event.severity == "crítica" else "high" if event.severity == "alta" else "medium",
+                    "title": event.title,
+                    "message": event.message,
+                    "reference_id": event.id,
+                    "date": _mobile_iso(event.last_seen_at),
+                    "status": event.status,
+                    "value": event.value,
+                })
+            return _mobile_ok({"items": alerts, "total": len(alerts)})
+    except Exception:
+        db.session.rollback()
     if _mobile_can("risks"):
         for row in _dashboard_active_risks():
             rank = _dashboard_risk_rank(row.riesgo_residual)
@@ -205223,8 +206256,52 @@ def mobile_alerts():
     return _mobile_ok({"items": alerts[:100], "total": len(alerts)})
 
 
+_ALERT_SCHEDULER_STARTED = False
+_ALERT_SCHEDULER_LOCK = threading.Lock()
+_ALERT_SCHEDULER_STOP = threading.Event()
+
+
+def _alert_scheduler_loop():
+    # Espera inicial para que la aplicación termine de levantar todos los binds.
+    if _ALERT_SCHEDULER_STOP.wait(30):
+        return
+    while not _ALERT_SCHEDULER_STOP.is_set():
+        interval = 15
+        try:
+            with app.app_context():
+                alert_evaluate_all(send_emails=True, force_email=False)
+                interval = max(5, min(1440, int(alert_get_config().evaluation_minutes or 15)))
+        except Exception as exc:
+            try:
+                app.logger.warning("Evaluador automático de alertas: %r", exc)
+            except Exception:
+                pass
+        _ALERT_SCHEDULER_STOP.wait(interval * 60)
+
+
+def alert_start_scheduler():
+    global _ALERT_SCHEDULER_STARTED
+    if str(os.getenv("GRAC_ALERTS_BACKGROUND", "1")).strip().lower() in {"0", "false", "no", "off"}:
+        return False
+    if str(os.getenv("FLASK_DEBUG", "0")).strip().lower() in {"1", "true", "yes", "on"} \
+            and os.getenv("WERKZEUG_RUN_MAIN") != "true":
+        return False
+    with _ALERT_SCHEDULER_LOCK:
+        if _ALERT_SCHEDULER_STARTED:
+            return True
+        thread = threading.Thread(
+            target=_alert_scheduler_loop,
+            name="grac-alert-evaluator",
+            daemon=True,
+        )
+        thread.start()
+        _ALERT_SCHEDULER_STARTED = True
+    return True
+
+
 with app.app_context():
     db.create_all()
+    alert_seed_defaults()
     cont_comp_migrate_evidence_schema()
     cont_comp_sync_governance_findings()
     ensure_attack_auto_db()
@@ -205242,6 +206319,7 @@ app.register_blueprint(iso22301_madurez_bp)
 app.register_blueprint(ai_madurez_bp)
 app.register_blueprint(mobile_api_bp)
 asegurar_columnas_aprobacion_seguridad_rfc()
+alert_start_scheduler()
 
 if __name__ == "__main__":
     print("🚀 Ejecutando en puerto 5002")
