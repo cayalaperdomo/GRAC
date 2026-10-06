@@ -19397,6 +19397,147 @@ ALERT_MODULE_PERMISSIONS = {
 }
 
 
+ALERT_PAGE_HEADER_STYLES = """
+<style>
+  .grac-alert-header-card {
+    background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+    border-radius:18px;
+    padding:16px 24px;
+    min-height:94px;
+    display:flex;
+    align-items:center;
+    box-shadow:0 12px 24px rgba(15,23,42,.25);
+    position:relative;
+    overflow:hidden;
+    margin-bottom:14px;
+  }
+
+  .grac-alert-header-card::before {
+    content:"";
+    position:absolute;
+    inset:0;
+    background:
+      radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+      repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+  }
+
+  .grac-alert-header-overlay {
+    width:100%;
+    display:flex;
+    align-items:center;
+    gap:14px;
+    position:relative;
+    z-index:1;
+    min-width:0;
+  }
+
+  .grac-alert-header-icon {
+    width:54px;
+    height:54px;
+    min-width:54px;
+    border-radius:14px;
+    background:#fff;
+    color:#0b4a8f;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:1.4rem;
+    box-shadow:0 8px 18px rgba(0,0,0,.25);
+  }
+
+  .grac-alert-header-text {
+    flex:1 1 auto;
+    min-width:0;
+  }
+
+  .grac-alert-header-badge {
+    display:inline-block;
+    background:rgba(255,255,255,.18);
+    border-radius:999px;
+    padding:3px 10px;
+    font-size:.65rem;
+    font-weight:800;
+    margin-bottom:4px;
+    color:#fff;
+  }
+
+  .grac-alert-header-title {
+    color:#fff !important;
+    font-weight:950;
+    font-size:1.32rem;
+    line-height:1.1;
+    margin:0 !important;
+    text-shadow:0 4px 14px rgba(0,0,0,.45);
+    overflow-wrap:break-word;
+  }
+
+  .grac-alert-header-subtitle {
+    color:rgba(255,255,255,.95);
+    font-size:.78rem;
+    line-height:1.25;
+    margin-top:3px;
+    overflow-wrap:break-word;
+  }
+
+  .grac-alert-header-actions {
+    flex:0 0 auto;
+    margin-left:auto;
+  }
+
+  .grac-alert-header-button {
+    border-radius:10px !important;
+    border:1px solid rgba(255,255,255,.72) !important;
+    background:#fff !important;
+    color:#0f172a !important;
+    font-weight:900 !important;
+    box-shadow:0 4px 10px rgba(0,0,0,.12);
+    white-space:nowrap;
+  }
+
+  .grac-alert-header-button:hover {
+    background:#edf5ff !important;
+    color:#0b65d8 !important;
+  }
+
+  @media (max-width:768px) {
+    .grac-alert-header-card {
+      padding:14px 16px;
+    }
+
+    .grac-alert-header-overlay {
+      align-items:flex-start;
+      flex-wrap:wrap;
+    }
+
+    .grac-alert-header-icon {
+      width:48px;
+      height:48px;
+      min-width:48px;
+    }
+
+    .grac-alert-header-title {
+      font-size:1.18rem;
+    }
+
+    .grac-alert-header-actions {
+      width:100%;
+      margin-left:62px;
+    }
+  }
+
+  @media (max-width:480px) {
+    .grac-alert-header-actions {
+      margin-left:0;
+    }
+
+    .grac-alert-header-button {
+      width:100%;
+    }
+  }
+</style>
+"""
+
+
 def alert_user_can_view_module(user, module_name):
     if not user:
         return False
@@ -19493,12 +19634,17 @@ def admin_alertas():
 
     smtp_cfg = get_email_config()
     deliveries = AlertDelivery.query.order_by(AlertDelivery.id.desc()).limit(20).all()
-    inner = render_template_string("""
+    inner = render_template_string(ALERT_PAGE_HEADER_STYLES + """
     <div class="container-fluid py-3" style="max-width:1500px">
-      <div class="p-4 mb-3 text-white rounded-4 shadow" style="background:linear-gradient(135deg,#063463,#0b63b6,#4535a8)">
-        <div class="small fw-bold opacity-75">SGSI · ADMINISTRACIÓN</div>
-        <h2 class="fw-bold mb-1"><i class="bi bi-bell-fill me-2"></i>Administración de Alertas</h2>
-        <div>Configura destinatarios, umbrales, severidad y frecuencia. La conexión se toma de Parámetros Generales → Configuración del Correo.</div>
+      <div class="grac-alert-header-card">
+        <div class="grac-alert-header-overlay">
+          <div class="grac-alert-header-icon"><i class="bi bi-bell-fill"></i></div>
+          <div class="grac-alert-header-text">
+            <div class="grac-alert-header-badge">SGSI · Administración</div>
+            <h3 class="grac-alert-header-title">Administración de Alertas</h3>
+            <div class="grac-alert-header-subtitle">Configura destinatarios, umbrales, severidad y frecuencia. La conexión se toma de Parámetros Generales → Configuración del Correo.</div>
+          </div>
+        </div>
       </div>
 
       <div class="alert {{ 'alert-success' if smtp_ready else 'alert-warning' }} shadow-sm">
@@ -19636,12 +19782,21 @@ def alert_center():
         "new": visible_query.filter(AlertEvent.status == "nueva").count(),
         "resolved": visible_query.filter(AlertEvent.status == "resuelta").count(),
     }
-    inner = render_template_string("""
+    inner = render_template_string(ALERT_PAGE_HEADER_STYLES + """
     <div class="container-fluid py-3" style="max-width:1500px">
-      <div class="p-4 mb-3 text-white rounded-4 shadow" style="background:linear-gradient(135deg,#063463,#0b63b6,#4535a8)">
-        <div class="small fw-bold opacity-75">SGSI · MONITOREO</div>
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2"><div><h2 class="fw-bold mb-1"><i class="bi bi-bell-fill me-2"></i>Centro de Alertas</h2><div>Seguimiento centralizado de condiciones que requieren atención.</div></div>
-        <form method="post"><input type="hidden" name="action" value="refresh"><button class="btn btn-light fw-bold"><i class="bi bi-arrow-clockwise"></i> Actualizar ahora</button></form></div>
+      <div class="grac-alert-header-card">
+        <div class="grac-alert-header-overlay">
+          <div class="grac-alert-header-icon"><i class="bi bi-bell-fill"></i></div>
+          <div class="grac-alert-header-text">
+            <div class="grac-alert-header-badge">SGSI · Monitoreo</div>
+            <h3 class="grac-alert-header-title">Centro de Alertas</h3>
+            <div class="grac-alert-header-subtitle">Seguimiento centralizado de condiciones que requieren atención.</div>
+          </div>
+          <form method="post" class="grac-alert-header-actions">
+            <input type="hidden" name="action" value="refresh">
+            <button class="btn grac-alert-header-button"><i class="bi bi-arrow-clockwise me-1"></i>Actualizar ahora</button>
+          </form>
+        </div>
       </div>
       <div class="row g-3 mb-3">{% for label,value,color in [('Activas',counts.active,'danger'),('Críticas',counts.critical,'dark'),('Nuevas',counts.new,'primary'),('Resueltas',counts.resolved,'success')] %}<div class="col-6 col-lg-3"><div class="card border-0 shadow-sm rounded-4 h-100"><div class="card-body"><div class="text-muted small fw-bold">{{ label }}</div><div class="display-6 fw-bold text-{{ color }}">{{ value }}</div></div></div></div>{% endfor %}</div>
       <div class="card border-0 shadow-sm rounded-4 mb-3"><div class="card-body"><form class="row g-2">
