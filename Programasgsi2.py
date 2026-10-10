@@ -1,4 +1,3 @@
-# GRAC Render: importaciones pesadas diferidas hasta que se usa el módulo correspondiente.
 #madurez_bp = Blueprint# soa_iso27001_app.py
 # Aplicación Flask autocontenida: Declaración de Aplicabilidad ISO 27001:2022 (todo en un archivo)
 # Requisitos: pip install flask flask_sqlalchemy
@@ -26,7 +25,7 @@ from datetime import datetime as dt
 from flask import Flask, render_template_string, request, redirect, url_for, session, flash
 from flask import abort
 import re
-
+import pandas as pd
 from markupsafe import Markup, escape
 from werkzeug.utils import secure_filename
 from io import BytesIO
@@ -37,14 +36,14 @@ from reportlab.lib.utils import ImageReader
 import secrets
 import io
 import math
-
+import numpy as np
 import matplotlib
 matplotlib.use("Agg")
-
-
-
+import matplotlib.pyplot as plt
+from matplotlib.patches import Wedge, Circle, FancyArrowPatch
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import shutil
-
+import numpy as np
 from werkzeug.utils import secure_filename
 from uuid import uuid4
 import requests
@@ -53,7 +52,7 @@ import string
 from flask_sqlalchemy import SQLAlchemy
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib import colors
-
+import pandas as pd
 import os
 from cryptography.fernet import Fernet
 from werkzeug.utils import secure_filename
@@ -140,8 +139,8 @@ from reportlab.lib.enums import TA_LEFT
 from reportlab.lib import colors
 from werkzeug.exceptions import HTTPException
 import uuid
-
-
+import pandas as pd
+from openpyxl import load_workbook
 
 
 from flask import (
@@ -149,8 +148,8 @@ from flask import (
 )
 from flask_sqlalchemy import SQLAlchemy
 
-
-
+import pandas as pd
+import numpy as np
 
 
 
@@ -158,7 +157,7 @@ from flask_sqlalchemy import SQLAlchemy
 os.environ["MPLBACKEND"] = "Agg"
 import matplotlib
 matplotlib.use("Agg")
-
+import matplotlib.pyplot as plt
 
 # OpenAI SDK
 from openai import OpenAI
@@ -175,7 +174,7 @@ from reportlab.platypus import (
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
 import matplotlib
 matplotlib.use("Agg")  # IMPORTANT para servidores Flask
-
+import matplotlib.pyplot as plt
 from flask import send_file
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.pagesizes import A4, landscape
@@ -2336,7 +2335,6 @@ def _pick_col(df, candidates):
     return None
 
 def calcular_nist_desde_iso(iso_analysis_id):
-    import pandas as pd
     """
     Toma un AnalysisRun ISO (ISO 27001) y genera resultados NIST CSF 2.0
     usando el mapeo CSF→ISO del Excel.
@@ -2414,7 +2412,6 @@ def calcular_nist_desde_iso(iso_analysis_id):
         }
 
     def split_refs(x):
-        import pandas as pd
         s = ("" if pd.isna(x) else str(x)).strip()
         if not s:
             return []
@@ -7767,7 +7764,6 @@ def to_text(v) -> str:
     return str(v)
 
 def load_instrument_structure(xlsx_path: str):
-    import pandas as pd
     xls = pd.ExcelFile(xlsx_path)
     sheets = []
     for sheet_name in xls.sheet_names:
@@ -8360,7 +8356,6 @@ def get_areaid_divisiones_map():
 
     
 def extraer_respuestas_desde_excel(path_xlsx):
-    import pandas as pd
     """
     Lee el archivo Excel del cuestionario de proveedores y
     devuelve una lista de dicts con:
@@ -11747,13 +11742,12 @@ import math
 import re
 import json
 import sqlite3
-
-
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 from flask import jsonify
 
 
 def _dashboard_fig_to_b64(fig):
-    import matplotlib.pyplot as plt
     buf = io.BytesIO()
     fig.savefig(
         buf,
@@ -11768,7 +11762,6 @@ def _dashboard_fig_to_b64(fig):
 
 
 def _dashboard_empty_chart(title="Sin datos", subtitle="No hay información disponible"):
-    import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(7.8, 4.8))
     fig.patch.set_facecolor("#ffffff")
     ax.set_facecolor("#ffffff")
@@ -11788,8 +11781,6 @@ def _dashboard_empty_chart(title="Sin datos", subtitle="No hay información disp
 
 
 def _dashboard_gauge_b64(value, title="Cumplimiento", subtitle="Protección de datos personales"):
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
     try:
         value = float(value or 0)
     except Exception:
@@ -11935,7 +11926,6 @@ def _dashboard_gauge_b64(value, title="Cumplimiento", subtitle="Protección de d
     return _dashboard_fig_to_b64(fig)
 
 def _dashboard_donut_b64(labels, values, title="", subtitle=""):
-    import matplotlib.pyplot as plt
     labels = labels or []
     values = values or []
 
@@ -12038,7 +12028,6 @@ def _dashboard_latest_iso_radar():
         return _dashboard_empty_chart("ISO Error", str(e))
 
 def generar_radar_grande(labels, values, title):
-    import matplotlib.pyplot as plt
     angles = [n / float(len(labels)) * 2 * math.pi for n in range(len(labels))]
     angles += angles[:1]
 
@@ -13527,7 +13516,6 @@ def _dashboard_nice_scale(value):
 
 
 def _dashboard_scalar_ring_b64(value, title="", subtitle="", unit="", decimals=2):
-    import matplotlib.pyplot as plt
     try:
         value = max(0.0, float(value or 0))
     except Exception:
@@ -13557,7 +13545,6 @@ def _dashboard_scalar_ring_b64(value, title="", subtitle="", unit="", decimals=2
 
 
 def _dashboard_pie_b64(labels, values, title="", subtitle=""):
-    import matplotlib.pyplot as plt
     labels = list(labels or [])
     values = [float(v or 0) for v in (values or [])]
     if not labels or not values or sum(values) <= 0:
@@ -13587,7 +13574,6 @@ def _dashboard_pie_b64(labels, values, title="", subtitle=""):
 
 
 def _dashboard_bar_b64(labels, values, title="", subtitle="", horizontal=False, unit=""):
-    import matplotlib.pyplot as plt
     labels = [str(label) for label in (labels or [])]
     values = [float(v or 0) for v in (values or [])]
     if not labels or not values:
@@ -13621,7 +13607,6 @@ def _dashboard_bar_b64(labels, values, title="", subtitle="", horizontal=False, 
 
 
 def _dashboard_line_b64(labels, values, title="", subtitle="", unit=""):
-    import matplotlib.pyplot as plt
     labels = [str(label) for label in (labels or [])]
     values = [float(v or 0) for v in (values or [])]
     if not labels or not values:
@@ -99186,7 +99171,6 @@ def allowed_file_excel(filename: str) -> bool:
 
 
 def leer_cuestionario_excel(file_storage) -> str:
-    import pandas as pd
     """
     Lee el Excel del cuestionario de proveedores y construye un texto:
     Referencia: X.X
@@ -99270,7 +99254,6 @@ def _normalizar_respuesta(valor: str) -> str:
 
 
 def calcular_puntaje_desde_excel_bytes(contenido_excel: bytes) -> tuple[float, str]:
-    import pandas as pd
     """
     Lee el Excel (binario) del cuestionario y calcula el puntaje según la regla:
     - Sí = 100
@@ -99608,7 +99591,6 @@ def calcular_puntaje_total(puntaje_cuestionario: float,
     return round(puntaje_cuestionario, 2)
 
 def obtener_resumen_respuestas_desde_excel_bytes(contenido_excel: bytes) -> dict:
-    import pandas as pd
     """
     Lee el Excel (binario) y devuelve un resumen:
     {
@@ -117384,8 +117366,6 @@ def cargar_respuestas_run(run_id):
     return out
 
 def normalize_control_code(v) -> str:
-    import pandas as pd
-    import numpy as np
     """
     Convierte el código de control de ANEXO A a texto estable:
     - Si Excel lo convirtió a fecha (05/06/2026) => "5.6"
@@ -118451,7 +118431,6 @@ def eval_status_from_row(df: pd.DataFrame, r: int, col_map: dict, requisito: str
 
 
 def parse_sheet_xls(excel_path: str, sheet_name: str):
-    import pandas as pd
     df = pd.read_excel(excel_path, sheet_name=sheet_name, header=None, engine="xlrd")
 
     # 1) Intentar formato NUEVO (Item/Subitem/Pregunta…)
@@ -118642,8 +118621,6 @@ def parse_sheet_xls(excel_path: str, sheet_name: str):
 # ==========================
 def make_radar_base64(labels, values, title="Araña de madurez", max_label_len=22):
     # 1) recorte general
-    import numpy as np
-    import matplotlib.pyplot as plt
     labels2 = [l if len(l) <= max_label_len else (l[:max_label_len] + "…") for l in labels]
 
     # 2) ✅ FIX SOLO para 6 Planificación y 10 Mejora: poner salto de línea
@@ -118722,8 +118699,6 @@ def make_radar_base64(labels, values, title="Araña de madurez", max_label_len=2
 
 
 def make_bar_base64(labels, values, title="Madurez por capítulo", max_label_len=26):
-    import numpy as np
-    import matplotlib.pyplot as plt
     labs = [l if len(l) <= max_label_len else (l[:max_label_len] + "…") for l in labels]
     if not labs:
         return ""
@@ -122772,7 +122747,6 @@ def param_gap_levels():
     return render_template_string(BASE, title="Parámetro: Brechas", content=content)
 
 def safe_str(x):
-    import pandas as pd
     """Convierte NaN/None a '' y todo lo demás a string limpio."""
     try:
         import pandas as pd
@@ -122833,7 +122807,6 @@ def normalize_anexo_control(raw_control: str, tema: str = "") -> str:
 @madurez_bp.route("/admin/importar_instrumento", methods=["POST"])
 @login_required
 def importar_instrumento_admin():
-    import pandas as pd
     force = (request.args.get("force") == "1") or (request.form.get("force") == "1")
 
     if force:
@@ -123050,7 +123023,6 @@ def _translate_to_es_cached(text: str) -> str:
 @nist_madurez_bp.route("/admin/importar_instrumento", methods=["POST"])
 @login_required
 def nist_importar_instrumento_admin():
-    from openpyxl import load_workbook
     force = (request.args.get("force") == "1") or (request.form.get("force") == "1")
 
     if (NistMadurezPregunta.query.count() > 0) and not force:
@@ -125110,7 +125082,6 @@ def ingreso_guardar():
         return redirect(url_for("madurez.ingreso"))
 
 def build_df_from_db(run_id: int):
-    import pandas as pd
     import pandas as pd
 
     rows = db.session.query(
@@ -130809,7 +130780,6 @@ def nist_pct_por_funcion(resumen: dict, func_order: list[str]):
 
 
 def nist_radar_b64(labels: list[str], values: list[float], title: str = "Radar NIST CSF 2.0"):
-    import matplotlib.pyplot as plt
     """
     Genera PNG base64 (sin guardar archivo).
     values debe venir en escala 0..100.
@@ -137293,7 +137263,6 @@ def _normalizar_titulo(t: str) -> str:
     return t
 
 def _gdpr_construir_radar_fig(resumen: dict):
-    import matplotlib.pyplot as plt
     """
     Construye la figura radar y la retorna como objeto matplotlib Figure.
     Sirve para HTML (base64) y para PDF (bytes PNG).
@@ -137383,7 +137352,6 @@ def _gdpr_construir_radar_fig(resumen: dict):
         return None
 
 def generar_radar_datos_base64(resumen: dict) -> str | None:
-    import matplotlib.pyplot as plt
     try:
         fig = _gdpr_construir_radar_fig(resumen)
         if fig is None:
@@ -137407,7 +137375,6 @@ def generar_radar_datos_base64(resumen: dict) -> str | None:
 
 
 def generar_radar_datos_png_bytes(resumen: dict) -> bytes | None:
-    import matplotlib.pyplot as plt
     try:
         fig = _gdpr_construir_radar_fig(resumen)
         if fig is None:
@@ -137459,8 +137426,6 @@ def gdpr_resumen_tarjetas_por_nivel(resumen: dict):
     return out
 
 def _gdpr_construir_velocimetro_niveles_fig(resumen: dict):
-    import numpy as np
-    import matplotlib.pyplot as plt
     """
     Construye una figura con 5 mini-velocímetros, uno por nivel,
     mostrando la cantidad de dominios en cada nivel.
@@ -137547,7 +137512,6 @@ def _gdpr_construir_velocimetro_niveles_fig(resumen: dict):
 
 
 def generar_velocimetro_niveles_base64(resumen: dict) -> str | None:
-    import matplotlib.pyplot as plt
     try:
         fig = _gdpr_construir_velocimetro_niveles_fig(resumen)
         if fig is None:
@@ -137571,7 +137535,6 @@ def generar_velocimetro_niveles_base64(resumen: dict) -> str | None:
 
 
 def generar_velocimetro_niveles_png_bytes(resumen: dict) -> bytes | None:
-    import matplotlib.pyplot as plt
     try:
         fig = _gdpr_construir_velocimetro_niveles_fig(resumen)
         if fig is None:
@@ -137692,8 +137655,6 @@ REGLAS
 # =====================================================================
 
 def _gdpr_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: str):
-    import numpy as np
-    import matplotlib.pyplot as plt
     try:
         pct = max(0.0, min(100.0, float(pct or 0)))
 
@@ -137870,7 +137831,6 @@ def _gdpr_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: s
         return None
 
 def generar_gdpr_velocimetro_png_bytes(label: str, pct: float, nivel: str, color: str):
-    import matplotlib.pyplot as plt
     fig = _gdpr_construir_velocimetro_fig(label, pct, nivel, color)
     if fig is None:
         return None
@@ -138246,7 +138206,6 @@ def detalle_pdf(run_id: int):
 @madurez_datos_bp.route("/admin/importar_instrumento", methods=["POST"])
 @login_required
 def importar_instrumento_admin():
-    from openpyxl import load_workbook
     user = User.query.get(session.get("user_id"))
 
     if user.role == "auditor":
@@ -143324,7 +143283,6 @@ def pci_resolver_nivel(pct: float):
 # =========================
 
 def pci_safe_str(x):
-    import pandas as pd
     if x is None:
         return ""
     try:
@@ -143758,7 +143716,6 @@ def _ai_text(prompt: str, max_tokens: int = 900) -> str:
 @pci_madurez_bp.route("/admin/importar_instrumento", methods=["POST"])
 @login_required
 def importar_instrumento_pci():
-    import pandas as pd
     user = User.query.get(session.get("user_id"))
 
     if user.role == "auditor":
@@ -144004,7 +143961,6 @@ def informe_ejecutivo_generar_pci(run_id: int):
 # =========================
 
 def build_pci_df_from_db(run_id: int) -> pd.DataFrame:
-    import pandas as pd
     q = (
         db.session.query(PciMadurezRespuesta, PciMadurezPregunta)
         .join(PciMadurezPregunta, PciMadurezPregunta.id == PciMadurezRespuesta.pregunta_id)
@@ -144289,8 +144245,6 @@ def ingreso_guardar_pci():
 # =========================
 
 def _pci_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: str):
-    import numpy as np
-    import matplotlib.pyplot as plt
     try:
         pct = max(0.0, min(100.0, float(pct or 0)))
 
@@ -144335,11 +144289,6 @@ def _pci_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: st
         return None
 
 def generar_pci_velocimetro_png_bytes(titulo, valor, nivel="", color="#6c757d"):
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Wedge
-    from matplotlib.patches import Circle
-    from matplotlib.patches import FancyArrowPatch
-    from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
     """
     Genera un velocímetro limpio y legible para incrustar en PDF.
     Retorna bytes PNG.
@@ -144583,7 +144532,6 @@ def pci_normalizar_texto_rico_guardado(texto: str) -> str:
     return txt.strip()
 
 def generar_pci_radar_base64(resultados: dict):
-    import matplotlib.pyplot as plt
     try:
         labels = []
         values = []
@@ -148770,7 +148718,6 @@ def informe_ejecutivo_editar_pci(run_id: int):
 @pci_madurez_bp.route("/resultado/<int:analysis_id>", methods=["GET"])
 @login_required
 def detalle_resultado_pci(analysis_id: int):
-    import matplotlib.pyplot as plt
     user = User.query.get(session.get("user_id"))
 
     if user.role not in ("admin", "auditor") and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
@@ -149426,7 +149373,6 @@ def soc2_block_title(code: str) -> str:
 
 
 def soc2_safe_str(x):
-    import pandas as pd
     if x is None:
         return ""
     try:
@@ -149694,7 +149640,6 @@ def soc2_pct_por_criterio(resumen: dict, order: list[str] = None):
 
 
 def soc2_radar_b64(labels: list[str], values: list[float], title: str = "Radar SOC 2"):
-    import matplotlib.pyplot as plt
     if not labels:
         return ""
     vals = [max(0.0, min(100.0, float(v))) for v in values]
@@ -149725,11 +149670,6 @@ def soc2_radar_b64(labels: list[str], values: list[float], title: str = "Radar S
 
 
 def generar_soc2_velocimetro_png_bytes(titulo, valor, nivel="", color="#6c757d"):
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Wedge
-    from matplotlib.patches import Circle
-    from matplotlib.patches import FancyArrowPatch
-    from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
     try:
         valor = max(0, min(100, float(valor or 0)))
         fig = plt.figure(figsize=(7.2, 4.2), dpi=220)
@@ -150159,7 +150099,6 @@ Enfocado en madurez SOC 2 y preparación para auditoría.
 @soc2_madurez_bp.route("/admin/importar_instrumento", methods=["POST"])
 @login_required
 def importar_instrumento_soc2():
-    import pandas as pd
     user = User.query.get(session.get("user_id"))
     if user.role == "auditor":
         flash("El rol Auditor no puede importar instrumentos.", "danger")
@@ -154653,7 +154592,6 @@ def iso22301_block_title(code: str) -> str:
 
 
 def iso22301_safe_str(x):
-    import pandas as pd
     if x is None:
         return ""
     try:
@@ -154941,7 +154879,6 @@ def iso22301_pct_por_criterio(resumen: dict, order: list[str] = None):
 
 
 def iso22301_radar_b64(labels: list[str], values: list[float], title: str = "Radar ISO 22301"):
-    import matplotlib.pyplot as plt
     if not labels:
         return ""
     vals = [max(0.0, min(100.0, float(v))) for v in values]
@@ -154972,11 +154909,6 @@ def iso22301_radar_b64(labels: list[str], values: list[float], title: str = "Rad
 
 
 def generar_iso22301_velocimetro_png_bytes(titulo, valor, nivel="", color="#6c757d"):
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Wedge
-    from matplotlib.patches import Circle
-    from matplotlib.patches import FancyArrowPatch
-    from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
     try:
         valor = max(0, min(100, float(valor or 0)))
         fig = plt.figure(figsize=(7.2, 4.2), dpi=220)
@@ -155521,7 +155453,6 @@ def _iso22301_bool(value, default=True):
 
 
 def _iso22301_catalog_from_excel(xlsx_path):
-    import pandas as pd
     df = pd.read_excel(xlsx_path, sheet_name="Catálogo Arkyntech", header=0)
     normalized = {_iso22301_norm(c): c for c in df.columns}
     required = {
@@ -159920,7 +159851,6 @@ def ai_recalcular_y_actualizar_run(run_id):
 
 
 def ai_radar_b64(labels, values, title="Radar ISO 42001"):
-    import matplotlib.pyplot as plt
     if not labels:
         return ""
 
@@ -159953,7 +159883,6 @@ def ai_radar_b64(labels, values, title="Radar ISO 42001"):
 
 
 def ai_importar_instrumento_desde_excel(path_excel, force=False):
-    from openpyxl import load_workbook
     if not os.path.exists(path_excel):
         raise FileNotFoundError(f"No existe el archivo del instrumento: {path_excel}")
 
@@ -180043,7 +179972,6 @@ def proponentes_scorecard_rating(scorecard_id):
 @app.route("/proponentes/scorecard/<int:scorecard_id>/rating/pdf")
 @login_required
 def proponentes_scorecard_rating_pdf(scorecard_id):
-    import matplotlib.pyplot as plt
     user, allowed, read_only = scorecard_proponentes_user_permiso()
 
     if not allowed:
@@ -180213,7 +180141,6 @@ def proponentes_scorecard_rating_pdf(scorecard_id):
         return "#b91c1c"
 
     def fig_to_image(fig, width, height):
-        import matplotlib.pyplot as plt
         img = BytesIO()
         fig.savefig(
             img,
@@ -191695,7 +191622,6 @@ CONT_COMP_ISO27002_LEGACY_TO_2022 = {
 
 
 def cont_comp_iso27002_entries_from_xlsx(force_reload=False):
-    from openpyxl import load_workbook
     """
     Lee exclusivamente los 93 controles oficiales del archivo:
         static/templates/anexo A 27002.xlsx
