@@ -1,3 +1,4 @@
+# GRAC Render: importaciones pesadas diferidas hasta que se usa el módulo correspondiente.
 #madurez_bp = Blueprint# soa_iso27001_app.py
 # Aplicación Flask autocontenida: Declaración de Aplicabilidad ISO 27001:2022 (todo en un archivo)
 # Requisitos: pip install flask flask_sqlalchemy
@@ -25,7 +26,7 @@ from datetime import datetime as dt
 from flask import Flask, render_template_string, request, redirect, url_for, session, flash
 from flask import abort
 import re
-import pandas as pd
+
 from markupsafe import Markup, escape
 from werkzeug.utils import secure_filename
 from io import BytesIO
@@ -36,14 +37,14 @@ from reportlab.lib.utils import ImageReader
 import secrets
 import io
 import math
-import numpy as np
+
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from matplotlib.patches import Wedge, Circle, FancyArrowPatch
-from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+
+
+
 import shutil
-import numpy as np
+
 from werkzeug.utils import secure_filename
 from uuid import uuid4
 import requests
@@ -52,7 +53,7 @@ import string
 from flask_sqlalchemy import SQLAlchemy
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib import colors
-import pandas as pd
+
 import os
 from cryptography.fernet import Fernet
 from werkzeug.utils import secure_filename
@@ -139,8 +140,8 @@ from reportlab.lib.enums import TA_LEFT
 from reportlab.lib import colors
 from werkzeug.exceptions import HTTPException
 import uuid
-import pandas as pd
-from openpyxl import load_workbook
+
+
 
 
 from flask import (
@@ -148,8 +149,8 @@ from flask import (
 )
 from flask_sqlalchemy import SQLAlchemy
 
-import pandas as pd
-import numpy as np
+
+
 
 
 
@@ -157,7 +158,7 @@ import numpy as np
 os.environ["MPLBACKEND"] = "Agg"
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+
 
 # OpenAI SDK
 from openai import OpenAI
@@ -174,7 +175,7 @@ from reportlab.platypus import (
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
 import matplotlib
 matplotlib.use("Agg")  # IMPORTANT para servidores Flask
-import matplotlib.pyplot as plt
+
 from flask import send_file
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.pagesizes import A4, landscape
@@ -406,6 +407,8 @@ def calcular_riesgo(probabilidad_txt, impacto_txt):
 
 
 app = Flask(__name__)
+# La cookie de autenticación termina con la sesión del navegador.
+app.config["SESSION_PERMANENT"] = False
 
 # ============================================================
 # BARRA DE PROGRESO GLOBAL SGSI - PARA TODOS LOS PROCESOS
@@ -1091,6 +1094,533 @@ def inject_sgsi_progress_bar(response):
         print("No se pudo inyectar barra de progreso SGSI:", repr(e))
 
     return response
+
+# ============================================================
+# CIERRE DE SESIÓN AL CERRAR PESTAÑA O NAVEGADOR
+# ============================================================
+# pagehide también ocurre al recargar o navegar dentro del sitio. El tab_id
+# identifica la pestaña y el page_id identifica cada documento cargado. Así la
+# página siguiente puede cancelar el cierre pendiente de una navegación normal.
+
+BROWSER_SESSION_DB_PATH = os.path.join(app.instance_path, "browser_sessions.db")
+_BROWSER_SESSION_DB_LOCK = threading.RLock()
+_BROWSER_SESSION_KEY = "_grac_browser_session_id"
+
+try:
+    BROWSER_SESSION_GRACE_SECONDS = min(
+        15.0,
+        max(2.0, float(os.getenv("GRAC_TAB_CLOSE_GRACE_SECONDS", "5")))
+    )
+except (TypeError, ValueError):
+    BROWSER_SESSION_GRACE_SECONDS = 5.0
+
+
+def _browser_session_connect():
+    os.makedirs(app.instance_path, exist_ok=True)
+    conn = sqlite3.connect(BROWSER_SESSION_DB_PATH, timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=10000")
+    return conn
+
+
+def _browser_session_init_db():
+    with _BROWSER_SESSION_DB_LOCK:
+        conn = _browser_session_connect()
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS browser_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    user_id INTEGER,
+                    revoked_at REAL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS browser_tabs (
+                    session_id TEXT NOT NULL,
+                    tab_id TEXT NOT NULL,
+                    current_page_id TEXT,
+                    close_requested_at REAL,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (session_id, tab_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS ix_browser_tabs_pending
+                ON browser_tabs (session_id, close_requested_at);
+                """
+            )
+            cutoff = time.time() - (30 * 24 * 60 * 60)
+            conn.execute(
+                "DELETE FROM browser_tabs WHERE updated_at < ?",
+                (cutoff,)
+            )
+            conn.execute(
+                "DELETE FROM browser_sessions WHERE updated_at < ?",
+                (cutoff,)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def _browser_lifecycle_id(value):
+    value = str(value or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]{8,180}", value):
+        return None
+    return value
+
+
+def _browser_session_id(create=True):
+    session_id = _browser_lifecycle_id(session.get(_BROWSER_SESSION_KEY))
+
+    if not session_id and create:
+        session_id = secrets.token_urlsafe(32)
+        session[_BROWSER_SESSION_KEY] = session_id
+
+    return session_id
+
+
+def _browser_session_upsert(conn, session_id, now):
+    conn.execute(
+        """
+        INSERT INTO browser_sessions
+            (session_id, user_id, revoked_at, created_at, updated_at)
+        VALUES (?, ?, NULL, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+            user_id = excluded.user_id,
+            updated_at = excluded.updated_at
+        """,
+        (session_id, session.get("user_id"), now, now)
+    )
+
+    state = conn.execute(
+        "SELECT revoked_at FROM browser_sessions WHERE session_id = ?",
+        (session_id,)
+    ).fetchone()
+    return not state or state["revoked_at"] is None
+
+
+def _browser_session_expire_pending(conn, session_id, now):
+    pending = conn.execute(
+        """
+        SELECT MIN(close_requested_at) AS requested_at
+        FROM browser_tabs
+        WHERE session_id = ? AND close_requested_at IS NOT NULL
+        """,
+        (session_id,)
+    ).fetchone()
+
+    requested_at = pending["requested_at"] if pending else None
+    if requested_at is None:
+        return False
+
+    if (now - float(requested_at)) < BROWSER_SESSION_GRACE_SECONDS:
+        return False
+
+    conn.execute(
+        """
+        UPDATE browser_sessions
+        SET revoked_at = ?, updated_at = ?
+        WHERE session_id = ?
+        """,
+        (now, now, session_id)
+    )
+    return True
+
+
+def _browser_session_touch_and_validate():
+    session_id = _browser_session_id(create=True)
+    now = time.time()
+
+    with _BROWSER_SESSION_DB_LOCK:
+        conn = _browser_session_connect()
+        try:
+            if not _browser_session_upsert(conn, session_id, now):
+                conn.commit()
+                return False
+
+            expired = _browser_session_expire_pending(
+                conn, session_id, now
+            )
+            conn.commit()
+            return not expired
+        finally:
+            conn.close()
+
+
+def _browser_session_resume_tab(tab_id, page_id):
+    session_id = _browser_session_id(create=True)
+    now = time.time()
+
+    with _BROWSER_SESSION_DB_LOCK:
+        conn = _browser_session_connect()
+        try:
+            if not _browser_session_upsert(conn, session_id, now):
+                conn.commit()
+                return False
+
+            current_tab = conn.execute(
+                """
+                SELECT current_page_id, close_requested_at
+                FROM browser_tabs
+                WHERE session_id = ? AND tab_id = ?
+                """,
+                (session_id, tab_id)
+            ).fetchone()
+
+            # El mismo page_id con cierre pendiente puede ser un aviso que llegó
+            # después del fetch inicial. Un page_id distinto es navegación o
+            # recarga y sí cancela el cierre de la página anterior.
+            same_page_pending = bool(
+                current_tab
+                and current_tab["close_requested_at"] is not None
+                and current_tab["current_page_id"] == page_id
+            )
+
+            if same_page_pending:
+                conn.execute(
+                    """
+                    UPDATE browser_tabs
+                    SET updated_at = ?
+                    WHERE session_id = ? AND tab_id = ?
+                    """,
+                    (now, session_id, tab_id)
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO browser_tabs
+                        (session_id, tab_id, current_page_id,
+                         close_requested_at, updated_at)
+                    VALUES (?, ?, ?, NULL, ?)
+                    ON CONFLICT(session_id, tab_id) DO UPDATE SET
+                        current_page_id = excluded.current_page_id,
+                        close_requested_at = NULL,
+                        updated_at = excluded.updated_at
+                    """,
+                    (session_id, tab_id, page_id, now)
+                )
+
+            expired = _browser_session_expire_pending(
+                conn, session_id, now
+            )
+            conn.commit()
+            return not expired
+        finally:
+            conn.close()
+
+
+def _browser_session_mark_tab_closed(tab_id, page_id):
+    session_id = _browser_session_id(create=False)
+    if not session_id:
+        return
+
+    now = time.time()
+
+    with _BROWSER_SESSION_DB_LOCK:
+        conn = _browser_session_connect()
+        try:
+            current_tab = conn.execute(
+                """
+                SELECT current_page_id
+                FROM browser_tabs
+                WHERE session_id = ? AND tab_id = ?
+                """,
+                (session_id, tab_id)
+            ).fetchone()
+
+            if current_tab is None:
+                conn.execute(
+                    """
+                    INSERT INTO browser_tabs
+                        (session_id, tab_id, current_page_id,
+                         close_requested_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (session_id, tab_id, page_id, now, now)
+                )
+            elif current_tab["current_page_id"] == page_id:
+                # Ignora un beacon tardío de una página anterior.
+                conn.execute(
+                    """
+                    UPDATE browser_tabs
+                    SET close_requested_at = ?, updated_at = ?
+                    WHERE session_id = ? AND tab_id = ?
+                    """,
+                    (now, now, session_id, tab_id)
+                )
+
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def _browser_session_revoke(session_id=None):
+    session_id = _browser_lifecycle_id(
+        session_id or session.get(_BROWSER_SESSION_KEY)
+    )
+    if not session_id:
+        return
+
+    now = time.time()
+
+    with _BROWSER_SESSION_DB_LOCK:
+        conn = _browser_session_connect()
+        try:
+            conn.execute(
+                """
+                UPDATE browser_sessions
+                SET revoked_at = ?, updated_at = ?
+                WHERE session_id = ?
+                """,
+                (now, now, session_id)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+try:
+    _browser_session_init_db()
+except Exception as exc:
+    # No impide arrancar GRAC; la validación se reintentará en cada acceso.
+    print("No se pudo inicializar el control de pestañas:", repr(exc))
+
+
+@app.before_request
+def enforce_browser_session_lifecycle():
+    endpoint = request.endpoint or ""
+
+    if endpoint in {
+        "static",
+        "grac_browser_tab_resume",
+        "grac_browser_tab_close",
+        "logout"
+    }:
+        return None
+
+    if not session.get("user_id"):
+        return None
+
+    try:
+        valid = _browser_session_touch_and_validate()
+    except Exception as exc:
+        print("No se pudo validar la sesión del navegador:", repr(exc))
+        return None
+
+    if valid:
+        return None
+
+    session.clear()
+
+    if endpoint == "login":
+        return None
+
+    if request.path.startswith("/api/") or request.is_json:
+        return jsonify({
+            "ok": False,
+            "error": "La sesión finalizó al cerrarse la pestaña o el navegador."
+        }), 401
+
+    flash(
+        "La sesión se cerró porque se cerró la pestaña o el navegador.",
+        "info"
+    )
+    return redirect(url_for("login"))
+
+
+@app.route("/session/lifecycle/resume", methods=["POST"])
+def grac_browser_tab_resume():
+    if not session.get("user_id"):
+        return jsonify({"ok": False}), 401
+
+    payload = request.get_json(silent=True) or request.form
+    tab_id = _browser_lifecycle_id(payload.get("tab_id"))
+    page_id = _browser_lifecycle_id(payload.get("page_id"))
+
+    if not tab_id or not page_id:
+        return jsonify({"ok": False, "error": "Identificador inválido."}), 400
+
+    try:
+        valid = _browser_session_resume_tab(tab_id, page_id)
+    except Exception as exc:
+        print("No se pudo reanudar la sesión de pestaña:", repr(exc))
+        return jsonify({
+            "ok": False,
+            "error": "Control de sesión no disponible."
+        }), 503
+
+    if not valid:
+        session.clear()
+        flash(
+            "La sesión se cerró porque se cerró la pestaña o el navegador.",
+            "info"
+        )
+        return jsonify({
+            "ok": False,
+            "login_url": url_for("login")
+        }), 401
+
+    return jsonify({"ok": True})
+
+
+@app.route("/session/lifecycle/close", methods=["POST"])
+def grac_browser_tab_close():
+    if not session.get("user_id"):
+        return "", 204
+
+    payload = request.get_json(silent=True) or request.form
+    tab_id = _browser_lifecycle_id(payload.get("tab_id"))
+    page_id = _browser_lifecycle_id(payload.get("page_id"))
+
+    if tab_id and page_id:
+        try:
+            _browser_session_mark_tab_closed(tab_id, page_id)
+        except Exception as exc:
+            print("No se pudo registrar el cierre de pestaña:", repr(exc))
+
+    return "", 204
+
+
+BROWSER_SESSION_LIFECYCLE_HTML = r"""
+<script id="gracBrowserSessionLifecycle">
+(function () {
+  "use strict";
+
+  if (window.__gracBrowserSessionLifecycleInstalled) return;
+  window.__gracBrowserSessionLifecycleInstalled = true;
+
+  function newId() {
+    try {
+      if (window.crypto && typeof window.crypto.randomUUID === "function") {
+        return window.crypto.randomUUID();
+      }
+      if (window.crypto && typeof window.crypto.getRandomValues === "function") {
+        const bytes = new Uint8Array(16);
+        window.crypto.getRandomValues(bytes);
+        return Array.from(bytes, function (b) {
+          return b.toString(16).padStart(2, "0");
+        }).join("");
+      }
+    } catch (_) {}
+
+    return Date.now().toString(36) + "-" +
+      Math.random().toString(36).slice(2) +
+      Math.random().toString(36).slice(2);
+  }
+
+  let tabId;
+  try {
+    tabId = window.sessionStorage.getItem("gracBrowserTabId");
+    if (!tabId) {
+      tabId = newId();
+      window.sessionStorage.setItem("gracBrowserTabId", tabId);
+    }
+  } catch (_) {
+    tabId = newId();
+  }
+
+  const pageId = newId();
+  const resumeUrl = "/session/lifecycle/resume";
+  const closeUrl = "/session/lifecycle/close";
+
+  function resumeSession() {
+    const body = new URLSearchParams({tab_id: tabId, page_id: pageId});
+
+    fetch(resumeUrl, {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      keepalive: true,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+      },
+      body: body.toString()
+    }).then(function (response) {
+      if (response.status === 401) {
+        window.location.replace("/login");
+      }
+    }).catch(function () {
+      // Un corte puntual de red no debe interrumpir la página actual.
+    });
+  }
+
+  function notifyClose(event) {
+    // Una página guardada en bfcache no está cerrada y puede restaurarse.
+    if (event && event.persisted) return;
+
+    const form = new FormData();
+    form.append("tab_id", tabId);
+    form.append("page_id", pageId);
+
+    let queued = false;
+    try {
+      queued = !!(
+        navigator.sendBeacon &&
+        navigator.sendBeacon(closeUrl, form)
+      );
+    } catch (_) {}
+
+    if (!queued) {
+      const body = new URLSearchParams({tab_id: tabId, page_id: pageId});
+      fetch(closeUrl, {
+        method: "POST",
+        credentials: "same-origin",
+        keepalive: true,
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+        },
+        body: body.toString()
+      }).catch(function () {});
+    }
+  }
+
+  resumeSession();
+
+  window.addEventListener("pageshow", function (event) {
+    if (event.persisted) resumeSession();
+  });
+
+  window.addEventListener("pagehide", notifyClose, {capture: true});
+})();
+</script>
+"""
+
+
+@app.after_request
+def inject_browser_session_lifecycle(response):
+    try:
+        if response.status_code != 200 or response.is_streamed:
+            return response
+
+        if not session.get("user_id"):
+            return response
+
+        if "text/html" not in response.headers.get("Content-Type", ""):
+            return response
+
+        html_response = response.get_data(as_text=True)
+
+        if (
+            not html_response
+            or "gracBrowserSessionLifecycle" in html_response
+            or "</body>" not in html_response
+        ):
+            return response
+
+        html_response = html_response.replace(
+            "</body>",
+            BROWSER_SESSION_LIFECYCLE_HTML + "\n</body>",
+            1
+        )
+        response.set_data(html_response)
+        response.headers["Content-Length"] = str(len(response.get_data()))
+    except Exception as exc:
+        print("No se pudo inyectar el control de sesión:", repr(exc))
+
+    return response
+
 
 # ============================================================================================================================================
 #                                                               LOGS DE AUDITORÍA - DB INDEPENDIENTE
@@ -1806,6 +2336,7 @@ def _pick_col(df, candidates):
     return None
 
 def calcular_nist_desde_iso(iso_analysis_id):
+    import pandas as pd
     """
     Toma un AnalysisRun ISO (ISO 27001) y genera resultados NIST CSF 2.0
     usando el mapeo CSF→ISO del Excel.
@@ -1883,6 +2414,7 @@ def calcular_nist_desde_iso(iso_analysis_id):
         }
 
     def split_refs(x):
+        import pandas as pd
         s = ("" if pd.isna(x) else str(x)).strip()
         if not s:
             return []
@@ -7235,6 +7767,7 @@ def to_text(v) -> str:
     return str(v)
 
 def load_instrument_structure(xlsx_path: str):
+    import pandas as pd
     xls = pd.ExcelFile(xlsx_path)
     sheets = []
     for sheet_name in xls.sheet_names:
@@ -7827,6 +8360,7 @@ def get_areaid_divisiones_map():
 
     
 def extraer_respuestas_desde_excel(path_xlsx):
+    import pandas as pd
     """
     Lee el archivo Excel del cuestionario de proveedores y
     devuelve una lista de dicts con:
@@ -8846,6 +9380,11 @@ def generar_otp(username):
 # ============================================================================================================================================
 @app.route('/logout')
 def logout():
+
+    try:
+        _browser_session_revoke()
+    except Exception as exc:
+        print("No se pudo revocar la sesión al cerrar manualmente:", repr(exc))
 
     session.clear()
 
@@ -11208,12 +11747,13 @@ import math
 import re
 import json
 import sqlite3
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
+
+
 from flask import jsonify
 
 
 def _dashboard_fig_to_b64(fig):
+    import matplotlib.pyplot as plt
     buf = io.BytesIO()
     fig.savefig(
         buf,
@@ -11228,6 +11768,7 @@ def _dashboard_fig_to_b64(fig):
 
 
 def _dashboard_empty_chart(title="Sin datos", subtitle="No hay información disponible"):
+    import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(7.8, 4.8))
     fig.patch.set_facecolor("#ffffff")
     ax.set_facecolor("#ffffff")
@@ -11247,6 +11788,8 @@ def _dashboard_empty_chart(title="Sin datos", subtitle="No hay información disp
 
 
 def _dashboard_gauge_b64(value, title="Cumplimiento", subtitle="Protección de datos personales"):
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
     try:
         value = float(value or 0)
     except Exception:
@@ -11392,6 +11935,7 @@ def _dashboard_gauge_b64(value, title="Cumplimiento", subtitle="Protección de d
     return _dashboard_fig_to_b64(fig)
 
 def _dashboard_donut_b64(labels, values, title="", subtitle=""):
+    import matplotlib.pyplot as plt
     labels = labels or []
     values = values or []
 
@@ -11494,6 +12038,7 @@ def _dashboard_latest_iso_radar():
         return _dashboard_empty_chart("ISO Error", str(e))
 
 def generar_radar_grande(labels, values, title):
+    import matplotlib.pyplot as plt
     angles = [n / float(len(labels)) * 2 * math.pi for n in range(len(labels))]
     angles += angles[:1]
 
@@ -12982,6 +13527,7 @@ def _dashboard_nice_scale(value):
 
 
 def _dashboard_scalar_ring_b64(value, title="", subtitle="", unit="", decimals=2):
+    import matplotlib.pyplot as plt
     try:
         value = max(0.0, float(value or 0))
     except Exception:
@@ -13011,6 +13557,7 @@ def _dashboard_scalar_ring_b64(value, title="", subtitle="", unit="", decimals=2
 
 
 def _dashboard_pie_b64(labels, values, title="", subtitle=""):
+    import matplotlib.pyplot as plt
     labels = list(labels or [])
     values = [float(v or 0) for v in (values or [])]
     if not labels or not values or sum(values) <= 0:
@@ -13040,6 +13587,7 @@ def _dashboard_pie_b64(labels, values, title="", subtitle=""):
 
 
 def _dashboard_bar_b64(labels, values, title="", subtitle="", horizontal=False, unit=""):
+    import matplotlib.pyplot as plt
     labels = [str(label) for label in (labels or [])]
     values = [float(v or 0) for v in (values or [])]
     if not labels or not values:
@@ -13073,6 +13621,7 @@ def _dashboard_bar_b64(labels, values, title="", subtitle="", horizontal=False, 
 
 
 def _dashboard_line_b64(labels, values, title="", subtitle="", unit=""):
+    import matplotlib.pyplot as plt
     labels = [str(label) for label in (labels or [])]
     values = [float(v or 0) for v in (values or [])]
     if not labels or not values:
@@ -98637,6 +99186,7 @@ def allowed_file_excel(filename: str) -> bool:
 
 
 def leer_cuestionario_excel(file_storage) -> str:
+    import pandas as pd
     """
     Lee el Excel del cuestionario de proveedores y construye un texto:
     Referencia: X.X
@@ -98720,6 +99270,7 @@ def _normalizar_respuesta(valor: str) -> str:
 
 
 def calcular_puntaje_desde_excel_bytes(contenido_excel: bytes) -> tuple[float, str]:
+    import pandas as pd
     """
     Lee el Excel (binario) del cuestionario y calcula el puntaje según la regla:
     - Sí = 100
@@ -99057,6 +99608,7 @@ def calcular_puntaje_total(puntaje_cuestionario: float,
     return round(puntaje_cuestionario, 2)
 
 def obtener_resumen_respuestas_desde_excel_bytes(contenido_excel: bytes) -> dict:
+    import pandas as pd
     """
     Lee el Excel (binario) y devuelve un resumen:
     {
@@ -116832,6 +117384,8 @@ def cargar_respuestas_run(run_id):
     return out
 
 def normalize_control_code(v) -> str:
+    import pandas as pd
+    import numpy as np
     """
     Convierte el código de control de ANEXO A a texto estable:
     - Si Excel lo convirtió a fecha (05/06/2026) => "5.6"
@@ -117897,6 +118451,7 @@ def eval_status_from_row(df: pd.DataFrame, r: int, col_map: dict, requisito: str
 
 
 def parse_sheet_xls(excel_path: str, sheet_name: str):
+    import pandas as pd
     df = pd.read_excel(excel_path, sheet_name=sheet_name, header=None, engine="xlrd")
 
     # 1) Intentar formato NUEVO (Item/Subitem/Pregunta…)
@@ -118087,6 +118642,8 @@ def parse_sheet_xls(excel_path: str, sheet_name: str):
 # ==========================
 def make_radar_base64(labels, values, title="Araña de madurez", max_label_len=22):
     # 1) recorte general
+    import numpy as np
+    import matplotlib.pyplot as plt
     labels2 = [l if len(l) <= max_label_len else (l[:max_label_len] + "…") for l in labels]
 
     # 2) ✅ FIX SOLO para 6 Planificación y 10 Mejora: poner salto de línea
@@ -118165,6 +118722,8 @@ def make_radar_base64(labels, values, title="Araña de madurez", max_label_len=2
 
 
 def make_bar_base64(labels, values, title="Madurez por capítulo", max_label_len=26):
+    import numpy as np
+    import matplotlib.pyplot as plt
     labs = [l if len(l) <= max_label_len else (l[:max_label_len] + "…") for l in labels]
     if not labs:
         return ""
@@ -122213,6 +122772,7 @@ def param_gap_levels():
     return render_template_string(BASE, title="Parámetro: Brechas", content=content)
 
 def safe_str(x):
+    import pandas as pd
     """Convierte NaN/None a '' y todo lo demás a string limpio."""
     try:
         import pandas as pd
@@ -122273,6 +122833,7 @@ def normalize_anexo_control(raw_control: str, tema: str = "") -> str:
 @madurez_bp.route("/admin/importar_instrumento", methods=["POST"])
 @login_required
 def importar_instrumento_admin():
+    import pandas as pd
     force = (request.args.get("force") == "1") or (request.form.get("force") == "1")
 
     if force:
@@ -122489,6 +123050,7 @@ def _translate_to_es_cached(text: str) -> str:
 @nist_madurez_bp.route("/admin/importar_instrumento", methods=["POST"])
 @login_required
 def nist_importar_instrumento_admin():
+    from openpyxl import load_workbook
     force = (request.args.get("force") == "1") or (request.form.get("force") == "1")
 
     if (NistMadurezPregunta.query.count() > 0) and not force:
@@ -124548,6 +125110,7 @@ def ingreso_guardar():
         return redirect(url_for("madurez.ingreso"))
 
 def build_df_from_db(run_id: int):
+    import pandas as pd
     import pandas as pd
 
     rows = db.session.query(
@@ -130246,6 +130809,7 @@ def nist_pct_por_funcion(resumen: dict, func_order: list[str]):
 
 
 def nist_radar_b64(labels: list[str], values: list[float], title: str = "Radar NIST CSF 2.0"):
+    import matplotlib.pyplot as plt
     """
     Genera PNG base64 (sin guardar archivo).
     values debe venir en escala 0..100.
@@ -136729,6 +137293,7 @@ def _normalizar_titulo(t: str) -> str:
     return t
 
 def _gdpr_construir_radar_fig(resumen: dict):
+    import matplotlib.pyplot as plt
     """
     Construye la figura radar y la retorna como objeto matplotlib Figure.
     Sirve para HTML (base64) y para PDF (bytes PNG).
@@ -136818,6 +137383,7 @@ def _gdpr_construir_radar_fig(resumen: dict):
         return None
 
 def generar_radar_datos_base64(resumen: dict) -> str | None:
+    import matplotlib.pyplot as plt
     try:
         fig = _gdpr_construir_radar_fig(resumen)
         if fig is None:
@@ -136841,6 +137407,7 @@ def generar_radar_datos_base64(resumen: dict) -> str | None:
 
 
 def generar_radar_datos_png_bytes(resumen: dict) -> bytes | None:
+    import matplotlib.pyplot as plt
     try:
         fig = _gdpr_construir_radar_fig(resumen)
         if fig is None:
@@ -136892,6 +137459,8 @@ def gdpr_resumen_tarjetas_por_nivel(resumen: dict):
     return out
 
 def _gdpr_construir_velocimetro_niveles_fig(resumen: dict):
+    import numpy as np
+    import matplotlib.pyplot as plt
     """
     Construye una figura con 5 mini-velocímetros, uno por nivel,
     mostrando la cantidad de dominios en cada nivel.
@@ -136978,6 +137547,7 @@ def _gdpr_construir_velocimetro_niveles_fig(resumen: dict):
 
 
 def generar_velocimetro_niveles_base64(resumen: dict) -> str | None:
+    import matplotlib.pyplot as plt
     try:
         fig = _gdpr_construir_velocimetro_niveles_fig(resumen)
         if fig is None:
@@ -137001,6 +137571,7 @@ def generar_velocimetro_niveles_base64(resumen: dict) -> str | None:
 
 
 def generar_velocimetro_niveles_png_bytes(resumen: dict) -> bytes | None:
+    import matplotlib.pyplot as plt
     try:
         fig = _gdpr_construir_velocimetro_niveles_fig(resumen)
         if fig is None:
@@ -137121,6 +137692,8 @@ REGLAS
 # =====================================================================
 
 def _gdpr_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: str):
+    import numpy as np
+    import matplotlib.pyplot as plt
     try:
         pct = max(0.0, min(100.0, float(pct or 0)))
 
@@ -137297,6 +137870,7 @@ def _gdpr_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: s
         return None
 
 def generar_gdpr_velocimetro_png_bytes(label: str, pct: float, nivel: str, color: str):
+    import matplotlib.pyplot as plt
     fig = _gdpr_construir_velocimetro_fig(label, pct, nivel, color)
     if fig is None:
         return None
@@ -137672,6 +138246,7 @@ def detalle_pdf(run_id: int):
 @madurez_datos_bp.route("/admin/importar_instrumento", methods=["POST"])
 @login_required
 def importar_instrumento_admin():
+    from openpyxl import load_workbook
     user = User.query.get(session.get("user_id"))
 
     if user.role == "auditor":
@@ -142749,6 +143324,7 @@ def pci_resolver_nivel(pct: float):
 # =========================
 
 def pci_safe_str(x):
+    import pandas as pd
     if x is None:
         return ""
     try:
@@ -143182,6 +143758,7 @@ def _ai_text(prompt: str, max_tokens: int = 900) -> str:
 @pci_madurez_bp.route("/admin/importar_instrumento", methods=["POST"])
 @login_required
 def importar_instrumento_pci():
+    import pandas as pd
     user = User.query.get(session.get("user_id"))
 
     if user.role == "auditor":
@@ -143427,6 +144004,7 @@ def informe_ejecutivo_generar_pci(run_id: int):
 # =========================
 
 def build_pci_df_from_db(run_id: int) -> pd.DataFrame:
+    import pandas as pd
     q = (
         db.session.query(PciMadurezRespuesta, PciMadurezPregunta)
         .join(PciMadurezPregunta, PciMadurezPregunta.id == PciMadurezRespuesta.pregunta_id)
@@ -143711,6 +144289,8 @@ def ingreso_guardar_pci():
 # =========================
 
 def _pci_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: str):
+    import numpy as np
+    import matplotlib.pyplot as plt
     try:
         pct = max(0.0, min(100.0, float(pct or 0)))
 
@@ -143755,6 +144335,11 @@ def _pci_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: st
         return None
 
 def generar_pci_velocimetro_png_bytes(titulo, valor, nivel="", color="#6c757d"):
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Wedge
+    from matplotlib.patches import Circle
+    from matplotlib.patches import FancyArrowPatch
+    from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
     """
     Genera un velocímetro limpio y legible para incrustar en PDF.
     Retorna bytes PNG.
@@ -143998,6 +144583,7 @@ def pci_normalizar_texto_rico_guardado(texto: str) -> str:
     return txt.strip()
 
 def generar_pci_radar_base64(resultados: dict):
+    import matplotlib.pyplot as plt
     try:
         labels = []
         values = []
@@ -148184,6 +148770,7 @@ def informe_ejecutivo_editar_pci(run_id: int):
 @pci_madurez_bp.route("/resultado/<int:analysis_id>", methods=["GET"])
 @login_required
 def detalle_resultado_pci(analysis_id: int):
+    import matplotlib.pyplot as plt
     user = User.query.get(session.get("user_id"))
 
     if user.role not in ("admin", "auditor") and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
@@ -148839,6 +149426,7 @@ def soc2_block_title(code: str) -> str:
 
 
 def soc2_safe_str(x):
+    import pandas as pd
     if x is None:
         return ""
     try:
@@ -149106,6 +149694,7 @@ def soc2_pct_por_criterio(resumen: dict, order: list[str] = None):
 
 
 def soc2_radar_b64(labels: list[str], values: list[float], title: str = "Radar SOC 2"):
+    import matplotlib.pyplot as plt
     if not labels:
         return ""
     vals = [max(0.0, min(100.0, float(v))) for v in values]
@@ -149136,6 +149725,11 @@ def soc2_radar_b64(labels: list[str], values: list[float], title: str = "Radar S
 
 
 def generar_soc2_velocimetro_png_bytes(titulo, valor, nivel="", color="#6c757d"):
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Wedge
+    from matplotlib.patches import Circle
+    from matplotlib.patches import FancyArrowPatch
+    from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
     try:
         valor = max(0, min(100, float(valor or 0)))
         fig = plt.figure(figsize=(7.2, 4.2), dpi=220)
@@ -149565,6 +150159,7 @@ Enfocado en madurez SOC 2 y preparación para auditoría.
 @soc2_madurez_bp.route("/admin/importar_instrumento", methods=["POST"])
 @login_required
 def importar_instrumento_soc2():
+    import pandas as pd
     user = User.query.get(session.get("user_id"))
     if user.role == "auditor":
         flash("El rol Auditor no puede importar instrumentos.", "danger")
@@ -154058,6 +154653,7 @@ def iso22301_block_title(code: str) -> str:
 
 
 def iso22301_safe_str(x):
+    import pandas as pd
     if x is None:
         return ""
     try:
@@ -154345,6 +154941,7 @@ def iso22301_pct_por_criterio(resumen: dict, order: list[str] = None):
 
 
 def iso22301_radar_b64(labels: list[str], values: list[float], title: str = "Radar ISO 22301"):
+    import matplotlib.pyplot as plt
     if not labels:
         return ""
     vals = [max(0.0, min(100.0, float(v))) for v in values]
@@ -154375,6 +154972,11 @@ def iso22301_radar_b64(labels: list[str], values: list[float], title: str = "Rad
 
 
 def generar_iso22301_velocimetro_png_bytes(titulo, valor, nivel="", color="#6c757d"):
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Wedge
+    from matplotlib.patches import Circle
+    from matplotlib.patches import FancyArrowPatch
+    from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
     try:
         valor = max(0, min(100, float(valor or 0)))
         fig = plt.figure(figsize=(7.2, 4.2), dpi=220)
@@ -154919,6 +155521,7 @@ def _iso22301_bool(value, default=True):
 
 
 def _iso22301_catalog_from_excel(xlsx_path):
+    import pandas as pd
     df = pd.read_excel(xlsx_path, sheet_name="Catálogo Arkyntech", header=0)
     normalized = {_iso22301_norm(c): c for c in df.columns}
     required = {
@@ -159317,6 +159920,7 @@ def ai_recalcular_y_actualizar_run(run_id):
 
 
 def ai_radar_b64(labels, values, title="Radar ISO 42001"):
+    import matplotlib.pyplot as plt
     if not labels:
         return ""
 
@@ -159349,6 +159953,7 @@ def ai_radar_b64(labels, values, title="Radar ISO 42001"):
 
 
 def ai_importar_instrumento_desde_excel(path_excel, force=False):
+    from openpyxl import load_workbook
     if not os.path.exists(path_excel):
         raise FileNotFoundError(f"No existe el archivo del instrumento: {path_excel}")
 
@@ -179438,6 +180043,7 @@ def proponentes_scorecard_rating(scorecard_id):
 @app.route("/proponentes/scorecard/<int:scorecard_id>/rating/pdf")
 @login_required
 def proponentes_scorecard_rating_pdf(scorecard_id):
+    import matplotlib.pyplot as plt
     user, allowed, read_only = scorecard_proponentes_user_permiso()
 
     if not allowed:
@@ -179607,6 +180213,7 @@ def proponentes_scorecard_rating_pdf(scorecard_id):
         return "#b91c1c"
 
     def fig_to_image(fig, width, height):
+        import matplotlib.pyplot as plt
         img = BytesIO()
         fig.savefig(
             img,
@@ -191088,6 +191695,7 @@ CONT_COMP_ISO27002_LEGACY_TO_2022 = {
 
 
 def cont_comp_iso27002_entries_from_xlsx(force_reload=False):
+    from openpyxl import load_workbook
     """
     Lee exclusivamente los 93 controles oficiales del archivo:
         static/templates/anexo A 27002.xlsx
