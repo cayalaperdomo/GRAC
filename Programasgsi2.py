@@ -14720,8 +14720,16 @@ MENU_SECTIONS = [
         "title": "Cadena de Suministro (TPRM)",
         "icon": "bi-truck",
         "items": [
-            {"label": "Ingreso de información proponente web", "href": "/cuestionario_proveedores_web", "icon": "bi-ui-checks", "btn": "btn-info text-white", "module": "Cuestionario de proveedores web"},
-            {"label": "Ingreso de información proponente archivo", "href": "/ingreso_informacion_proponente_archivo", "icon": "bi-file-earmark-spreadsheet", "btn": "btn-info text-white", "module": "Cuestionarios de Proponentes"},
+            {
+                "label": "Ingreso información",
+                "href": "#",
+                "icon": "bi-folder2-open",
+                "btn": "btn-info text-white",
+                "children": [
+                    {"label": "Vía web", "href": "/cuestionario_proveedores_web", "icon": "bi-globe", "btn": "btn-info text-white", "module": "Cuestionario de proveedores web"},
+                    {"label": "Vía archivo", "href": "/ingreso_informacion_proponente_archivo", "icon": "bi-file-earmark-spreadsheet", "btn": "btn-info text-white", "module": "Cuestionarios de Proponentes"},
+                ],
+            },
             {"label": "Evaluación de proponentes", "href": "/cuestionarios_proveedores", "icon": "bi-bar-chart-line", "btn": "btn-info text-white", "module": "Cuestionarios de Proponentes"},
             {"label": "Revisión en Listas Restrictivas", "href": "/listas_restrictivas", "icon": "bi-shield-exclamation", "btn": "btn-danger", "module": "Listas Restrictivas"},
             {"label": "Security Scorecard de Terceros", "href": "/proponentes/scorecard", "icon": "bi-shield-check", "btn": "btn-warning text-dark", "module": "Security Scorecard de Terceros"},
@@ -15442,10 +15450,17 @@ def _sgsi_build_global_menu_html():
             },
 
             # Cadena de Suministro
-            "Cuestionario de proveedores web": {"paths": ["/cuestionario_proveedores_web"], "endpoints": ["cpw_admin", "cpw_detail"]},
-            "Cuestionarios de Proponentes": {
-                "paths": ["/cuestionarios_proveedores", "/ingreso_informacion_proponente_archivo"],
-                "endpoints": ["cuestionarios_proveedores", "ingreso_informacion_proponente_archivo"]
+            "Vía web": {
+                "paths": ["/cuestionario_proveedores_web"],
+                "endpoints": ["cpw_admin", "cpw_evaluation", "cpw_detail"]
+            },
+            "Vía archivo": {
+                "paths": ["/ingreso_informacion_proponente_archivo"],
+                "endpoints": ["ingreso_informacion_proponente_archivo"]
+            },
+            "Evaluación de proponentes": {
+                "paths": ["/cuestionarios_proveedores"],
+                "endpoints": ["cuestionarios_proveedores"]
             },
             "Revisión en Listas Restrictivas": {
                 "paths": ["/listas_restrictivas"],
