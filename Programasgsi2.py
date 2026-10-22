@@ -9998,6 +9998,7 @@ MODULES = [
     "Tablas de Valoración",
     "Dueños de Información",
     "Registro de Incidentes",
+    "Centro de Alertas",
     "Configuración Parámetros de la Empresa",
     "Gestión de Cambios (RFC)",
     "Registro de Proveedores",
@@ -11311,11 +11312,11 @@ def verificar_permiso_activos(user, permiso_matriz):
 # ============================================================
 
 AUDITOR_MODULES_DENY = {
+    "Centro de Alertas",
     "Configuración Parámetros de la Empresa",
     "OpenRouter API Key",
     "Gestión de Usuarios",
     "Aplicación móvil",
-    "Chat con Asistente",
 }
 
 AUDITOR_ACTIONS_DENY_LABELS = (
@@ -14697,7 +14698,7 @@ MENU_SECTIONS = [
         "title": "Gestión de Eventos",
         "icon": "bi-exclamation-triangle",
         "items": [
-            {"label": "Centro de Alertas", "href": "/alertas", "icon": "bi-bell-fill", "btn": "btn-warning text-dark"},
+            {"label": "Centro de Alertas", "href": "/alertas", "icon": "bi-bell-fill", "btn": "btn-warning text-dark", "module": "Centro de Alertas"},
             {"label": "Registro de Incidentes", "href": "/incidentes", "icon": "bi-exclamation-triangle", "btn": "btn-danger", "module": "Registro de Incidentes"},
             {"label": "Registro de Vulnerabilidades", "href": "/vulnerabilidades_menu", "icon": "bi-bug", "btn": "btn-danger", "module": "Registro de Vulnerabilidades"},
             {"label": "Modelamiento de Amenazas", "href": "/modelamiento_amenazas", "icon": "bi-diagram-3", "btn": "btn-dark", "module": "Modelamiento de Amenazas"},
@@ -15001,11 +15002,16 @@ MENU_SECTIONS = [
     },
 ]
 
-def filtrar_items_menu(items, usuario_actual):
+def filtrar_items_menu(items, usuario_actual, seccion_admin=False):
     filtrados = []
 
     for it in items:
         item_copy = dict(it)
+        # En Administración los perfiles Usuario y Auditor solo ven el chat.
+        # Este filtro es exclusivo de la sección: no toca otros módulos SGSI.
+        if (seccion_admin and usuario_actual.role in ("user", "auditor")
+                and item_copy.get("href") != "/chatgpt_view"):
+            continue
         children = item_copy.get("children", [])
         module_name = item_copy.get("module")
 
@@ -15038,7 +15044,7 @@ def filtrar_items_menu(items, usuario_actual):
 
         # Si tiene hijos, se filtran recursivamente
         if children:
-            children_filtrados = filtrar_items_menu(children, usuario_actual)
+            children_filtrados = filtrar_items_menu(children, usuario_actual, seccion_admin=seccion_admin)
 
             if children_filtrados and permitido:
                 item_copy["children"] = children_filtrados
@@ -15055,6 +15061,37 @@ def filtrar_items_menu(items, usuario_actual):
                 filtrados.append(item_copy)
 
     return filtrados
+
+
+# ============================================================
+# SEGURIDAD: SOLO CHAT PARA USUARIO Y AUDITOR EN ADMINISTRACIÓN
+# ============================================================
+@app.before_request
+def _sgsi_restringir_administracion_a_chat():
+    """Evita acceso por URL o POST a funciones administrativas ocultas del menú."""
+    uid = session.get("user_id")
+    if not uid:
+        return None  # La autenticación conserva su validación original.
+
+    path = (request.path or "/").rstrip("/") or "/"
+    # Solo destinos administrativos del menú (sin interferir con otros módulos).
+    administrativo = (
+        path == "/admin" or path.startswith("/admin/")
+        or path == "/usuarios" or path.startswith("/usuarios/")
+        or path.startswith("/editar_permisos/")
+        or path in {"/areas_area", "/areas_division", "/areas/delete", "/config/email"}
+        or (path.startswith("/areas/") and
+            (path.endswith("/info") or path.endswith("/divisiones_json")))
+    )
+    if not administrativo:
+        return None
+
+    usuario = db.session.get(User, uid)
+    if usuario is None or usuario.role in ("user", "auditor"):
+        # Un POST o una consulta directa tampoco puede sortear la restricción.
+        abort(403, description="Acceso restringido a Administración. Solo Chat con Asistente.")
+    return None
+
 
 # ============================================================
 # MENÚ GLOBAL SGSI SIEMPRE VISIBLE EN TODOS LOS MÓDULOS
@@ -15772,7 +15809,10 @@ def _sgsi_build_global_menu_html():
         all_leaf_items = []
 
         for sec in MENU_SECTIONS:
-            allowed_items = filtrar_items_menu(sec.get("items", []), usuario_actual)
+            allowed_items = filtrar_items_menu(
+                sec.get("items", []), usuario_actual,
+                seccion_admin=(sec.get("title") == "Administración")
+            )
             if allowed_items:
                 sec2 = dict(sec)
                 sec2["items"] = allowed_items
@@ -17471,7 +17511,10 @@ def menu():
     else:
         sections = []
         for sec in MENU_SECTIONS:
-            allowed_items = filtrar_items_menu(sec.get("items", []), usuario_actual)
+            allowed_items = filtrar_items_menu(
+                sec.get("items", []), usuario_actual,
+                seccion_admin=(sec.get("title") == "Administración")
+            )
             if allowed_items:
                 sec2 = dict(sec)
                 sec2["items"] = allowed_items
@@ -20115,9 +20158,9 @@ ALERT_PAGE_HEADER_STYLES = """
 
 
 def alert_user_can_view_module(user, module_name):
-    if not user:
+    if not user or user.role == "auditor":
         return False
-    if user.role in {"admin", "auditor"}:
+    if user.role == "admin":
         return True
     permission = ALERT_MODULE_PERMISSIONS.get(module_name)
     if not permission:
@@ -20297,9 +20340,14 @@ def admin_alertas():
 @app.route("/alertas", methods=["GET", "POST"])
 @login_required
 def alert_center():
+    # Control de acceso real del Centro de Alertas (también por URL directa).
+    current_alert_user = User.query.get(session.get("user_id"))
+    if (not current_alert_user or current_alert_user.role == "auditor"
+            or not verificar_permiso(current_alert_user, "Centro de Alertas")):
+        abort(403, description="No tiene permiso para acceder al Centro de Alertas.")
+
     alert_seed_defaults()
     cfg = alert_get_config()
-    current_alert_user = User.query.get(session.get("user_id"))
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
         event_id = request.form.get("event_id", type=int)
@@ -99227,7 +99275,9 @@ def leer_cuestionario_excel(file_storage) -> str:
     file_storage.seek(0)
 
     # En tu archivo, el 'header' útil empieza en la fila 2 (índice 1)
-    df = pd.read_excel(in_memory_file, header=1)
+    # Mantener las respuestas literales: por defecto pandas interpreta
+    # "N/A" y "NA" como NaN y altera el resumen, el texto IA y el puntaje.
+    df = pd.read_excel(in_memory_file, header=1, keep_default_na=False)
 
     # 1) Intento directo por nombre de columna (por si en el futuro cambias el formato)
     posibles_preg = ["Pregunta", "PREGUNTA", "pregunta"]
@@ -99306,7 +99356,9 @@ def calcular_puntaje_desde_excel_bytes(contenido_excel: bytes) -> tuple[float, s
     Devuelve (puntaje_0_100, explicacion_texto).
     """
     in_memory_file = io.BytesIO(contenido_excel)
-    df = pd.read_excel(in_memory_file, header=1)
+    # Mantener las respuestas literales: por defecto pandas interpreta
+    # "N/A" y "NA" como NaN y altera el resumen, el texto IA y el puntaje.
+    df = pd.read_excel(in_memory_file, header=1, keep_default_na=False)
 
     # Detectar columna de respuestas igual que en leer_cuestionario_excel
     posibles_resp = ["Respuesta", "RESPUESTA", "respuesta"]
@@ -99644,7 +99696,9 @@ def obtener_resumen_respuestas_desde_excel_bytes(contenido_excel: bytes) -> dict
     }
     """
     in_memory_file = io.BytesIO(contenido_excel)
-    df = pd.read_excel(in_memory_file, header=1)
+    # Mantener las respuestas literales: por defecto pandas interpreta
+    # "N/A" y "NA" como NaN y altera el resumen, el texto IA y el puntaje.
+    df = pd.read_excel(in_memory_file, header=1, keep_default_na=False)
 
     # Detectar columna de respuestas
     posibles_resp = ["Respuesta", "RESPUESTA", "respuesta"]
@@ -99815,18 +99869,36 @@ def cuestionarios_proveedores():
                 flash("Debes ingresar un título para la evaluación.", "warning")
                 return redirect(url_for(destino))
 
+            # Un cuestionario se considera evaluado SOLO si existe su resultado
+            # en el historial vigente del módulo «Evaluación de proponentes».
+            # La tabla evaluacion_cuestionario conserva un cálculo auxiliar,
+            # incluso después de eliminar el grupo histórico; no debe bloquear
+            # una nueva evaluación cuando el resultado ya no existe.
+            ids_con_resultado = db.session.query(EvaluacionGrupoDetalle.cuestionario_id)
             cuestionarios = CuestionarioProveedor.query.options(
                 selectinload(CuestionarioProveedor.evaluacion)
             ).filter(
-                CuestionarioProveedor.evaluacion == None,
+                ~CuestionarioProveedor.id.in_(ids_con_resultado),
                 CuestionarioProveedor.id.in_(_cpw_g.cpw_ids) if _cpw_portal else True
             ).order_by(
                 CuestionarioProveedor.fecha_carga.desc()
             ).all()
 
             if not cuestionarios:
-                flash("No hay cuestionarios pendientes para evaluar. Sube nuevos cuestionarios primero.", "info")
+                flash(
+                    "No hay cuestionarios disponibles para esta evaluación. "
+                    "Los cuestionarios seleccionados ya tienen resultados en "
+                    "«Evaluación de proponentes», o aún no se han cargado. "
+                    "Si se elimina el resultado histórico correspondiente, "
+                    "su cuestionario podrá evaluarse nuevamente sin volver a cargarlo.",
+                    "info"
+                )
                 return redirect(url_for(destino))
+
+            # Si el usuario eligió cuestionarios ya registrados junto a otros
+            # pendientes, procesar únicamente los pendientes y avisar cuáles
+            # se omitieron para no generar resultados duplicados.
+            omitidos = (len(set(_cpw_g.cpw_ids)) - len(cuestionarios)) if _cpw_portal else 0
 
             grupo = EvaluacionGrupo(
                 titulo=titulo_eval,
@@ -99980,6 +100052,8 @@ def cuestionarios_proveedores():
                 _cpw_g.cpw_group_id = grupo.id
 
             msg = f"Se creó la evaluación '{titulo_eval}' con {procesados} proponente(s) evaluado(s)."
+            if omitidos > 0:
+                msg += f" Se omitieron {omitidos} cuestionario(s) porque su resultado ya figura en Evaluación de proponentes."
             if errores > 0:
                 msg += f" Hubo errores en {errores} proveedor(es). Revisa la consola para más detalles."
             flash(msg, "success")
@@ -99990,13 +100064,16 @@ def cuestionarios_proveedores():
     # GET de Consultas y resultados es liviano: no abre archivos Excel BLOB.
     cuestionarios_cargados = []
     if modo_archivo:
-        cuestionarios = CuestionarioProveedor.query.options(
+        # Mostrar de nuevo cuestionarios cuyos resultados fueron eliminados.
+        # La existencia de evaluacion_cuestionario no equivale a un histórico vigente.
+        ids_con_resultado = db.session.query(EvaluacionGrupoDetalle.cuestionario_id)
+        cuestionarios_cargados = CuestionarioProveedor.query.options(
             load_only(CuestionarioProveedor.id, CuestionarioProveedor.fecha_carga,
                       CuestionarioProveedor.nombre_proveedor, CuestionarioProveedor.sitio_web,
-                      CuestionarioProveedor.nombre_archivo),
-            selectinload(CuestionarioProveedor.evaluacion)
+                      CuestionarioProveedor.nombre_archivo)
+        ).filter(
+            ~CuestionarioProveedor.id.in_(ids_con_resultado)
         ).order_by(CuestionarioProveedor.fecha_carga.desc()).all()
-        cuestionarios_cargados = [c for c in cuestionarios if c.evaluacion is None]
     # El dato del grupo más reciente se preserva para compatibilidad con BASE.
     ultimo_grupo = EvaluacionGrupo.query.order_by(EvaluacionGrupo.fecha_evaluacion.desc()).first()
 
@@ -100064,7 +100141,7 @@ def cuestionarios_proveedores():
       {% if cuestionarios_cargados %}
       <div class="propia-card mb-4">
         <div class="propia-card-body">
-          <div class="propia-section-title">Cuestionarios de Proveedores Evaluados</div>
+          <div class="propia-section-title">Cuestionarios pendientes de evaluación</div>
           <p class="text-muted mb-2">
             Estos son los cuestionarios que has cargado y aún no han sido incluidos en una evaluación de grupo.
           </p>
@@ -101691,16 +101768,24 @@ def cuestionarios_proveedores_ficha_proponente(detalle_id):
         selectinload(EvaluacionGrupoDetalle.cuestionario)
     ).get_or_404(detalle_id)
 
-    # 🔹 Calculamos resumen de referencias por tipo de respuesta
+    # 🔹 Resumen y verificación transparente del puntaje histórico.
+    # Nunca modificamos puntajes archivados de forma implícita al abrir una ficha.
     resumen_respuestas = None
+    puntaje_recalculado = None
+    puntaje_desactualizado = False
     if detalle.cuestionario and detalle.cuestionario.contenido_archivo:
         try:
             resumen_respuestas = obtener_resumen_respuestas_desde_excel_bytes(
                 detalle.cuestionario.contenido_archivo
             )
+            puntaje_recalculado, _ = calcular_puntaje_desde_excel_bytes(
+                detalle.cuestionario.contenido_archivo
+            )
+            puntaje_desactualizado = abs(float(detalle.puntaje_cuestionario or 0) - puntaje_recalculado) > 0.0049
         except Exception as e:
-            print("Error al obtener resumen de respuestas:", e)
+            print("Error al obtener resumen/puntaje del cuestionario:", e)
             resumen_respuestas = None
+            puntaje_recalculado = None
 
     content = render_template_string("""
     <div class="proficha-shell">
@@ -101760,6 +101845,18 @@ def cuestionarios_proveedores_ficha_proponente(detalle_id):
               </div>
             </div>
 
+            {% if puntaje_desactualizado %}
+            <div class="col-12">
+              <div class="alert alert-warning mb-2" role="status">
+                <strong>Revisión del puntaje:</strong> el archivo de respuestas arroja ahora
+                <strong>{{ "%.2f"|format(puntaje_recalculado) }}%</strong> al reconocer correctamente "N/A".
+                El puntaje histórico mostrado arriba se conserva sin modificar por trazabilidad.
+                Para guardar un resultado nuevo con el cálculo corregido, elimina la evaluación histórica
+                (si corresponde) y vuelve a evaluarla desde Ingreso información.
+              </div>
+            </div>
+            {% endif %}
+
             <div class="col-12">
               <div class="proficha-section-title">Resultado del cuestionario</div>
               <div class="proficha-text-box">
@@ -101800,7 +101897,7 @@ def cuestionarios_proveedores_ficha_proponente(detalle_id):
                   <tbody>
                     {% for tipo, refs in resumen_respuestas.items() %}
                       <tr>
-                        <td><strong>{{ tipo }}</strong></td>
+                        <td><strong>{{ tipo }}</strong> <span class="badge bg-secondary ms-2" title="Número de referencias">{{ refs|length }}</span></td>
                         <td>
                           {% if refs and refs|length > 0 %}
                             {{ refs|join(', ') }}
@@ -102069,7 +102166,8 @@ def cuestionarios_proveedores_ficha_proponente(detalle_id):
         }
       }
     </style>
-    """, detalle=detalle, resumen_respuestas=resumen_respuestas)
+    """, detalle=detalle, resumen_respuestas=resumen_respuestas,
+       puntaje_recalculado=puntaje_recalculado, puntaje_desactualizado=puntaje_desactualizado)
 
     return render_template_string(BASE, content=content)
 
@@ -206928,6 +207026,12 @@ def mobile_action_plans():
 @mobile_api_bp.route("/alerts", methods=["GET"])
 @mobile_auth_required
 def mobile_alerts():
+    # Las alertas móviles respetan el mismo permiso del Centro de Alertas.
+    mobile_alert_user = getattr(_mobile_g, "mobile_user", None)
+    if (not mobile_alert_user or mobile_alert_user.role == "auditor"
+            or not verificar_permiso(mobile_alert_user, "Centro de Alertas")):
+        return _mobile_error("FORBIDDEN", "No tienes permiso para consultar el Centro de Alertas.", 403)
+
     alerts = []
     try:
         central_cfg = AlertConfig.query.first()
