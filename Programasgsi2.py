@@ -7,6 +7,12 @@ from flask import Flask, request, redirect, url_for, render_template_string, sen
 from flask_sqlalchemy import SQLAlchemy
 from passlib.hash import ldap_salted_sha1 as ssha
 import os, io, csv
+# GRAC/Render: evita hilos nativos innecesarios de NumPy/OpenBLAS
+# en contenedores de memoria limitada, sin cambiar algoritmos.
+for _grac_thread_env in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS",
+                         "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_grac_thread_env, "1")
+os.environ.setdefault("MPLBACKEND", "Agg")
 from sqlalchemy import text
 import pyotp
 import json
@@ -407,6 +413,59 @@ def calcular_riesgo(probabilidad_txt, impacto_txt):
 
 app = Flask(__name__)
 # La cookie de autenticación termina con la sesión del navegador.
+
+# --- Render: diagnóstico discreto de memoria (se usa sólo /proc en Linux) ---
+def _grac_rss_mb():
+    try:
+        with open("/proc/self/status", "r", encoding="ascii") as _proc:
+            for _line in _proc:
+                if _line.startswith("VmRSS:"):
+                    return float(_line.split()[1]) / 1024.0
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+_GRAC_MEMORY_REPORT_LOCK = threading.Lock()
+_GRAC_MEMORY_REPORT_LAST = {}
+
+@app.before_request
+def _grac_memory_request_start():
+    # No carga el body ni datos de la sesión.
+    from flask import g
+    g._grac_rss_before = _grac_rss_mb()
+
+    # 300 MB se reservan únicamente para publicar APK Android.
+    # El resto de GRAC conserva el límite de carga previo de 50 MB.
+    if request.endpoint != "admin_mobile_app":
+        try:
+            general_limit = max(1, int(os.getenv("GRAC_MAX_REQUEST_MB", "50"))) * 1024 * 1024
+        except ValueError:
+            general_limit = 50 * 1024 * 1024
+        if request.content_length is not None and request.content_length > general_limit:
+            abort(413, description="El archivo supera el límite permitido para este módulo.")
+
+
+def _grac_memory_report(response):
+    from flask import g
+    rss_now = _grac_rss_mb()
+    if rss_now is None:
+        return
+    rss_before = getattr(g, "_grac_rss_before", None)
+    delta = (rss_now - rss_before) if rss_before is not None else 0.0
+    try:
+        warn_at = float(os.getenv("GRAC_MEMORY_WARN_MB", "320"))
+    except ValueError:
+        warn_at = 320.0
+    if rss_now < warn_at and delta < 35.0:
+        return
+    endpoint = request.endpoint or "unknown"
+    now = time.monotonic()
+    with _GRAC_MEMORY_REPORT_LOCK:
+        if now - _GRAC_MEMORY_REPORT_LAST.get(endpoint, -1e9) < 60.0:
+            return
+        _GRAC_MEMORY_REPORT_LAST[endpoint] = now
+    app.logger.warning("GRAC_MEM endpoint=%s rss_mb=%.1f change_mb=%.1f response_bytes=%s status=%s",
+                       endpoint, rss_now, delta, response.calculate_content_length(), response.status_code)
 app.config["SESSION_PERMANENT"] = False
 
 # ============================================================
@@ -1074,37 +1133,67 @@ SGSI_PROGRESS_GLOBAL = """
 """
 
 
+# Un único postprocesamiento de HTML evita tener 3 copias sucesivas
+# del documento por solicitud (menú, control de pestaña y progreso).
 @app.after_request
 def inject_sgsi_progress_bar(response):
     try:
-        content_type = response.headers.get("Content-Type", "")
-
-        if "text/html" not in content_type:
+        if response.is_streamed or "text/html" not in response.headers.get("Content-Type", ""):
+            _grac_memory_report(response)
             return response
 
-        html_response = response.get_data(as_text=True)
-
-        if not html_response:
+        page = response.get_data(as_text=True)
+        if not page:
             return response
 
-        # Evita inyectar duplicado
-        if "id=\"sgsiProgressOverlay\"" in html_response or "id='sgsiProgressOverlay'" in html_response:
-            return response
+        modified = False
+        user_id = session.get("user_id")
 
-        if "</body>" in html_response:
-            html_response = html_response.replace(
-                "</body>",
-                SGSI_PROGRESS_GLOBAL + "\n</body>"
+        # 1. Menú: conservar las exclusiones y la ubicación del menú original.
+        if user_id and "sgsiGlobalMenu" not in page:
+            excluded = {"login", "logout", "static", "dashboard_status",
+                        "menu", "verificar_otp", "configurar_otp"}
+            blocked_paths = ("/verificar_otp", "/configurar_otp", "/otp/")
+            if (request.endpoint or "") not in excluded and not request.path.startswith(blocked_paths):
+                menu_html = _sgsi_build_global_menu_html()
+                if menu_html:
+                    if "</header>" in page:
+                        page = page.replace("</header>", "</header>\n" + menu_html, 1)
+                    elif "<body>" in page:
+                        page = page.replace("<body>", "<body>\n" + menu_html, 1)
+                    elif "</body>" in page:
+                        page = page.replace("</body>", menu_html + "\n</body>", 1)
+                    else:
+                        page = menu_html + page
+                    modified = True
+
+        # 2. Control de cierre de pestaña: sólo HTML 200 con sesión activa.
+        if (user_id and response.status_code == 200 and
+                "gracBrowserSessionLifecycle" not in page and "</body>" in page):
+            page = page.replace(
+                "</body>", BROWSER_SESSION_LIFECYCLE_HTML + "\n</body>", 1
             )
-        else:
-            html_response += SGSI_PROGRESS_GLOBAL
+            modified = True
 
-        response.set_data(html_response)
-        response.headers["Content-Length"] = str(len(response.get_data()))
+        # 3. Barra de progreso: se conserva su comportamiento anterior.
+        if 'id="sgsiProgressOverlay"' not in page and "id='sgsiProgressOverlay'" not in page:
+            if "</body>" in page:
+                page = page.replace("</body>", SGSI_PROGRESS_GLOBAL + "\n</body>")
+            else:
+                page += SGSI_PROGRESS_GLOBAL
+            modified = True
 
-    except Exception as e:
-        print("No se pudo inyectar barra de progreso SGSI:", repr(e))
+        if modified:
+            response.set_data(page)  # actualiza Content-Length automáticamente
 
+    except Exception as exc:
+        app.logger.warning("No se pudo inyectar interfaz global GRAC: %r", exc)
+
+    # Observabilidad de memoria sin dependencias externas, en Linux (Render).
+    try:
+        _grac_memory_report(response)
+    except Exception:
+        pass
     return response
 
 # ============================================================
@@ -1600,7 +1689,6 @@ BROWSER_SESSION_LIFECYCLE_HTML = r"""
 """
 
 
-@app.after_request
 def inject_browser_session_lifecycle(response):
     try:
         if response.status_code != 200 or response.is_streamed:
@@ -11764,17 +11852,26 @@ from flask import jsonify
 
 
 def _dashboard_fig_to_b64(fig):
+    # Un gráfico a 220 dpi genera ~3.4 veces más píxeles que a 120 dpi.
+    # En Render se prioriza consumo de RAM sin alterar el resultado numérico.
+    default_dpi = 120 if os.getenv("RENDER_SERVICE_ID") else 220
+    try:
+        dpi = max(90, min(220, int(os.getenv("GRAC_DASHBOARD_DPI", str(default_dpi)))))
+    except ValueError:
+        dpi = default_dpi
     buf = io.BytesIO()
-    fig.savefig(
-        buf,
-        format="png",
-        bbox_inches="tight",
-        dpi=220,
-        facecolor=fig.get_facecolor()
-    )
-    plt.close(fig)
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode("utf-8")
+    try:
+        fig.savefig(
+            buf,
+            format="png",
+            bbox_inches="tight",
+            dpi=dpi,
+            facecolor=fig.get_facecolor()
+        )
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
+    finally:
+        plt.close(fig)
+        buf.close()
 
 
 def _dashboard_empty_chart(title="Sin datos", subtitle="No hay información disponible"):
@@ -16319,7 +16416,6 @@ def _sgsi_build_global_menu_html():
         return ""
 
 
-@app.after_request
 def inject_sgsi_global_vertical_menu(response):
     try:
         content_type = response.headers.get("Content-Type", "")
