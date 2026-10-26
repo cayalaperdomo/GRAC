@@ -7,12 +7,6 @@ from flask import Flask, request, redirect, url_for, render_template_string, sen
 from flask_sqlalchemy import SQLAlchemy
 from passlib.hash import ldap_salted_sha1 as ssha
 import os, io, csv
-# GRAC/Render: evita hilos nativos innecesarios de NumPy/OpenBLAS
-# en contenedores de memoria limitada, sin cambiar algoritmos.
-for _grac_thread_env in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS",
-                         "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
-    os.environ.setdefault(_grac_thread_env, "1")
-os.environ.setdefault("MPLBACKEND", "Agg")
 from sqlalchemy import text
 import pyotp
 import json
@@ -413,59 +407,6 @@ def calcular_riesgo(probabilidad_txt, impacto_txt):
 
 app = Flask(__name__)
 # La cookie de autenticación termina con la sesión del navegador.
-
-# --- Render: diagnóstico discreto de memoria (se usa sólo /proc en Linux) ---
-def _grac_rss_mb():
-    try:
-        with open("/proc/self/status", "r", encoding="ascii") as _proc:
-            for _line in _proc:
-                if _line.startswith("VmRSS:"):
-                    return float(_line.split()[1]) / 1024.0
-    except (OSError, ValueError, IndexError):
-        pass
-    return None
-
-_GRAC_MEMORY_REPORT_LOCK = threading.Lock()
-_GRAC_MEMORY_REPORT_LAST = {}
-
-@app.before_request
-def _grac_memory_request_start():
-    # No carga el body ni datos de la sesión.
-    from flask import g
-    g._grac_rss_before = _grac_rss_mb()
-
-    # 300 MB se reservan únicamente para publicar APK Android.
-    # El resto de GRAC conserva el límite de carga previo de 50 MB.
-    if request.endpoint != "admin_mobile_app":
-        try:
-            general_limit = max(1, int(os.getenv("GRAC_MAX_REQUEST_MB", "50"))) * 1024 * 1024
-        except ValueError:
-            general_limit = 50 * 1024 * 1024
-        if request.content_length is not None and request.content_length > general_limit:
-            abort(413, description="El archivo supera el límite permitido para este módulo.")
-
-
-def _grac_memory_report(response):
-    from flask import g
-    rss_now = _grac_rss_mb()
-    if rss_now is None:
-        return
-    rss_before = getattr(g, "_grac_rss_before", None)
-    delta = (rss_now - rss_before) if rss_before is not None else 0.0
-    try:
-        warn_at = float(os.getenv("GRAC_MEMORY_WARN_MB", "320"))
-    except ValueError:
-        warn_at = 320.0
-    if rss_now < warn_at and delta < 35.0:
-        return
-    endpoint = request.endpoint or "unknown"
-    now = time.monotonic()
-    with _GRAC_MEMORY_REPORT_LOCK:
-        if now - _GRAC_MEMORY_REPORT_LAST.get(endpoint, -1e9) < 60.0:
-            return
-        _GRAC_MEMORY_REPORT_LAST[endpoint] = now
-    app.logger.warning("GRAC_MEM endpoint=%s rss_mb=%.1f change_mb=%.1f response_bytes=%s status=%s",
-                       endpoint, rss_now, delta, response.calculate_content_length(), response.status_code)
 app.config["SESSION_PERMANENT"] = False
 
 # ============================================================
@@ -1133,67 +1074,37 @@ SGSI_PROGRESS_GLOBAL = """
 """
 
 
-# Un único postprocesamiento de HTML evita tener 3 copias sucesivas
-# del documento por solicitud (menú, control de pestaña y progreso).
 @app.after_request
 def inject_sgsi_progress_bar(response):
     try:
-        if response.is_streamed or "text/html" not in response.headers.get("Content-Type", ""):
-            _grac_memory_report(response)
+        content_type = response.headers.get("Content-Type", "")
+
+        if "text/html" not in content_type:
             return response
 
-        page = response.get_data(as_text=True)
-        if not page:
+        html_response = response.get_data(as_text=True)
+
+        if not html_response:
             return response
 
-        modified = False
-        user_id = session.get("user_id")
+        # Evita inyectar duplicado
+        if "id=\"sgsiProgressOverlay\"" in html_response or "id='sgsiProgressOverlay'" in html_response:
+            return response
 
-        # 1. Menú: conservar las exclusiones y la ubicación del menú original.
-        if user_id and "sgsiGlobalMenu" not in page:
-            excluded = {"login", "logout", "static", "dashboard_status",
-                        "menu", "verificar_otp", "configurar_otp"}
-            blocked_paths = ("/verificar_otp", "/configurar_otp", "/otp/")
-            if (request.endpoint or "") not in excluded and not request.path.startswith(blocked_paths):
-                menu_html = _sgsi_build_global_menu_html()
-                if menu_html:
-                    if "</header>" in page:
-                        page = page.replace("</header>", "</header>\n" + menu_html, 1)
-                    elif "<body>" in page:
-                        page = page.replace("<body>", "<body>\n" + menu_html, 1)
-                    elif "</body>" in page:
-                        page = page.replace("</body>", menu_html + "\n</body>", 1)
-                    else:
-                        page = menu_html + page
-                    modified = True
-
-        # 2. Control de cierre de pestaña: sólo HTML 200 con sesión activa.
-        if (user_id and response.status_code == 200 and
-                "gracBrowserSessionLifecycle" not in page and "</body>" in page):
-            page = page.replace(
-                "</body>", BROWSER_SESSION_LIFECYCLE_HTML + "\n</body>", 1
+        if "</body>" in html_response:
+            html_response = html_response.replace(
+                "</body>",
+                SGSI_PROGRESS_GLOBAL + "\n</body>"
             )
-            modified = True
+        else:
+            html_response += SGSI_PROGRESS_GLOBAL
 
-        # 3. Barra de progreso: se conserva su comportamiento anterior.
-        if 'id="sgsiProgressOverlay"' not in page and "id='sgsiProgressOverlay'" not in page:
-            if "</body>" in page:
-                page = page.replace("</body>", SGSI_PROGRESS_GLOBAL + "\n</body>")
-            else:
-                page += SGSI_PROGRESS_GLOBAL
-            modified = True
+        response.set_data(html_response)
+        response.headers["Content-Length"] = str(len(response.get_data()))
 
-        if modified:
-            response.set_data(page)  # actualiza Content-Length automáticamente
+    except Exception as e:
+        print("No se pudo inyectar barra de progreso SGSI:", repr(e))
 
-    except Exception as exc:
-        app.logger.warning("No se pudo inyectar interfaz global GRAC: %r", exc)
-
-    # Observabilidad de memoria sin dependencias externas, en Linux (Render).
-    try:
-        _grac_memory_report(response)
-    except Exception:
-        pass
     return response
 
 # ============================================================
@@ -1689,6 +1600,7 @@ BROWSER_SESSION_LIFECYCLE_HTML = r"""
 """
 
 
+@app.after_request
 def inject_browser_session_lifecycle(response):
     try:
         if response.status_code != 200 or response.is_streamed:
@@ -10080,6 +9992,7 @@ MODULES = [
     "Listado Maestro de Documentos",
     "Gestión de Activos de Información",
     "Inventario de Software",
+    "Inventario de IA",
     "Inventario de Información",
     "Inventario de Datos Personales",
     "Inventario Físico",
@@ -11852,26 +11765,17 @@ from flask import jsonify
 
 
 def _dashboard_fig_to_b64(fig):
-    # Un gráfico a 220 dpi genera ~3.4 veces más píxeles que a 120 dpi.
-    # En Render se prioriza consumo de RAM sin alterar el resultado numérico.
-    default_dpi = 120 if os.getenv("RENDER_SERVICE_ID") else 220
-    try:
-        dpi = max(90, min(220, int(os.getenv("GRAC_DASHBOARD_DPI", str(default_dpi)))))
-    except ValueError:
-        dpi = default_dpi
     buf = io.BytesIO()
-    try:
-        fig.savefig(
-            buf,
-            format="png",
-            bbox_inches="tight",
-            dpi=dpi,
-            facecolor=fig.get_facecolor()
-        )
-        return base64.b64encode(buf.getvalue()).decode("utf-8")
-    finally:
-        plt.close(fig)
-        buf.close()
+    fig.savefig(
+        buf,
+        format="png",
+        bbox_inches="tight",
+        dpi=220,
+        facecolor=fig.get_facecolor()
+    )
+    plt.close(fig)
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode("utf-8")
 
 
 def _dashboard_empty_chart(title="Sin datos", subtitle="No hay información disponible"):
@@ -14700,6 +14604,13 @@ MENU_SECTIONS = [
                                 "module": "Inventario de Software"
                             },
                             {
+                                "label": "Inventario de IA",
+                                "href": "/inventario_ia_menu",
+                                "icon": "bi-cpu-fill",
+                                "btn": "btn-outline-primary",
+                                "module": "Inventario de IA"
+                            },
+                            {
                                 "label": "Inventario de Información",
                                 "href": "/inventario_informacion_menu",
                                 "icon": "bi-file-earmark-text",
@@ -15393,6 +15304,8 @@ def _sgsi_build_global_menu_html():
                 "paths": [
                     "/inventario_software_menu",
                     "/inventario_software",
+                    "/inventario_ia_menu",
+                    "/inventario_ia",
                     "/inventario_informacion_menu",
                     "/inventario_informacion",
                     "/inventario_datos_personales_menu",
@@ -15407,6 +15320,7 @@ def _sgsi_build_global_menu_html():
                 ],
                 "endpoints": [
                     "inventario_software",
+                    "inventario_ia",
                     "inventario_informacion",
                     "inventario_datos_personales",
                     "inventario_fisico",
@@ -15421,6 +15335,8 @@ def _sgsi_build_global_menu_html():
                 "paths": [
                     "/inventario_software_menu",
                     "/inventario_software",
+                    "/inventario_ia_menu",
+                    "/inventario_ia",
                     "/inventario_informacion_menu",
                     "/inventario_informacion",
                     "/inventario_datos_personales_menu",
@@ -15430,6 +15346,7 @@ def _sgsi_build_global_menu_html():
                 ],
                 "endpoints": [
                     "inventario_software",
+                    "inventario_ia",
                     "inventario_informacion",
                     "inventario_datos_personales",
                     "inventario_fisico"
@@ -15438,6 +15355,10 @@ def _sgsi_build_global_menu_html():
             "Inventario de Software": {
                 "paths": ["/inventario_software_menu", "/inventario_software"],
                 "endpoints": ["inventario_software"]
+            },
+            "Inventario de IA (ISO 42001)": {
+                "paths": ["/inventario_ia_menu", "/inventario_ia"],
+                "endpoints": ["inventario_ia"]
             },
             "Inventario de Información": {
                 "paths": ["/inventario_informacion_menu", "/inventario_informacion"],
@@ -15858,6 +15779,12 @@ def _sgsi_build_global_menu_html():
         def _item_candidate_score(item):
             href = _norm_path(item.get("href", ""))
             label = item.get("label", "")
+            # Matriz IA y sus formularios: mantener la opción activa.
+            if current_path.startswith('/inventario_ia') and item.get('module') == 'Inventario de IA':
+                return 10000
+            # Centro de Reportes: mantener la opción activa incluso con filtros.
+            if (current_path == '/reportes' or current_path.startswith('/reportes/')) and href == '/reportes':
+                return 10000
             rules = MENU_ACTIVE_RULES.get(label, {})
             exact = bool(rules.get("exact", False))
 
@@ -16416,6 +16343,7 @@ def _sgsi_build_global_menu_html():
         return ""
 
 
+@app.after_request
 def inject_sgsi_global_vertical_menu(response):
     try:
         content_type = response.headers.get("Content-Type", "")
@@ -127758,6 +127686,11 @@ REPORT_KEYS_EXCEL_ONLY = {
     "registro_incidentes",
     "planes_accion_sgsi",
     "partes_interesadas",
+    "inventario_ia",
+    "inventario_software",
+    "inventario_informacion",
+    "inventario_datos_personales",
+    "inventario_fisico",
 }
 
 REPORT_CATALOG = [
@@ -127772,6 +127705,11 @@ REPORT_CATALOG = [
     {"key": "registro_incidentes", "label": "Registro de Incidentes",                        "icon": "bi-journal-medical"},
     {"key": "planes_accion_sgsi",  "label": "Planes de Acción del Sistema de Gestión",       "icon": "bi-list-check"},
     {"key": "partes_interesadas",  "label": "Partes Interesadas",                            "icon": "bi-diagram-3"},
+    {"key": "inventario_ia",       "label": "Inventario de IA (ISO 42001)",                 "icon": "bi-cpu-fill"},
+    {"key": "inventario_software", "label": "Inventario de Software",                       "icon": "bi-cpu"},
+    {"key": "inventario_informacion", "label": "Inventario de Información",               "icon": "bi-file-earmark-text"},
+    {"key": "inventario_datos_personales", "label": "Inventario de Datos Personales",     "icon": "bi-shield-lock"},
+    {"key": "inventario_fisico",   "label": "Inventario Físico",                            "icon": "bi-pc-display"},
 
     {"key": "objetivos",           "label": "Objetivos del SGSI",                            "icon": "bi-bullseye"},
     {"key": "docs",                "label": "Listado maestro de documentos",                 "icon": "bi-journal-text"},
@@ -129631,11 +129569,71 @@ def _payload_excel_only_generic(key: str):
 
 
 # ============================================================
+# INVENTARIOS DE ACTIVOS - REPORTES EXCEL
+# ============================================================
+
+_INVENTARIOS_EXCEL_TABLAS = {
+    "inventario_software": ("inventario_software", "Inventario de Software", "Inventario de Software"),
+    "inventario_informacion": ("inventario_informacion", "Inventario de Información", "Inventario de Información"),
+    "inventario_datos_personales": ("inventario_datos_personales", "Inventario de Datos Personales", "Inventario de Datos Personales"),
+    "inventario_fisico": ("inventario_fisico", "Inventario Físico", "Inventario Físico"),
+}
+_INVENTARIOS_EXCEL_PERMISOS = {
+    key: nombre for key, (_, nombre, _) in _INVENTARIOS_EXCEL_TABLAS.items()
+}
+_INVENTARIOS_EXCEL_PERMISOS["inventario_ia"] = "Inventario de IA"
+
+
+def _inventarios_excel_valor(v):
+    """Evita que fórmulas inyectadas desde registros se ejecuten en Excel."""
+    val = _fmt(v)
+    if isinstance(val, str) and val.lstrip().startswith(('=', '+', '-', '@', '\t', '\r')):
+        return "'" + val
+    return val
+
+
+def _payload_inventarios_activos(key):
+    if key == "inventario_ia":
+        # Base independiente: no usar el SQLAlchemy principal para esta matriz.
+        with _ai_inv_connection() as con:
+            raw = [dict(r) for r in con.execute('SELECT * FROM sistemas_ia ORDER BY id').fetchall()]
+        cols = ['codigo'] + list(_AI_INV_KEYS)
+        labels = ['Código'] + [label for _, label, _, _ in _AI_INV_FIELDS]
+        rows = [dict(codigo='IA-{:05d}'.format(r['id']), **{
+            k: _inventarios_excel_valor(r.get(k)) for k in _AI_INV_KEYS
+        }) for r in raw]
+        nombre = 'Inventario de IA (ISO 42001)'
+        filename = 'GRAC_Inventario_IA'
+        sheet_name = 'Inventario IA'
+    else:
+        tabla, nombre, _ = _INVENTARIOS_EXCEL_TABLAS[key]
+        # La tabla procede de una lista interna fija, nunca de entrada del usuario.
+        rows = _sql_fetchall('SELECT * FROM "{}" ORDER BY id'.format(tabla))
+        cols = list(rows[0].keys()) if rows else _table_columns(tabla)
+        rows = [{k: _inventarios_excel_valor(r.get(k)) for k in cols} for r in rows]
+        labels = list(cols)
+        filename = 'GRAC_' + key
+        sheet_name = 'Matriz'
+    return {
+        'title': nombre,
+        'filename': filename,
+        'sheets': [{
+            'name': sheet_name,
+            'title': nombre,
+            'rows': rows, 'cols': cols, 'labels': labels,
+        }],
+    }
+
+
+# ============================================================
 # FÁBRICA CENTRAL DE PAYLOAD
 # ============================================================
 
 def _get_report_payload(key: str):
     key = (key or "").strip().lower()
+
+    if key in _INVENTARIOS_EXCEL_PERMISOS:
+        return _payload_inventarios_activos(key)
 
     if key == "soa":
         return _payload_soa()
@@ -129691,6 +129689,11 @@ def reportes_home():
 
     start_date = (request.args.get("start_date") or "").strip()
     end_date = (request.args.get("end_date") or "").strip()
+
+    catalogo_visible = [r for r in REPORT_CATALOG if (
+        r['key'] not in _INVENTARIOS_EXCEL_PERMISOS or
+        verificar_permiso_activos(user, _INVENTARIOS_EXCEL_PERMISOS[r['key']])
+    )]
 
     content = render_template_string("""
     <div class="rep-shell">
@@ -129796,6 +129799,8 @@ def reportes_home():
                         Exportación de planes de acción del sistema de gestión en Excel.
                       {% elif r.key == 'partes_interesadas' %}
                         Exportación de partes interesadas en Excel.
+                      {% elif r.key == 'inventario_ia' %}
+                        Matriz de inteligencia artificial, basada en ISO/IEC 42001, en Excel.
                       {% else %}
                         Disponible únicamente para exportación en Excel.
                       {% endif %}
@@ -130256,7 +130261,7 @@ def reportes_home():
       }
     </style>
     """,
-    catalog=REPORT_CATALOG,
+    catalog=catalogo_visible,
     pdf_word_allowed=REPORT_KEYS_PDF_WORD,
     excel_only_allowed=REPORT_KEYS_EXCEL_ONLY,
     company=company,
@@ -130339,6 +130344,13 @@ def reportes_excel(key):
     if key not in REPORT_KEYS_EXCEL_ONLY:
         flash("Este reporte no está disponible en Excel.", "warning")
         return redirect(url_for("reportes_home"))
+
+    usuario = db.session.get(User, session.get('user_id'))
+    if usuario is None or (usuario.role != 'admin' and not verificar_permiso(usuario, 'Reportes')):
+        abort(403, description='Sin acceso al Centro de Reportes.')
+    permiso_inventario = _INVENTARIOS_EXCEL_PERMISOS.get(key)
+    if permiso_inventario and not verificar_permiso_activos(usuario, permiso_inventario):
+        abort(403, description='Sin permiso para exportar este inventario.')
 
     company = (request.args.get("company") or "").strip()
     payload = _get_report_payload(key)
@@ -209063,6 +209075,531 @@ def _grac_install_supplier_portal(_namespace):
     install(_namespace)
 
 _grac_install_supplier_portal(globals())
+
+# ============================================================================
+# ARKYNTECH GRAC · INVENTARIO DE INTELIGENCIA ARTIFICIAL (ISO/IEC 42001)
+# Matriz de activos de IA; base independiente y permisos de Gestión de Activos.
+# ============================================================================
+from contextlib import contextmanager as _ai_contextmanager
+from markupsafe import Markup as _AI_Markup
+
+_AI_INV_SECTIONS = [
+    ('Identificación y responsables', [
+        ('nombre', 'Nombre del sistema de IA', 'text', True),
+        ('descripcion', 'Descripción del sistema', 'textarea', False),
+        ('empresa', 'Empresa / organización', 'text', False),
+        ('area', 'Área', 'text', True),
+        ('division', 'División', 'text', False),
+        ('proceso', 'Proceso', 'text', True),
+        ('responsable_funcional', 'Responsable funcional', 'text', True),
+        ('responsable_tecnico', 'Responsable técnico', 'text', False),
+        ('usuarios', 'Usuarios / grupos autorizados', 'textarea', False),
+        ('estado', 'Estado del sistema', ['Registrado','En evaluación','En pruebas','Aprobado','En producción','Suspendido','Retirado'], True),
+        ('fecha_registro', 'Fecha de incorporación', 'date', False),
+        ('fecha_revision', 'Próxima revisión', 'date', False),
+    ]),
+    ('Propósito y utilización', [
+        ('finalidad', 'Finalidad / objetivo de la IA', 'textarea', True),
+        ('caso_uso', 'Caso de uso', 'textarea', False),
+        ('decisiones', 'Decisiones que apoya o automatiza', 'textarea', False),
+        ('alcance', 'Alcance, límites y usuarios', 'textarea', False),
+        ('personas_afectadas', 'Personas o grupos afectados', 'textarea', False),
+        ('usos_prohibidos', 'Usos no previstos o prohibidos', 'textarea', False),
+        ('autonomia', 'Nivel de autonomía', ['Asistencia','Recomendación con aprobación humana','Semiautónomo','Autónomo'], True),
+    ]),
+    ('Tecnología y recursos', [
+        ('tipo_ia', 'Tipo de IA', ['IA generativa','Aprendizaje automático','Visión computacional','Procesamiento del lenguaje','Sistemas expertos','Otro'], True),
+        ('proveedor', 'Proveedor / desarrollador', 'text', False),
+        ('modelo', 'Modelo o sistema base', 'text', False),
+        ('version_modelo', 'Versión del modelo', 'text', False),
+        ('plataforma', 'Plataforma / aplicación', 'text', False),
+        ('entorno', 'Entorno de ejecución', ['On Premise','Nube pública','Nube privada','Híbrido','SaaS','Otro'], False),
+        ('ubicacion', 'Ubicación / región / servidor', 'text', False),
+        ('integraciones', 'APIs e integraciones', 'textarea', False),
+        ('recursos', 'Infraestructura, recursos y dependencias', 'textarea', False),
+    ]),
+    ('Datos utilizados', [
+        ('origen_datos', 'Origen y procedencia de los datos', 'textarea', False),
+        ('categoria_datos', 'Categorías de datos', 'textarea', False),
+        ('sensibilidad_datos', 'Clasificación de información', ['Pública','Interna','Confidencial','Restringida','Mixta'], False),
+        ('datos_personales', '¿Trata datos personales?', ['No','Sí','Por determinar'], True),
+        ('datos_sensibles', '¿Trata datos sensibles?', ['No','Sí','Por determinar'], False),
+        ('datos_entrenamiento', 'Datos para entrenamiento / ajuste', 'textarea', False),
+        ('datos_inferencia', 'Datos de entrada / inferencia', 'textarea', False),
+        ('calidad_datos', 'Controles de calidad / procedencia', 'textarea', False),
+        ('almacenamiento', 'Almacenamiento y transferencia', 'textarea', False),
+        ('retencion', 'Conservación y eliminación', 'textarea', False),
+    ]),
+    ('Controles y ciclo de vida', [
+        ('supervision_humana', 'Supervisión e intervención humana', 'textarea', True),
+        ('transparencia', 'Transparencia y explicabilidad', 'textarea', False),
+        ('evaluacion_pruebas', 'Pruebas, validación y métricas de desempeño', 'textarea', False),
+        ('aprobacion', 'Aprobación / autorización de uso', 'textarea', False),
+        ('fecha_despliegue', 'Fecha de puesta en producción', 'date', False),
+        ('monitoreo', 'Monitoreo, alertas y controles', 'textarea', False),
+        ('gestion_cambios', 'Gestión de cambios y versiones', 'textarea', False),
+        ('incidentes', 'Incidentes / fallos conocidos', 'textarea', False),
+        ('mantenimiento', 'Mantenimiento y actualización', 'textarea', False),
+        ('plan_retiro', 'Plan de retiro / desmantelamiento', 'textarea', False),
+    ]),
+    ('Terceros y obligaciones', [
+        ('responsable_proveedor', 'Responsable o contrato del proveedor', 'text', False),
+        ('referencia_proveedor', 'Referencia en Registro de Proveedores GRAC', 'text', False),
+        ('contratos', 'Acuerdos, condiciones y garantías', 'textarea', False),
+        ('responsabilidades', 'Responsabilidades compartidas', 'textarea', False),
+        ('obligaciones', 'Requisitos legales / regulatorios aplicables', 'textarea', False),
+        ('dependencias', 'Dependencias de terceros y servicios', 'textarea', False),
+    ]),
+    ('Documentos y evidencias', [
+        ('ficha_tecnica', 'Referencia de ficha técnica / model card', 'text', False),
+        ('documento_riesgos', 'Referencia de evaluación de riesgos', 'text', False),
+        ('documento_impacto', 'Referencia de evaluación de impactos', 'text', False),
+        ('documento_controles', 'Referencia de controles y pruebas', 'text', False),
+        ('documento_aprobacion', 'Acta de aprobación / evidencia', 'text', False),
+        ('observaciones', 'Observaciones y recomendaciones', 'textarea', False),
+    ]),
+]
+_AI_INV_FIELDS = [field for _, group in _AI_INV_SECTIONS for field in group]
+_AI_INV_KEYS = [field[0] for field in _AI_INV_FIELDS]
+_AI_INV_REQUIRED = [field[0] for field in _AI_INV_FIELDS if field[3]]
+_AI_INV_DB_PATH = os.path.join(app.instance_path, 'inventario_ia.db')
+_AI_INV_EVIDENCE_DIR = os.path.join(app.instance_path, 'inventario_ia_evidencias')
+_AI_INV_DB_LOCK = threading.RLock()
+_AI_INV_DB_READY = False
+
+
+def _ai_inv_init():
+    global _AI_INV_DB_READY
+    if _AI_INV_DB_READY:
+        return
+    with _AI_INV_DB_LOCK:
+        if _AI_INV_DB_READY:
+            return
+        os.makedirs(app.instance_path, exist_ok=True)
+        with sqlite3.connect(_AI_INV_DB_PATH, timeout=15) as conn:
+            cols = ',\n'.join('"{}" TEXT DEFAULT \'\''.format(key) for key in _AI_INV_KEYS)
+            conn.execute('PRAGMA busy_timeout=15000')
+            conn.execute('''CREATE TABLE IF NOT EXISTS sistemas_ia (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                {} ,
+                creado_en TEXT NOT NULL, actualizado_en TEXT NOT NULL,
+                creado_por TEXT, actualizado_por TEXT
+            )'''.format(cols))
+            conn.execute('''CREATE TABLE IF NOT EXISTS sistemas_ia_evidencias (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sistema_id INTEGER NOT NULL,
+                nombre_original TEXT NOT NULL,
+                nombre_archivo TEXT NOT NULL,
+                creado_en TEXT NOT NULL,
+                usuario TEXT,
+                FOREIGN KEY (sistema_id) REFERENCES sistemas_ia(id) ON DELETE CASCADE
+            )''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS sistemas_ia_auditoria (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sistema_id INTEGER NOT NULL,
+                accion TEXT NOT NULL,
+                usuario TEXT,
+                fecha TEXT NOT NULL,
+                detalles TEXT
+            )''')
+            conn.execute('CREATE INDEX IF NOT EXISTS ix_ia_sistemas_estado ON sistemas_ia(estado)')
+            conn.execute('CREATE INDEX IF NOT EXISTS ix_ia_evidencias_sistema ON sistemas_ia_evidencias(sistema_id)')
+        _AI_INV_DB_READY = True
+
+
+@_ai_contextmanager
+def _ai_inv_connection():
+    _ai_inv_init()
+    con = sqlite3.connect(_AI_INV_DB_PATH, timeout=15)
+    con.row_factory = sqlite3.Row
+    con.execute('PRAGMA busy_timeout=15000')
+    con.execute('PRAGMA foreign_keys=ON')
+    try:
+        yield con
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+
+
+def _ai_inv_user(edit=False):
+    user = db.session.get(User, session.get('user_id'))
+    if not user or not verificar_permiso_activos(user, 'Inventario de IA'):
+        abort(403, description='Sin permiso para Inventario de IA.')
+    if edit and user.role not in ('admin', 'user'):
+        abort(403, description='Inventario de IA en modo solo lectura.')
+    return user
+
+
+def _ai_inv_csrf():
+    token = session.get('_ai_inventory_csrf')
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session['_ai_inventory_csrf'] = token
+    return token
+
+
+def _ai_inv_check_csrf():
+    if not secrets.compare_digest(
+        str(session.get('_ai_inventory_csrf') or ''),
+        str(request.form.get('csrf') or '')
+    ) or not session.get('_ai_inventory_csrf'):
+        abort(403, description='Formulario vencido o token inválido.')
+
+
+def _ai_inv_now():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _ai_inv_read(con, iid):
+    row = con.execute('SELECT * FROM sistemas_ia WHERE id = ?', (iid,)).fetchone()
+    if row is None:
+        abort(404)
+    return dict(row)
+
+
+def _ai_inv_input():
+    data = {}
+    for key, label, ftype, required in _AI_INV_FIELDS:
+        value = (request.form.get(key) or '').strip()
+        if len(value) > (5000 if ftype == 'textarea' else 500):
+            raise ValueError('El campo "{}" supera el límite permitido.'.format(label))
+        if isinstance(ftype, list) and value and value not in ftype:
+            raise ValueError('Valor no válido en {}.'.format(label))
+        if ftype == 'date' and value:
+            try:
+                datetime.strptime(value, '%Y-%m-%d')
+            except ValueError:
+                raise ValueError('Fecha no válida en {}.'.format(label))
+        if required and not value:
+            raise ValueError('Complete el campo obligatorio: {}.'.format(label))
+        data[key] = value
+    return data
+
+
+def _ai_inv_audit(con, iid, action, user, detail=None):
+    con.execute('''INSERT INTO sistemas_ia_auditoria
+        (sistema_id, accion, usuario, fecha, detalles) VALUES (?, ?, ?, ?, ?)''',
+        (iid, action, user.username, _ai_inv_now(), json.dumps(detail or {}, ensure_ascii=False)))
+
+
+def _ai_inv_evidences(con, iid):
+    return [dict(row) for row in con.execute(
+        'SELECT * FROM sistemas_ia_evidencias WHERE sistema_id = ? ORDER BY id DESC', (iid,)).fetchall()]
+
+
+def _ai_inv_store_evidence(con, iid, user):
+    file = request.files.get('evidencia')
+    if not file or not file.filename:
+        return
+    original = os.path.basename(file.filename.replace('\\', '/')).strip()
+    if not original.lower().endswith('.pdf'):
+        raise ValueError('Solo se admiten evidencias PDF.')
+    blob = file.read(10 * 1024 * 1024 + 1)
+    if len(blob) > 10 * 1024 * 1024 or not blob.startswith(b'%PDF-'):
+        raise ValueError('El PDF debe ser válido y no superar 10 MB.')
+    os.makedirs(_AI_INV_EVIDENCE_DIR, exist_ok=True)
+    fname = secrets.token_hex(24) + '.pdf'
+    fullpath = os.path.join(_AI_INV_EVIDENCE_DIR, fname)
+    try:
+        with open(fullpath, 'xb') as f:
+            f.write(blob)
+        con.execute('''INSERT INTO sistemas_ia_evidencias
+            (sistema_id,nombre_original,nombre_archivo,creado_en,usuario)
+            VALUES (?, ?, ?, ?, ?)''', (iid, original[:240], fname, _ai_inv_now(), user.username))
+    except Exception:
+        if os.path.isfile(fullpath):
+            os.remove(fullpath)
+        raise
+
+
+_AI_INV_CSS = '''
+<style>
+.aiinv-shell{width:96%;max-width:1750px;margin:12px auto 28px}
+.aiinv-header{background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);border-radius:18px;
+ padding:16px 24px;min-height:94px;display:flex;align-items:center;box-shadow:0 12px 24px #0f172a40;
+ color:white;position:relative;overflow:hidden;margin-bottom:12px}
+.aiinv-header:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(135deg,#ffffff0d 0px,#ffffff0d 1px,transparent 1px,transparent 14px)}
+.aiinv-icon{width:54px;height:54px;min-width:54px;border-radius:14px;background:white;display:grid;
+ place-items:center;color:#0b4a8f;font-size:27px;margin-right:14px;z-index:1;box-shadow:0 8px 18px #0004}
+.aiinv-headtext{position:relative;z-index:1}.aiinv-headtext small{font-size:.68rem;background:#ffffff30;border-radius:30px;padding:4px 12px;font-weight:800}
+.aiinv-headtext h3{font-size:1.32rem;font-weight:950;color:white;margin:8px 0 4px}
+.aiinv-headtext p{font-size:.82rem;color:#fff;margin:0}
+.aiinv-actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 12px}
+.aiinv-panel{background:#fff;border:1px solid #d8e4f2;border-radius:17px;box-shadow:0 10px 22px #102a4b1c;margin-bottom:14px;overflow:hidden}
+.aiinv-panelhead{padding:14px 18px;background:#eff6ff;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.aiinv-panelhead h5{margin:0;color:#073c77;font-weight:800;font-size:1rem}
+.aiinv-body{padding:17px}.aiinv-counter{border-radius:99px;padding:7px 15px;background:#0b4a8f;color:white;font-weight:800;font-size:.8rem}
+.aiinv-kpis{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px;margin-bottom:14px}
+.aiinv-kpi{background:white;border:1px solid #cbdff4;border-radius:15px;padding:14px 16px;box-shadow:0 8px 18px #092f5d18}
+.aiinv-kpi b{display:block;font-size:1.35rem;color:#073c77}.aiinv-kpi span{font-size:.76rem;color:#56718e;font-weight:700}
+.aiinv-table{width:100%;font-size:.79rem;border-color:#d7e5f5}.aiinv-table th{background:#0b4a8f!important;color:white!important;white-space:nowrap;font-size:.73rem;vertical-align:middle}
+.aiinv-table td{vertical-align:middle;min-width:96px}.aiinv-table td:first-child{min-width:195px}
+.aiinv-rowactions{display:flex;align-items:center;gap:5px;flex-wrap:wrap}.aiinv-rowactions form{display:inline}
+.aiinv-filter{display:grid;grid-template-columns:2fr minmax(150px,1fr) auto;gap:10px;align-items:end}
+.aiinv-field label{font-size:.8rem;font-weight:700;color:#173f6d;margin-bottom:4px;display:block}
+.aiinv-field .form-control,.aiinv-field .form-select{border:1px solid #b9cce1;border-radius:9px;font-size:.84rem;min-height:39px}
+.aiinv-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px}
+.aiinv-field.wide{grid-column:1/-1}.aiinv-field textarea{min-height:79px}
+.aiinv-section{border:1px solid #d4e2f2;border-radius:12px;background:#fff;margin-bottom:10px;overflow:hidden}
+.aiinv-section summary{cursor:pointer;list-style:revert;padding:12px 16px;background:#eff6ff;color:#073c77;font-weight:800;font-size:.92rem}
+.aiinv-section-inner{padding:15px}.aiinv-help{font-size:.75rem;color:#607c9a}
+.aiinv-detail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px 16px}.aiinv-detail > div{background:#f8fbff;border:1px solid #e3ebf5;border-radius:9px;padding:9px 12px;overflow-wrap:anywhere}
+.aiinv-detail small{display:block;color:#607c9a;font-weight:700}.aiinv-detail span{white-space:pre-wrap;font-size:.85rem;color:#102a4b}
+@media(max-width:900px){.aiinv-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.aiinv-filter{grid-template-columns:1fr 1fr}.aiinv-form-grid,.aiinv-detail{grid-template-columns:1fr}}
+@media(max-width:500px){.aiinv-kpis,.aiinv-filter{grid-template-columns:1fr}.aiinv-header{padding:12px}.aiinv-headtext h3{font-size:1.1rem}}
+</style>
+'''
+_AI_INV_HEAD = '''<div class="aiinv-header"><div class="aiinv-icon"><i class="bi bi-cpu-fill"></i></div>
+<div class="aiinv-headtext"><small>SGSI · Matrices de Activos · ISO/IEC 42001</small>
+<h3>Inventario de Inteligencia Artificial — Matriz</h3>
+<p>Registro y gobierno del ciclo de vida de los sistemas de inteligencia artificial</p></div></div>'''
+
+
+def _ai_inv_html(inner, **context):
+    rendered = render_template_string(
+        _AI_INV_CSS + '<div class="aiinv-shell">' + _AI_INV_HEAD + inner + '</div>', **context)
+    return render_template_string(BASE, content=_AI_Markup(rendered))
+
+
+@app.route('/inventario_ia_menu')
+@login_required
+def inventario_ia_menu():
+    _ai_inv_user()
+    return redirect(url_for('inventario_ia'))
+
+
+@app.route('/inventario_ia', methods=['GET'])
+@login_required
+def inventario_ia():
+    user = _ai_inv_user()
+    search = (request.args.get('q') or '').strip()[:120]
+    estado = (request.args.get('estado') or '').strip()[:50]
+    with _ai_inv_connection() as con:
+        rows = [dict(r) for r in con.execute('SELECT * FROM sistemas_ia ORDER BY id DESC').fetchall()]
+    hoy = date.today().isoformat()
+    kpis = {
+        'total': len(rows),
+        'produccion': sum(r['estado'] == 'En producción' for r in rows),
+        'sin_revision': sum(not r['fecha_revision'] and r['estado'] != 'Retirado' for r in rows),
+        'vencidos': sum(bool(r['fecha_revision']) and r['fecha_revision'] < hoy and r['estado'] != 'Retirado' for r in rows),
+    }
+    filtered = [r for r in rows if
+        (not search or search.casefold() in ' '.join(str(r.get(k) or '') for k in
+         ('nombre','area','proceso','responsable_funcional','modelo','proveedor')).casefold())
+        and (not estado or r['estado'] == estado)
+]
+    inner = '''
+    <div class="aiinv-actions">
+      {% if can_edit %}<a class="btn btn-primary rounded-pill fw-bold px-4" href="{{ url_for('inventario_ia_form') }}">➕ Agregar IA</a>{% endif %}
+    </div>
+    <div class="aiinv-kpis">
+      <div class="aiinv-kpi"><b>{{ kpis.total }}</b><span>Total sistemas IA</span></div>
+      <div class="aiinv-kpi"><b>{{ kpis.produccion }}</b><span>En producción</span></div>
+      <div class="aiinv-kpi"><b>{{ kpis.sin_revision }}</b><span>Sin fecha de revisión</span></div>
+      <div class="aiinv-kpi"><b>{{ kpis.vencidos }}</b><span>Revisiones vencidas</span></div>
+    </div>
+    <div class="aiinv-panel"><div class="aiinv-panelhead"><h5>Matriz de sistemas de inteligencia artificial</h5><span class="aiinv-counter">Total registros: {{ filtered|length }}</span></div>
+    <div class="aiinv-body">
+      <form class="aiinv-filter mb-3" method="get">
+        <div class="aiinv-field"><label>Buscar sistema, área, proceso o responsable</label><input class="form-control" name="q" value="{{ filtros.q }}" placeholder="Buscar..."></div>
+        <div class="aiinv-field"><label>Estado</label><select class="form-select" name="estado"><option value="">Todos</option>
+          {% for opt in estados %}<option value="{{ opt }}" {% if opt == filtros.estado %}selected{% endif %}>{{ opt }}</option>{% endfor %}</select></div>
+        <div class="d-flex gap-1"><button class="btn btn-primary" type="submit">Filtrar</button><a class="btn btn-outline-secondary" href="{{ url_for('inventario_ia') }}">Limpiar</a></div>
+      </form>
+      <div class="table-responsive"><table class="table table-bordered table-hover align-middle aiinv-table mb-0">
+        <thead><tr><th>ID</th><th>Sistema de IA</th><th>Área / proceso</th><th>Responsable</th>
+          <th>Tipo IA / modelo</th><th>Proveedor</th><th>Estado</th><th>Próxima revisión</th><th>Acciones</th></tr></thead>
+        <tbody>{% for r in filtered %}<tr>
+          <td><strong>IA-{{ '%05d'|format(r.id) }}</strong></td>
+          <td><strong>{{ r.nombre }}</strong><div class="text-muted">{{ r.finalidad|truncate(75) }}</div></td>
+          <td>{{ r.area or '—' }}<div class="text-muted">{{ r.proceso or '—' }}</div></td>
+          <td>{{ r.responsable_funcional or '—' }}</td>
+          <td>{{ r.tipo_ia or '—' }}<div class="text-muted">{{ r.modelo or '—' }}</div></td>
+          <td>{{ r.proveedor or '—' }}</td>
+          <td><span class="badge {% if r.estado=='En producción' %}bg-success{% elif r.estado=='Suspendido' %}bg-danger{% else %}bg-primary{% endif %}">{{ r.estado or '—' }}</span></td>
+          <td>{{ r.fecha_revision or '—' }}</td>
+          <td><div class="aiinv-rowactions">
+            <a class="btn btn-info btn-sm rounded-pill text-white fw-bold" href="{{ url_for('inventario_ia_detail', iid=r.id) }}">Ver</a>
+            {% if can_edit %}<a class="btn btn-warning btn-sm rounded-pill fw-bold" href="{{ url_for('inventario_ia_form', iid=r.id) }}">Editar</a>
+            <form method="post" action="{{ url_for('inventario_ia_delete', iid=r.id) }}" onsubmit="return confirm('¿Eliminar este sistema de IA y sus evidencias?');">
+              <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn btn-danger btn-sm rounded-pill fw-bold">Eliminar</button></form>{% else %}<span class="badge bg-secondary">Solo lectura</span>{% endif %}
+          </div></td></tr>{% else %}<tr><td colspan="9" class="text-center py-4 text-muted">Sin registros para los filtros seleccionados.</td></tr>{% endfor %}
+        </tbody></table></div>
+      </div></div>
+    <div class="aiinv-help">Inventario de apoyo a ISO/IEC 42001. El registro no certifica conformidad con la norma ni reemplaza la evaluación de riesgos o impactos.</div>
+    '''
+    return _ai_inv_html(inner, filtered=filtered, kpis=kpis,
+        can_edit=user.role in ('admin', 'user'), csrf=_ai_inv_csrf(),
+        filtros={'q': search, 'estado': estado},
+        estados=_AI_INV_SECTIONS[0][1][9][2])
+
+
+@app.route('/inventario_ia/nuevo', defaults={'iid': None}, methods=['GET', 'POST'])
+@app.route('/inventario_ia/editar/<int:iid>', methods=['GET', 'POST'])
+@login_required
+def inventario_ia_form(iid):
+    user = _ai_inv_user(edit=True)
+    with _ai_inv_connection() as con:
+        item = _ai_inv_read(con, iid) if iid else {key: '' for key in _AI_INV_KEYS}
+        evs = _ai_inv_evidences(con, iid) if iid else []
+    if request.method == 'POST':
+        if request.content_length is not None and request.content_length > 14 * 1024 * 1024:
+            abort(413, description='El formulario supera el tamaño permitido.')
+        _ai_inv_check_csrf()
+        try:
+            data = _ai_inv_input()
+            with _ai_inv_connection() as con:
+                if iid:
+                    before = _ai_inv_read(con, iid)
+                    changes = {k: {'antes': before[k], 'despues': data[k]}
+                               for k in _AI_INV_KEYS if before[k] != data[k]}
+                    assignments = ', '.join('"{}" = ?'.format(k) for k in _AI_INV_KEYS)
+                    con.execute('UPDATE sistemas_ia SET {}, actualizado_en=?, actualizado_por=? WHERE id=?'.format(assignments),
+                                [data[k] for k in _AI_INV_KEYS] + [_ai_inv_now(), user.username, iid])
+                    _ai_inv_audit(con, iid, 'EDICION', user, changes)
+                else:
+                    fields = ', '.join('"{}"'.format(k) for k in _AI_INV_KEYS)
+                    holders = ', '.join('?' for _ in _AI_INV_KEYS)
+                    cur = con.execute('INSERT INTO sistemas_ia ({},creado_en,actualizado_en,creado_por,actualizado_por) VALUES ({},?,?,?,?)'.format(fields, holders),
+                        [data[k] for k in _AI_INV_KEYS] + [_ai_inv_now(), _ai_inv_now(), user.username, user.username])
+                    iid = cur.lastrowid
+                    _ai_inv_audit(con, iid, 'CREACION', user, {'nombre': data['nombre']})
+                _ai_inv_store_evidence(con, iid, user)
+            try:
+                registrar_log(user.username, 'Inventario IA: guardado sistema IA-{:05d}'.format(iid))
+            except Exception:
+                pass
+            flash('Sistema de inteligencia artificial guardado correctamente.', 'success')
+            return redirect(url_for('inventario_ia_detail', iid=iid))
+        except ValueError as exc:
+            flash(str(exc), 'danger')
+            item.update({key: (request.form.get(key) or '').strip() for key in _AI_INV_KEYS})
+        except Exception:
+            app.logger.exception('No se pudo guardar Inventario IA')
+            flash('No se pudo guardar el registro. Consulte los logs del servidor.', 'danger')
+    inner = '''
+      <div class="aiinv-actions"><a class="btn btn-outline-primary rounded-pill fw-bold" href="{{ url_for('inventario_ia') }}">⬅ Volver a la matriz</a>
+        {% if iid %}<a class="btn btn-info rounded-pill text-white" href="{{ url_for('inventario_ia_detail', iid=iid) }}">Ver detalle</a>{% endif %}</div>
+      <div class="aiinv-panel"><div class="aiinv-panelhead"><h5>{{ 'Editar sistema IA-' ~ ('%05d'|format(iid)) if iid else 'Agregar sistema de inteligencia artificial' }}</h5></div>
+      <div class="aiinv-body"><p class="aiinv-help mb-3">Campos con * obligatorios. Complete las siete secciones que correspondan al sistema de IA. Adjunte evidencias PDF si dispone de ellas.</p>
+      <form method="post" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}">
+      {% for title, campos in sections %}<details class="aiinv-section" {% if loop.first %}open{% endif %}>
+        <summary>{{ loop.index }}. {{ title }}</summary><div class="aiinv-section-inner"><div class="aiinv-form-grid">
+        {% for key, label, typ, required in campos %}
+        <div class="aiinv-field {% if typ=='textarea' %}wide{% endif %}"><label for="ia_{{ key }}">{{ label }}{% if required %} *{% endif %}</label>
+        {% if typ=='textarea' %}<textarea class="form-control" id="ia_{{ key }}" name="{{ key }}" maxlength="5000" {% if required %}required{% endif %}>{{ item.get(key,'') or '' }}</textarea>
+        {% elif typ is sequence and typ is not string %}<select class="form-select" id="ia_{{ key }}" name="{{ key }}" {% if required %}required{% endif %}>
+           <option value="">Seleccionar...</option>{% for op in typ %}<option value="{{ op }}" {% if item.get(key)==op %}selected{% endif %}>{{ op }}</option>{% endfor %}</select>
+        {% else %}<input class="form-control" id="ia_{{ key }}" name="{{ key }}" type="{{ typ }}" value="{{ item.get(key,'') or '' }}" maxlength="500" {% if required %}required{% endif %}>{% endif %}
+        </div>{% endfor %}</div></div></details>{% endfor %}
+      <div class="aiinv-panel mb-3"><div class="aiinv-body"><label class="fw-bold" for="ia_evidencia">Adjuntar evidencia PDF (máx. 10 MB)</label>
+      <input class="form-control mt-2" type="file" id="ia_evidencia" name="evidencia" accept="application/pdf,.pdf">
+      {% if evs %}<p class="aiinv-help mt-2 mb-1">Evidencias existentes:</p>{% for ev in evs %}
+      <div><a href="{{ url_for('inventario_ia_evidence', evid=ev.id) }}">{{ ev.nombre_original }}</a></div>{% endfor %}{% endif %}
+      </div></div>
+      <button class="btn btn-primary rounded-pill fw-bold px-5" type="submit">Guardar registro</button>
+      <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('inventario_ia') }}">Cancelar</a></form></div></div>'''
+    return _ai_inv_html(inner, sections=_AI_INV_SECTIONS, item=item, iid=iid, evs=evs,
+                        csrf=_ai_inv_csrf())
+
+
+@app.route('/inventario_ia/detalle/<int:iid>')
+@login_required
+def inventario_ia_detail(iid):
+    user = _ai_inv_user()
+    with _ai_inv_connection() as con:
+        item = _ai_inv_read(con, iid)
+        evs = _ai_inv_evidences(con, iid)
+        hist = [dict(r) for r in con.execute(
+            'SELECT accion,usuario,fecha FROM sistemas_ia_auditoria WHERE sistema_id=? ORDER BY id DESC LIMIT 10', (iid,)).fetchall()]
+    inner = '''
+      <div class="aiinv-actions"><a class="btn btn-outline-primary rounded-pill fw-bold" href="{{ url_for('inventario_ia') }}">⬅ Volver a matriz</a>
+      {% if can_edit %}<a class="btn btn-warning rounded-pill fw-bold" href="{{ url_for('inventario_ia_form', iid=iid) }}">Editar</a>{% endif %}
+      </div>
+      <div class="aiinv-panel"><div class="aiinv-panelhead"><h5>IA-{{ '%05d'|format(iid) }} · {{ item.nombre }}</h5>
+         <span class="aiinv-counter">{{ item.estado or 'Registrado' }}</span></div>
+      <div class="aiinv-body">{% for title, campos in sections %}<details class="aiinv-section" open><summary>{{ loop.index }}. {{ title }}</summary>
+      <div class="aiinv-section-inner"><div class="aiinv-detail">{% for key, label, typ, required in campos %}
+      <div><small>{{ label }}</small><span>{{ item.get(key) or '—' }}</span></div>{% endfor %}</div></div></details>{% endfor %}
+      <div class="aiinv-panel"><div class="aiinv-panelhead"><h5>Evidencias PDF</h5></div><div class="aiinv-body">
+      {% for ev in evs %}<div class="d-flex align-items-center gap-2 mb-2"><a href="{{ url_for('inventario_ia_evidence', evid=ev.id) }}">{{ ev.nombre_original }}</a>
+      <small class="text-muted">{{ ev.creado_en }}</small>{% if can_edit %}
+      <form method="post" action="{{ url_for('inventario_ia_delete_evidence', evid=ev.id) }}" onsubmit="return confirm('¿Eliminar esta evidencia?');">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn btn-outline-danger btn-sm">Eliminar</button></form>{% endif %}</div>
+      {% else %}<div class="aiinv-help">No hay evidencias adjuntas.</div>{% endfor %}</div></div>
+      <div class="aiinv-help">Creado: {{ item.creado_en }} ({{ item.creado_por or '—' }}) · Última actualización: {{ item.actualizado_en }} ({{ item.actualizado_por or '—' }})</div>
+      {% if hist %}<details class="aiinv-section mt-2"><summary>Historial de cambios</summary><div class="aiinv-section-inner">
+         {% for h in hist %}<div>{{ h.fecha }} · {{ h.usuario }} · {{ h.accion }}</div>{% endfor %}</div></details>{% endif %}
+      </div></div>'''
+    return _ai_inv_html(inner, iid=iid, item=item, evs=evs, hist=hist,
+                        sections=_AI_INV_SECTIONS, can_edit=user.role in ('admin', 'user'), csrf=_ai_inv_csrf())
+
+
+@app.route('/inventario_ia/eliminar/<int:iid>', methods=['POST'])
+@login_required
+def inventario_ia_delete(iid):
+    user = _ai_inv_user(edit=True)
+    _ai_inv_check_csrf()
+    files = []
+    with _ai_inv_connection() as con:
+        item = _ai_inv_read(con, iid)
+        files = [e['nombre_archivo'] for e in _ai_inv_evidences(con, iid)]
+        _ai_inv_audit(con, iid, 'ELIMINACION', user, {'nombre': item['nombre']})
+        con.execute('DELETE FROM sistemas_ia WHERE id=?', (iid,))
+    for fname in files:
+        path = os.path.join(_AI_INV_EVIDENCE_DIR, fname)
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+            except OSError:
+                app.logger.warning('No se pudo borrar evidencia IA %s', fname)
+    flash('Sistema de IA eliminado.', 'success')
+    return redirect(url_for('inventario_ia'))
+
+
+@app.route('/inventario_ia/evidencia/<int:evid>')
+@login_required
+def inventario_ia_evidence(evid):
+    _ai_inv_user()
+    with _ai_inv_connection() as con:
+        ev = con.execute('SELECT * FROM sistemas_ia_evidencias WHERE id=?', (evid,)).fetchone()
+        if ev is None:
+            abort(404)
+        ev = dict(ev)
+    path = os.path.join(_AI_INV_EVIDENCE_DIR, ev['nombre_archivo'])
+    if not os.path.isfile(path):
+        abort(404)
+    return send_file(path, mimetype='application/pdf', as_attachment=True,
+                     download_name=ev['nombre_original'])
+
+
+@app.route('/inventario_ia/evidencia/<int:evid>/eliminar', methods=['POST'])
+@login_required
+def inventario_ia_delete_evidence(evid):
+    user = _ai_inv_user(edit=True)
+    _ai_inv_check_csrf()
+    with _ai_inv_connection() as con:
+        ev = con.execute('SELECT * FROM sistemas_ia_evidencias WHERE id=?', (evid,)).fetchone()
+        if ev is None:
+            abort(404)
+        ev = dict(ev)
+        con.execute('DELETE FROM sistemas_ia_evidencias WHERE id=?', (evid,))
+        _ai_inv_audit(con, ev['sistema_id'], 'ELIMINAR_EVIDENCIA', user, {'archivo': ev['nombre_original']})
+    path = os.path.join(_AI_INV_EVIDENCE_DIR, ev['nombre_archivo'])
+    if os.path.isfile(path):
+        try:
+            os.remove(path)
+        except OSError:
+            app.logger.warning('No se pudo borrar evidencia IA %s', ev['nombre_archivo'])
+    flash('Evidencia eliminada.', 'success')
+    return redirect(url_for('inventario_ia_detail', iid=ev['sistema_id']))
+
+
+# FIN INVENTARIO IA
+
 
 with app.app_context():
     db.create_all()
