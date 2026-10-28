@@ -9999,6 +9999,7 @@ MODULES = [
     "Tablas de Valoración",
     "Dueños de Información",
     "Registro de Incidentes",
+    "Planes de Respuesta a Incidentes",
     "Centro de Alertas",
     "Configuración Parámetros de la Empresa",
     "Gestión de Cambios (RFC)",
@@ -14708,6 +14709,7 @@ MENU_SECTIONS = [
         "items": [
             {"label": "Centro de Alertas", "href": "/alertas", "icon": "bi-bell-fill", "btn": "btn-warning text-dark", "module": "Centro de Alertas"},
             {"label": "Registro de Incidentes", "href": "/incidentes", "icon": "bi-exclamation-triangle", "btn": "btn-danger", "module": "Registro de Incidentes"},
+            {"label": "Planes de Respuesta a Incidentes", "href": "/planes_respuesta_incidentes", "icon": "bi-shield-check", "btn": "btn-primary", "module": "Planes de Respuesta a Incidentes"},
             {"label": "Registro de Vulnerabilidades", "href": "/vulnerabilidades_menu", "icon": "bi-bug", "btn": "btn-danger", "module": "Registro de Vulnerabilidades"},
             {"label": "Modelamiento de Amenazas", "href": "/modelamiento_amenazas", "icon": "bi-diagram-3", "btn": "btn-dark", "module": "Modelamiento de Amenazas"},
             {"label": "Superficie de Ataque y Escenarios", "href": "/superficie_ataque", "icon": "bi-bullseye", "btn": "btn-primary", "module": "Superficie de Ataque y Escenarios"},
@@ -15423,6 +15425,10 @@ def _sgsi_build_global_menu_html():
             "Registro de Incidentes": {
                 "paths": ["/incidentes"],
                 "endpoints": ["incidentes", "incidente"]
+            },
+            "Planes de Respuesta a Incidentes": {
+                "paths": ["/planes_respuesta_incidentes"],
+                "endpoints": ["ir_catalog", "ir_plan_form", "ir_plan_detail", "ir_step_form", "ir_runs", "ir_run_new", "ir_run_detail", "ir_tracking"]
             },
             "Registro de Vulnerabilidades": {
                 "paths": ["/vulnerabilidades_menu", "/vulnerabilidades"],
@@ -73488,6 +73494,9 @@ def incidentes_detalle(id):
           ⬅ Volver a la Matriz de Incidentes
         </a>
 
+        {% if can_planes %}
+        <a href="{{ url_for('ir_incident_plans', iid=row['id']) }}" class="btn btn-primary rounded-pill px-4 fw-bold"><i class="bi bi-shield-check"></i> Activar plan de respuesta</a>
+        {% endif %}
         {% if not solo_lectura %}
         <a href="{{ url_for('incidentes_editar', id=row['id']) }}"
            class="btn btn-warning rounded-pill px-4 fw-bold"
@@ -73818,7 +73827,8 @@ def incidentes_detalle(id):
         }
       }
     </style>
-    """, row=row, solo_lectura=solo_lectura)
+    """, row=row, solo_lectura=solo_lectura,
+       can_planes=verificar_permiso(user, 'Planes de Respuesta a Incidentes'))
 
     return render_template_string(BASE, content=content)
 
@@ -84030,10 +84040,13 @@ def threat_model_dashboard():
     items = q.distinct().order_by(ThreatModelEntry.id.desc()).all()
 
     body = """
-    <div class="glass-card p-4 mt-2">
-      <div class="section-title">🎯 Dashboard de Modelamiento de Amenazas</div>
+    <div class="glass-card p-4 mt-2 threat-dashboard-card">
+      <div class="section-title threat-dashboard-heading">🎯 Dashboard de Modelamiento de Amenazas</div>
 
-      <div class="toolbar-actions justify-content-end mb-3 threat-main-actions">
+      <!-- Acciones siempre DEBAJO del título, sin superposiciones. -->
+      <div class="threat-dashboard-actions-panel">
+        <div class="threat-dashboard-actions-label">Acciones del módulo</div>
+        <div class="threat-main-actions">
         <a href="{{ url_for('threat_model_asset_view') }}"
            class="btn btn-primary rounded-pill px-4">
           🧭 Matriz MITRE ATT&CK
@@ -84079,6 +84092,7 @@ def threat_model_dashboard():
             📥 Importar Nessus
           </a>
         {% endif %}
+        </div>
       </div>
 
       <form method="get" class="row g-3 mb-3" id="threatFiltroForm">
@@ -84283,15 +84297,81 @@ def threat_model_dashboard():
         font-weight:900;
       }
 
-      .threat-main-actions{
-        display:flex;
-        flex-wrap:wrap;
-        gap:10px;
+      /* Presentación uniforme del módulo, igual al orden título > acciones > contenido.
+         Las posiciones están en el flujo normal: los botones NO se montan sobre el título. */
+      .threat-dashboard-card > .threat-dashboard-heading{
+        display:block;
+        position:relative;
+        z-index:1;
+        clear:both;
+        width:100%;
+        margin-bottom:16px !important;
       }
 
-      .threat-main-actions .btn{
+      .threat-dashboard-card .threat-dashboard-actions-panel{
+        display:block;
+        position:relative !important;
+        inset:auto !important;
+        float:none !important;
+        transform:none !important;
+        clear:both;
+        width:100%;
+        margin:0 0 20px 0;
+        padding:14px 16px 16px;
+        background:#f8fbff;
+        border:1px solid #d9eaff;
+        border-radius:14px;
+      }
+
+      .threat-dashboard-card .threat-dashboard-actions-label{
+        color:#0b4a8f;
+        font-size:.79rem;
         font-weight:900;
+        margin-bottom:12px;
+      }
+
+      .threat-dashboard-card .threat-main-actions{
+        display:grid !important;
+        grid-template-columns:repeat(3,minmax(0,1fr));
+        align-items:stretch;
+        justify-items:stretch;
+        gap:10px;
+        position:static !important;
+        float:none !important;
+        transform:none !important;
+        width:100%;
+      }
+
+      .threat-dashboard-card .threat-main-actions .btn{
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        width:100%;
+        min-width:0;
+        min-height:42px;
+        margin:0;
+        padding:9px 12px !important;
+        white-space:normal;
+        text-align:center;
+        overflow-wrap:anywhere;
+        font-weight:900;
+        font-size:.79rem;
         box-shadow:0 8px 18px rgba(0,0,0,.10);
+      }
+
+      @media (max-width:1100px){
+        .threat-dashboard-card .threat-main-actions{
+          grid-template-columns:repeat(2,minmax(0,1fr));
+        }
+      }
+
+      @media (max-width:650px){
+        .threat-dashboard-card .threat-main-actions{
+          grid-template-columns:minmax(0,1fr);
+        }
+        .threat-dashboard-card .threat-dashboard-actions-panel{
+          padding:12px;
+        }
       }
 
       .tm-actions-wrap{
@@ -127684,6 +127764,7 @@ REPORT_KEYS_EXCEL_ONLY = {
     "proveedores",
     "matriz_riesgos",
     "registro_incidentes",
+    "planes_respuesta_incidentes",
     "planes_accion_sgsi",
     "partes_interesadas",
     "inventario_ia",
@@ -127703,6 +127784,7 @@ REPORT_CATALOG = [
 
     {"key": "matriz_riesgos",      "label": "Matriz de Riesgos",                             "icon": "bi-shield-exclamation"},
     {"key": "registro_incidentes", "label": "Registro de Incidentes",                        "icon": "bi-journal-medical"},
+    {"key": "planes_respuesta_incidentes", "label": "Planes de Respuesta a Incidentes", "icon": "bi-shield-check"},
     {"key": "planes_accion_sgsi",  "label": "Planes de Acción del Sistema de Gestión",       "icon": "bi-list-check"},
     {"key": "partes_interesadas",  "label": "Partes Interesadas",                            "icon": "bi-diagram-3"},
     {"key": "inventario_ia",       "label": "Inventario de IA (ISO 42001)",                 "icon": "bi-cpu-fill"},
@@ -129659,6 +129741,9 @@ def _get_report_payload(key: str):
     if key == "registro_incidentes":
         return _payload_registro_incidentes()
 
+    if key == "planes_respuesta_incidentes":
+        return _ir_excel_payload()
+
     if key == "planes_accion_sgsi":
         return _payload_planes_accion_sgsi()
 
@@ -129691,8 +129776,9 @@ def reportes_home():
     end_date = (request.args.get("end_date") or "").strip()
 
     catalogo_visible = [r for r in REPORT_CATALOG if (
-        r['key'] not in _INVENTARIOS_EXCEL_PERMISOS or
-        verificar_permiso_activos(user, _INVENTARIOS_EXCEL_PERMISOS[r['key']])
+        (r['key'] not in _INVENTARIOS_EXCEL_PERMISOS or
+         verificar_permiso_activos(user, _INVENTARIOS_EXCEL_PERMISOS[r['key']]))
+        and (r['key'] != 'planes_respuesta_incidentes' or verificar_permiso(user, 'Planes de Respuesta a Incidentes'))
     )]
 
     content = render_template_string("""
@@ -129795,6 +129881,8 @@ def reportes_home():
                         Exportación de la matriz de riesgos en Excel.
                       {% elif r.key == 'registro_incidentes' %}
                         Exportación del registro de incidentes en Excel.
+                      {% elif r.key == 'planes_respuesta_incidentes' %}
+                        Catálogo, ejecuciones y seguimiento de actividades de respuesta.
                       {% elif r.key == 'planes_accion_sgsi' %}
                         Exportación de planes de acción del sistema de gestión en Excel.
                       {% elif r.key == 'partes_interesadas' %}
@@ -130348,6 +130436,8 @@ def reportes_excel(key):
     usuario = db.session.get(User, session.get('user_id'))
     if usuario is None or (usuario.role != 'admin' and not verificar_permiso(usuario, 'Reportes')):
         abort(403, description='Sin acceso al Centro de Reportes.')
+    if key == 'planes_respuesta_incidentes' and not verificar_permiso(usuario, 'Planes de Respuesta a Incidentes'):
+        abort(403, description='Sin permiso para exportar planes de respuesta.')
     permiso_inventario = _INVENTARIOS_EXCEL_PERMISOS.get(key)
     if permiso_inventario and not verificar_permiso_activos(usuario, permiso_inventario):
         abort(403, description='Sin permiso para exportar este inventario.')
@@ -209600,6 +209690,741 @@ def inventario_ia_delete_evidence(evid):
 
 # FIN INVENTARIO IA
 
+
+# ============================================================================
+# GRAC - PLANES DE RESPUESTA A INCIDENTES (catálogo, ejecución, seguimiento)
+# Datos independientes: instance/planes_respuesta_incidentes.db
+# ============================================================================
+from werkzeug.utils import secure_filename as _ir_safe_name
+from markupsafe import Markup as _IRMarkup
+
+_IR_DB = os.path.join(app.instance_path, 'planes_respuesta_incidentes.db')
+_IR_FILES = os.path.join(app.instance_path, 'planes_respuesta_evidencias')
+_IR_PHASES = ('Identificación y análisis', 'Contención', 'Erradicación y recuperación', 'Post-incidente')
+# Categorías normalizadas en español para las nuevas instalaciones.
+_IR_CATEGORY_TRANSLATIONS = {
+    'Abusive Content': 'Contenido abusivo',
+    'Malicious Code': 'Código malicioso',
+    'Information Gathering': 'Recopilación de información',
+    'Intrusion Attempts': 'Intentos de intrusión',
+    'Intrusions': 'Intrusiones',
+    'Availability': 'Disponibilidad',
+    'Information Content Security': 'Seguridad del contenido de la información',
+    'Fraud': 'Fraude',
+}
+_IR_DEFAULT_PLAN_NAMES = {
+    'Contenido abusivo': 'Respuesta a contenido abusivo',
+    'Código malicioso': 'Respuesta a código malicioso',
+    'Recopilación de información': 'Respuesta a recopilación de información',
+    'Intentos de intrusión': 'Respuesta a intentos de intrusión',
+    'Intrusiones': 'Respuesta a intrusiones',
+    'Disponibilidad': 'Respuesta a incidentes de disponibilidad',
+    'Seguridad del contenido de la información': 'Respuesta a incidentes de seguridad de la información',
+    'Fraude': 'Respuesta a fraude',
+}
+_IR_CATEGORIES = (
+    ('Contenido abusivo', 'Contenido abusivo, spam o comunicaciones maliciosas'),
+    ('Código malicioso', 'Virus, spyware, ransomware y otros códigos maliciosos'),
+    ('Recopilación de información', 'Reconocimiento, escaneo e ingeniería social'),
+    ('Intentos de intrusión', 'Intentos de explotación o acceso indebido'),
+    ('Intrusiones', 'Intrusiones y accesos no autorizados confirmados'),
+    ('Disponibilidad', 'Interrupción de servicios, DDoS y sabotaje'),
+    ('Seguridad del contenido de la información', 'Divulgación, alteración o pérdida de información'),
+    ('Fraude', 'Fraude, suplantación y abuso de privilegios'),
+)
+_IR_SPECIAL_STEPS = {
+    'Contenido abusivo': ('Preservar los mensajes originales y sus encabezados', 'Bloquear remitentes o cuentas identificadas conforme a políticas', 'Revisar los canales afectados y comprobar que cesó el abuso'),
+    'Código malicioso': ('Recoger alertas del EDR/antimalware y delimitar activos afectados', 'Aislar los equipos comprometidos con autorización', 'Eliminar el código malicioso, corregir la causa y validar restauración limpia'),
+    'Recopilación de información': ('Correlacionar indicadores de reconocimiento y origen del tráfico', 'Aplicar limitación de tráfico y endurecimiento de accesos según autorización', 'Verificar la exposición y corregir configuraciones que faciliten el reconocimiento'),
+    'Intentos de intrusión': ('Analizar eventos de autenticación, WAF y perímetro', 'Bloquear temporalmente indicadores maliciosos aprobados', 'Corregir vulnerabilidades y verificar que cesen los intentos'),
+    'Intrusiones': ('Delimitar cuentas, equipos y sesiones comprometidos', 'Revocar sesiones y aislar activos con autorización del responsable', 'Restablecer credenciales, eliminar persistencia y validar sistemas'),
+    'Disponibilidad': ('Determinar servicios afectados, impacto y causa probable', 'Activar mitigación DDoS, filtrado o procedimientos de continuidad autorizados', 'Restaurar gradualmente el servicio y verificar métricas de disponibilidad'),
+    'Seguridad del contenido de la información': ('Clasificar la información y preservar trazas de acceso', 'Restringir accesos y contener divulgaciones activas con autorización', 'Verificar integridad, restaurar información y evaluar notificaciones aplicables'),
+    'Fraude': ('Identificar transacciones, identidades y evidencias involucradas', 'Suspender operaciones o credenciales de forma autorizada', 'Corregir el vector de fraude y conciliar operaciones afectadas'),
+}
+
+def _ir_now():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+class _IRConnection(sqlite3.Connection):
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            return super().__exit__(exc_type, exc, tb)
+        finally:
+            self.close()
+
+def _ir_db():
+    os.makedirs(app.instance_path, exist_ok=True)
+    con = sqlite3.connect(_IR_DB, timeout=15, factory=_IRConnection)
+    con.row_factory = sqlite3.Row
+    con.execute('PRAGMA foreign_keys=ON')
+    con.execute('PRAGMA busy_timeout=15000')
+    return con
+
+def _ir_init():
+    os.makedirs(_IR_FILES, exist_ok=True)
+    con = _ir_db()
+    try:
+        con.executescript('''
+        CREATE TABLE IF NOT EXISTS ir_plans (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT NOT NULL,
+          name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+          activation TEXT NOT NULL DEFAULT '', owner TEXT NOT NULL DEFAULT '',
+          technologies TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'Borrador',
+          version INTEGER NOT NULL DEFAULT 1, review_date TEXT,
+          approved_by TEXT, approved_at TEXT, created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS ir_plan_steps (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id INTEGER NOT NULL REFERENCES ir_plans(id),
+          phase TEXT NOT NULL, seq INTEGER NOT NULL, title TEXT NOT NULL,
+          instructions TEXT NOT NULL DEFAULT '', assigned_role TEXT NOT NULL DEFAULT '',
+          priority TEXT NOT NULL DEFAULT 'Media');
+        CREATE TABLE IF NOT EXISTS ir_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id INTEGER NOT NULL REFERENCES ir_plans(id),
+          plan_name TEXT NOT NULL, plan_version INTEGER NOT NULL,
+          incident_id INTEGER, incident_reference TEXT, mode TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'En curso', owner TEXT NOT NULL DEFAULT '',
+          start_at TEXT NOT NULL, end_at TEXT, observations TEXT NOT NULL DEFAULT '',
+          lessons TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS ir_run_steps (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL REFERENCES ir_runs(id),
+          phase TEXT NOT NULL, seq INTEGER NOT NULL, title TEXT NOT NULL,
+          instructions TEXT NOT NULL, assigned_role TEXT NOT NULL, priority TEXT NOT NULL,
+          assigned_to TEXT NOT NULL DEFAULT '', due_at TEXT,
+          status TEXT NOT NULL DEFAULT 'Pendiente', notes TEXT NOT NULL DEFAULT '',
+          started_at TEXT, finished_at TEXT, finished_by TEXT);
+        CREATE TABLE IF NOT EXISTS ir_evidence (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL REFERENCES ir_runs(id),
+          step_id INTEGER REFERENCES ir_run_steps(id), original_name TEXT NOT NULL,
+          stored_name TEXT NOT NULL, sha256 TEXT NOT NULL,
+          size_bytes INTEGER NOT NULL, uploaded_by TEXT NOT NULL, uploaded_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS ir_audit (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id INTEGER, run_id INTEGER,
+          actor TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL,
+          created_at TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS idx_ir_steps ON ir_plan_steps(plan_id, seq);
+        CREATE INDEX IF NOT EXISTS idx_ir_run_steps ON ir_run_steps(run_id, seq);
+        CREATE INDEX IF NOT EXISTS idx_ir_audit ON ir_audit(run_id, created_at);
+        ''')
+        # Solo se precarga en instalaciones nuevas; no se reescriben planes del cliente.
+        if con.execute('SELECT COUNT(*) FROM ir_plans').fetchone()[0] == 0:
+            now = _ir_now()
+            common = (
+                (_IR_PHASES[0], 'Validar la señal y determinar alcance', 'Correlacionar alertas, validar falsos positivos y registrar activos y tiempo de detección.'),
+                (_IR_PHASES[0], 'Clasificar el incidente y notificar', 'Estimar criticidad, informar al coordinador y definir responsables.'),
+                (_IR_PHASES[1], 'Preservar evidencias iniciales', 'Recolectar registros y evidencias con control de acceso e integridad.'),
+                (_IR_PHASES[2], 'Verificar recuperación y monitoreo', 'Comprobar el servicio, integridad y ausencia de indicadores de compromiso.'),
+                (_IR_PHASES[3], 'Documentar decisiones y comunicaciones', 'Registrar hechos, responsables, tiempos y notificaciones exigibles.'),
+                (_IR_PHASES[3], 'Realizar lecciones aprendidas', 'Registrar causas, mejoras, controles y seguimiento de acciones.'),
+            )
+            for category, desc in _IR_CATEGORIES:
+                c = con.execute('INSERT INTO ir_plans (category,name,description,activation,status,version,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)',
+                    (category, _IR_DEFAULT_PLAN_NAMES[category], desc, 'Evento confirmado o sospecha razonable: ' + category.lower(), 'Borrador', 1, now, now))
+                pid = c.lastrowid
+                spec = _IR_SPECIAL_STEPS[category]
+                tasks = [common[0], common[1], ( _IR_PHASES[0],spec[0],'Aplicar el procedimiento de análisis definido por la organización.'),common[2],
+                    (_IR_PHASES[1],spec[1],'Validar autorización y documentar posibles impactos en el negocio.'),
+                    (_IR_PHASES[2],spec[2],'Conservar registros de las verificaciones y resultados.'),common[3],common[4],common[5]]
+                for seq, (phase,title,description) in enumerate(tasks,1):
+                    con.execute('INSERT INTO ir_plan_steps(plan_id,phase,seq,title,instructions,priority) VALUES(?,?,?,?,?,?)',
+                        (pid,phase,seq,title,description,'Alta' if phase == _IR_PHASES[1] else 'Media'))
+        # Localización no destructiva de los planes precargados en versiones previas.
+        # Se actualizan SOLO los valores predeterminados en inglés; las modificaciones
+        # de clientes, las versiones, el estado aprobado y las tareas permanecen intactos.
+        for original, traducida in _IR_CATEGORY_TRANSLATIONS.items():
+            nombre_nuevo = _IR_DEFAULT_PLAN_NAMES[traducida]
+            nombre_anterior = 'Respuesta a ' + original
+            activacion_anterior = 'Evento confirmado o sospecha razonable de ' + original
+            activacion_nueva = 'Evento confirmado o sospecha razonable: ' + traducida.lower()
+            con.execute('''UPDATE ir_plans SET name=?
+                WHERE name=? AND category IN (?,?)''',
+                (nombre_nuevo, nombre_anterior, original, traducida))
+            con.execute('''UPDATE ir_plans SET activation=?
+                WHERE activation=? AND category IN (?,?)''',
+                (activacion_nueva, activacion_anterior, original, traducida))
+            con.execute('UPDATE ir_plans SET category=? WHERE category=?',
+                (traducida, original))
+            # Las ejecuciones históricas son instantáneas: cambiar únicamente
+            # el nombre genérico precargado; no modificar tareas ni evidencias.
+            con.execute('UPDATE ir_runs SET plan_name=? WHERE plan_name=?',
+                (nombre_nuevo, nombre_anterior))
+        con.commit()
+    finally:
+        con.close()
+
+def _ir_user(write=False):
+    user = db.session.get(User, session.get('user_id'))
+    if user is None or not verificar_permiso(user, 'Planes de Respuesta a Incidentes'):
+        abort(403, description='Sin permiso para Planes de Respuesta a Incidentes.')
+    if write and user.role == 'auditor':
+        abort(403, description='El auditor tiene acceso de solo lectura.')
+    return user
+
+def _ir_token():
+    token = session.get('_grac_ir_csrf')
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session['_grac_ir_csrf'] = token
+    return token
+
+def _ir_csrf():
+    if not session.get('_grac_ir_csrf') or not secrets.compare_digest(
+        str(session.get('_grac_ir_csrf','')), str(request.form.get('csrf',''))):
+        abort(403, description='Token de formulario inválido.')
+
+def _ir_audit(con, actor, action, detail='', plan_id=None, run_id=None):
+    con.execute('INSERT INTO ir_audit(plan_id,run_id,actor,action,detail,created_at) VALUES(?,?,?,?,?,?)',
+        (plan_id,run_id,actor,action,str(detail)[:2000],_ir_now()))
+
+def _ir_page(template, **kwargs):
+    """Diseño institucional GRAC: encabezado -> navegación -> contenido.
+
+    El HTML de cada pantalla comienza con su encabezado ir-hero. Lo
+    renderizamos primero y lo separamos de los demás componentes para evitar
+    que las pestañas aparezcan por encima del título del módulo.
+    """
+    css = '''<style>
+    .ir-wrap{max-width:1420px;margin:0 auto;padding:16px 14px 30px;font-size:1rem}
+    /* Encabezado idéntico a Registro de Incidentes: fondo rayado,
+       emblema blanco, etiqueta SGSI y tipografía institucional. */
+    .ir-wrap .ir-hero{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;padding:16px 24px;min-height:94px;
+        display:flex;align-items:center;justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;overflow:hidden;margin:0 0 16px;
+        color:#fff;
+    }
+    .ir-wrap .ir-hero::before{
+        content:"";position:absolute;inset:0;pointer-events:none;
+        background:radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,
+          rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+    }
+    .ir-wrap .ir-hero-inner{
+        display:flex;align-items:center;justify-content:flex-start;gap:14px;
+        width:100%;position:relative;z-index:1;min-width:0;
+    }
+    .ir-wrap .ir-hero-icon{
+        width:54px;height:54px;min-width:54px;border-radius:14px;
+        background:#fff;color:#0b4a8f;display:flex;align-items:center;
+        justify-content:center;font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+    }
+    .ir-wrap .ir-hero-info{min-width:0;flex:1}
+    .ir-wrap .ir-hero .ir-kicker{
+        display:inline-block;background:rgba(255,255,255,.18);
+        border-radius:999px;padding:3px 10px;font-size:.65rem;
+        font-weight:800;margin:0 0 4px;color:#fff;
+    }
+    .ir-wrap .ir-hero h2{
+        color:#fff!important;font-weight:950!important;font-size:1.32rem!important;
+        line-height:1.1!important;text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0!important;
+    }
+    .ir-wrap .ir-hero p{
+        color:rgba(255,255,255,.95)!important;font-size:.78rem!important;
+        margin:4px 0 0!important;line-height:1.25!important;
+    }
+    /* La navegación es una tarjeta bajo el encabezado, no una barra flotante. */
+    .ir-wrap .ir-nav-panel{position:static!important;display:block!important;
+        background:#fff;border:1px solid #dbe7f5;border-radius:16px;
+        padding:14px 18px;margin:0 0 17px;
+        box-shadow:0 5px 15px rgba(20,64,112,.08)}
+    .ir-wrap .ir-nav-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+    .ir-wrap .ir-nav-link{display:inline-flex;align-items:center;justify-content:center;
+        gap:8px;min-height:42px;padding:9px 16px;font-size:.94rem;
+        font-weight:650;line-height:1.2;border:1px solid #bcd5ef;
+        color:#16518f;background:#f6faff;text-decoration:none;border-radius:10px;
+        transition:background .15s,border-color .15s}
+    .ir-wrap .ir-nav-link:hover{background:#e6f2ff;border-color:#4c95dc;color:#10427a}
+    .ir-wrap .ir-nav-link.active{background:#1766bb;color:white;border-color:#1766bb;
+        box-shadow:0 3px 8px rgba(23,102,187,.16)}
+    .ir-wrap .ir-nav-link.active:hover{color:#fff;background:#11559e}
+    .ir-card{background:white;color:#1e293b;border:1px solid #e2e8f0;
+        border-radius:14px;padding:19px;margin-bottom:14px;
+        box-shadow:0 5px 13px #1835570c}
+    .ir-kpi{font-size:1.75rem;font-weight:800;color:#184e88}
+    .ir-tab{margin:0 6px 6px 0}.ir-wrap .form-label{font-weight:600}
+    .ir-tbl{overflow:auto}.ir-wrap table{font-size:.96rem}.ir-wrap td{vertical-align:middle}
+    .ir-wrap textarea{min-height:80px}.ir-wrap .btn{border-radius:9px}
+    @media(max-width:620px){
+        .ir-wrap{padding:12px 8px 24px}
+        .ir-wrap .ir-hero{padding:14px 16px;min-height:90px}
+        .ir-wrap .ir-hero-icon{width:46px;height:46px;min-width:46px;font-size:1.2rem}
+        .ir-wrap .ir-hero-inner{gap:10px}
+        .ir-wrap .ir-hero h2{font-size:1.18rem!important}
+        .ir-wrap .ir-nav-panel{padding:11px}
+        .ir-wrap .ir-nav-actions{display:grid;grid-template-columns:1fr}
+        .ir-wrap .ir-nav-link{justify-content:flex-start;width:100%}
+    }
+    </style>'''
+    endpoint = request.endpoint or ''
+    if endpoint == 'ir_tracking':
+        active_section = 'tracking'
+    elif endpoint in ('ir_runs', 'ir_run_detail', 'ir_run_new',
+                      'ir_incident_plans', 'ir_step_update',
+                      'ir_run_close', 'ir_evidence_upload', 'ir_evidence_download'):
+        active_section = 'runs'
+    else:
+        active_section = 'catalog'
+    nav = '''<nav class="ir-nav-panel" aria-label="Secciones de planes de respuesta a incidentes">
+      <div class="ir-nav-actions">
+        <a class="ir-nav-link {{'active' if active_section=='catalog' else ''}}"
+           href="{{url_for('ir_catalog')}}" {{'aria-current="page"'|safe if active_section=='catalog' else ''}}>
+           <i class="bi bi-journal-text" aria-hidden="true"></i> Catálogo de planes</a>
+        <a class="ir-nav-link {{'active' if active_section=='runs' else ''}}"
+           href="{{url_for('ir_runs')}}" {{'aria-current="page"'|safe if active_section=='runs' else ''}}>
+           <i class="bi bi-play-circle" aria-hidden="true"></i> Ejecución de planes</a>
+        <a class="ir-nav-link {{'active' if active_section=='tracking' else ''}}"
+           href="{{url_for('ir_tracking')}}" {{'aria-current="page"'|safe if active_section=='tracking' else ''}}>
+           <i class="bi bi-graph-up" aria-hidden="true"></i> Seguimiento y pruebas</a>
+      </div>
+    </nav>'''
+    data = dict(kwargs, csrf=_ir_token(), phases=_IR_PHASES,
+                categories=_IR_CATEGORIES, active_section=active_section)
+    rendered = render_template_string(template, **data)
+    # Todos los formularios y vistas de este módulo comienzan con ir-hero.
+    # Separar el encabezado YA RENDERIZADO evita cambiar sus textos dinámicos.
+    match = re.match(r'\s*(<div\s+class="ir-hero"[^>]*>.*?</div>)(.*)\Z', rendered, re.S)
+    if match:
+        header_html, body_html = match.group(1), match.group(2)
+    else:
+        # Defensa: mantener diseño consistente si se crea una vista nueva.
+        header_html = ('<div class="ir-hero"><h2>Planes de Respuesta a Incidentes</h2>'
+                       '<p>Gestión de planes y ejecuciones</p></div>')
+        body_html = rendered
+    # Recrear el encabezado con las mismas piezas visuales del encabezado de
+    # Registro de Incidentes. Los textos vienen del HTML Jinja ya renderizado.
+    # Solo se transforma el encabezado; navegación, vistas y formularios quedan igual.
+    heading = re.fullmatch(
+        r'\s*<div class="ir-hero">\s*<h2>(.*?)</h2>\s*<p>(.*?)</p>\s*</div>\s*',
+        header_html, re.S)
+    if heading:
+        titulo_html = heading.group(1)
+        descripcion_html = heading.group(2)
+        # El icono ya está en el recuadro blanco, evitar duplicarlo en el título.
+        titulo_html = re.sub(
+            r'^\s*<i class="bi bi-shield-check me-2"></i>\s*',
+            '', titulo_html, count=1)
+        header_html = (
+            '<div class="ir-hero">'
+            '<div class="ir-hero-inner">'
+            '<span class="ir-hero-icon" aria-hidden="true">'
+            '<i class="bi bi-shield-check"></i></span>'
+            '<div class="ir-hero-info">'
+            '<div class="ir-kicker">SGSI · Gestión de Eventos</div>'
+            '<h2>' + titulo_html + '</h2>'
+            '<p>' + descripcion_html + '</p>'
+            '</div></div></div>'
+        )
+    menu_html = render_template_string(nav, **data)
+    content = '<div class="ir-wrap">' + css + header_html + menu_html + body_html + '</div>'
+    return render_template_string(BASE, content=_IRMarkup(content))
+
+@app.route('/planes_respuesta_incidentes')
+@login_required
+def ir_catalog():
+    user=_ir_user()
+    query=(request.args.get('q') or '').strip()
+    with _ir_db() as con:
+        plans=[dict(r) for r in con.execute('SELECT p.*, (SELECT COUNT(*) FROM ir_plan_steps s WHERE s.plan_id=p.id) AS tasks, (SELECT COUNT(*) FROM ir_runs e WHERE e.plan_id=p.id) AS executions FROM ir_plans p ORDER BY p.id')]
+    if query:
+        plans=[p for p in plans if query.casefold() in (p['name']+' '+p['category']+' '+p['owner']).casefold()]
+    return _ir_page('''
+    <div class="ir-hero"><h2><i class="bi bi-shield-check me-2"></i>Planes de Respuesta a Incidentes</h2><p>Catálogo configurable · Identificación · Contención · Recuperación · Lecciones aprendidas</p></div>
+    <div class="row g-3 mb-3"><div class="col-md-4"><div class="ir-card"><div class="ir-kpi">{{plans|length}}</div>Planes visibles</div></div>
+    <div class="col-md-4"><div class="ir-card"><div class="ir-kpi">{{plans|selectattr('status','equalto','Vigente')|list|length}}</div>Planes vigentes</div></div>
+    <div class="col-md-4"><div class="ir-card"><div class="ir-kpi">{{plans|sum(attribute='executions')}}</div>Ejecuciones registradas</div></div></div>
+    <div class="ir-card"><div class="d-flex gap-2 justify-content-between flex-wrap mb-3">
+    <form method="get" class="d-flex gap-2"><input class="form-control" name="q" value="{{q}}" placeholder="Buscar plan o categoría"><button class="btn btn-primary">Buscar</button></form>
+    {% if writable %}<a class="btn btn-primary" href="{{url_for('ir_plan_form')}}"><i class="bi bi-plus-circle"></i> Nuevo plan</a>{% endif %}</div>
+    <div class="ir-tbl"><table class="table table-hover align-middle"><thead class="table-light"><tr><th>Código</th><th>Plan / categoría</th><th>Responsable</th><th>Versión</th><th>Estado</th><th>Actividades</th><th>Acciones</th></tr></thead><tbody>
+    {% for p in plans %}<tr><td>PRI-{{'%03d'|format(p.id)}}</td><td><strong>{{p.name}}</strong><div class="text-muted small">{{p.category}}</div></td><td>{{p.owner or 'Sin asignar'}}</td><td>v{{p.version}}</td><td><span class="badge {{'bg-success' if p.status=='Vigente' else 'bg-secondary'}}">{{p.status}}</span></td><td>{{p.tasks}}</td><td><a class="btn btn-sm btn-outline-primary" href="{{url_for('ir_plan_detail',pid=p.id)}}">Ver / gestionar</a></td></tr>{% endfor %}
+    </tbody></table></div></div>
+    ''', plans=plans,q=query,writable=user.role!='auditor')
+
+@app.route('/planes_respuesta_incidentes/plan/nuevo', methods=['GET','POST'])
+@app.route('/planes_respuesta_incidentes/plan/<int:pid>/editar', methods=['GET','POST'])
+@login_required
+def ir_plan_form(pid=None):
+    user=_ir_user(write=True)
+    with _ir_db() as con:
+        plan=dict(con.execute('SELECT * FROM ir_plans WHERE id=?',(pid,)).fetchone()) if pid and con.execute('SELECT 1 FROM ir_plans WHERE id=?',(pid,)).fetchone() else None
+        if pid and plan is None: abort(404)
+        if request.method=='POST':
+            _ir_csrf()
+            name=(request.form.get('name') or '').strip()[:180]
+            category=(request.form.get('category') or '').strip()[:100]
+            if not name or not category: abort(400, description='Nombre y categoría obligatorios.')
+            desc=(request.form.get('description') or '').strip()[:4000]
+            activation=(request.form.get('activation') or '').strip()[:3000]
+            owner=(request.form.get('owner') or '').strip()[:160]
+            tech=(request.form.get('technologies') or '').strip()[:1000]
+            review=(request.form.get('review_date') or '').strip()[:10]
+            if review and not re.fullmatch(r'\d{4}-\d{2}-\d{2}',review):abort(400)
+            if plan:
+                con.execute('UPDATE ir_plans SET name=?,category=?,description=?,activation=?,owner=?,technologies=?,review_date=?,status=?,version=version+1,approved_by=NULL,approved_at=NULL,updated_at=? WHERE id=?',
+                    (name,category,desc,activation,owner,tech,review,'Borrador',_ir_now(),pid))
+                _ir_audit(con,user.username,'EDITAR_PLAN','Versión incrementada. Aprobación invalidada.',pid)
+            else:
+                cur=con.execute('INSERT INTO ir_plans(category,name,description,activation,owner,technologies,review_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
+                   (category,name,desc,activation,owner,tech,review,_ir_now(),_ir_now()))
+                pid=cur.lastrowid
+                _ir_audit(con,user.username,'CREAR_PLAN',name,pid)
+            con.commit()
+            flash('Plan guardado. Requiere aprobación antes de activarlo.', 'success')
+            return redirect(url_for('ir_plan_detail',pid=pid))
+    return _ir_page('''<div class="ir-hero"><h2>{{'Editar plan' if plan else 'Nuevo plan de respuesta'}}</h2><p>Personaliza el plan para tu organización.</p></div>
+    <div class="ir-card"><form method="post"><input type="hidden" name="csrf" value="{{csrf}}"><div class="row g-3">
+    <div class="col-md-6"><label class="form-label">Nombre del plan *</label><input name="name" class="form-control" maxlength="180" required value="{{plan.name if plan else ''}}"></div>
+    <div class="col-md-6"><label class="form-label">Categoría *</label><input name="category" list="ir_categories" class="form-control" required value="{{plan.category if plan else ''}}"><datalist id="ir_categories">{% for k,d in categories %}<option value="{{k}}">{{d}}</option>{% endfor %}</datalist></div>
+    <div class="col-md-12"><label class="form-label">Descripción</label><textarea name="description" class="form-control">{{plan.description if plan else ''}}</textarea></div>
+    <div class="col-md-12"><label class="form-label">Criterios de activación</label><textarea name="activation" class="form-control">{{plan.activation if plan else ''}}</textarea></div>
+    <div class="col-md-5"><label class="form-label">Responsable</label><input name="owner" class="form-control" value="{{plan.owner if plan else ''}}"></div>
+    <div class="col-md-5"><label class="form-label">Tecnologías / dependencias aplicables</label><input name="technologies" class="form-control" value="{{plan.technologies if plan else ''}}"></div>
+    <div class="col-md-2"><label class="form-label">Próxima revisión</label><input type="date" name="review_date" class="form-control" value="{{plan.review_date if plan else ''}}"></div>
+    </div><div class="mt-3"><button class="btn btn-primary">Guardar</button> <a href="{{url_for('ir_catalog')}}" class="btn btn-outline-secondary">Cancelar</a></div></form></div>''',plan=plan)
+
+@app.route('/planes_respuesta_incidentes/plan/<int:pid>')
+@login_required
+def ir_plan_detail(pid):
+    user=_ir_user()
+    with _ir_db() as con:
+        p=con.execute('SELECT * FROM ir_plans WHERE id=?',(pid,)).fetchone()
+        if p is None:abort(404)
+        p=dict(p)
+        steps=[dict(r) for r in con.execute('SELECT * FROM ir_plan_steps WHERE plan_id=? ORDER BY seq,id',(pid,))]
+        history=[dict(r) for r in con.execute('SELECT * FROM ir_runs WHERE plan_id=? ORDER BY id DESC LIMIT 15',(pid,))]
+    return _ir_page('''<div class="ir-hero"><h2>{{p.name}}</h2><p>{{p.category}} · v{{p.version}} · {{p.status}}</p></div>
+    <div class="ir-card"><div class="d-flex gap-2 flex-wrap mb-3">
+    {% if writable %}<a class="btn btn-outline-primary" href="{{url_for('ir_plan_form',pid=p.id)}}">Editar información</a>
+    <a class="btn btn-outline-primary" href="{{url_for('ir_step_form',pid=p.id)}}">Agregar actividad</a>
+    {% if admin %}<form method="post" action="{{url_for('ir_plan_state',pid=p.id)}}" class="d-inline"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="status" value="{{'Vigente' if p.status!='Vigente' else 'Retirado'}}"><button class="btn btn-outline-success">{{'Aprobar / publicar' if p.status!='Vigente' else 'Retirar'}}</button></form>{% endif %}
+    {% if p.status=='Vigente' %}<a class="btn btn-primary" href="{{url_for('ir_run_new',pid=p.id)}}">Activar plan</a>{% endif %}{% endif %}
+    </div><p><strong>Propósito:</strong> {{p.description or 'No definido'}}</p><p><strong>Activación:</strong> {{p.activation or 'No definida'}}</p>
+    <p><strong>Responsable:</strong> {{p.owner or 'Pendiente'}} · <strong>Revisión:</strong> {{p.review_date or 'Pendiente'}} · <strong>Aprobado por:</strong> {{p.approved_by or 'Pendiente'}}</p>
+    <p><strong>Tecnologías:</strong> {{p.technologies or 'Independiente de proveedor'}}</p></div>
+    <div class="ir-card"><h5>Actividades del plan</h5><div class="ir-tbl"><table class="table table-striped"><thead><tr><th>#</th><th>Fase</th><th>Actividad / instrucciones</th><th>Rol</th><th>Prioridad</th><th></th></tr></thead><tbody>
+    {% for s in steps %}<tr><td>{{s.seq}}</td><td>{{s.phase}}</td><td><strong>{{s.title}}</strong><div class="text-muted small" style="white-space:pre-wrap">{{s.instructions}}</div></td><td>{{s.assigned_role}}</td><td>{{s.priority}}</td><td>{% if writable %}<a class="btn btn-sm btn-outline-secondary" href="{{url_for('ir_step_form',pid=p.id,sid=s.id)}}">Editar</a><form method="post" action="{{url_for('ir_step_delete',pid=p.id,sid=s.id)}}" class="d-inline"><input type="hidden" name="csrf" value="{{csrf}}"><button class="btn btn-sm btn-outline-danger" onclick="return confirm('¿Quitar la actividad del plan?')">Quitar</button></form>{% endif %}</td></tr>{% endfor %}</tbody></table></div></div>
+    <div class="ir-card"><h5>Ejecuciones vinculadas</h5><ul>{% for e in history %}<li><a href="{{url_for('ir_run_detail',rid=e.id)}}">Ejecución #{{e.id}}</a> · {{e.mode}} · {{e.start_at}} · {{e.status}}</li>{% else %}<li>Sin ejecuciones.</li>{% endfor %}</ul></div>
+    ''',p=p,steps=steps,history=history,writable=user.role!='auditor',admin=user.role=='admin')
+
+@app.route('/planes_respuesta_incidentes/plan/<int:pid>/estado',methods=['POST'])
+@login_required
+def ir_plan_state(pid):
+    user=_ir_user(write=True);_ir_csrf()
+    # Aprobar planes requiere administrador. El usuario autorizado puede editar planes en borrador.
+    if user.role!='admin': abort(403,description='Solo el administrador puede aprobar o retirar planes.')
+    status=request.form.get('status')
+    if status not in ('Vigente','Retirado'):abort(400)
+    with _ir_db() as con:
+        p=con.execute('SELECT id FROM ir_plans WHERE id=?',(pid,)).fetchone()
+        if not p:abort(404)
+        if status=='Vigente' and not con.execute('SELECT 1 FROM ir_plan_steps WHERE plan_id=?',(pid,)).fetchone():
+            flash('Agrega al menos una actividad antes de aprobar.', 'warning')
+            return redirect(url_for('ir_plan_detail',pid=pid))
+        con.execute('UPDATE ir_plans SET status=?,approved_by=?,approved_at=?,updated_at=? WHERE id=?',
+            (status,user.username if status=='Vigente' else None,_ir_now() if status=='Vigente' else None,_ir_now(),pid))
+        _ir_audit(con,user.username,'CAMBIO_ESTADO_PLAN',status,pid)
+        con.commit()
+    flash('Estado del plan actualizado.','success');return redirect(url_for('ir_plan_detail',pid=pid))
+
+@app.route('/planes_respuesta_incidentes/plan/<int:pid>/actividad/nueva',methods=['GET','POST'])
+@app.route('/planes_respuesta_incidentes/plan/<int:pid>/actividad/<int:sid>',methods=['GET','POST'])
+@login_required
+def ir_step_form(pid,sid=None):
+    user=_ir_user(write=True)
+    with _ir_db() as con:
+        p=con.execute('SELECT * FROM ir_plans WHERE id=?',(pid,)).fetchone()
+        if not p:abort(404)
+        step=con.execute('SELECT * FROM ir_plan_steps WHERE id=? AND plan_id=?',(sid,pid)).fetchone() if sid else None
+        if sid and not step:abort(404)
+        if request.method=='POST':
+            _ir_csrf()
+            title=(request.form.get('title') or '').strip()[:250]
+            phase=request.form.get('phase')
+            if not title or phase not in _IR_PHASES:abort(400)
+            instr=(request.form.get('instructions') or '').strip()[:6000]
+            role=(request.form.get('assigned_role') or '').strip()[:120]
+            priority=request.form.get('priority')
+            if priority not in ('Baja','Media','Alta','Crítica'):abort(400)
+            try:seq=int(request.form.get('seq') or 1)
+            except ValueError: abort(400)
+            if seq<1 or seq>9999:abort(400)
+            if sid:
+                con.execute('UPDATE ir_plan_steps SET seq=?,phase=?,title=?,instructions=?,assigned_role=?,priority=? WHERE id=? AND plan_id=?',
+                    (seq,phase,title,instr,role,priority,sid,pid))
+            else:
+                con.execute('INSERT INTO ir_plan_steps(plan_id,seq,phase,title,instructions,assigned_role,priority) VALUES(?,?,?,?,?,?,?)',
+                    (pid,seq,phase,title,instr,role,priority))
+            con.execute('UPDATE ir_plans SET status="Borrador",version=version+1,approved_by=NULL,approved_at=NULL,updated_at=? WHERE id=?',(_ir_now(),pid))
+            _ir_audit(con,user.username,'EDITAR_ACTIVIDAD','Actividad: '+title,pid)
+            con.commit()
+            flash('Actividad guardada. El plan requiere nueva aprobación.','success')
+            return redirect(url_for('ir_plan_detail',pid=pid))
+    return _ir_page('''<div class="ir-hero"><h2>{{'Editar actividad' if s else 'Agregar actividad'}}</h2><p>{{p.name}}</p></div><div class="ir-card">
+    <form method="post"><input type="hidden" name="csrf" value="{{csrf}}"><div class="row g-3">
+    <div class="col-md-3"><label class="form-label">Fase</label><select name="phase" class="form-select">{% for ph in phases %}<option {% if s and s.phase==ph %}selected{% endif %}>{{ph}}</option>{% endfor %}</select></div>
+    <div class="col-md-7"><label class="form-label">Actividad *</label><input name="title" class="form-control" required value="{{s.title if s else ''}}"></div>
+    <div class="col-md-2"><label class="form-label">Orden</label><input type="number" name="seq" class="form-control" min="1" max="9999" value="{{s.seq if s else 10}}"></div>
+    <div class="col-md-12"><label class="form-label">Instrucciones</label><textarea name="instructions" class="form-control">{{s.instructions if s else ''}}</textarea></div>
+    <div class="col-md-6"><label class="form-label">Rol asignado</label><input name="assigned_role" class="form-control" value="{{s.assigned_role if s else ''}}"></div>
+    <div class="col-md-6"><label class="form-label">Prioridad</label><select name="priority" class="form-select">{% for pr in ('Baja','Media','Alta','Crítica') %}<option {% if s and s.priority==pr %}selected{% elif not s and pr=='Media' %}selected{% endif %}>{{pr}}</option>{% endfor %}</select></div>
+    </div><div class="mt-3"><button class="btn btn-primary">Guardar actividad</button> <a class="btn btn-outline-secondary" href="{{url_for('ir_plan_detail',pid=p.id)}}">Volver</a></div></form></div>''',p=dict(p),s=dict(step) if step else None)
+
+def _ir_incidents():
+    # Referencia sin FK entre bases de datos; no modificar la tabla existente.
+    user = db.session.get(User, session.get('user_id'))
+    if not user or not verificar_permiso(user, 'Registro de Incidentes'):
+        return []
+    try:
+        with get_incidentes_db_connection() as con:
+            return [dict(r) for r in con.execute(
+                'SELECT id,id_incidente,nombre_alerta,estado,clasificacion_incidente FROM registro_incidentes ORDER BY id DESC LIMIT 1000')]
+    except (sqlite3.Error,NameError):
+        return []
+
+@app.route('/planes_respuesta_incidentes/plan/<int:pid>/actividad/<int:sid>/eliminar',methods=['POST'])
+@login_required
+def ir_step_delete(pid,sid):
+    user=_ir_user(write=True);_ir_csrf()
+    with _ir_db() as con:
+        s=con.execute('SELECT id,title FROM ir_plan_steps WHERE plan_id=? AND id=?',(pid,sid)).fetchone()
+        if not s:abort(404)
+        con.execute('DELETE FROM ir_plan_steps WHERE id=?',(sid,))
+        con.execute('UPDATE ir_plans SET status="Borrador", version=version+1, approved_by=NULL, approved_at=NULL, updated_at=? WHERE id=?',(_ir_now(),pid))
+        _ir_audit(con,user.username,'ELIMINAR_ACTIVIDAD',s['title'],pid)
+        con.commit()
+    flash('Actividad retirada del catálogo. Las ejecuciones anteriores no se modificaron.','success')
+    return redirect(url_for('ir_plan_detail',pid=pid))
+
+@app.route('/planes_respuesta_incidentes/plan/<int:pid>/activar',methods=['GET','POST'])
+@login_required
+def ir_run_new(pid):
+    user=_ir_user(write=True)
+    with _ir_db() as con:
+        p=con.execute('SELECT * FROM ir_plans WHERE id=?',(pid,)).fetchone()
+        if not p:abort(404)
+        p=dict(p)
+        if p['status']!='Vigente':abort(409,description='Solo se pueden activar planes vigentes y aprobados.')
+        if request.method=='POST':
+            _ir_csrf()
+            mode=request.form.get('mode')
+            if mode not in ('Real','Simulacro'):abort(400)
+            chosen=(request.form.get('incident_id') or '').strip()
+            incident_id=int(chosen) if chosen.isdecimal() else None
+            incident=None
+            if incident_id:
+                incident=next((r for r in _ir_incidents() if r['id']==incident_id),None)
+                if incident is None:abort(400,description='El incidente seleccionado no existe.')
+            if mode=='Real' and incident_id is None:abort(400,description='Una ejecución real debe estar vinculada a un incidente.')
+            owner=(request.form.get('owner') or '').strip()[:150]
+            obs=(request.form.get('observations') or '').strip()[:2000]
+            ref=('/'.join(filter(None,[str(incident.get('id_incidente') or incident_id),str(incident.get('nombre_alerta') or '')]))[:250]) if incident else ''
+            cur=con.execute('INSERT INTO ir_runs(plan_id,plan_name,plan_version,incident_id,incident_reference,mode,owner,start_at,observations,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                (pid,p['name'],p['version'],incident_id,ref,mode,owner or p['owner'],_ir_now(),obs,user.username))
+            rid=cur.lastrowid
+            rows=con.execute('SELECT * FROM ir_plan_steps WHERE plan_id=? ORDER BY seq,id',(pid,)).fetchall()
+            for s in rows:
+                con.execute('INSERT INTO ir_run_steps(run_id,phase,seq,title,instructions,assigned_role,priority) VALUES(?,?,?,?,?,?,?)',
+                    (rid,s['phase'],s['seq'],s['title'],s['instructions'],s['assigned_role'],s['priority']))
+            _ir_audit(con,user.username,'ACTIVAR_PLAN',f'{mode}; incidente {ref}',pid,rid)
+            con.commit()
+            flash('Plan activado; se creó una copia de las actividades para esta ejecución.','success')
+            return redirect(url_for('ir_run_detail',rid=rid))
+    return _ir_page('''<div class="ir-hero"><h2>Activar plan: {{p.name}}</h2><p>v{{p.version}} · {{p.category}}</p></div>
+    <div class="ir-card"><form method="post"><input type="hidden" name="csrf" value="{{csrf}}"><div class="row g-3">
+    <div class="col-md-4"><label class="form-label">Modalidad</label><select class="form-select" name="mode" required><option value="Real">Incidente real</option><option value="Simulacro">Simulacro / ejercicio</option></select></div>
+    <div class="col-md-8"><label class="form-label">Vincular incidente existente (obligatorio para modo Real)</label><select name="incident_id" class="form-select"><option value="">Sin incidente — solo simulacro</option>{% for i in incidents %}<option value="{{i.id}}" {% if selected_id==i.id %}selected{% endif %}>{{i.id_incidente or ('#'~i.id)}} · {{i.nombre_alerta}} · {{i.estado}}</option>{% endfor %}</select></div>
+    <div class="col-md-6"><label class="form-label">Coordinador de ejecución</label><input name="owner" class="form-control" value="{{p.owner}}"></div>
+    <div class="col-md-12"><label class="form-label">Observaciones iniciales</label><textarea name="observations" class="form-control"></textarea></div>
+    </div><div class="mt-3"><button class="btn btn-primary">Activar plan</button> <a class="btn btn-outline-secondary" href="{{url_for('ir_plan_detail',pid=p.id)}}">Cancelar</a></div></form></div>''',p=p,incidents=_ir_incidents(),selected_id=request.args.get('incident_id',type=int))
+
+@app.route('/planes_respuesta_incidentes/incidente/<int:iid>')
+@login_required
+def ir_incident_plans(iid):
+    _ir_user(write=True)
+    incident=next((x for x in _ir_incidents() if x['id']==iid),None)
+    if incident is None:abort(404,description='Incidente no encontrado o sin permisos.')
+    with _ir_db() as con:
+        plans=[dict(p) for p in con.execute('SELECT id,name,category,version FROM ir_plans WHERE status="Vigente" ORDER BY name')]
+    return _ir_page('''<div class="ir-hero"><h2>Seleccionar plan para el incidente</h2><p>{{incident.id_incidente or ('#'~incident.id)}} · {{incident.nombre_alerta}}</p></div>
+    <div class="ir-card"><p>Selecciona un plan vigente y aprobado para iniciar la respuesta. El incidente permanecerá registrado en su matriz original.</p>
+    {% for p in plans %}<div class="d-flex align-items-center justify-content-between border-bottom p-2"><span><strong>{{p.name}}</strong><br><small>{{p.category}} · v{{p.version}}</small></span><a class="btn btn-primary" href="{{url_for('ir_run_new',pid=p.id,incident_id=incident.id)}}">Seleccionar</a></div>{% else %}<p>No hay planes vigentes. Aprueba al menos uno desde el catálogo.</p>{% endfor %}</div>''',incident=incident,plans=plans)
+
+@app.route('/planes_respuesta_incidentes/ejecuciones')
+@login_required
+def ir_runs():
+    user=_ir_user()
+    with _ir_db() as con:
+        runs=[dict(r) for r in con.execute('''SELECT r.*, (SELECT COUNT(*) FROM ir_run_steps s WHERE s.run_id=r.id) total,
+          (SELECT COUNT(*) FROM ir_run_steps s WHERE s.run_id=r.id AND s.status IN ('Completada','No aplica')) done
+          FROM ir_runs r ORDER BY r.id DESC''')]
+    return _ir_page('''<div class="ir-hero"><h2>Ejecución de Planes de Respuesta</h2><p>Atención real de incidentes y ejercicios simulados · Seguimiento de actividades</p></div>
+    <div class="ir-card"><div class="ir-tbl"><table class="table table-hover"><thead class="table-light"><tr><th>Ej.</th><th>Plan y versión</th><th>Modo</th><th>Incidente</th><th>Responsable</th><th>Inicio</th><th>Progreso</th><th>Estado</th><th></th></tr></thead><tbody>
+    {% for e in runs %}<tr><td>#{{e.id}}</td><td>{{e.plan_name}} (v{{e.plan_version}})</td><td>{{e.mode}}</td><td>{{e.incident_reference or '—'}}</td><td>{{e.owner}}</td><td>{{e.start_at}}</td><td>{{e.done}}/{{e.total}}</td><td>{{e.status}}</td><td><a class="btn btn-sm btn-outline-primary" href="{{url_for('ir_run_detail',rid=e.id)}}">Seguimiento</a></td></tr>{% else %}<tr><td colspan="9">Aún no hay ejecuciones. Abre el catálogo y activa un plan vigente.</td></tr>{% endfor %}
+    </tbody></table></div></div>''',runs=runs)
+
+@app.route('/planes_respuesta_incidentes/ejecucion/<int:rid>')
+@login_required
+def ir_run_detail(rid):
+    user=_ir_user()
+    with _ir_db() as con:
+        r=con.execute('SELECT * FROM ir_runs WHERE id=?',(rid,)).fetchone()
+        if r is None:abort(404)
+        r=dict(r)
+        steps=[dict(s) for s in con.execute('SELECT * FROM ir_run_steps WHERE run_id=? ORDER BY seq,id',(rid,))]
+        ev=[dict(e) for e in con.execute('SELECT * FROM ir_evidence WHERE run_id=? ORDER BY id DESC',(rid,))]
+        audit=[dict(a) for a in con.execute('SELECT * FROM ir_audit WHERE run_id=? ORDER BY id DESC LIMIT 25',(rid,))]
+    done=sum(s['status'] in ('Completada','No aplica') for s in steps)
+    return _ir_page('''<div class="ir-hero"><h2>Ejecución #{{r.id}} · {{r.plan_name}}</h2><p>{{r.mode}} · Plan v{{r.plan_version}} · {{r.status}} · Inicio: {{r.start_at}}</p></div>
+    <div class="ir-card"><div class="row g-2"><div class="col-md-4"><strong>Incidente vinculado:</strong> {{r.incident_reference or 'Simulacro sin incidente'}}</div>
+    <div class="col-md-4"><strong>Coordinador:</strong> {{r.owner or 'Sin asignar'}}</div><div class="col-md-4"><strong>Progreso:</strong> {{done}} / {{steps|length}}</div></div>
+    <div class="progress my-3"><div class="progress-bar" style="width:{{((done/(steps|length))*100)|round(1) if steps else 0}}%">{{((done/(steps|length))*100)|round(1) if steps else 0}}%</div></div>
+    {% if r.incident_id %}<a href="{{url_for('incidentes_detalle',id=r.incident_id)}}" class="btn btn-outline-primary btn-sm">Ver incidente asociado</a>{% endif %}
+    {% if writable and r.status=='En curso' %}<form method="post" class="mt-3" action="{{url_for('ir_run_close',rid=r.id)}}"><input type="hidden" name="csrf" value="{{csrf}}"><label class="form-label">Lecciones aprendidas y acciones posteriores</label><textarea name="lessons" class="form-control" required placeholder="Documenta resultados, causa raíz y acciones de mejora"></textarea>
+    <button type="submit" class="btn btn-success mt-2" onclick="return confirm('¿Cerrar definitivamente esta ejecución?')">Cerrar ejecución</button></form>{% endif %}
+    {% if r.status=='Cerrado' %}<p class="mt-2"><strong>Cierre:</strong> {{r.end_at}}. <strong>Lecciones:</strong> {{r.lessons}}</p>{% endif %}</div>
+    <div class="ir-card"><h5>Actividades de respuesta</h5><div class="ir-tbl"><table class="table table-striped"><thead><tr><th>Fase</th><th>Actividad</th><th>Responsable / plazo</th><th>Estado</th><th>Registro y evidencias</th></tr></thead><tbody>
+    {% for s in steps %}<tr><td>{{s.phase}}</td><td><strong>{{s.title}}</strong><div class="small text-muted" style="white-space:pre-wrap">{{s.instructions}}</div><div class="small">Prioridad: {{s.priority}}</div></td><td>{{s.assigned_to or s.assigned_role or 'Pendiente'}}<div class="small">{{s.due_at or ''}}</div></td><td><span class="badge {{'bg-success' if s.status=='Completada' else ('bg-secondary' if s.status=='No aplica' else 'bg-warning text-dark')}}">{{s.status}}</span></td><td><div class="small" style="white-space:pre-wrap">{{s.notes}}</div>
+    {% if writable and r.status=='En curso' %}<details><summary class="text-primary">Actualizar</summary><form method="post" action="{{url_for('ir_step_update',sid=s.id)}}" class="mt-2"><input type="hidden" name="csrf" value="{{csrf}}"><select name="status" class="form-select form-select-sm">{% for state in ('Pendiente','En progreso','Completada','No aplica') %}<option {% if state==s.status %}selected{% endif %}>{{state}}</option>{% endfor %}</select><input name="assigned_to" class="form-control form-control-sm mt-1" placeholder="Responsable" value="{{s.assigned_to}}"><input name="due_at" type="datetime-local" class="form-control form-control-sm mt-1" value="{{s.due_at or ''}}"><textarea name="notes" class="form-control form-control-sm mt-1" placeholder="Acciones realizadas">{{s.notes}}</textarea><button class="btn btn-primary btn-sm mt-1">Guardar</button></form></details>{% endif %}
+    {% if writable %}<details class="mt-2"><summary class="text-primary">Adjuntar evidencia</summary><form method="post" enctype="multipart/form-data" action="{{url_for('ir_evidence_upload',rid=r.id,sid=s.id)}}"><input type="hidden" name="csrf" value="{{csrf}}"><input type="file" name="archivo" accept=".pdf,.png,.jpg,.jpeg,.txt,.csv" class="form-control form-control-sm" required><button class="btn btn-sm btn-outline-primary mt-1">Subir evidencia</button></form></details>{% endif %}</td></tr>{% endfor %}</tbody></table></div></div>
+    <div class="ir-card"><h5>Evidencias registradas (SHA-256)</h5><ul>{% for e in ev %}<li><a href="{{url_for('ir_evidence_download',eid=e.id)}}">{{e.original_name}}</a> — {{e.uploaded_by}} · {{e.uploaded_at}} <span class="small text-muted">{{e.sha256[:14]}}…</span></li>{% else %}<li>Sin evidencias.</li>{% endfor %}</ul></div>
+    <div class="ir-card"><h5>Bitácora de decisiones y cambios</h5><div class="ir-tbl"><table class="table table-sm"><thead><tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Detalle</th></tr></thead><tbody>{% for a in audit %}<tr><td>{{a.created_at}}</td><td>{{a.actor}}</td><td>{{a.action}}</td><td>{{a.detail}}</td></tr>{% endfor %}</tbody></table></div></div>''',r=r,steps=steps,ev=ev,audit=audit,done=done,writable=user.role!='auditor')
+
+@app.route('/planes_respuesta_incidentes/actividad/<int:sid>/actualizar',methods=['POST'])
+@login_required
+def ir_step_update(sid):
+    user=_ir_user(write=True);_ir_csrf()
+    status=request.form.get('status')
+    if status not in ('Pendiente','En progreso','Completada','No aplica'):abort(400)
+    with _ir_db() as con:
+        s=con.execute('SELECT s.*,r.status AS run_status FROM ir_run_steps s JOIN ir_runs r ON r.id=s.run_id WHERE s.id=?',(sid,)).fetchone()
+        if not s:abort(404)
+        if s['run_status']!='En curso':abort(409,description='Ejecución cerrada: inmutable.')
+        assignee=(request.form.get('assigned_to') or '').strip()[:160]
+        notes=(request.form.get('notes') or '').strip()[:4000]
+        due=(request.form.get('due_at') or '').strip()[:16]
+        if due and not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}',due):abort(400)
+        started=s['started_at'] or (_ir_now() if status!='Pendiente' else None)
+        finished=_ir_now() if status in ('Completada','No aplica') else None
+        con.execute('UPDATE ir_run_steps SET status=?,assigned_to=?,notes=?,due_at=?,started_at=?,finished_at=?,finished_by=? WHERE id=?',
+            (status,assignee,notes,due,started,finished,user.username if finished else None,sid))
+        _ir_audit(con,user.username,'ACTUALIZAR_TAREA',f'{s["title"]}: {s["status"]} => {status}; {notes[:300]}',run_id=s['run_id'])
+        con.commit()
+    flash('Actividad actualizada.','success');return redirect(url_for('ir_run_detail',rid=s['run_id']))
+
+@app.route('/planes_respuesta_incidentes/ejecucion/<int:rid>/cerrar',methods=['POST'])
+@login_required
+def ir_run_close(rid):
+    user=_ir_user(write=True);_ir_csrf()
+    lessons=(request.form.get('lessons') or '').strip()[:10000]
+    if not lessons:abort(400,description='Registra las lecciones aprendidas.')
+    with _ir_db() as con:
+        r=con.execute('SELECT * FROM ir_runs WHERE id=?',(rid,)).fetchone()
+        if r is None:abort(404)
+        if r['status']!='En curso':abort(409)
+        unfinished=con.execute("SELECT COUNT(*) FROM ir_run_steps WHERE run_id=? AND status NOT IN ('Completada','No aplica')",(rid,)).fetchone()[0]
+        if unfinished:
+            flash('Para cerrar debes completar o marcar No aplica en todas las actividades.','warning')
+            return redirect(url_for('ir_run_detail',rid=rid))
+        con.execute('UPDATE ir_runs SET status="Cerrado",end_at=?,lessons=? WHERE id=?',(_ir_now(),lessons,rid))
+        _ir_audit(con,user.username,'CERRAR_EJECUCION',lessons[:500],r['plan_id'],rid)
+        con.commit()
+    flash('Ejecución cerrada con trazabilidad.','success');return redirect(url_for('ir_run_detail',rid=rid))
+
+@app.route('/planes_respuesta_incidentes/ejecucion/<int:rid>/actividad/<int:sid>/evidencia',methods=['POST'])
+@login_required
+def ir_evidence_upload(rid,sid):
+    user=_ir_user(write=True);_ir_csrf()
+    with _ir_db() as con:
+        s=con.execute('SELECT s.id,r.plan_id FROM ir_run_steps s JOIN ir_runs r ON r.id=s.run_id WHERE s.id=? AND s.run_id=?',(sid,rid)).fetchone()
+        if not s:abort(404)
+        state=con.execute('SELECT status FROM ir_runs WHERE id=?',(rid,)).fetchone()
+        if state is None or state['status']!='En curso':abort(409,description='La ejecución está cerrada.')
+        f=request.files.get('archivo')
+        if f is None or not f.filename:abort(400,description='Selecciona un archivo.')
+        original=_ir_safe_name(f.filename)[:190]
+        extension=os.path.splitext(original)[1].lower()
+        if extension not in {'.pdf','.png','.jpg','.jpeg','.txt','.csv'}:abort(400,description='Formato no permitido.')
+        data=f.read(10*1024*1024+1)
+        if not data or len(data)>10*1024*1024:abort(413,description='Máximo 10 MB por evidencia.')
+        digest=hashlib.sha256(data).hexdigest()
+        stored=secrets.token_hex(20)+extension
+        os.makedirs(_IR_FILES,exist_ok=True)
+        full=os.path.join(_IR_FILES,stored)
+        with open(full,'xb') as dest:dest.write(data)
+        try:
+            con.execute('INSERT INTO ir_evidence(run_id,step_id,original_name,stored_name,sha256,size_bytes,uploaded_by,uploaded_at) VALUES(?,?,?,?,?,?,?,?)',
+                (rid,sid,original,stored,digest,len(data),user.username,_ir_now()))
+            _ir_audit(con,user.username,'ADJUNTAR_EVIDENCIA',f'{original}, SHA256={digest}',s['plan_id'],rid)
+            con.commit()
+        except Exception:
+            os.remove(full)
+            raise
+    flash('Evidencia incorporada con huella de integridad SHA-256.','success');return redirect(url_for('ir_run_detail',rid=rid))
+
+@app.route('/planes_respuesta_incidentes/evidencia/<int:eid>')
+@login_required
+def ir_evidence_download(eid):
+    _ir_user()
+    with _ir_db() as con:
+        ev=con.execute('SELECT * FROM ir_evidence WHERE id=?',(eid,)).fetchone()
+        if ev is None:abort(404)
+        ev=dict(ev)
+    full=os.path.join(_IR_FILES,os.path.basename(ev['stored_name']))
+    if not os.path.isfile(full):abort(404)
+    with open(full,'rb') as f: digest=hashlib.file_digest(f,'sha256').hexdigest()
+    if not secrets.compare_digest(digest,ev['sha256']):
+        app.logger.error('GRAC: evidencia de incidentes modificada, id=%s',eid)
+        abort(409,description='La evidencia no supera la comprobación de integridad.')
+    return send_file(full,as_attachment=True,download_name=ev['original_name'],mimetype='application/octet-stream')
+
+@app.route('/planes_respuesta_incidentes/seguimiento')
+@login_required
+def ir_tracking():
+    _ir_user()
+    with _ir_db() as con:
+        plans=[dict(r) for r in con.execute('SELECT * FROM ir_plans')]
+        rows=[dict(r) for r in con.execute('''SELECT r.*, (SELECT COUNT(*) FROM ir_run_steps WHERE run_id=r.id) as total,
+           (SELECT COUNT(*) FROM ir_run_steps WHERE run_id=r.id AND status IN ('Completada','No aplica')) done,
+           (SELECT COUNT(*) FROM ir_run_steps WHERE run_id=r.id AND status NOT IN ('Completada','No aplica') AND due_at IS NOT NULL AND due_at < strftime('%Y-%m-%dT%H:%M','now')) overdue
+           FROM ir_runs r ORDER BY r.id DESC''')]
+    now=datetime.now().strftime('%Y-%m-%d')
+    stats={'total':len(plans),'active':sum(p['status']=='Vigente' for p in plans),'simulations':sum(r['mode']=='Simulacro' for r in rows),
+        'open':sum(r['status']=='En curso' for r in rows),'overdue':sum(r['overdue'] for r in rows),
+        'reviews':sum(bool(p['review_date'] and p['review_date']<now) for p in plans)}
+    return _ir_page('''<div class="ir-hero"><h2>Seguimiento y Pruebas</h2><p>Planes, simulacros, actividades pendientes y revisiones</p></div>
+    <div class="row g-3">{% for label,num in [('Planes',stats.total),('Vigentes',stats.active),('Simulacros',stats.simulations),('Ejecuciones abiertas',stats.open),('Tareas vencidas',stats.overdue),('Revisiones vencidas',stats.reviews)] %}<div class="col-md-4 col-lg-2"><div class="ir-card"><div class="ir-kpi">{{num}}</div><div>{{label}}</div></div></div>{% endfor %}</div>
+    <div class="ir-card"><h5>Seguimiento de ejecuciones</h5><div class="ir-tbl"><table class="table table-striped"><thead><tr><th>Ej.</th><th>Plan</th><th>Tipo</th><th>Fecha</th><th>Completadas</th><th>Fuera de plazo</th><th>Estado</th></tr></thead><tbody>{% for r in rows %}<tr><td><a href="{{url_for('ir_run_detail',rid=r.id)}}">#{{r.id}}</a></td><td>{{r.plan_name}}</td><td>{{r.mode}}</td><td>{{r.start_at}}</td><td>{{r.done}}/{{r.total}}</td><td>{{r.overdue}}</td><td>{{r.status}}</td></tr>{% else %}<tr><td colspan="7">Sin ejecuciones.</td></tr>{% endfor %}</tbody></table></div>
+    <a class="btn btn-outline-success" href="{{url_for('ir_excel')}}"><i class="bi bi-file-earmark-excel"></i> Exportar Excel de seguimiento</a></div>''',stats=stats,rows=rows)
+
+def _ir_excel_payload():
+    _ir_init()
+    with _ir_db() as con:
+        plans=[dict(r) for r in con.execute('SELECT * FROM ir_plans ORDER BY id')]
+        rows=[dict(r) for r in con.execute('SELECT * FROM ir_runs ORDER BY id DESC')]
+        tasks=[dict(r) for r in con.execute('''SELECT s.*,r.plan_name,r.mode,r.incident_reference FROM ir_run_steps s JOIN ir_runs r ON r.id=s.run_id ORDER BY s.run_id DESC,s.seq''')]
+    def sheet(name,rows):
+        cols=list(rows[0]) if rows else ['id']
+        return dict(name=name,title=name,rows=rows,cols=cols,labels=cols)
+    return {'title':'Planes de Respuesta a Incidentes','filename':'planes_respuesta_incidentes','sheets':[
+        sheet('Catalogo planes',plans),sheet('Ejecuciones',rows),sheet('Actividades',tasks)]}
+
+@app.route('/planes_respuesta_incidentes/exportar/excel')
+@login_required
+def ir_excel():
+    _ir_user()
+    payload=_ir_excel_payload()
+    data=_build_excel(filename=payload['filename'],sheets=payload['sheets'],company_name='')
+    return Response(data,mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition':'attachment; filename=planes_respuesta_incidentes.xlsx'})
+
+# FIN DEL MÓDULO DE PLANES DE RESPUESTA A INCIDENTES
+
+
+_ir_init()
 
 with app.app_context():
     db.create_all()
