@@ -928,6 +928,10 @@ SGSI_PROGRESS_GLOBAL = """
             hrefLower.includes("pdf") ||
             hrefLower.includes("reporte") ||
             hrefLower.includes("descargar") ||
+            // Las rutas de exportación devuelven archivos descargables (Excel/CSV),
+            // no una nueva página HTML: no activar la barra de progreso.
+            hrefLower.includes("/exportar/") ||
+            hrefLower.includes("exportar_excel") ||
             hrefLower.includes("download") ||
             link.target === "_blank" ||
             link.hasAttribute("download") ||
@@ -127780,6 +127784,7 @@ REPORT_CATALOG = [
     {"key": "metricas_riesgos",    "label": "Métricas de Riesgos",                           "icon": "bi-graph-up"},
     {"key": "metricas_vuln",       "label": "Métricas de Vulnerabilidades",                  "icon": "bi-bar-chart"},
     {"key": "metricas_cultura",    "label": "Métricas de Cultura de Seguridad",              "icon": "bi-people"},
+    {"key": "metricas_mejora",     "label": "Métricas Planes de Mejora",                     "icon": "bi-clipboard-check"},
     {"key": "dofa",                "label": "DOFA",                                          "icon": "bi-grid-3x3-gap"},
 
     {"key": "matriz_riesgos",      "label": "Matriz de Riesgos",                             "icon": "bi-shield-exclamation"},
@@ -129781,6 +129786,14 @@ def reportes_home():
         and (r['key'] != 'planes_respuesta_incidentes' or verificar_permiso(user, 'Planes de Respuesta a Incidentes'))
     )]
 
+    ir_categorias_reporte = []
+    if any(r['key'] == 'planes_respuesta_incidentes' for r in catalogo_visible):
+        _ir_init()
+        with _ir_db() as ir_con:
+            ir_categorias_reporte = [r['category'] for r in ir_con.execute(
+                "SELECT DISTINCT category FROM ir_plans WHERE TRIM(category) <> '' ORDER BY category COLLATE NOCASE"
+            )]
+
     content = render_template_string("""
     <div class="rep-shell">
 
@@ -129882,7 +129895,7 @@ def reportes_home():
                       {% elif r.key == 'registro_incidentes' %}
                         Exportación del registro de incidentes en Excel.
                       {% elif r.key == 'planes_respuesta_incidentes' %}
-                        Catálogo, ejecuciones y seguimiento de actividades de respuesta.
+                        Catálogo y ejecuciones en Excel; plan operativo por categoría con diagrama de flujo para imprimir.
                       {% elif r.key == 'planes_accion_sgsi' %}
                         Exportación de planes de acción del sistema de gestión en Excel.
                       {% elif r.key == 'partes_interesadas' %}
@@ -129911,6 +129924,25 @@ def reportes_home():
                   </div>
                 </div>
 
+                {% if r.key == 'planes_respuesta_incidentes' %}
+                <form method="get" action="{{ url_for('ir_category_report_pdf') }}"
+                      target="_blank" class="mt-3 no-progress"
+                      data-no-progress="true" aria-label="Imprimir plan de respuesta por categoría">
+                  <input type="hidden" name="company" value="{{ company }}">
+                  <label class="form-label fw-semibold small" for="ir-report-category">Categoría del incidente</label>
+                  <select id="ir-report-category" class="form-select form-select-sm mb-2" name="categoria" required>
+                    <option value="__todas__">Todas las categorías</option>
+                    {% for categoria in ir_categorias_reporte %}
+                    <option value="{{ categoria }}">{{ categoria }}</option>
+                    {% endfor %}
+                  </select>
+                  <button type="submit" class="btn btn-primary btn-sm w-100 no-progress"
+                          data-no-progress="true">
+                    <i class="bi bi-diagram-3 me-1"></i> Imprimir plan y diagrama (PDF)
+                  </button>
+                  <div class="form-text">Incluye la versión vigente o borrador, fases, actividades e instrucciones.</div>
+                </form>
+                {% endif %}
                 <div class="rep-report-actions mt-auto pt-3 d-flex gap-2 flex-wrap">
                   {% if allow_pdf_word %}
                     <a class="btn btn-primary btn-sm rounded-pill px-3"
@@ -130352,6 +130384,7 @@ def reportes_home():
     catalog=catalogo_visible,
     pdf_word_allowed=REPORT_KEYS_PDF_WORD,
     excel_only_allowed=REPORT_KEYS_EXCEL_ONLY,
+    ir_categorias_reporte=ir_categorias_reporte,
     company=company,
     start_date=start_date,
     end_date=end_date,
@@ -210398,7 +210431,7 @@ def ir_tracking():
     return _ir_page('''<div class="ir-hero"><h2>Seguimiento y Pruebas</h2><p>Planes, simulacros, actividades pendientes y revisiones</p></div>
     <div class="row g-3">{% for label,num in [('Planes',stats.total),('Vigentes',stats.active),('Simulacros',stats.simulations),('Ejecuciones abiertas',stats.open),('Tareas vencidas',stats.overdue),('Revisiones vencidas',stats.reviews)] %}<div class="col-md-4 col-lg-2"><div class="ir-card"><div class="ir-kpi">{{num}}</div><div>{{label}}</div></div></div>{% endfor %}</div>
     <div class="ir-card"><h5>Seguimiento de ejecuciones</h5><div class="ir-tbl"><table class="table table-striped"><thead><tr><th>Ej.</th><th>Plan</th><th>Tipo</th><th>Fecha</th><th>Completadas</th><th>Fuera de plazo</th><th>Estado</th></tr></thead><tbody>{% for r in rows %}<tr><td><a href="{{url_for('ir_run_detail',rid=r.id)}}">#{{r.id}}</a></td><td>{{r.plan_name}}</td><td>{{r.mode}}</td><td>{{r.start_at}}</td><td>{{r.done}}/{{r.total}}</td><td>{{r.overdue}}</td><td>{{r.status}}</td></tr>{% else %}<tr><td colspan="7">Sin ejecuciones.</td></tr>{% endfor %}</tbody></table></div>
-    <a class="btn btn-outline-success" href="{{url_for('ir_excel')}}"><i class="bi bi-file-earmark-excel"></i> Exportar Excel de seguimiento</a></div>''',stats=stats,rows=rows)
+    <a class="btn btn-outline-success no-progress" data-no-progress="true" href="{{url_for('ir_excel')}}"><i class="bi bi-file-earmark-excel"></i> Exportar Excel de seguimiento</a></div>''',stats=stats,rows=rows)
 
 def _ir_excel_payload():
     _ir_init()
@@ -210420,6 +210453,244 @@ def ir_excel():
     data=_build_excel(filename=payload['filename'],sheets=payload['sheets'],company_name='')
     return Response(data,mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         headers={'Content-Disposition':'attachment; filename=planes_respuesta_incidentes.xlsx'})
+
+# ==========================================================================
+# REPORTES > PLANES DE RESPUESTA A INCIDENTES: PDF IMPRIMIBLE POR CATEGORÍA
+# Diagrama vectorial y ficha de todas las actividades reales del catálogo.
+# ==========================================================================
+
+def _ir_category_pdf_bytes(plans, company=''):
+    """PDF corporativo multipágina; datos recibidos desde ir_plans/ir_plan_steps.
+
+    Las conexiones muestran la SECUENCIA definida por fase y orden; no se
+    representan decisiones automáticas que el catálogo no almacena.
+    """
+    from reportlab.platypus import (SimpleDocTemplate as IRDoc, Paragraph as IRPara,
+        Spacer as IRSpacer, PageBreak as IRBreak, KeepTogether as IRKeep, Flowable as IRFlow)
+    from reportlab.lib import colors as IRC
+    from reportlab.lib.pagesizes import A4 as IR_A4, landscape as ir_landscape
+    from reportlab.lib.styles import ParagraphStyle as IRStyle
+    from reportlab.lib.utils import simpleSplit as ir_wrap
+    from reportlab.lib.enums import TA_CENTER as IR_CENTER
+    from xml.sax.saxutils import escape as ir_escape
+
+    paper = ir_landscape(IR_A4)
+    navy = IRC.HexColor('#123B6A')
+    blue = IRC.HexColor('#2071BA')
+    muted = IRC.HexColor('#566D82')
+    border = IRC.HexColor('#D9E5F2')
+    phase_colors = [IRC.HexColor(c) for c in ('#246CC0','#0E8995','#B66E24','#7852A4')]
+    soft_colors = [IRC.HexColor(c) for c in ('#EDF5FF','#EAF8F8','#FFF4E7','#F3EFFB')]
+
+    class IRDiagram(IRFlow):
+        def __init__(self, ordered_steps, part=0, per_page=4):
+            IRFlow.__init__(self)
+            self.steps=ordered_steps
+            self.part=part
+            self.per_page=per_page
+            self.width=paper[0]-76
+            self.height=328
+        def wrap(self, avail_width, avail_height):
+            self.width=min(avail_width,paper[0]-76)
+            return (self.width,self.height)
+        def draw(self):
+            canv=self.canv
+            W=self.width; H=self.height
+            gap=9
+            colw=(W-gap*3)/4
+            # Inicio / transición entre las cuatro grandes fases.
+            for idx, phase in enumerate(_IR_PHASES):
+                x=idx*(colw+gap)
+                fill=phase_colors[idx]
+                bg=soft_colors[idx]
+                canv.setFillColor(bg)
+                canv.setStrokeColor(border)
+                canv.roundRect(x,3,colw,H-7,12,stroke=1,fill=1)
+                canv.setFillColor(fill)
+                canv.roundRect(x,H-51,colw,47,10,stroke=0,fill=1)
+                canv.setFillColor(IRC.white)
+                canv.setFont('Helvetica-Bold',10.2)
+                lines=ir_wrap(phase,'Helvetica-Bold',10.2,colw-25)
+                if len(lines)>2:
+                    lines=lines[:2]
+                for j,line in enumerate(lines):
+                    canv.drawCentredString(x+colw/2,H-25+(len(lines)-1)*6-j*12,line)
+                if idx<3:
+                    # La flecha visible relaciona las fases de izquierda a derecha.
+                    y=H-27
+                    canv.setStrokeColor(navy);canv.setFillColor(navy)
+                    canv.setLineWidth(1.4)
+                    canv.line(x+colw+1,y,x+colw+gap-2,y)
+                    p=canv.beginPath()
+                    p.moveTo(x+colw+gap-2,y+3)
+                    p.lineTo(x+colw+gap+2,y)
+                    p.lineTo(x+colw+gap-2,y-3)
+                    p.close();canv.drawPath(p,stroke=0,fill=1)
+                group=[v for v in self.steps if v['phase']==phase]
+                chunk=group[self.part*self.per_page:(self.part+1)*self.per_page]
+                if not chunk:
+                    canv.setFillColor(muted);canv.setFont('Helvetica-Oblique',8.5)
+                    canv.drawCentredString(x+colw/2,H-90,'Sin actividades en este tramo')
+                    continue
+                boxh=54
+                y=H-68
+                for j,step in enumerate(chunk):
+                    boxy=y-boxh
+                    canv.setFillColor(IRC.white)
+                    canv.setStrokeColor(fill)
+                    canv.roundRect(x+9,boxy,colw-18,boxh-2,8,stroke=1,fill=1)
+                    canv.setFillColor(fill)
+                    canv.circle(x+22,boxy+boxh-15,10,stroke=0,fill=1)
+                    canv.setFillColor(IRC.white)
+                    canv.setFont('Helvetica-Bold',8.2)
+                    canv.drawCentredString(x+22,boxy+boxh-18,str(step.get('seq',''))[:4])
+                    canv.setFillColor(navy);canv.setFont('Helvetica-Bold',8.3)
+                    # En el diagrama el texto largo se limita; el anexo lo reproduce completo.
+                    text=' '.join(str(step.get('title') or '').split())
+                    lines=ir_wrap(text,'Helvetica-Bold',8.3,colw-55)
+                    if len(lines)>3:
+                        lines=lines[:3]
+                        lines[-1]=lines[-1].rstrip(' .')+'…'
+                    for li,line in enumerate(lines):
+                        canv.drawString(x+36,boxy+boxh-17-li*10,line)
+                    if j<len(chunk)-1:
+                        canv.setStrokeColor(fill)
+                        canv.setFillColor(fill)
+                        canv.setLineWidth(1.5)
+                        canv.line(x+colw/2,boxy,x+colw/2,boxy-10)
+                        p=canv.beginPath()
+                        p.moveTo(x+colw/2-3,boxy-7)
+                        p.lineTo(x+colw/2,boxy-12)
+                        p.lineTo(x+colw/2+3,boxy-7)
+                        p.close();canv.drawPath(p,fill=1,stroke=0)
+                    y-=64
+            canv.setFillColor(muted)
+            canv.setFont('Helvetica-Oblique',7.9)
+            canv.drawString(5,0,'Secuencia del catálogo: las autorizaciones, decisiones y escalamiento siguen los procedimientos de la empresa.')
+
+    styles = {
+        'title':IRStyle('IRTitle',fontName='Helvetica-Bold',fontSize=17,leading=21,textColor=navy,spaceAfter=9),
+        'subtitle':IRStyle('IRSubtitle',fontName='Helvetica',fontSize=9.5,leading=14,textColor=muted,spaceAfter=8),
+        'h2':IRStyle('IRH2',fontName='Helvetica-Bold',fontSize=12,leading=16,textColor=navy,spaceBefore=12,spaceAfter=8),
+        'body':IRStyle('IRBody',fontName='Helvetica',fontSize=9.2,leading=13,textColor=IRC.HexColor('#20364B'),spaceAfter=7),
+        'small':IRStyle('IRSmall',fontName='Helvetica',fontSize=8.5,leading=12,textColor=IRC.HexColor('#284258'),spaceAfter=5),
+        'step':IRStyle('IRStep',fontName='Helvetica-Bold',fontSize=9,leading=13,textColor=navy,spaceAfter=4),
+        'label':IRStyle('IRLabel',fontName='Helvetica-Bold',fontSize=8.5,leading=12,textColor=navy,spaceAfter=5),
+    }
+    buf=io.BytesIO()
+    doc=IRDoc(buf,pagesize=paper,rightMargin=38,leftMargin=38,
+              topMargin=49,bottomMargin=43,title='GRAC - Planes de respuesta por categoría',
+              author='Arkyntech GRAC',pageCompression=1)
+    story=[]
+    now=datetime.now().strftime('%d/%m/%Y %H:%M')
+    for index, record in enumerate(plans):
+        if index:
+            story.append(IRBreak())
+        plan=record['plan']
+        steps=record.get('steps',[])
+        code='PRI-%03d'%int(plan['id'])
+        status=str(plan.get('status') or 'Borrador')
+        title=str(plan.get('name') or '')
+        story.append(IRPara(ir_escape(code+' · '+title),styles['title']))
+        story.append(IRPara('PLAN DE RESPUESTA A INCIDENTES  |  Categoría: <b>'+ir_escape(str(plan.get('category') or ''))+'</b>',styles['subtitle']))
+        status_note=' · NO APROBADO / BORRADOR' if status!='Vigente' else ' · VIGENTE'
+        meta=('Versión: <b>v%s</b>  |  Estado: <b>%s</b>%s  |  Responsable: <b>%s</b>  |  Revisión: %s' % (
+            ir_escape(str(plan.get('version') or 1)),ir_escape(status),
+            ir_escape(status_note),ir_escape(str(plan.get('owner') or 'No asignado')),
+            ir_escape(str(plan.get('review_date') or 'Sin fecha'))))
+        story.append(IRPara(meta,styles['small']))
+        if plan.get('description'):
+            story.append(IRPara('<b>Objetivo:</b> '+ir_escape(str(plan['description'])),styles['small']))
+        if plan.get('activation'):
+            story.append(IRPara('<b>Activación:</b> '+ir_escape(str(plan['activation'])),styles['small']))
+        story.append(IRPara('DIAGRAMA DE FLUJO OPERATIVO',styles['h2']))
+        max_per_phase=max([sum(1 for r in steps if r['phase']==p) for p in _IR_PHASES] or [0])
+        parts=max(1,(max_per_phase+3)//4)
+        for part in range(parts):
+            if part:
+                story.append(IRBreak())
+                story.append(IRPara(ir_escape(code+' · '+title),styles['title']))
+                story.append(IRPara('DIAGRAMA DE FLUJO OPERATIVO · Continuación %d/%d'%(part+1,parts),styles['subtitle']))
+            story.append(IRDiagram(steps,part=part))
+            story.append(IRSpacer(1,8))
+        story.append(IRBreak())
+        story.append(IRPara('GUÍA DE ACTIVIDADES Y RESPONSABILIDADES',styles['title']))
+        story.append(IRPara('Plan '+ir_escape(code)+' · '+ir_escape(title)+' · '+str(len(steps))+' actividades documentadas',styles['subtitle']))
+        for phase in _IR_PHASES:
+            group=[r for r in steps if r['phase']==phase]
+            if not group:continue
+            story.append(IRPara(ir_escape(phase),styles['h2']))
+            for step in group:
+                head='<b>%s.</b> %s' % (ir_escape(str(step.get('seq',''))),ir_escape(str(step.get('title') or '')))
+                sub='Responsable: <b>%s</b>  ·  Prioridad: <b>%s</b>' % (
+                    ir_escape(str(step.get('assigned_role') or 'Por asignar')),
+                    ir_escape(str(step.get('priority') or 'Media')))
+                cells=[IRPara(head,styles['step']),IRPara(sub,styles['small'])]
+                if step.get('instructions'):
+                    cells.append(IRPara(ir_escape(str(step['instructions'])).replace('\n','<br/>'),styles['body']))
+                story.append(IRKeep(cells))
+                story.append(IRSpacer(1,6))
+        additional=[r for r in steps if r['phase'] not in _IR_PHASES]
+        if additional:
+            story.append(IRPara('Otras actividades configuradas',styles['h2']))
+            for step in additional:
+                story.append(IRPara(ir_escape('%s · %s — %s'%(step.get('seq',''),step.get('phase',''),step.get('title',''))),styles['step']))
+                story.append(IRPara(ir_escape(str(step.get('instructions') or '')),styles['body']))
+        story.append(IRSpacer(1,8))
+        story.append(IRPara('Generado el '+ir_escape(now)+'. Documento para consulta e impresión; verificar aprobación y versión antes de utilizarlo operativamente.',styles['small']))
+    def decorate(canv, doc):
+        canv.saveState()
+        W,H=paper
+        canv.setFillColor(navy);canv.rect(0,H-25,W,25,stroke=0,fill=1)
+        canv.setFillColor(IRC.white);canv.setFont('Helvetica-Bold',9)
+        canv.drawString(38,H-17,'ARKYNTECH GRAC  ·  GESTIÓN DE EVENTOS')
+        canv.setStrokeColor(border);canv.line(38,31,W-38,31)
+        canv.setFillColor(muted);canv.setFont('Helvetica',8)
+        company_text='Empresa: '+str(company).strip() if str(company).strip() else 'Planes de Respuesta a Incidentes'
+        canv.drawString(38,19,company_text[:90])
+        canv.drawRightString(W-38,19,'Página %s'%doc.page)
+        canv.restoreState()
+    doc.build(story,onFirstPage=decorate,onLaterPages=decorate)
+    return buf.getvalue()
+
+
+@app.route('/reportes/planes-respuesta/diagrama')
+@login_required
+def ir_category_report_pdf():
+    """Informe vectorial imprimible, filtrado por la categoría real del catálogo."""
+    user=db.session.get(User,session.get('user_id'))
+    if user is None or (user.role!='admin' and not verificar_permiso(user,'Reportes')):
+        abort(403,description='Sin acceso al Centro de Reportes.')
+    _ir_user()  # El permiso del módulo también se verifica en el servidor.
+    categoria=(request.args.get('categoria') or '').strip()
+    if len(categoria)>180:
+        abort(400,description='La categoría indicada no es válida.')
+    _ir_init()
+    with _ir_db() as con:
+        categories=[r['category'] for r in con.execute('SELECT DISTINCT category FROM ir_plans')]
+        if categoria and categoria!='__todas__' and categoria not in categories:
+            abort(404,description='La categoría solicitada no existe.')
+        if not categoria or categoria=='__todas__':
+            rows=con.execute('SELECT * FROM ir_plans ORDER BY category COLLATE NOCASE, id').fetchall()
+        else:
+            rows=con.execute('SELECT * FROM ir_plans WHERE category=? ORDER BY id',(categoria,)).fetchall()
+        plans=[]
+        for row in rows:
+            plan=dict(row)
+            steps=[dict(x) for x in con.execute(
+                'SELECT seq,phase,title,instructions,assigned_role,priority FROM ir_plan_steps WHERE plan_id=? ORDER BY seq,id',
+                (plan['id'],)).fetchall()]
+            plans.append({'plan':plan,'steps':steps})
+    if not plans:abort(404,description='No se encontraron planes en esa categoría.')
+    company=(request.args.get('company') or '').strip()[:140]
+    pdf=_ir_category_pdf_bytes(plans,company=company)
+    fname=('planes_respuesta_todas' if not categoria or categoria=='__todas__'
+           else 'planes_respuesta_'+str(plans[0]['plan']['id']))
+    return Response(pdf,mimetype='application/pdf',headers={
+        'Content-Disposition': 'inline; filename="%s.pdf"'%fname,
+        'Cache-Control':'no-store',
+        'X-Content-Type-Options':'nosniff'
+    })
 
 # FIN DEL MÓDULO DE PLANES DE RESPUESTA A INCIDENTES
 
