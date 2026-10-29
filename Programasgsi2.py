@@ -7,17 +7,6 @@ from flask import Flask, request, redirect, url_for, render_template_string, sen
 from flask_sqlalchemy import SQLAlchemy
 from passlib.hash import ldap_salted_sha1 as ssha
 import os, io, csv
-# Render: controlar hilos de las librerías numéricas ANTES de cargar NumPy/Pandas.
-# No afecta los servidores locales salvo que GRAC_RENDER_LOW_MEMORY=1.
-_GRAC_RENDER_LOW_MEMORY = (
-    os.getenv("GRAC_RENDER_LOW_MEMORY", "").strip().lower() in {"1", "true", "yes", "on"}
-    or bool(os.getenv("RENDER_SERVICE_ID"))
-)
-if _GRAC_RENDER_LOW_MEMORY:
-    for _grac_mem_key in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
-        os.environ[_grac_mem_key] = os.getenv("GRAC_RENDER_BLAS_THREADS", "1")
-    os.environ.setdefault("MPLBACKEND", "Agg")
-    os.environ.setdefault("MALLOC_ARENA_MAX", "2")
 from sqlalchemy import text
 import pyotp
 import json
@@ -48,43 +37,11 @@ import secrets
 import io
 import math
 import numpy as np
-# Los gráficos no deben ocupar memoria en Render hasta que se solicite un informe.
-# Estos objetos resuelven los imports al primer uso; la versión normal no cambia.
-if _GRAC_RENDER_LOW_MEMORY:
-    import importlib as _grac_importlib
-
-    class _GRACRenderLazyImport:
-        def __init__(self, module_name, attr_name=None):
-            self._module_name = module_name
-            self._attr_name = attr_name
-            self._object = None
-
-        def _get(self):
-            if self._object is None:
-                module = _grac_importlib.import_module(self._module_name)
-                self._object = (getattr(module, self._attr_name)
-                                if self._attr_name else module)
-            return self._object
-
-        def __getattr__(self, name):
-            return getattr(self._get(), name)
-
-        def __call__(self, *args, **kwargs):
-            return self._get()(*args, **kwargs)
-
-    matplotlib = _GRACRenderLazyImport("matplotlib")
-    plt = _GRACRenderLazyImport("matplotlib.pyplot")
-    patches = _GRACRenderLazyImport("matplotlib.patches")
-    Wedge = _GRACRenderLazyImport("matplotlib.patches", "Wedge")
-    Circle = _GRACRenderLazyImport("matplotlib.patches", "Circle")
-    FancyArrowPatch = _GRACRenderLazyImport("matplotlib.patches", "FancyArrowPatch")
-    FigureCanvas = _GRACRenderLazyImport("matplotlib.backends.backend_agg", "FigureCanvasAgg")
-else:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Wedge, Circle, FancyArrowPatch
-    from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.patches import Wedge, Circle, FancyArrowPatch
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import shutil
 import numpy as np
 from werkzeug.utils import secure_filename
@@ -198,10 +155,9 @@ import numpy as np
 
 # ✅ Matplotlib sin GUI (macOS/Flask)
 os.environ["MPLBACKEND"] = "Agg"
-if not _GRAC_RENDER_LOW_MEMORY:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 # OpenAI SDK
 from openai import OpenAI
@@ -216,10 +172,9 @@ from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
 )
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
-if not _GRAC_RENDER_LOW_MEMORY:
-    import matplotlib
-    matplotlib.use("Agg")  # IMPORTANT para servidores Flask
-    import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use("Agg")  # IMPORTANT para servidores Flask
+import matplotlib.pyplot as plt
 from flask import send_file
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.pagesizes import A4, landscape
@@ -1131,27 +1086,6 @@ def inject_sgsi_progress_bar(response):
         if "text/html" not in content_type:
             return response
 
-        if _GRAC_RENDER_LOW_MEMORY:
-            # Bytes: no duplicar el HTML decodificado/re-serializado en cada respuesta.
-            body_bytes = response.get_data()
-            if not body_bytes:
-                return response
-            pieces = []
-            if b'id="sgsiProgressOverlay"' not in body_bytes and b"id='sgsiProgressOverlay'" not in body_bytes:
-                pieces.append(SGSI_PROGRESS_GLOBAL.encode("utf-8"))
-            if (response.status_code == 200 and not response.is_streamed
-                    and session.get("user_id") and b'gracBrowserSessionLifecycle' not in body_bytes):
-                pieces.append(BROWSER_SESSION_LIFECYCLE_HTML.encode("utf-8"))
-            if pieces:
-                insert = b"\n".join(pieces) + b"\n"
-                marker = b"</body>"
-                if marker in body_bytes:
-                    head, sep, tail = body_bytes.rpartition(marker)
-                    response.set_data(head + insert + sep + tail)
-                else:
-                    response.set_data(body_bytes + insert)
-            return response
-
         html_response = response.get_data(as_text=True)
 
         if not html_response:
@@ -1672,10 +1606,6 @@ BROWSER_SESSION_LIFECYCLE_HTML = r"""
 
 @app.after_request
 def inject_browser_session_lifecycle(response):
-    # En Render los dos scripts se insertan de una vez en inject_sgsi_progress_bar,
-    # sin serializar otra vez todo el documento HTML.
-    if _GRAC_RENDER_LOW_MEMORY:
-        return response
     try:
         if response.status_code != 200 or response.is_streamed:
             return response
@@ -2101,12 +2031,6 @@ def ensure_min_meses_revision_column():
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sgsi.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-# Menos conexiones SQLite inactivas retenidas durante horas en Render.
-# SQLite sigue almacenando exactamente los mismos datos/archivos.
-if _GRAC_RENDER_LOW_MEMORY:
-    from sqlalchemy.pool import NullPool as _GRACRenderNullPool
-    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"poolclass": _GRACRenderNullPool}
 
 db = SQLAlchemy()
 db.init_app(app)
@@ -11840,9 +11764,8 @@ import math
 import re
 import json
 import sqlite3
-if not _GRAC_RENDER_LOW_MEMORY:
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 from flask import jsonify
 
 
@@ -14813,16 +14736,24 @@ MENU_SECTIONS = [
         "icon": "bi-truck",
         "items": [
             {
-                "label": "Ingreso información",
+                "label": "Selección de Proponentes",
                 "href": "#",
-                "icon": "bi-folder2-open",
+                "icon": "bi-people",
                 "btn": "btn-info text-white",
                 "children": [
-                    {"label": "Vía web", "href": "/cuestionario_proveedores_web", "icon": "bi-globe", "btn": "btn-info text-white", "module": "Cuestionario de proveedores web"},
-                    {"label": "Vía archivo", "href": "/ingreso_informacion_proponente_archivo", "icon": "bi-file-earmark-spreadsheet", "btn": "btn-info text-white", "module": "Cuestionarios de Proponentes"},
+                    {
+                        "label": "Ingreso información",
+                        "href": "#",
+                        "icon": "bi-folder2-open",
+                        "btn": "btn-info text-white",
+                        "children": [
+                            {"label": "Vía web", "href": "/cuestionario_proveedores_web", "icon": "bi-globe", "btn": "btn-info text-white", "module": "Cuestionario de proveedores web"},
+                            {"label": "Vía archivo", "href": "/ingreso_informacion_proponente_archivo", "icon": "bi-file-earmark-spreadsheet", "btn": "btn-info text-white", "module": "Cuestionarios de Proponentes"},
+                        ],
+                    },
+                    {"label": "Evaluación de proponentes", "href": "/cuestionarios_proveedores", "icon": "bi-bar-chart-line", "btn": "btn-info text-white", "module": "Cuestionarios de Proponentes"},
                 ],
             },
-            {"label": "Evaluación de proponentes", "href": "/cuestionarios_proveedores", "icon": "bi-bar-chart-line", "btn": "btn-info text-white", "module": "Cuestionarios de Proponentes"},
             {"label": "Revisión en Listas Restrictivas", "href": "/listas_restrictivas", "icon": "bi-shield-exclamation", "btn": "btn-danger", "module": "Listas Restrictivas"},
             {"label": "Security Scorecard de Terceros", "href": "/proponentes/scorecard", "icon": "bi-shield-check", "btn": "btn-warning text-dark", "module": "Security Scorecard de Terceros"},
             {"label": "Registro de Proveedores", "href": "/proveedores_menu", "icon": "bi-building", "btn": "btn-primary", "module": "Registro de Proveedores"},
@@ -53619,12 +53550,6 @@ def _glpi_invfis_fetch_computer_detail(cfg, session_token, computer_id):
 
 _GLPI_INVFIS_ITEM_CACHE = {}
 
-def _grac_glpi_cache_set(key, value):
-    if _GRAC_RENDER_LOW_MEMORY and len(_GLPI_INVFIS_ITEM_CACHE) >= 512 \
-            and key not in _GLPI_INVFIS_ITEM_CACHE:
-        _GLPI_INVFIS_ITEM_CACHE.pop(next(iter(_GLPI_INVFIS_ITEM_CACHE)))
-    _GLPI_INVFIS_ITEM_CACHE[key] = value
-
 
 def _glpi_invfis_api_get(cfg, session_token, path, params=None):
     """
@@ -53816,10 +53741,10 @@ def _glpi_invfis_resolve_item_name(cfg, session_token, itemtype, item_id):
         for k in ("name", "completename", "value"):
             val = _glpi_clean_text(data.get(k))
             if val:
-                _grac_glpi_cache_set(cache_key, val)
+                _GLPI_INVFIS_ITEM_CACHE[cache_key] = val
                 return val
 
-    _grac_glpi_cache_set(cache_key, "")
+    _GLPI_INVFIS_ITEM_CACHE[cache_key] = ""
     return ""
 
 
@@ -123343,9 +123268,6 @@ def _translate_to_es_cached(text: str) -> str:
     cache = _translate_to_es_cached._cache
     if t in cache:
         return cache[t]
-    # Evita que miles de traducciones retenidas ocupen memoria indefinidamente.
-    if _GRAC_RENDER_LOW_MEMORY and len(cache) >= 128:
-        cache.pop(next(iter(cache)))
 
     try:
         # Traducción directa, sin adornos
@@ -210806,6 +210728,5 @@ asegurar_columnas_aprobacion_seguridad_rfc()
 alert_start_scheduler()
 
 if __name__ == "__main__":
-    # Ejecución local (para Render se utiliza Gunicorn, ver gunicorn.conf.py).
     print("🚀 Ejecutando en puerto 5002")
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5002")), debug=False, use_reloader=False)
+    app.run(host="0.0.0.0", port=5002)
