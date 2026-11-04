@@ -3,21 +3,66 @@
 # Requisitos: pip install flask flask_sqlalchemy
 
 #from flask import Flask, request, redirect, url_for, render_template_string, send_file, flash, session, Blueprint
+# ============================================================
+# PERFIL BAJO CONSUMO DE MEMORIA — RENDER / GRAC
+# Reduce la memoria inicial sin deshabilitar módulos de la aplicación.
+# Las librerías de Excel y gráficos se importan al primer uso real.
+# ============================================================
+import os as _grac_os
+import sys as _grac_sys
+
+# Debe establecerse ANTES de la primera importación de NumPy/Matplotlib.
+_grac_os.environ.setdefault("MPLBACKEND", "Agg")
+_grac_os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+_grac_os.environ.setdefault("OMP_NUM_THREADS", "1")
+_grac_os.environ.setdefault("MKL_NUM_THREADS", "1")
+_grac_os.environ.setdefault("NUMEXPR_MAX_THREADS", "1")
+_grac_os.environ.setdefault("MALLOC_ARENA_MAX", "2")
+
+class _GRACLazyModule:
+    """Proxy de módulo. No importa el paquete pesado hasta que se usa."""
+    __slots__ = ("_name", "_real")
+
+    def __init__(self, name):
+        self._name = name
+        self._real = None
+
+    def _load(self):
+        if self._real is None:
+            import importlib
+            self._real = importlib.import_module(self._name)
+        return self._real
+
+    def __getattr__(self, name):
+        return getattr(self._load(), name)
+
+    def __repr__(self):
+        return "<GRAC deferred module %s>" % self._name
+
+# Las anotaciones pandas de funciones se mantienen diferidas como cadenas.
+pd = _GRACLazyModule("pandas")
+np = _GRACLazyModule("numpy")
+plt = _GRACLazyModule("matplotlib.pyplot")
+patches = _GRACLazyModule("matplotlib.patches")
+
+def Wedge(*args, **kwargs):
+    return patches.Wedge(*args, **kwargs)
+
+def Circle(*args, **kwargs):
+    return patches.Circle(*args, **kwargs)
+
+def FancyArrowPatch(*args, **kwargs):
+    return patches.FancyArrowPatch(*args, **kwargs)
+
+def FigureCanvas(*args, **kwargs):
+    import importlib
+    cls = importlib.import_module("matplotlib.backends.backend_agg").FigureCanvasAgg
+    return cls(*args, **kwargs)
+
 from flask import Flask, request, redirect, url_for, render_template_string, send_file, flash, session, Blueprint, make_response
 from flask_sqlalchemy import SQLAlchemy
 from passlib.hash import ldap_salted_sha1 as ssha
 import os, io, csv
-# Ajustes tempranos del proceso: deben preceder la carga de NumPy y Matplotlib.
-# La detección automática de Render no cambia la ejecución local del programa.
-_GRAC_RENDER_LOW_MEMORY = (
-    os.getenv("GRAC_RENDER_LOW_MEMORY", "").strip().lower() in {"1", "true", "yes", "on"}
-    or bool(os.getenv("RENDER_SERVICE_ID"))
-)
-if _GRAC_RENDER_LOW_MEMORY:
-    for _grac_key in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
-        os.environ[_grac_key] = os.getenv("GRAC_RENDER_BLAS_THREADS", "1")
-    os.environ.setdefault("MPLBACKEND", "Agg")
-    os.environ.setdefault("MALLOC_ARENA_MAX", "2")
 from sqlalchemy import text
 import pyotp
 import json
@@ -36,7 +81,7 @@ from datetime import datetime as dt
 from flask import Flask, render_template_string, request, redirect, url_for, session, flash
 from flask import abort
 import re
-import pandas as pd
+# GRAC-RAM: importación diferida en el bloque de optimización
 from markupsafe import Markup, escape
 from werkzeug.utils import secure_filename
 from io import BytesIO
@@ -47,45 +92,14 @@ from reportlab.lib.utils import ImageReader
 import secrets
 import io
 import math
-import numpy as np
-# Matplotlib es pesado: solo importarlo cuando se solicite un gráfico en Render.
-# Los proxies conservan las funciones de reporte existentes sin cargar el módulo al arrancar.
-if _GRAC_RENDER_LOW_MEMORY:
-    import importlib as _grac_importlib
-
-    class _GRACRenderLazyImport:
-        def __init__(self, module_name, attr_name=None):
-            self._module_name = module_name
-            self._attr_name = attr_name
-            self._object = None
-
-        def _get(self):
-            if self._object is None:
-                module = _grac_importlib.import_module(self._module_name)
-                self._object = getattr(module, self._attr_name) if self._attr_name else module
-            return self._object
-
-        def __getattr__(self, name):
-            return getattr(self._get(), name)
-
-        def __call__(self, *args, **kwargs):
-            return self._get()(*args, **kwargs)
-
-    matplotlib = _GRACRenderLazyImport("matplotlib")
-    plt = _GRACRenderLazyImport("matplotlib.pyplot")
-    patches = _GRACRenderLazyImport("matplotlib.patches")
-    Wedge = _GRACRenderLazyImport("matplotlib.patches", "Wedge")
-    Circle = _GRACRenderLazyImport("matplotlib.patches", "Circle")
-    FancyArrowPatch = _GRACRenderLazyImport("matplotlib.patches", "FancyArrowPatch")
-    FigureCanvas = _GRACRenderLazyImport("matplotlib.backends.backend_agg", "FigureCanvasAgg")
-else:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Wedge, Circle, FancyArrowPatch
-    from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+# GRAC-RAM: importación diferida en el bloque de optimización
+# GRAC-RAM: importación diferida en el bloque de optimización
+# GRAC-RAM: MPLBACKEND=Agg definido antes de importar bibliotecas
+# GRAC-RAM: importación diferida en el bloque de optimización
+# GRAC-RAM: importación diferida en el bloque de optimización
+# GRAC-RAM: importación diferida en el bloque de optimización
 import shutil
-import numpy as np
+# GRAC-RAM: importación diferida en el bloque de optimización
 from werkzeug.utils import secure_filename
 from uuid import uuid4
 import requests
@@ -94,7 +108,7 @@ import string
 from flask_sqlalchemy import SQLAlchemy
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib import colors
-import pandas as pd
+# GRAC-RAM: importación diferida en el bloque de optimización
 import os
 from cryptography.fernet import Fernet
 from werkzeug.utils import secure_filename
@@ -181,7 +195,7 @@ from reportlab.lib.enums import TA_LEFT
 from reportlab.lib import colors
 from werkzeug.exceptions import HTTPException
 import uuid
-import pandas as pd
+# GRAC-RAM: importación diferida en el bloque de optimización
 from openpyxl import load_workbook
 
 
@@ -190,17 +204,16 @@ from flask import (
 )
 from flask_sqlalchemy import SQLAlchemy
 
-import pandas as pd
-import numpy as np
+# GRAC-RAM: importación diferida en el bloque de optimización
+# GRAC-RAM: importación diferida en el bloque de optimización
 
 
 
 # ✅ Matplotlib sin GUI (macOS/Flask)
 os.environ["MPLBACKEND"] = "Agg"
-if not _GRAC_RENDER_LOW_MEMORY:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+# GRAC-RAM: importación diferida en el bloque de optimización
+# GRAC-RAM: MPLBACKEND=Agg definido antes de importar bibliotecas
+# GRAC-RAM: importación diferida en el bloque de optimización
 
 # OpenAI SDK
 from openai import OpenAI
@@ -215,10 +228,9 @@ from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
 )
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
-if not _GRAC_RENDER_LOW_MEMORY:
-    import matplotlib
-    matplotlib.use("Agg")  # IMPORTANT para servidores Flask
-    import matplotlib.pyplot as plt
+# GRAC-RAM: importación diferida en el bloque de optimización
+# GRAC-RAM: MPLBACKEND=Agg definido antes de importar bibliotecas
+# GRAC-RAM: importación diferida en el bloque de optimización
 from flask import send_file
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.pagesizes import A4, landscape
@@ -1130,23 +1142,6 @@ def inject_sgsi_progress_bar(response):
         if "text/html" not in content_type:
             return response
 
-        if _GRAC_RENDER_LOW_MEMORY:
-            # Insertar progreso + ciclo de sesión en una única pasada de bytes.
-            raw = response.get_data()
-            if not raw:
-                return response
-            parts = []
-            if b'id="sgsiProgressOverlay"' not in raw and b"id='sgsiProgressOverlay'" not in raw:
-                parts.append(SGSI_PROGRESS_GLOBAL.encode('utf-8'))
-            if (response.status_code == 200 and not response.is_streamed
-                    and session.get('user_id') and b'gracBrowserSessionLifecycle' not in raw):
-                parts.append(BROWSER_SESSION_LIFECYCLE_HTML.encode('utf-8'))
-            if parts:
-                addition = b"\n".join(parts) + b"\n"
-                prefix, sep, tail = raw.rpartition(b'</body>')
-                response.set_data(prefix + addition + sep + tail if sep else raw + addition)
-            return response
-
         html_response = response.get_data(as_text=True)
 
         if not html_response:
@@ -1667,9 +1662,6 @@ BROWSER_SESSION_LIFECYCLE_HTML = r"""
 
 @app.after_request
 def inject_browser_session_lifecycle(response):
-    # En Render ambos scripts son inyectados por inject_sgsi_progress_bar.
-    if _GRAC_RENDER_LOW_MEMORY:
-        return response
     try:
         if response.status_code != 200 or response.is_streamed:
             return response
@@ -2095,14 +2087,6 @@ def ensure_min_meses_revision_column():
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sgsi.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-# En Render evitar retener conexiones SQLite ociosas del motor principal.
-if _GRAC_RENDER_LOW_MEMORY:
-    from sqlalchemy.pool import NullPool as _GRAC_Render_NullPool
-    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-        **app.config.get('SQLALCHEMY_ENGINE_OPTIONS', {}),
-        'poolclass': _GRAC_Render_NullPool,
-    }
 
 db = SQLAlchemy()
 db.init_app(app)
@@ -10116,6 +10100,7 @@ MODULES = [
     "Métricas",
     "Reportes",
     "Logs de Auditoría",
+    "Aplicación móvil",
 ]
 
 
@@ -11836,9 +11821,8 @@ import math
 import re
 import json
 import sqlite3
-if not _GRAC_RENDER_LOW_MEMORY:
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
+# GRAC-RAM: importación diferida en el bloque de optimización
+# GRAC-RAM: importación diferida en el bloque de optimización
 from flask import jsonify
 
 
@@ -15034,6 +15018,13 @@ MENU_SECTIONS = [
          ],
      },
     {
+        "title": "Aplicación móvil",
+        "icon": "bi-phone",
+        "items": [
+            {"label": "Descargar aplicación móvil", "desc": "Consulta y descarga GRAC Mobile para Android o iOS.", "href": "/aplicacion_movil", "icon": "bi-phone", "btn": "btn-primary", "module": "Aplicación móvil"},
+        ],
+    },
+    {
         "title": "Administración",
         "icon": "bi-gear",
         "items": [
@@ -15832,6 +15823,10 @@ def _sgsi_build_global_menu_html():
             "Gestión de Usuarios": {
                 "paths": ["/usuarios"],
                 "endpoints": ["usuarios"]
+            },
+            "Descargar aplicación móvil": {
+                "paths": ["/aplicacion_movil"],
+                "endpoints": ["aplicacion_movil", "mobile_app_user_download"]
             },
             "Aplicación móvil": {
                 "paths": ["/admin/mobile-app"],
@@ -17095,7 +17090,7 @@ def _mobile_release_external_download_url(row):
         return None
     if row["platform"] == "ios":
         return (row["distribution_url"] or "").strip() or None
-    return url_for("admin_mobile_app_download", release_id=row["id"], _external=True)
+    return url_for("mobile_app_user_download", release_id=row["id"], _external=True)
 
 
 def _mobile_release_publish(
@@ -17138,6 +17133,136 @@ def _mobile_release_publish(
 
 
 init_mobile_release_db()
+
+
+
+# ============================================================================
+# GRAC MOBILE — MÓDULO DE CONSULTA Y DESCARGA (WEB / ON-PREMISE)
+# Independiente de Administración. Solo lectura, sin publicar ni eliminar.
+# Acceso por el permiso individual "Aplicación móvil".
+# ============================================================================
+@app.route("/aplicacion_movil", methods=["GET"])
+@login_required
+def aplicacion_movil():
+    usuario = User.query.get(session.get("user_id"))
+    if not _mobile_release_allowed(usuario):
+        abort(403, description="No tiene permiso para acceder al módulo Aplicación móvil.")
+
+    android = _mobile_release_active("android")
+    ios = _mobile_release_active("ios")
+    android_url = _mobile_release_external_download_url(android)
+    ios_url = _mobile_release_external_download_url(ios)
+    android_qr = _mobile_release_qr_data_uri(android_url)
+    ios_qr = _mobile_release_qr_data_uri(ios_url)
+
+    # Las tarjetas reproducen la información de descarga visible en
+    # Administración, SIN formularios de publicación, historial ni edición.
+    contenido = render_template_string(r"""
+    <div class="grac-mobile-user-shell">
+      <div class="grac-mobile-user-hero">
+        <div class="grac-mobile-user-icon"><i class="bi bi-phone"></i></div>
+        <div>
+          <h2>Aplicación móvil</h2>
+          <p>Distribución controlada de GRAC Mobile para Android y iOS mediante TestFlight.</p>
+        </div>
+      </div>
+      <div class="row g-3">
+        <div class="col-xl-6">
+          <div class="card border-0 shadow-sm h-100 grac-mobile-user-card">
+            <div class="card-body p-4">
+              <div class="d-flex align-items-center gap-3 mb-3">
+                <div class="grac-mobile-platform android"><i class="bi bi-android2"></i></div>
+                <div><h4 class="mb-0 fw-bold">Android</h4>
+                  <div class="text-muted small">Descarga directa del APK publicado en GRAC</div>
+                </div>
+              </div>
+              {% if android %}
+              <div class="grac-mobile-version mb-3">
+                <div><b>Versión:</b> {{ android['version'] }} · Build {{ android['build_number'] }}</div>
+                <div><b>Publicada:</b> {{ android['published_at'] }}</div>
+                <div><b>Por:</b> {{ android['published_by'] or '—' }}</div>
+                <div><b>Mínima:</b> {{ android['min_version'] or android['version'] }} · Build {{ android['min_build'] }}</div>
+                <div><b>Actualización:</b> {% if android['mandatory'] %}<span class="badge bg-danger">Obligatoria</span>{% else %}<span class="badge bg-success">Opcional</span>{% endif %}</div>
+              </div>
+              <div class="d-flex flex-wrap align-items-center gap-3">
+                <a href="{{ android_url }}" class="btn btn-primary rounded-pill px-4" data-no-progress="true"><i class="bi bi-download me-1"></i> Descargar APK</a>
+                {% if android_qr %}<img class="grac-mobile-qr" src="{{ android_qr }}" alt="Código QR para descargar Android">{% endif %}
+              </div>
+              {% else %}<div class="alert alert-warning">Todavía no hay una versión Android publicada en este servidor.</div>{% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="col-xl-6">
+          <div class="card border-0 shadow-sm h-100 grac-mobile-user-card">
+            <div class="card-body p-4">
+              <div class="d-flex align-items-center gap-3 mb-3">
+                <div class="grac-mobile-platform ios"><i class="bi bi-apple"></i></div>
+                <div><h4 class="mb-0 fw-bold">iOS / iPadOS</h4>
+                  <div class="text-muted small">Instalación mediante Apple TestFlight</div>
+                </div>
+              </div>
+              {% if ios %}
+              <div class="grac-mobile-version mb-3">
+                <div><b>Versión:</b> {{ ios['version'] }} · Build {{ ios['build_number'] }}</div>
+                <div><b>Publicada:</b> {{ ios['published_at'] }}</div>
+                <div><b>Por:</b> {{ ios['published_by'] or '—' }}</div>
+                <div><b>Mínima:</b> {{ ios['min_version'] or ios['version'] }} · Build {{ ios['min_build'] }}</div>
+                <div><b>Actualización:</b> {% if ios['mandatory'] %}<span class="badge bg-danger">Obligatoria</span>{% else %}<span class="badge bg-success">Opcional</span>{% endif %}</div>
+              </div>
+              <div class="d-flex flex-wrap align-items-center gap-3">
+                <a href="{{ ios_url }}" class="btn btn-dark rounded-pill px-4" target="_blank" rel="noopener noreferrer" data-no-progress="true"><i class="bi bi-apple me-1"></i> Abrir en TestFlight</a>
+                {% if ios_qr %}<img class="grac-mobile-qr" src="{{ ios_qr }}" alt="Código QR TestFlight">{% endif %}
+              </div>
+              {% else %}<div class="alert alert-warning">Todavía no hay un enlace de TestFlight publicado en este servidor.</div>{% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <style>
+      .grac-mobile-user-shell{width:96%;max-width:1200px;margin:24px auto 28px;}
+      .grac-mobile-user-hero{display:flex;align-items:center;gap:16px;min-height:94px;padding:18px 25px;margin-bottom:18px;color:white;border-radius:20px;background:linear-gradient(115deg,#062b55,#0b4a8f,#226ab5);box-shadow:0 12px 26px rgba(20,60,110,.21);}
+      .grac-mobile-user-hero h2{font-size:1.55rem!important;font-weight:850;margin:0 0 4px!important;color:#fff!important;}
+      .grac-mobile-user-hero p{font-size:.92rem;margin:0;color:rgba(255,255,255,.94);}
+      .grac-mobile-user-icon{width:56px;height:56px;min-width:56px;border-radius:14px;background:white;color:#0b4a8f;display:flex;align-items:center;justify-content:center;font-size:1.6rem;}
+      .grac-mobile-user-card{border-radius:22px;overflow:hidden;}
+      .grac-mobile-platform{width:60px;height:60px;min-width:60px;border-radius:17px;display:flex;align-items:center;justify-content:center;font-size:2rem;}
+      .grac-mobile-platform.android{background:#e7f7ee;color:#198754;}
+      .grac-mobile-platform.ios{background:#edf1f5;color:#111827;}
+      .grac-mobile-version{background:#f8fafc;border:1px solid #e7edf4;border-radius:16px;padding:16px 20px;line-height:1.85;}
+      .grac-mobile-qr{width:135px;height:135px;border-radius:16px;border:1px solid #e3e8ef;padding:8px;background:white;object-fit:contain;}
+      @media(max-width:768px){.grac-mobile-user-hero{padding:16px;gap:12px}.grac-mobile-user-hero h2{font-size:1.3rem!important}.grac-mobile-user-shell{width:98%}}
+    </style>
+    """, android=android, ios=ios,
+         android_url=android_url, ios_url=ios_url,
+         android_qr=android_qr, ios_qr=ios_qr)
+    return render_template_string(BASE, content=Markup(contenido))
+
+
+@app.route("/aplicacion_movil/descargar/<int:release_id>", methods=["GET"])
+@login_required
+def mobile_app_user_download(release_id):
+    usuario = User.query.get(session.get("user_id"))
+    if not _mobile_release_allowed(usuario):
+        abort(403, description="No tiene permiso para descargar GRAC Mobile.")
+
+    release = _mobile_release_row(release_id)
+    # Solo la versión Android actualmente publicada está disponible al usuario.
+    if (not release or release["platform"] != "android"
+            or not release["is_active"] or not release["stored_name"]):
+        abort(404)
+    archivo = safe_join(MOBILE_RELEASE_DIR, release["stored_name"])
+    if not archivo or not os.path.isfile(archivo):
+        abort(404)
+
+    registrar_log(usuario.username, f"Descargó GRAC Mobile Android versión {release['version']} build {release['build_number']}.")
+    return send_file(
+        archivo,
+        mimetype="application/vnd.android.package-archive",
+        as_attachment=True,
+        download_name=f"GRAC-Mobile-{release['version']}-build-{release['build_number']}.apk",
+        conditional=True,
+    )
 
 
 @app.route("/admin/mobile-app", methods=["GET", "POST"])
@@ -25749,7 +25874,7 @@ def agregar_riesgo():
             impacto_res_label=impacto_res_label,
             riesgo_residual=riesgo_residual_calc,
             fecha_revision=request.form.get('fecha_revision'),
-            tratamiento_riesgo=request.form.get('tratamiento'),
+            tratamiento_riesgo=request.form.get('tratamiento_riesgo'),
             observaciones=obs_final,
             planes_accion=request.form.get('planes_accion'),
             responsable=request.form.get('responsable'),
@@ -25972,6 +26097,17 @@ def agregar_riesgo():
 
             <div class="col-12">
               <div class="riskform-section-title">🧩 Tratamiento del Riesgo Residual</div>
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label">Tratamiento del Riesgo</label>
+              <select class="form-control" name="tratamiento_riesgo" required>
+                <option value="">Seleccione...</option>
+                <option value="Aceptación">Aceptación</option>
+                <option value="Rechazo">Rechazo</option>
+                <option value="Transferencia">Transferencia</option>
+                <option value="Mitigación">Mitigación</option>
+              </select>
             </div>
 
             <div class="col-md-12">
@@ -53623,13 +53759,6 @@ def _glpi_invfis_fetch_computer_detail(cfg, session_token, computer_id):
 
 _GLPI_INVFIS_ITEM_CACHE = {}
 
-def _grac_glpi_cache_set(key, value):
-    """Mantener la resolución GLPI acotada en Render."""
-    if _GRAC_RENDER_LOW_MEMORY and len(_GLPI_INVFIS_ITEM_CACHE) >= 512 \
-            and key not in _GLPI_INVFIS_ITEM_CACHE:
-        _GLPI_INVFIS_ITEM_CACHE.pop(next(iter(_GLPI_INVFIS_ITEM_CACHE)))
-    _GLPI_INVFIS_ITEM_CACHE[key] = value
-
 
 def _glpi_invfis_api_get(cfg, session_token, path, params=None):
     """
@@ -53821,10 +53950,10 @@ def _glpi_invfis_resolve_item_name(cfg, session_token, itemtype, item_id):
         for k in ("name", "completename", "value"):
             val = _glpi_clean_text(data.get(k))
             if val:
-                _grac_glpi_cache_set(cache_key, val)
+                _GLPI_INVFIS_ITEM_CACHE[cache_key] = val
                 return val
 
-    _grac_glpi_cache_set(cache_key, "")
+    _GLPI_INVFIS_ITEM_CACHE[cache_key] = ""
     return ""
 
 
@@ -118384,7 +118513,7 @@ def extract_subkey(sheet_name: str, ref_raw: str) -> str:
     return m.group(1) if m else ""
 
 
-def detect_header_item_subitem(df: pd.DataFrame):
+def detect_header_item_subitem(df: "pd.DataFrame"):
     max_scan = min(50, df.shape[0])
 
     def is_item(s): return s == "item"
@@ -118456,7 +118585,7 @@ def _clean_cell_text(v) -> str:
     return s
 
 
-def eval_status_from_row_item_subitem(df: pd.DataFrame, r: int, col_map: dict):
+def eval_status_from_row_item_subitem(df: "pd.DataFrame", r: int, col_map: dict):
     item_col = col_map.get("item_col")
     subitem_col = col_map.get("subitem_col")
     preg_col = col_map.get("preg_col")
@@ -118647,7 +118776,7 @@ def aggregate_by_control(items: list) -> dict:
     return ordered
 
 
-def detect_header_and_columns(df: pd.DataFrame):
+def detect_header_and_columns(df: "pd.DataFrame"):
     max_scan = min(120, df.shape[0])
 
     def is_ref(s):
@@ -118746,7 +118875,7 @@ def brecha_pct_from_status(status: str):
     return 100.0
 
 
-def eval_status_from_row(df: pd.DataFrame, r: int, col_map: dict, requisito: str, ref_txt: str):
+def eval_status_from_row(df: "pd.DataFrame", r: int, col_map: dict, requisito: str, ref_txt: str):
     na_col = col_map.get("na_col")
     si_col = col_map.get("si_col")
     parcial_col = col_map.get("parcial_col")
@@ -123348,9 +123477,6 @@ def _translate_to_es_cached(text: str) -> str:
     cache = _translate_to_es_cached._cache
     if t in cache:
         return cache[t]
-    # Evitar que las traducciones retenidas crezcan indefinidamente.
-    if _GRAC_RENDER_LOW_MEMORY and len(cache) >= 128:
-        cache.pop(next(iter(cache)))
 
     try:
         # Traducción directa, sin adornos
@@ -144437,7 +144563,7 @@ def informe_ejecutivo_generar_pci(run_id: int):
 # Analisis y Calculos
 # =========================
 
-def build_pci_df_from_db(run_id: int) -> pd.DataFrame:
+def build_pci_df_from_db(run_id: int) -> "pd.DataFrame":
     q = (
         db.session.query(PciMadurezRespuesta, PciMadurezPregunta)
         .join(PciMadurezPregunta, PciMadurezPregunta.id == PciMadurezRespuesta.pregunta_id)
@@ -209260,7 +209386,42 @@ def _grac_install_supplier_portal(_namespace):
                     return [body]
                 return self.inner(environ, start_response)
         portal.wsgi_app = _CpwGatewayAuthentication(portal.wsgi_app)
-        host.wsgi_app=DispatcherMiddleware(host.wsgi_app,{'/proveedores':portal})
+        # GRAC incorpora dos funcionalidades distintas con la misma raíz URL:
+        #   /proveedores                    -> Registro de Proveedores (GRAC)
+        #   /proveedores/new, /scorecard... -> pantallas internas (GRAC)
+        #   /proveedores/ y /login...       -> portal privado de proponentes
+        # El DispatcherMiddleware simple interceptaba TODAS las rutas que
+        # empezaban por /proveedores, incluso las registradas por GRAC, y
+        # devolvía 403 (clave especial del gateway) a usuarios autorizados.
+        #
+        # Preservar la ruta pública y la autenticación del gateway, pero
+        # respetar primero las rutas internas explícitas de GRAC. Nunca se
+        # intenta montar ni servir el portal privado sin su token.
+        _grac_proveedores_main_wsgi = host.wsgi_app
+        _grac_proveedores_dispatcher = DispatcherMiddleware(
+            _grac_proveedores_main_wsgi, {'/proveedores': portal}
+        )
+
+        class _GracProveedoresRouteSelector:
+            def __call__(self, environ, start_response):
+                path = environ.get('PATH_INFO', '') or ''
+                if path == '/proveedores' or path.startswith('/proveedores/'):
+                    # Flask ya tiene su mapa de rutas completo en este punto.
+                    # Si una ruta interna de GRAC coincide, servirla allí
+                    # (con login_required y permisos originales); en caso
+                    # contrario mantener el portal detrás del gateway.
+                    from werkzeug.exceptions import NotFound, MethodNotAllowed
+                    from werkzeug.routing import RequestRedirect
+                    try:
+                        adapter = host.url_map.bind_to_environ(environ)
+                        rule, _ = adapter.match(return_rule=True)
+                        if rule.rule == '/proveedores' or rule.rule.startswith('/proveedores/'):
+                            return _grac_proveedores_main_wsgi(environ, start_response)
+                    except (NotFound, MethodNotAllowed, RequestRedirect):
+                        pass
+                return _grac_proveedores_dispatcher(environ, start_response)
+
+        host.wsgi_app = _GracProveedoresRouteSelector()
         host.extensions['proveedores_web']={'portal':portal,'snapshot':snapshot,'connect':connect,'root':root,'import_response':import_response}
 
     FORM = '''<header><h1>Cuestionario de seguridad de proveedores</h1><p>{{ acc.name }} · Arkyntech GRAC</p></header>
@@ -210809,6 +210970,37 @@ app.register_blueprint(ai_madurez_bp)
 app.register_blueprint(mobile_api_bp)
 asegurar_columnas_aprobacion_seguridad_rfc()
 alert_start_scheduler()
+
+
+# ============================================================
+# LIBERACIÓN DE FIGURAS EN RENDER
+# No toca sesiones, archivos, información de usuarios ni bases de datos.
+# Gunicorn se configura con un único worker y un único hilo.
+# ============================================================
+_GRAC_RENDER_ACTIVE = str(_grac_os.getenv("RENDER", "")).strip().lower() in {"1", "true", "yes"}
+_GRAC_LOW_MEMORY_CLEANUP = str(_grac_os.getenv(
+    "GRAC_LOW_MEMORY_CLEANUP", "1" if _GRAC_RENDER_ACTIVE else "0"
+)).strip().lower() not in {"0", "false", "no", "off"}
+_GRAC_REQUESTS_SINCE_GC = 0
+
+@app.teardown_request
+def _grac_render_release_graphs(error=None):
+    global _GRAC_REQUESTS_SINCE_GC
+    if not _GRAC_LOW_MEMORY_CLEANUP:
+        return
+    try:
+        # Solo cierra figuras globales si matplotlib fue importado antes.
+        _pyplot = _grac_sys.modules.get("matplotlib.pyplot")
+        if _pyplot is not None:
+            _pyplot.close("all")
+        _GRAC_REQUESTS_SINCE_GC += 1
+        if _GRAC_REQUESTS_SINCE_GC >= 32:
+            _GRAC_REQUESTS_SINCE_GC = 0
+            import gc
+            gc.collect()
+    except Exception:
+        # Ningún error de limpieza puede convertir una petición correcta en fallo.
+        pass
 
 if __name__ == "__main__":
     print("🚀 Ejecutando en puerto 5002")
