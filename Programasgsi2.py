@@ -19,6 +19,63 @@ _grac_os.environ.setdefault("MKL_NUM_THREADS", "1")
 _grac_os.environ.setdefault("NUMEXPR_MAX_THREADS", "1")
 _grac_os.environ.setdefault("MALLOC_ARENA_MAX", "2")
 
+# Rendimiento de GRAC Web en instancias Render con RAM restringida.
+def _grac_env_enabled(name, default=False):
+    value = _grac_os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off", ""}
+
+_GRAC_RENDER_RUNTIME = bool(_grac_os.environ.get("RENDER") or _grac_os.environ.get("RENDER_SERVICE_ID"))
+_GRAC_RENDER_LOW_MEMORY = _grac_env_enabled("GRAC_RENDER_LOW_MEMORY", _GRAC_RENDER_RUNTIME)
+
+# Las importaciones de exportadores permanecen diferidas hasta que alguien los use.
+# Esto evita cargar a la vez todos los generadores Word/PDF/Excel al iniciar GRAC.
+class _GRACDeferredSymbol:
+    __slots__ = ("module_name", "symbol_name", "_cached")
+
+    def __init__(self, module_name, symbol_name):
+        self.module_name = module_name
+        self.symbol_name = symbol_name
+        self._cached = None
+
+    def _resolve(self):
+        if self._cached is None:
+            from importlib import import_module
+            self._cached = getattr(import_module(self.module_name), self.symbol_name)
+        return self._cached
+
+    def __call__(self, *args, **kwargs):
+        return self._resolve()(*args, **kwargs)
+
+    def __getattr__(self, attr):
+        return getattr(self._resolve(), attr)
+
+    def __repr__(self):
+        return "<deferred %s.%s>" % (self.module_name, self.symbol_name)
+
+# Los nombres se definen antes de que se evalúen los tipos de los helpers.
+for _grac_sym in ("Document",):
+    globals()[_grac_sym] = _GRACDeferredSymbol("docx", _grac_sym)
+for _grac_sym in ("Inches", "Pt"):
+    globals()[_grac_sym] = _GRACDeferredSymbol("docx.shared", _grac_sym)
+WD_ALIGN_PARAGRAPH = _GRACDeferredSymbol("docx.enum.text", "WD_ALIGN_PARAGRAPH")
+WD_TABLE_ALIGNMENT = _GRACDeferredSymbol("docx.enum.table", "WD_TABLE_ALIGNMENT")
+for _grac_sym in ("load_workbook", "Workbook"):
+    globals()[_grac_sym] = _GRACDeferredSymbol("openpyxl", _grac_sym)
+for _grac_sym in ("Font", "PatternFill", "Alignment"):
+    globals()[_grac_sym] = _GRACDeferredSymbol("openpyxl.styles", _grac_sym)
+# El nombre Image de ReportLab también se reutiliza en el código actual.
+Image = _GRACDeferredSymbol("reportlab.platypus", "Image")
+for _grac_sym in ("ImageReader",):
+    globals()[_grac_sym] = _GRACDeferredSymbol("reportlab.lib.utils", _grac_sym)
+for _grac_sym in ("ParagraphStyle", "getSampleStyleSheet"):
+    globals()[_grac_sym] = _GRACDeferredSymbol("reportlab.lib.styles", _grac_sym)
+for _grac_sym in ("SimpleDocTemplate", "Paragraph", "Spacer", "Table", "TableStyle", "PageBreak"):
+    globals()[_grac_sym] = _GRACDeferredSymbol("reportlab.platypus", _grac_sym)
+RLImage = _GRACDeferredSymbol("reportlab.platypus", "Image")
+
+
 class _GRACLazyModule:
     """Proxy de módulo. No importa el paquete pesado hasta que se usa."""
     __slots__ = ("_name", "_real")
@@ -44,6 +101,7 @@ pd = _GRACLazyModule("pandas")
 np = _GRACLazyModule("numpy")
 plt = _GRACLazyModule("matplotlib.pyplot")
 patches = _GRACLazyModule("matplotlib.patches")
+colors = _GRACLazyModule("reportlab.lib.colors")
 
 def Wedge(*args, **kwargs):
     return patches.Wedge(*args, **kwargs)
@@ -88,7 +146,7 @@ from io import BytesIO
 from collections import Counter
 import unicodedata
 import smtplib
-from reportlab.lib.utils import ImageReader
+# GRAC-RAM: importación diferida: from reportlab.lib.utils import ImageReader
 import secrets
 import io
 import math
@@ -106,8 +164,8 @@ import requests
 from requests.auth import HTTPBasicAuth
 import string
 from flask_sqlalchemy import SQLAlchemy
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib import colors
+# GRAC-RAM: importación diferida: from reportlab.lib.styles import ParagraphStyle
+# GRAC-RAM: colors se carga bajo demanda
 # GRAC-RAM: importación diferida en el bloque de optimización
 import os
 from cryptography.fernet import Fernet
@@ -115,13 +173,13 @@ from werkzeug.utils import secure_filename
 from flask_migrate import Migrate
 import re
 import secrets
-from docx import Document
+# GRAC-RAM: importación diferida: from docx import Document
 import requests
 from requests.auth import HTTPBasicAuth
 from cryptography.fernet import Fernet
-from docx.shared import Inches
+# GRAC-RAM: importación diferida: from docx.shared import Inches
 import traceback
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+# GRAC-RAM: importación diferida: from docx.enum.text import WD_ALIGN_PARAGRAPH
 from email.message import EmailMessage
 import datetime as dt
 import string
@@ -187,16 +245,16 @@ from datetime import datetime, timezone
 from xml.sax.saxutils import escape as xml_escape
 from openai import OpenAIError, AuthenticationError
 from datetime import datetime, timezone, timedelta
-from reportlab.platypus import Table, TableStyle
+# GRAC-RAM: importación diferida: from reportlab.platypus import Table, TableStyle
 from flask import Blueprint
 import traceback
-from reportlab.lib.styles import ParagraphStyle
+# GRAC-RAM: importación diferida: from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_LEFT
-from reportlab.lib import colors
+# GRAC-RAM: colors se carga bajo demanda
 from werkzeug.exceptions import HTTPException
 import uuid
 # GRAC-RAM: importación diferida en el bloque de optimización
-from openpyxl import load_workbook
+# GRAC-RAM: importación diferida: from openpyxl import load_workbook
 
 
 from flask import (
@@ -222,20 +280,18 @@ from openai import AuthenticationError, OpenAIError
 # PDF (ReportLab) - PRO
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
-)
+# GRAC-RAM: colors se carga bajo demanda
+# GRAC-RAM: importación diferida: from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+Image = _GRACDeferredSymbol("reportlab.platypus", "Image")
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
 # GRAC-RAM: importación diferida en el bloque de optimización
 # GRAC-RAM: MPLBACKEND=Agg definido antes de importar bibliotecas
 # GRAC-RAM: importación diferida en el bloque de optimización
 from flask import send_file
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
+Image = _GRACDeferredSymbol("reportlab.platypus", "Image")
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib import colors
+# GRAC-RAM: importación diferida: from reportlab.lib.styles import getSampleStyleSheet
+# GRAC-RAM: colors se carga bajo demanda
 from reportlab.lib.units import cm
 import hashlib
 import base64
@@ -53950,9 +54006,13 @@ def _glpi_invfis_resolve_item_name(cfg, session_token, itemtype, item_id):
         for k in ("name", "completename", "value"):
             val = _glpi_clean_text(data.get(k))
             if val:
+                if _GRAC_RENDER_LOW_MEMORY and len(_GLPI_INVFIS_ITEM_CACHE) >= 1000:
+                    _GLPI_INVFIS_ITEM_CACHE.clear()
                 _GLPI_INVFIS_ITEM_CACHE[cache_key] = val
                 return val
 
+    if _GRAC_RENDER_LOW_MEMORY and len(_GLPI_INVFIS_ITEM_CACHE) >= 1000:
+        _GLPI_INVFIS_ITEM_CACHE.clear()
     _GLPI_INVFIS_ITEM_CACHE[cache_key] = ""
     return ""
 
@@ -123492,11 +123552,18 @@ def _translate_to_es_cached(text: str) -> str:
         out = (resp.choices[0].message.content or "").strip()
         if out:
             cache[t] = out
+            if _GRAC_RENDER_LOW_MEMORY and len(cache) > 384:
+                for _ in range(128):
+                    cache.pop(next(iter(cache)), None)
             return out
     except Exception:
         pass
 
     cache[t] = t
+    if _GRAC_RENDER_LOW_MEMORY and len(cache) > 384:
+        # La traducción permanece disponible; solo se descartan traducciones antiguas.
+        for _ in range(128):
+            cache.pop(next(iter(cache)), None)
     return t
 
 
@@ -127936,19 +128003,19 @@ from collections import defaultdict
 import sqlite3
 
 from reportlab.lib.pagesizes import letter, landscape
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
+# GRAC-RAM: importación diferida: from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+# GRAC-RAM: importación diferida: from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+# GRAC-RAM: colors se carga bajo demanda
 from reportlab.lib.units import inch
 
-from docx import Document
-from docx.shared import Inches, Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT
+# GRAC-RAM: importación diferida: from docx import Document
+# GRAC-RAM: importación diferida: from docx.shared import Inches, Pt
+# GRAC-RAM: importación diferida: from docx.enum.text import WD_ALIGN_PARAGRAPH
+# GRAC-RAM: importación diferida: from docx.enum.table import WD_TABLE_ALIGNMENT
 
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment
-from openpyxl.drawing.image import Image as XLImage
+# GRAC-RAM: importación diferida: from openpyxl import Workbook
+# GRAC-RAM: importación diferida: from openpyxl.styles import Font, PatternFill, Alignment
+Image = _GRACDeferredSymbol("openpyxl.drawing.image", "Image")
 
 import io
 import os
@@ -149776,20 +149843,12 @@ def detalle_resultado_pci(analysis_id: int):
 
 soc2_madurez_bp = Blueprint("madurez_soc2", __name__, url_prefix="/madurez_soc2")
 
-from reportlab.lib import colors
+# GRAC-RAM: colors se carga bajo demanda
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import cm
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import (
-    SimpleDocTemplate,
-    Paragraph,
-    Spacer,
-    Table,
-    TableStyle,
-    Image as RLImage,
-    PageBreak
-)
+# GRAC-RAM: importación diferida: from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+Image = _GRACDeferredSymbol("reportlab.platypus", "Image")
 
 # ============================================================
 # BASE DE DATOS INDEPENDIENTE — SOC 2
@@ -153825,20 +153884,12 @@ def soc2_nistform_css():
 
 iso22301_madurez_bp = Blueprint("madurez_iso22301", __name__, url_prefix="/madurez_iso22301")
 
-from reportlab.lib import colors
+# GRAC-RAM: colors se carga bajo demanda
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import cm
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import (
-    SimpleDocTemplate,
-    Paragraph,
-    Spacer,
-    Table,
-    TableStyle,
-    Image as RLImage,
-    PageBreak
-)
+# GRAC-RAM: importación diferida: from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+Image = _GRACDeferredSymbol("reportlab.platypus", "Image")
 
 # ============================================================
 # BASE DE DATOS INDEPENDIENTE — ISO 22301
@@ -206244,7 +206295,7 @@ def cont_comp_sync_governance_findings():
     CONT_COMP_STANDARD_CATALOG_CACHE.clear()
 
     try:
-        firewall_findings = FirewallGovFinding.query.order_by(FirewallGovFinding.id.asc()).limit(20000).all()
+        firewall_findings = FirewallGovFinding.query.order_by(FirewallGovFinding.id.asc()).limit(20000).yield_per(100)
         for finding in firewall_findings:
             desired_by_source["Gobierno de Firewall"].update(
                 cont_comp_upsert_governance_evidence(
@@ -206292,7 +206343,7 @@ def cont_comp_sync_governance_findings():
                     ORDER BY f.id ASC
                     LIMIT 20000
                     """
-                ).fetchall()
+                )  # sqlite3.Cursor iterable: evita crear una lista de hasta 20.000 hallazgos
                 for finding in rows:
                     asset = finding["sam_account_name"] or finding["display_name"] or "Cuenta Active Directory"
                     desired_by_source["Gobierno del Directorio Activo"].update(
@@ -206334,7 +206385,7 @@ def cont_comp_sync_governance_findings():
     try:
         for source in processed_sources:
             desired = desired_by_source.get(source, set())
-            existing = ContinuousEvidence.query.filter_by(source=source).all()
+            existing = ContinuousEvidence.query.filter_by(source=source).yield_per(150)
             for evidence in existing:
                 if evidence.event_ref not in desired:
                     db.session.delete(evidence)
@@ -207579,7 +207630,7 @@ def _alert_scheduler_loop():
 
 def alert_start_scheduler():
     global _ALERT_SCHEDULER_STARTED
-    if str(os.getenv("GRAC_ALERTS_BACKGROUND", "1")).strip().lower() in {"0", "false", "no", "off"}:
+    if str(os.getenv("GRAC_ALERTS_BACKGROUND", "0" if _GRAC_RENDER_LOW_MEMORY else "1")).strip().lower() in {"0", "false", "no", "off"}:
         return False
     if str(os.getenv("FLASK_DEBUG", "0")).strip().lower() in {"1", "true", "yes", "on"} \
             and os.getenv("WERKZEUG_RUN_MAIN") != "true":
@@ -210953,7 +211004,10 @@ with app.app_context():
     db.create_all()
     alert_seed_defaults()
     cont_comp_migrate_evidence_schema()
-    cont_comp_sync_governance_findings()
+    # La vista de Cumplimiento Continuo ya sincroniza sus hallazgos al consultarla.
+    # Evitar hacerlo también durante cada cold start/reinicio en Render Free.
+    if not _GRAC_RENDER_LOW_MEMORY or _grac_env_enabled("GRAC_SYNC_GOVERNANCE_ON_START", False):
+        cont_comp_sync_governance_findings()
     ensure_attack_auto_db()
     asegurar_columnas_marcos_controles_riesgo()
     riesgo_asegurar_config_evaluacion_control()
@@ -211001,6 +211055,65 @@ def _grac_render_release_graphs(error=None):
     except Exception:
         # Ningún error de limpieza puede convertir una petición correcta en fallo.
         pass
+
+# ============================================================
+# DIAGNÓSTICO DE MEMORIA RENDER: memoria del proceso y del contenedor.
+# No expone datos ni rutas nuevas y solo escribe métricas en los logs.
+# ============================================================
+_GRAC_RAM_REQUESTS = 0
+_GRAC_RAM_LAST_MB = 0.0
+_GRAC_RAM_LIBC = None
+
+def _grac_memory_mb():
+    try:
+        with open("/proc/self/statm", "r", encoding="ascii") as f:
+            rss_pages = int(f.read().split()[1])
+        return round((rss_pages * os.sysconf("SC_PAGE_SIZE")) / 1048576, 1)
+    except (OSError, IndexError, ValueError):
+        return 0.0
+
+def _grac_cgroup_memory_mb():
+    # Incluye el proceso principal Gunicorn, worker y caché de archivos.
+    for path in ("/sys/fs/cgroup/memory.current", "/sys/fs/cgroup/memory/memory.usage_in_bytes"):
+        try:
+            with open(path, "r", encoding="ascii") as f:
+                return round(int(f.read().strip()) / 1048576, 1)
+        except (OSError, ValueError):
+            continue
+    return 0.0
+
+@app.after_request
+def _grac_render_memory_metrics(response):
+    global _GRAC_RAM_REQUESTS, _GRAC_RAM_LAST_MB, _GRAC_RAM_LIBC
+    if not _GRAC_RENDER_LOW_MEMORY:
+        return response
+    _GRAC_RAM_REQUESTS += 1
+    sample_step = max(1, int(os.getenv("GRAC_RAM_LOG_EVERY", "15")))
+    if _GRAC_RAM_REQUESTS % sample_step != 0:
+        return response
+    try:
+        import gc
+        rss = _grac_memory_mb()
+        container_mb = _grac_cgroup_memory_mb()
+        if rss > 330 and _GRAC_RAM_REQUESTS % (sample_step * 2) == 0:
+            gc.collect()
+            # malloc_trim permite devolver al SO segmentos libres del montón glibc.
+            if sys.platform.startswith("linux"):
+                try:
+                    if _GRAC_RAM_LIBC is None:
+                        import ctypes
+                        _GRAC_RAM_LIBC = ctypes.CDLL("libc.so.6")
+                    _GRAC_RAM_LIBC.malloc_trim(0)
+                except (OSError, AttributeError):
+                    pass
+            rss = _grac_memory_mb()
+            container_mb = _grac_cgroup_memory_mb()
+        _GRAC_RAM_LAST_MB = rss
+        app.logger.warning("GRAC-RAM rss=%.1fMB contenedor=%.1fMB endpoint=%s status=%s",
+                           rss, container_mb, request.endpoint or "(desconocido)", response.status_code)
+    except Exception:
+        pass
+    return response
 
 if __name__ == "__main__":
     print("🚀 Ejecutando en puerto 5002")
