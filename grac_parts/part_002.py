@@ -1,3 +1,2264 @@
+def jira_is_enabled():
+    return all([
+        JIRA_ENABLED,
+        (JIRA_BASE_URL or "").strip(),
+        (JIRA_EMAIL or "").strip(),
+        (JIRA_API_TOKEN or "").strip(),
+        (JIRA_PROJECT_KEY or "").strip()
+    ])
+
+
+def jira_auth():
+    return HTTPBasicAuth(JIRA_EMAIL, JIRA_API_TOKEN)
+
+
+def jira_headers():
+    return {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }
+
+
+def jira_priority_name(prioridad_local: str) -> str:
+    p = (prioridad_local or "").strip().lower()
+    if p == "alta":
+        return "High"
+    if p == "media":
+        return "Medium"
+    if p == "baja":
+        return "Low"
+    return "Medium"
+
+
+def limpiar_texto_jira(txt, max_len=None):
+    valor = (txt or "").strip()
+    if max_len:
+        valor = valor[:max_len]
+    return valor
+
+
+def descripcion_plan_para_jira(plan, vuln):
+    fecha_obj = plan.fecha_objetivo.strftime("%Y-%m-%d") if plan.fecha_objetivo else "No definida"
+
+    return f"""
+Plan de remediación generado desde el SGSI.
+
+Vulnerabilidad asociada:
+- Código: {vuln.codigo or 'N/A'}
+- Activo: {vuln.activo or 'N/A'}
+- Descripción: {vuln.descripcion_vulnerabilidad or 'N/A'}
+- CVE: {vuln.cve or 'N/A'}
+- CVSS: {vuln.cvss or 'N/A'}
+- Clasificación: {vuln.clasificacion or 'N/A'}
+- Estado vulnerabilidad: {vuln.estado or 'N/A'}
+
+Plan de remediación:
+- ID interno: {plan.id}
+- Responsable SGSI: {plan.responsable or 'N/A'}
+- Prioridad: {plan.prioridad or 'N/A'}
+- Estado: {plan.estado or 'N/A'}
+- Fecha objetivo: {fecha_obj}
+
+Acción correctiva:
+{plan.accion_correctiva or 'N/A'}
+
+Recursos necesarios:
+{plan.recursos_necesarios or 'N/A'}
+""".strip()
+
+def jira_adf_parrafo(texto: str, bold=False):
+    if not texto:
+        return {
+            "type": "paragraph",
+            "content": []
+        }
+
+    nodo = {
+        "type": "text",
+        "text": texto[:5000]
+    }
+
+    if bold:
+        nodo["marks"] = [{"type": "strong"}]
+
+    return {
+        "type": "paragraph",
+        "content": [nodo]
+    }
+
+
+def jira_adf_descripcion_plan(vuln, plan):
+    contenido = []
+
+    contenido.append(jira_adf_parrafo(f"Remediación de vulnerabilidad {vuln.codigo or '—'}", bold=True))
+    contenido.append(jira_adf_parrafo(f"Activo: {vuln.activo or '—'}"))
+    contenido.append(jira_adf_parrafo(f"Descripción vulnerabilidad: {vuln.descripcion_vulnerabilidad or '—'}"))
+    contenido.append(jira_adf_parrafo(f"Acción correctiva: {plan.accion_correctiva or '—'}"))
+    contenido.append(jira_adf_parrafo(f"Responsable SGSI: {plan.responsable or '—'}"))
+    contenido.append(jira_adf_parrafo(f"Prioridad: {plan.prioridad or '—'}"))
+    contenido.append(jira_adf_parrafo(f"Fecha objetivo: {plan.fecha_objetivo or '—'}"))
+    contenido.append(jira_adf_parrafo(f"Recursos necesarios: {plan.recursos_necesarios or '—'}"))
+    contenido.append(jira_adf_parrafo(f"Estado interno: {plan.estado or '—'}"))
+
+    return {
+        "type": "doc",
+        "version": 1,
+        "content": contenido
+    }
+
+
+def jira_consultar_issue(issue_key: str):
+    if not jira_is_enabled():
+        raise RuntimeError("Jira no está configurado correctamente.")
+
+    url = f"{JIRA_BASE_URL.rstrip('/')}/rest/api/3/issue/{issue_key}"
+    resp = requests.get(
+        url,
+        headers=jira_headers(),
+        auth=jira_auth(),
+        timeout=30
+    )
+
+    if resp.status_code != 200:
+        raise RuntimeError(f"Error consultando issue Jira: {resp.status_code} - {resp.text}")
+
+    return resp.json()
+
+def _month_range(anio: int, mes: int):
+    last_day = calendar.monthrange(anio, mes)[1]
+    start = f"{anio:04d}-{mes:02d}-01"
+    end   = f"{anio:04d}-{mes:02d}-{last_day:02d}"
+    return start, end
+
+
+# ==========================
+# HELPERS Nivel de Madurez
+# ==========================
+def to_text(v) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v
+    if isinstance(v, list):
+        return "\n".join([to_text(x) for x in v if x is not None])
+    if isinstance(v, dict):
+        return json.dumps(v, ensure_ascii=False, indent=2)
+    return str(v)
+
+def load_instrument_structure(xlsx_path: str):
+    xls = pd.ExcelFile(xlsx_path)
+    sheets = []
+    for sheet_name in xls.sheet_names:
+        df = xls.parse(sheet_name, header=None)
+
+        # Detectar si es "ANEXO A" por encabezado "Preguntas" en col 4
+        is_anexo_a = False
+        if df.shape[0] > 2:
+            v = str(df.iloc[1, 4]) if df.shape[1] > 4 else ""
+            if "preguntas" in v.lower():
+                is_anexo_a = True
+
+        items = []
+
+        if is_anexo_a:
+            # Header suele estar en fila 1, preguntas desde fila 3 aprox.
+            # Columnas:
+            # 0: idx, 1: control, 2: tema, 3: descripcion, 4: pregunta,
+            # 5: no aplica, 6: si, 7: parcialmente, 8: no, 9: comentarios
+            start_row = 3
+            for r in range(start_row, len(df)):
+                pregunta = df.iloc[r, 4] if df.shape[1] > 4 else None
+                if pd.isna(pregunta) or not str(pregunta).strip():
+                    continue
+
+                control = df.iloc[r, 1] if df.shape[1] > 1 else ""
+                tema = df.iloc[r, 2] if df.shape[1] > 2 else ""
+                items.append({
+                    "row": r,
+                    "tipo": "q",
+                    "control": "" if pd.isna(control) else str(control).strip(),
+                    "tema": "" if pd.isna(tema) else str(tema).strip(),
+                    "pregunta": str(pregunta).strip(),
+                    "layout": "anexo_a"
+                })
+
+        else:
+            # Capítulos (4-10): encabezado suele estar en fila 0
+            # Columnas:
+            # 1: pregunta/texto, 2..5 opciones, 6 comentarios
+            start_row = 1
+            for r in range(start_row, len(df)):
+                texto = df.iloc[r, 1] if df.shape[1] > 1 else None
+                if pd.isna(texto) or not str(texto).strip():
+                    continue
+
+                txt = str(texto).strip()
+
+                # Si parece ser un título de cláusula (ej: "4.1 ...", "5.2 ...") lo marcamos como header
+                is_header = bool(
+                    (len(txt) < 120) and (
+                        txt.startswith(("4.", "5.", "6.", "7.", "8.", "9.", "10.")) and
+                        ("¿" not in txt)
+                    )
+                )
+
+                items.append({
+                    "row": r,
+                    "tipo": "h" if is_header else "q",
+                    "pregunta": txt,
+                    "layout": "capitulo"
+                })
+
+        sheets.append({
+            "name": sheet_name,
+            "items": items
+        })
+
+    return sheets
+
+def render_action_plan_table(plan: list) -> str:
+    if not plan:
+        return "<div class='text-muted small'>Aún no se ha generado el plan de acción general.</div>"
+
+    tr = ""
+    for row in plan[:250]:
+        if not isinstance(row, dict):
+            continue
+        tr += f"""
+        <tr class="cell-small">
+          <td class="wrap" style="min-width:260px;">{xml_escape(to_text(row.get("accion")) )}</td>
+          <td class="wrap" style="min-width:220px;">{xml_escape(to_text(row.get("proposito")) )}</td>
+          <td class="wrap" style="min-width:240px;">{xml_escape(to_text(row.get("evidencia")) )}</td>
+          <td class="text-muted" style="min-width:90px;">{xml_escape(to_text(row.get("prioridad")) )}</td>
+          <td class="text-muted" style="min-width:90px;">{xml_escape(to_text(row.get("horizonte")) )}</td>
+          <td class="wrap" style="min-width:220px;">{xml_escape(to_text(row.get("dependencia")) )}</td>
+        </tr>
+        """
+
+    return f"""
+    <div class="table-responsive mt-2" style="max-height: 460px; overflow:auto;">
+      <table class="table table-sm table-striped align-middle table-tight">
+        <thead>
+          <tr>
+            <th>Acción</th>
+            <th>Propósito</th>
+            <th>Evidencia</th>
+            <th>Prioridad</th>
+            <th>Horizonte</th>
+            <th>Dependencia</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tr if tr else "<tr><td colspan='6' class='text-muted'>Sin datos.</td></tr>"}
+        </tbody>
+      </table>
+    </div>
+    """
+
+def normalize_action_plan_payload(parsed):
+    """
+    Acepta respuesta IA como:
+      A) {"action_plan":[{...}]}
+      B) {"plan":[{...}]}
+      C) [{...}, {...}]   <-- lista directa (tu caso)
+    Retorna SIEMPRE: {"action_plan":[{...}]}  (dict)
+    Además normaliza llaves con acentos: acción->accion, propósito->proposito.
+    """
+    def _strip_accents_keys(d: dict) -> dict:
+        if not isinstance(d, dict):
+            return {}
+        # mapa de llaves esperadas (acentos -> sin acentos)
+        key_map = {
+            "acción": "accion",
+            "propósito": "proposito",
+            "evidéncia": "evidencia",
+            "responsáble": "responsable",
+            "capítulo": "capitulo",
+            "fase": "fase",
+            "requisito": "requisito",
+            "prioridad": "prioridad",
+            "horizonte": "horizonte",
+            "dependencia": "dependencia",
+        }
+        out = {}
+        for k, v in d.items():
+            kk = (k or "").strip()
+            kk_low = kk.lower()
+            kk_norm = key_map.get(kk_low, kk_low)
+
+            # también soporta variantes comunes
+            if kk_norm == "accion" or kk_norm == "acción":
+                kk_norm = "accion"
+            elif kk_norm == "proposito" or kk_norm == "propósito":
+                kk_norm = "proposito"
+
+            out[kk_norm] = v
+        return out
+
+    # 1) determinar lista de filas
+    rows = None
+    if isinstance(parsed, list):
+        rows = parsed
+    elif isinstance(parsed, dict):
+        # varias llaves posibles
+        rows = parsed.get("action_plan") or parsed.get("plan") or parsed.get("acciones")
+        if rows is None:
+            # a veces viene {"action_plan": {...}} malformado
+            rows = []
+    else:
+        rows = []
+
+    if not isinstance(rows, list):
+        rows = []
+
+    # 2) normalizar filas
+    cleaned_rows = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        rr = _strip_accents_keys(r)
+
+        cleaned_rows.append({
+            # usa tus nombres esperados en UI
+            "accion": harden_no_conditionals(to_text(rr.get("accion"))).strip(),
+            "proposito": harden_no_conditionals(to_text(rr.get("proposito"))).strip(),
+            "evidencia": harden_no_conditionals(to_text(rr.get("evidencia"))).strip(),
+            "prioridad": (to_text(rr.get("prioridad")) or "").strip(),
+            "horizonte": (to_text(rr.get("horizonte")) or "").strip(),
+            "dependencia": harden_no_conditionals(to_text(rr.get("dependencia"))).strip(),
+            "responsable": harden_no_conditionals(to_text(rr.get("responsable"))).strip(),
+            "capitulo": (to_text(rr.get("capitulo")) or "").strip(),
+            "fase": (to_text(rr.get("fase")) or "").strip(),
+            "requisito": harden_no_conditionals(to_text(rr.get("requisito"))).strip(),
+        })
+
+    return {"action_plan": cleaned_rows}
+
+
+ 
+# =========================
+# Helper Evidencias SOA
+# =========================
+
+EVIDENCE_EXTENSIONS = {"pdf", "doc", "docx", "xls", "xlsx"}
+
+def allowed_evidence_file(filename: str) -> bool:
+    return (
+        "." in filename and
+        filename.rsplit(".", 1)[1].lower() in EVIDENCE_EXTENSIONS
+    )
+
+
+# configuración del correo
+
+def get_email_config():
+    """
+    Obtiene la configuración SMTP desde la base de datos (EmailConfig)
+    o como fallback desde variables de entorno.
+    """
+
+    # 1️⃣ Intentar desde BD
+    try:
+        cfg = EmailConfig.query.first()
+    except Exception:
+        cfg = None
+
+    if cfg:
+        return {
+            "SMTP_HOST": cfg.smtp_host,
+            "SMTP_PORT": int(cfg.smtp_port or 587),
+            "SMTP_USER": cfg.smtp_user,
+            "SMTP_PASS": cfg.smtp_pass,
+            "SMTP_FROM": cfg.smtp_from or cfg.smtp_user,
+            "APP_NAME":  cfg.app_name or "SGSI",
+        }
+
+    # 2️⃣ Fallback a variables de entorno
+    return {
+        "SMTP_HOST": os.getenv("SMTP_HOST"),
+        "SMTP_PORT": int(os.getenv("SMTP_PORT", "587")),
+        "SMTP_USER": os.getenv("SMTP_USER"),
+        "SMTP_PASS": os.getenv("SMTP_PASS"),
+        "SMTP_FROM": os.getenv("SMTP_FROM"),
+        "APP_NAME":  os.getenv("APP_NAME", "SGSI"),
+    }
+
+# Tipo de Riesgos
+
+def gattr(obj, name):
+    if name == "tipo_riesgo_nombre":
+        tr = getattr(obj, "tipo_riesgo", None)
+        return tr.nombre if tr else ""
+    return getattr(obj, name, None)
+
+# Metricas de Riesgos
+
+RISK_ORDER = ["Bajo", "Moderado", "Alto", "Extremo"]  # orden oficial
+
+def normalize_level(s: str) -> str:
+    if s is None:
+        return ""
+    x = str(s).strip().lower()
+
+    # quitar acentos simples
+    x = (x.replace("á","a").replace("é","e").replace("í","i")
+           .replace("ó","o").replace("ú","u"))
+
+    # 1) si viene numérico (ej: "16", "20") interpreta como matriz prob*impacto
+    if x.isdigit():
+        v = int(x)
+        if v <= 4:
+            return "Bajo"
+        elif v <= 9:
+            return "Moderado"
+        elif v <= 15:
+            return "Alto"
+        else:
+            return "Extremo"
+
+    # 2) sinónimos / variantes comunes
+    if x in ["bajo", "low"]:
+        return "Bajo"
+    if x in ["medio", "moderado", "moderate", "medium"]:
+        return "Moderado"
+    if x in ["alto", "high"]:
+        return "Alto"
+    if x in ["Extremo", "extreme ", "severo", "several"]:
+        return "Extremo"
+
+    # 3) detección por contains
+    if "crit" in x:
+        return "Extremo"
+    if "alt" in x:
+        return "Alto"
+    if "mod" in x or "med" in x:
+        return "Moderado"
+    if "baj" in x:
+        return "Bajo"
+    return ""
+
+def safe_appetite_level(raw: str, default="Moderado") -> str:
+    lvl = normalize_level(raw)
+    return lvl if lvl in RISK_ORDER else default
+
+def dominant_level(level_counts: dict) -> str:
+    """
+    Retorna el nivel dominante (el más frecuente).
+    Si hay empate, gana el nivel MÁS alto (Extremo > Crítico > ...).
+    """
+    best_lvl = ""
+    best_count = -1
+    for lvl in RISK_ORDER:
+        c = int(level_counts.get(lvl, 0) or 0)
+        if c > best_count:
+            best_count = c
+            best_lvl = lvl
+        elif c == best_count and c > 0:
+            # empate: el más alto según RISK_ORDER
+            if level_rank(lvl) > level_rank(best_lvl):
+                best_lvl = lvl
+    return best_lvl if best_count > 0 else ""
+
+def build_trend_text_dominant(trend_rows):
+    if not trend_rows:
+        return {
+            "inherente": "No hay datos con fecha para analizar tendencia.",
+            "residual": "No hay datos con fecha para analizar tendencia.",
+        }
+
+    first = trend_rows[0]
+    last = trend_rows[-1]
+
+    inh_ini, inh_fin = first["inh_dominante"], last["inh_dominante"]
+    res_ini, res_fin = first["res_dominante"], last["res_dominante"]
+
+    def describe(start, end, label):
+        if start == "Sin dato" or end == "Sin dato":
+            return f"No hay suficiente información para determinar tendencia {label}."
+        if start == end:
+            return f"La criticidad dominante {label} se mantiene en **{start}**."
+        # sube o baja según ranking
+        if level_rank(end) > level_rank(start):
+            return f"La criticidad dominante {label} **aumenta** de **{start}** a **{end}**."
+        else:
+            return f"La criticidad dominante {label} **disminuye** de **{start}** a **{end}**."
+
+    return {
+        "inherente": describe(inh_ini, inh_fin, "INHERENTE"),
+        "residual": describe(res_ini, res_fin, "RESIDUAL"),
+    }
+
+
+def level_rank(level: str) -> int:
+    lvl = normalize_level(level)
+    if lvl in RISK_ORDER:
+        return RISK_ORDER.index(lvl)
+    return -1
+
+def is_outside_appetite(residual_level: str, appetite_level: str) -> bool:
+    """True si residual >= apetito (umbral)."""
+    r = level_rank(residual_level)
+    a = level_rank(appetite_level)
+    if r < 0 or a < 0:
+        return False
+    return r >= a
+
+def build_trend_text(trend_rows, order_levels):
+    """
+    Genera análisis en texto para Inherente y Residual por criticidad.
+    Usa la primera y última fila disponible como comparación (inicio vs fin).
+    """
+    if not trend_rows:
+        return {
+            "inherente": "No hay datos con fecha para analizar tendencia.",
+            "residual": "No hay datos con fecha para analizar tendencia.",
+        }
+
+    first = trend_rows[0]
+    last = trend_rows[-1]
+
+    def one_side(prefix: str) -> str:
+        # prefix: "inh_" o "res_"
+        lines = []
+        total_first = 0
+        total_last = 0
+
+        deltas = []
+        for lvl in order_levels:
+            a = int(first.get(f"{prefix}{lvl}", 0) or 0)
+            b = int(last.get(f"{prefix}{lvl}", 0) or 0)
+            d = b - a
+            total_first += a
+            total_last += b
+            deltas.append((lvl, a, b, d))
+
+        # Resumen general
+        if total_last > total_first:
+            general = f"Aumenta el total ({total_first} → {total_last})."
+        elif total_last < total_first:
+            general = f"Disminuye el total ({total_first} → {total_last})."
+        else:
+            general = f"Se mantiene el total ({total_first} → {total_last})."
+
+        # Cambios por criticidad
+        changes = []
+        for (lvl, a, b, d) in deltas:
+            if d > 0:
+                changes.append(f"{lvl}: +{d} ({a}→{b})")
+            elif d < 0:
+                changes.append(f"{lvl}: {d} ({a}→{b})")
+            else:
+                changes.append(f"{lvl}: 0 ({a}→{b})")
+
+        # Encontrar mayor subida y mayor bajada
+        max_up = max(deltas, key=lambda x: x[3])
+        max_down = min(deltas, key=lambda x: x[3])
+
+        extra = []
+        if max_up[3] > 0:
+            extra.append(f"Mayor aumento: {max_up[0]} (+{max_up[3]}).")
+        if max_down[3] < 0:
+            extra.append(f"Mayor reducción: {max_down[0]} ({max_down[3]}).")
+
+        lines.append(general)
+        lines.append("Cambios por criticidad: " + " · ".join(changes) + ".")
+        if extra:
+            lines.append(" ".join(extra))
+
+        return " ".join(lines)
+
+    return {
+        "inherente": one_side("inh_"),
+        "residual": one_side("res_"),
+    }
+
+
+def parse_any_date(s: str):
+    """Parsea fechas típicas: YYYY-MM-DD, DD/MM/YYYY, etc. Retorna datetime o None."""
+    if not s:
+        return None
+    s = str(s).strip()
+    fmts = [
+        "%Y-%m-%d", "%Y/%m/%d",
+        "%d/%m/%Y", "%d-%m-%Y",
+        "%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S",
+        "%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S",
+    ]
+    # intento ISO
+    try:
+        return datetime.fromisoformat(s)
+    except Exception:
+        pass
+    for f in fmts:
+        try:
+            return datetime.strptime(s, f)
+        except Exception:
+            continue
+    return None
+
+def period_key(dt: datetime, tendencia: str) -> str:
+    """Genera llave de periodo según tendencia."""
+    y = dt.year
+    m = dt.month
+    tendencia = (tendencia or "mensual").lower()
+
+    if tendencia == "mensual":
+        return f"{y}-{m:02d}"
+    if tendencia == "trimestral":
+        q = (m - 1) // 3 + 1
+        return f"{y}-T{q}"
+    if tendencia == "cuatrimestral":
+        c = (m - 1) // 4 + 1  # 1..3
+        return f"{y}-C{c}"
+    if tendencia == "semestral":
+        s = 1 if m <= 6 else 2
+        return f"{y}-S{s}"
+    if tendencia == "anual":
+        return f"{y}"
+
+    # fallback
+    return f"{y}-{m:02d}"
+
+# mapa de divisiones por área
+
+def divisiones_por_area():
+    out = {}
+    for a in AreaEmpresa.query.order_by(AreaEmpresa.area.asc(), AreaEmpresa.division.asc()).all():
+        if not a.division:
+            continue
+        out.setdefault(a.id, [])
+        if a.division not in out[a.id]:
+            out[a.id].append(a.division)
+    return out
+
+def get_area_divisiones_map():
+    """
+    Devuelve un dict: { nombre_area: [división1, división2, ...] } (ordenadas)
+    """
+    filas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc(),
+                                       AreaEmpresa.division.asc()).all()
+    m = {}
+    for f in filas:
+        area = (f.area or "").strip()
+        div  = (f.division or "").strip()
+        if not area:
+            continue
+        m.setdefault(area, set())
+        if div:
+            m[area].add(div)
+    # sets -> listas ordenadas
+    return {k: sorted(v) for k, v in m.items()}
+
+
+def get_areaid_divisiones_map():
+    """
+    Devuelve un dict: { area_id: [división1, división2, ...] } (ordenadas)
+    Útil si tus selects usan area_id en lugar del nombre.
+    """
+    filas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc(),
+                                       AreaEmpresa.division.asc()).all()
+    m = {}
+    for f in filas:
+        div = (f.division or "").strip()
+        m.setdefault(f.id, set())
+        if div:
+            m[f.id].add(div)
+    return {k: sorted(v) for k, v in m.items()}
+
+# para setear cálculos en servidor
+
+    def calcular_criticidad(self):
+        total = (self.valor_alcance or 0) + (self.valor_esencial or 0) + \
+                (self.valor_plan_cont or 0) + (self.valor_alternativas or 0) + \
+                (self.valor_plan_migracion or 0) + (self.valor_info_sensible or 0)
+        self.criticidad_pct = total
+        # Reglas pedidas:
+        # >61 alta (rojo), >41 media (amarillo), >26 baja (verde oscuro), >1 muy baja (verde claro), si 0 -> muy baja
+        if total > 61:
+            self.criticidad_texto = "Criticidad alta"
+            self.criticidad_color = "badge-rojo"
+        elif total > 41:
+            self.criticidad_texto = "Criticidad media"
+            self.criticidad_color = "badge-amarillo"
+        elif total > 26:
+            self.criticidad_texto = "Criticidad baja"
+            self.criticidad_color = "badge-verde-oscuro"
+        elif total > 1:
+            self.criticidad_texto = "Criticidad muy baja"
+            self.criticidad_color = "badge-verde-claro"
+        else:
+            self.criticidad_texto = "Criticidad muy baja"
+            self.criticidad_color = "badge-verde-claro"
+
+    def calcular_certificados(self):
+        # requiere_formulario: No si hay certificación, Sí si no hay
+        self.requiere_formulario = "No" if (self.tiene_certificacion == "Sí") else "Sí"
+        self.puntos_certificacion = 100 if (self.tiene_certificacion == "Sí") else 0
+        if self.puntos_certificacion > 0:
+            self.puntos_formulario = 0
+        # total + resultado
+        total = (self.puntos_certificacion or 0) + (self.puntos_formulario or 0)
+        self.calificacion_total = total
+        if total > 80:
+            self.resultado_evaluacion = "Aprobado"
+            self.resultado_color = "badge-aprobado"
+        elif total > 60:
+            self.resultado_evaluacion = "En revisión"
+            self.resultado_color = "badge-revision"
+        elif total > 0:
+            self.resultado_evaluacion = "No Aprobado"
+            self.resultado_color = "badge-noaprob"
+        else:
+            self.resultado_evaluacion = "No Aprobado"
+            self.resultado_color = "badge-noaprob"
+            
+    def is_allowed_pdf(filename: str) -> bool:
+        ext = os.path.splitext(filename.lower())[1]
+    return ext in ALLOWED_PDF_EXT
+
+    def unique_store_name(original: str) -> str:
+        # evita colisiones y oculta nombres reales
+        ext = os.path.splitext(original)[1].lower()
+        return f"{uuid4().hex}{ext}"
+
+    def obtener_cargos_desde_areas():
+        cargos = set()
+        for a in AreaEmpresa.query.all():
+            # ajusta los nombres a tu modelo de Áreas
+            if getattr(a, 'responsable_cargo', None):
+                cargos.add(a.responsable_cargo)
+            if getattr(a, 'division_cargo', None):
+                cargos.add(a.division_cargo)
+        lst = sorted(c for c in cargos if c)
+        return lst or ['Analista','Coordinador','Jefe','Gerente']  # fallback
+
+    def attribute(obj, name):
+        return getattr(obj, name, None)
+
+
+    
+def extraer_respuestas_desde_excel(path_xlsx):
+    """
+    Lee el archivo Excel del cuestionario de proveedores y
+    devuelve una lista de dicts con:
+    - codigo
+    - pregunta
+    - cumplimiento
+    - notas
+    """
+    xls = pd.ExcelFile(path_xlsx)
+
+    # En tu plantilla el cuestionario está en la hoja "Requerimientos Aplicativos"
+    df = xls.parse("Requerimientos Aplicativos", header=None)
+
+    respuestas = []
+
+    # A partir de la fila 36 empiezan las preguntas (según el archivo que subiste)
+    # Columna B -> código (1.1, 1.2, etc.)
+    # Columna C -> texto de la pregunta
+    # Columna I -> Evidencias/Notas
+    # Columna J -> Cumplimiento (lo que llenará el proveedor)
+    for i in range(36, len(df)):
+        cod = df.iloc[i, 1]
+        txt = df.iloc[i, 2]
+
+        # Si no hay código ni texto, saltamos
+        if (pd.isna(cod) and pd.isna(txt)):
+            continue
+
+        # Saltar filas de títulos tipo "Sección 1", "Referencia", etc.
+        cod_str = "" if pd.isna(cod) else str(cod).strip()
+        txt_str = "" if pd.isna(txt) else str(txt).strip()
+
+        if not txt_str:
+            continue
+
+        # Tomamos cumplimiento y notas
+        notas = df.iloc[i, 8] if df.shape[1] > 8 else None
+        cumpl = df.iloc[i, 9] if df.shape[1] > 9 else None
+
+        notas_str = "" if pd.isna(notas) else str(notas).strip()
+        cumpl_str = "" if pd.isna(cumpl) else str(cumpl).strip().upper()
+
+        respuestas.append({
+            "codigo": cod_str,
+            "pregunta": txt_str,
+            "cumplimiento": cumpl_str,
+            "notas": notas_str
+        })
+
+    return respuestas
+
+def chat_ai(prompt: str, model: str = None) -> str:
+    """
+    Mantiene la misma firma para no romper módulos existentes,
+    pero usa el proveedor activo configurado en Administración.
+    """
+    ai_cfg = get_openrouter_client()
+    provider = ai_cfg.get("provider")
+
+    if provider == "ollama":
+        base_url = ai_cfg.get("base_url", "").rstrip("/")
+        ollama_model = ai_cfg.get("model") or get_ollama_model() or "llama3.1"
+
+        if not base_url:
+            raise RuntimeError("No existe OLLAMA_BASE_URL configurada en Administración.")
+        if not ollama_model:
+            raise RuntimeError("No existe OLLAMA_MODEL configurado en Administración.")
+
+        resp = requests.post(
+            f"{base_url}/api/generate",
+            json={
+                "model": ollama_model,
+                "prompt": f"Responde en español, claro y accionable.\n\n{prompt}",
+                "stream": False,
+                "options": {
+                    "temperature": 0.2
+                }
+            },
+            timeout=300
+        )
+        resp.raise_for_status()
+
+        data = resp.json() or {}
+        return (data.get("response") or "").strip()
+
+    # OpenRouter
+    client = ai_cfg["client"]
+    model_name = model or ai_cfg.get("model") or OPENROUTER_MODEL or "deepseek/deepseek-chat"
+
+    resp = client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": "Responde en español, claro y accionable."},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.2,
+    )
+
+    return (resp.choices[0].message.content or "").strip()
+
+
+# =========================
+# Inserta todos los controles si la tabla está vacía
+# =========================
+
+def populate_if_needed():
+    # Insertar controles iniciales si la tabla está vacía
+    if Control.query.first() is None:
+        for item in FULL_SOA:
+            db.session.add(Control(**item))
+        db.session.commit()
+
+    # Crear la tabla de registro de incidentes directamente en SQLite
+    conn = sqlite3.connect('sgsi.db')
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS registro_incidentes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            descripcion_corta TEXT,
+            causa TEXT,
+            fecha_inicio TEXT,
+            fecha_fin TEXT,
+            estado_actual TEXT,
+            datos_personales_involucrados TEXT,
+            violacion_datos_personales TEXT,
+            medidas_tomadas TEXT,
+            enlace_informe_interno TEXT,
+            medidas_prevencion TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def create_admin():
+    if not User.query.filter_by(username='Administrador').first():
+        admin = User(username='Administrador', role='admin')
+        admin.set_password('Abcd12345%')
+        db.session.add(admin)
+        db.session.commit()
+
+
+# =========================
+# Inicialización de BD al arrancar (compatible con Flask 3.x)
+# =========================
+
+with app.app_context():
+    db.create_all()
+    populate_if_needed()
+    create_admin()
+
+
+# =========================
+# Export CSV (descargar todo)
+# =========================
+
+@app.route('/export')
+def export_csv():
+    controls = Control.query.order_by(Control.nr).all()
+    si = io.StringIO()
+    fieldnames = ['nr','chapter','topic','control_text','applicable','justification','motivation','implemented']
+    writer = csv.DictWriter(si, fieldnames=fieldnames)
+    writer.writeheader()
+    for c in controls:
+        writer.writerow(c.to_dict())
+    mem = io.BytesIO()
+    mem.write(si.getvalue().encode('utf-8'))
+    mem.seek(0)
+    return send_file(mem, as_attachment=True, download_name='soa_iso27001_export.csv', mimetype='text/csv')
+
+# =========================
+# Ruta para descargar via send_file necesita BytesIO importado
+# =========================
+
+from io import BytesIO as _BytesIO
+def io_BytesIO(b): return _BytesIO(b)
+
+# =========================
+# Ajuste para send_file con BytesIO: re-definimos send_file wrapper
+# =========================
+from flask import Response
+@app.route('/export_alt')
+def export_csv_alt():
+    controls = Control.query.order_by(Control.nr).all()
+    si = io.StringIO()
+    fieldnames = ['nr','chapter','topic','control_text','applicable','justification','motivation','implemented']
+    writer = csv.DictWriter(si, fieldnames=fieldnames)
+    writer.writeheader()
+    for c in controls:
+        writer.writerow(c.to_dict())
+    data = si.getvalue().encode('utf-8')
+    return Response(data, mimetype='text/csv', headers={'Content-Disposition':'attachment;filename=soa_iso27001_export.csv'})
+
+# =========================
+# Atajo: /export redirige a /export_alt si send_file falla
+# =========================
+@app.route('/export')
+def export_csv_redirect():
+    return export_csv_alt()
+
+# =========================
+# Manejador de errores simple
+# =========================
+@app.errorhandler(Exception)
+def handle_all_errors(e):
+    # si es un error HTTP normal (404, 403, etc.), respétalo
+    if isinstance(e, HTTPException):
+        return e
+
+    tb = traceback.format_exc()
+    html = f"""
+    <div class="alert alert-danger">
+      <h5 class="mb-2">Error interno real (traceback)</h5>
+      <pre style="white-space:pre-wrap; font-size:12px; max-height:520px; overflow:auto;">{tb}</pre>
+    </div>
+    """
+    return render_template_string(BASE, content=html), 500
+
+# =========================
+# Persona Empresas
+# =========================
+def get_personas_empresa():
+    try:
+        return EmpresaPersona.query.order_by(EmpresaPersona.nombre.asc()).all()
+    except Exception:
+        return []
+
+
+# ============================================================================================================================================
+#                                                               Autenticación de Usuarios
+# ============================================================================================================================================
+
+from functools import wraps
+from flask import (
+    render_template_string,
+    request,
+    redirect,
+    url_for,
+    flash,
+    session,
+    send_file
+)
+
+import pyotp
+import qrcode
+import io
+import base64
+
+from io import BytesIO
+
+
+# =========================
+# DECORADOR DE LOGIN
+# =========================
+def login_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if 'user_id' not in session:
+            flash("Por favor, inicia sesión.", "warning")
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return wrapper
+
+
+def admin_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        user = User.query.get(session.get('user_id'))
+
+        if not user or user.role != 'admin':
+            flash("Acceso solo permitido a administradores.", "danger")
+            return redirect(url_for('menu'))
+
+        return f(*args, **kwargs)
+
+    return wrapper
+
+
+def admin_or_access_manager_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        user = User.query.get(session.get('user_id'))
+
+        if not user or user.role not in ('admin', 'gestor_accesos'):
+            flash(
+                "Acceso solo permitido a administradores o gestores de accesos.",
+                "danger"
+            )
+            return redirect(url_for('menu'))
+
+        return f(*args, **kwargs)
+
+    return wrapper
+
+
+def verify_otp(user, otp_code):
+    if not user or not user.otp_secret:
+        return False
+
+    totp = pyotp.TOTP(user.otp_secret)
+    return totp.verify(otp_code)
+
+
+# ============================================================================================================================================
+#                                                           RENDER QR OTP
+# ============================================================================================================================================
+def _render_qr_otp_setup(user, secret):
+
+    otp_uri = pyotp.totp.TOTP(secret).provisioning_uri(
+        name=user.username,
+        issuer_name="SGSI"
+    )
+
+    qr = qrcode.make(otp_uri)
+
+    buffer = io.BytesIO()
+
+    qr.save(buffer, format="PNG")
+
+    qr_data = base64.b64encode(buffer.getvalue()).decode()
+
+    content = f"""
+    <div class="col-md-6 offset-md-3 text-center">
+
+        <h3>Configuración de Autenticación en Dos Pasos</h3>
+
+        <div class="alert alert-info">
+            Escanea este código QR con Google Authenticator,
+            Microsoft Authenticator o Authy.
+            Luego ingresa el código de 6 dígitos para activar el token.
+        </div>
+
+        <img src="data:image/png;base64,{qr_data}"
+             class="img-fluid mb-3"
+             alt="QR Code"
+             style="max-width:260px;">
+
+        <form method="post"
+              action="{url_for('verificar_otp')}"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="none"
+              spellcheck="false">
+
+            <input type="hidden" name="username" value="{user.username}">
+            <input type="hidden" name="modo" value="setup">
+
+            <div class="mt-3 mb-3">
+                <label class="form-label fw-bold">
+                    Código de Verificación
+                </label>
+
+                <input class="form-control text-center"
+                       name="otp"
+                       type="password"
+                       inputmode="numeric"
+                       pattern="[0-9]{{6}}"
+                       maxlength="6"
+                       placeholder="••••••"
+                       required
+                       autocomplete="off"
+                       autocorrect="off"
+                       autocapitalize="none"
+                       spellcheck="false">
+            </div>
+
+            <button class="btn btn-success rounded-pill px-4">
+                Activar token
+            </button>
+
+            <a href="{url_for('login')}"
+               class="btn btn-secondary rounded-pill px-4">
+                Cancelar
+            </a>
+
+        </form>
+    </div>
+    """
+
+    return render_template_string(BASE, content=content)
+
+
+# ============================================================================================================================================
+#                                                               LOGIN
+# ============================================================================================================================================
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+
+    if request.method == 'POST':
+
+        username_ingresado = (
+            request.form.get('sgsi_user_secure') or
+            ""
+        ).strip()
+
+        password_ingresado = (
+            request.form.get('sgsi_password_secure') or
+            ""
+        )
+
+        user = User.query.filter_by(
+            username=username_ingresado
+        ).first()
+
+        # ============================================================
+        # LOGIN CORRECTO
+        # ============================================================
+        if user and user.check_password(password_ingresado):
+
+            # =====================================================
+            # USUARIO SIN OTP CONFIGURADO
+            # =====================================================
+            if not user.otp_secret:
+
+                secret_temporal = pyotp.random_base32()
+
+                session['temp_user'] = user.username
+                session['pending_otp_secret'] = secret_temporal
+
+                return _render_qr_otp_setup(
+                    user,
+                    secret_temporal
+                )
+
+            # =====================================================
+            # USUARIO YA TIENE OTP
+            # =====================================================
+            session['temp_user'] = user.username
+
+            session.pop(
+                'pending_otp_secret',
+                None
+            )
+
+            return redirect(
+                url_for('verificar_otp')
+            )
+
+        # ============================================================
+        # LOGIN FALLIDO
+        # ============================================================
+        registrar_log(
+            username_ingresado or "Desconocido",
+            (
+                "Acceso fallido al sistema. "
+                f"Usuario o contraseña inválida: "
+                f"{username_ingresado or 'Desconocido'}"
+            )
+        )
+
+        flash(
+            "Usuario o contraseña incorrectos.",
+            "danger"
+        )
+
+    # ====================================================================
+    # HTML LOGIN
+    # ====================================================================
+    content = """
+    <style>
+
+      input::-ms-reveal,
+      input::-ms-clear{
+        display:none;
+      }
+
+      input[type="password"]::-webkit-credentials-auto-fill-button,
+      input[type="password"]::-webkit-textfield-decoration-container{
+        display:none !important;
+        visibility:hidden;
+        pointer-events:none;
+      }
+
+      .login-card{
+        background:#ffffff;
+        border-radius:24px;
+        padding:32px;
+        box-shadow:0 10px 30px rgba(15,23,42,.08);
+      }
+
+      .login-title{
+        font-size:2rem;
+        font-weight:900;
+        text-align:center;
+        margin-bottom:24px;
+        color:#1e293b;
+      }
+
+      .login-label{
+        font-weight:800;
+        margin-bottom:8px;
+        color:#334155;
+      }
+
+      .login-input{
+        height:52px;
+        border-radius:14px;
+        border:1px solid #dbe2ea;
+        font-size:1rem;
+        padding-left:14px;
+        transition:.2s ease;
+      }
+
+      .login-input:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .18rem rgba(63,134,214,.15);
+      }
+
+      .login-btn{
+        height:52px;
+        border-radius:14px;
+        font-weight:900;
+        font-size:1rem;
+        background:#3f86d6;
+        border:none;
+      }
+
+      .login-btn:hover{
+        background:#2f6fb6;
+      }
+
+    </style>
+
+    <div class="col-md-4 offset-md-4">
+
+      <div class="login-card">
+
+        <div class="login-title">
+          Iniciar sesión
+        </div>
+
+        <form method="post"
+              id="sgsiLoginForm"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="none"
+              spellcheck="false">
+
+            <!-- CAMPOS TRAMPA -->
+            <input type="text"
+                   style="display:none"
+                   tabindex="-1"
+                   autocomplete="off">
+
+            <input type="password"
+                   style="display:none"
+                   tabindex="-1"
+                   autocomplete="new-password">
+
+            <!-- USUARIO -->
+            <div class="mb-3">
+
+              <label class="login-label">
+                Usuario
+              </label>
+
+              <input class="form-control login-input"
+                     id="sgsi_user_secure"
+                     name="sgsi_user_secure"
+                     type="text"
+                     required
+
+                     autocomplete="off"
+                     autocorrect="off"
+                     autocapitalize="none"
+                     spellcheck="false"
+
+                     data-form-type="other"
+
+                     readonly
+                     onfocus="this.removeAttribute('readonly');"
+
+                     placeholder="Digite su usuario">
+
+            </div>
+
+            <!-- PASSWORD -->
+            <div class="mb-4">
+
+              <label class="login-label">
+                Contraseña
+              </label>
+
+              <input class="form-control login-input"
+                     id="sgsi_password_secure"
+                     name="sgsi_password_secure"
+                     type="password"
+                     required
+
+                     autocomplete="off"
+                     autocorrect="off"
+                     autocapitalize="none"
+                     spellcheck="false"
+
+                     data-form-type="other"
+                     data-lpignore="true"
+
+                     readonly
+                     onfocus="this.removeAttribute('readonly');"
+
+                     placeholder="••••••••">
+
+            </div>
+
+            <button class="btn btn-primary w-100 login-btn">
+              Ingresar
+            </button>
+
+        </form>
+
+      </div>
+
+    </div>
+
+    <script>
+
+    document.addEventListener('DOMContentLoaded', function(){
+
+        const form = document.getElementById('sgsiLoginForm');
+
+        const user = document.getElementById('sgsi_user_secure');
+
+        const pass = document.getElementById('sgsi_password_secure');
+
+        // LIMPIAR AUTOFILL
+        if(user){
+            user.value = '';
+
+            setTimeout(function(){
+                user.value = '';
+            }, 100);
+        }
+
+        if(pass){
+            pass.value = '';
+
+            setTimeout(function(){
+                pass.value = '';
+            }, 100);
+        }
+
+        // BLOQUEAR DETECCIÓN DE LOGIN
+        if(form){
+
+            form.setAttribute(
+                'autocomplete',
+                'off'
+            );
+
+            form.addEventListener(
+                'submit',
+                function(){
+
+                    user.setAttribute(
+                        'autocomplete',
+                        'off'
+                    );
+
+                    pass.setAttribute(
+                        'autocomplete',
+                        'new-password'
+                    );
+
+                }
+            );
+
+        }
+
+        // DESBLOQUEAR READONLY AL HACER FOCUS
+        [user, pass].forEach(function(el){
+
+            if(!el) return;
+
+            el.addEventListener('focus', function(){
+
+                this.removeAttribute(
+                    'readonly'
+                );
+
+                this.setAttribute(
+                    'autocomplete',
+                    'off'
+                );
+
+            });
+
+        });
+
+    });
+
+    </script>
+    """
+
+    return render_template_string(
+        BASE,
+        content=content
+    )
+
+
+# ============================================================================================================================================
+#                                                               OTP
+# ============================================================================================================================================
+@app.route('/verificar_otp', methods=['GET', 'POST'])
+def verificar_otp():
+
+    username = session.get('temp_user')
+
+    if not username:
+        flash(
+            "Primero inicia sesión.",
+            "warning"
+        )
+
+        return redirect(
+            url_for('login')
+        )
+
+    user = User.query.filter_by(
+        username=username
+    ).first()
+
+    if not user:
+
+        session.pop('temp_user', None)
+
+        session.pop(
+            'pending_otp_secret',
+            None
+        )
+
+        registrar_log(
+            username or "Desconocido",
+            (
+                "Acceso fallido al sistema. "
+                "Usuario no encontrado "
+                f"en verificación OTP: "
+                f"{username or 'Desconocido'}"
+            )
+        )
+
+        flash(
+            "Usuario no encontrado.",
+            "danger"
+        )
+
+        return redirect(
+            url_for('login')
+        )
+
+    if request.method == 'POST':
+
+        otp = (
+            request.form.get('otp') or ""
+        ).strip()
+
+        modo = (
+            request.form.get('modo') or ""
+        ).strip()
+
+        # =====================================================
+        # CONFIGURACIÓN INICIAL OTP
+        # =====================================================
+        if modo == "setup":
+
+            secret_temporal = session.get(
+                'pending_otp_secret'
+            )
+
+            if not secret_temporal:
+
+                flash(
+                    "La configuración del token expiró. "
+                    "Inicia sesión nuevamente.",
+                    "warning"
+                )
+
+                return redirect(
+                    url_for('login')
+                )
+
+            totp = pyotp.TOTP(
+                secret_temporal
+            )
+
+            if totp.verify(otp):
+
+                user.otp_secret = secret_temporal
+
+                db.session.commit()
+
+                session['user_id'] = user.id
+                session['username'] = user.username
+                session['role'] = user.role
+
+                session.pop(
+                    'temp_user',
+                    None
+                )
+
+                session.pop(
+                    'pending_otp_secret',
+                    None
+                )
+
+                registrar_log(
+                    user.username,
+                    (
+                        "Acceso exitoso al sistema. "
+                        "Token OTP configurado "
+                        f"y usuario autenticado "
+                        f"con perfil: {user.role}"
+                    )
+                )
+
+                flash(
+                    f"Token configurado correctamente. "
+                    f"Bienvenido {user.username}",
+                    "success"
+                )
+
+                return redirect(
+                    url_for('menu')
+                )
+
+            registrar_log(
+                user.username,
+                (
+                    "Configuración OTP fallida. "
+                    f"Código inválido para "
+                    f"el usuario: {user.username}"
+                )
+            )
+
+            flash(
+                "Código OTP inválido. "
+                "Escanea el QR e intenta nuevamente.",
+                "danger"
+            )
+
+            return _render_qr_otp_setup(
+                user,
+                secret_temporal
+            )
+
+        # =====================================================
+        # LOGIN NORMAL OTP
+        # =====================================================
+        if not user.otp_secret:
+
+            flash(
+                "Este usuario aún no tiene "
+                "token configurado. "
+                "Inicia sesión nuevamente.",
+                "warning"
+            )
+
+            return redirect(
+                url_for('login')
+            )
+
+        totp = pyotp.TOTP(
+            user.otp_secret
+        )
+
+        if totp.verify(otp):
+
+            session['user_id'] = user.id
+            session['username'] = user.username
+            session['role'] = user.role
+
+            session.pop(
+                'temp_user',
+                None
+            )
+
+            session.pop(
+                'pending_otp_secret',
+                None
+            )
+
+            registrar_log(
+                user.username,
+                (
+                    "Acceso exitoso al sistema. "
+                    "Usuario autenticado "
+                    f"correctamente con perfil: "
+                    f"{user.role}"
+                )
+            )
+
+            flash(
+                f"Bienvenido {user.username}",
+                "success"
+            )
+
+            return redirect(
+                url_for('menu')
+            )
+
+        registrar_log(
+            user.username,
+            (
+                "Acceso fallido al sistema. "
+                f"OTP inválido para el usuario: "
+                f"{user.username}"
+            )
+        )
+
+        flash(
+            "Código OTP inválido, intente de nuevo.",
+            "danger"
+        )
+
+    # ====================================================================
+    # HTML OTP
+    # ====================================================================
+    content = f"""
+    <div class="col-md-4 offset-md-4 text-center">
+
+      <h3>Verificación de Código OTP</h3>
+
+      <form method="post"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="none"
+            spellcheck="false">
+
+        <input type="hidden"
+               name="username"
+               value="{user.username}">
+
+        <div class="mb-3">
+
+          <label>
+            Código OTP
+          </label>
+
+          <input class="form-control text-center"
+                 name="otp"
+                 type="password"
+                 inputmode="numeric"
+                 pattern="[0-9]{{6}}"
+                 maxlength="6"
+                 placeholder="••••••"
+                 required
+                 autocomplete="off"
+                 autocorrect="off"
+                 autocapitalize="none"
+                 spellcheck="false">
+
+        </div>
+
+        <button class="btn btn-success rounded-pill px-4">
+          Verificar
+        </button>
+
+        <a href="{url_for('login')}"
+           class="btn btn-secondary rounded-pill px-4">
+          Cancelar
+        </a>
+
+      </form>
+
+    </div>
+    """
+
+    return render_template_string(
+        BASE,
+        content=content
+    )
+
+
+# ============================================================================================================================================
+#                                                           GENERAR OTP
+# ============================================================================================================================================
+@app.route('/generar_otp/<username>')
+def generar_otp(username):
+
+    user = User.query.filter_by(
+        username=username
+    ).first()
+
+    if not user:
+        return "Usuario no encontrado", 404
+
+    secret = (
+        user.otp_secret or
+        session.get('pending_otp_secret') or
+        pyotp.random_base32()
+    )
+
+    session['temp_user'] = user.username
+
+    session['pending_otp_secret'] = secret
+
+    otp_uri = pyotp.totp.TOTP(secret).provisioning_uri(
+        name=username,
+        issuer_name="Sistema ISO27001"
+    )
+
+    img = qrcode.make(otp_uri)
+
+    buffer = BytesIO()
+
+    img.save(buffer, format="PNG")
+
+    buffer.seek(0)
+
+    return send_file(
+        buffer,
+        mimetype='image/png'
+    )
+
+
+# ============================================================================================================================================
+#                                                               LOGOUT
+# ============================================================================================================================================
+@app.route('/logout')
+def logout():
+
+    try:
+        _browser_session_revoke()
+    except Exception as exc:
+        print("No se pudo revocar la sesión al cerrar manualmente:", repr(exc))
+
+    session.clear()
+
+    flash(
+        "Sesión finalizada",
+        "info"
+    )
+
+    return redirect(
+        url_for('login')
+    )
+
+
+# ============================================================================================================================================
+#                                                   Fin módulo de Autenticación
+# ============================================================================================================================================
+
+# ============================================================================================================================================
+#                                                                   Módulo de Perfil
+# ============================================================================================================================================
+
+@app.context_processor
+def inject_user():
+    u = None
+    if 'user_id' in session:
+        u = User.query.get(session.get('user_id'))
+    return dict(current_user=u)
+
+@app.route("/perfil", methods=["GET", "POST"])
+@login_required
+def perfil():
+    user = User.query.get(session.get("user_id"))
+
+    if request.method == "POST":
+        accion = request.form.get("accion")
+
+        # ============================
+        # A) Subir foto
+        # ============================
+        if accion == "subir_foto":
+            f = request.files.get("foto")
+            if not f or f.filename == "":
+                flash("Selecciona una imagen.", "warning")
+                return redirect(url_for("perfil"))
+
+            if not allowed_file(f.filename):
+                flash("Formato no permitido. Usa PNG/JPG/JPEG/WEBP.", "danger")
+                return redirect(url_for("perfil"))
+
+            ext = f.filename.rsplit(".", 1)[1].lower()
+            filename = secure_filename(f"{uuid4().hex}.{ext}")
+            path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+            f.save(path)
+
+            # (Opcional) borrar foto anterior
+            if user.photo_filename:
+                old_path = os.path.join(app.config["UPLOAD_FOLDER"], user.photo_filename)
+                if os.path.exists(old_path):
+                    try:
+                        os.remove(old_path)
+                    except:
+                        pass
+
+            user.photo_filename = filename
+            db.session.commit()
+            flash("Foto actualizada.", "success")
+            return redirect(url_for("perfil"))
+
+        # ============================
+        # B) Cambiar contraseña
+        # ============================
+        if accion == "cambiar_password":
+            actual = request.form.get("password_actual") or ""
+            nueva = request.form.get("password_nueva") or ""
+            confirma = request.form.get("password_confirma") or ""
+
+            if not user.check_password(actual):
+                flash("La contraseña actual no es correcta.", "danger")
+                return redirect(url_for("perfil"))
+
+            if len(nueva) < 10:
+                flash("La nueva contraseña debe tener mínimo 10 caracteres.", "warning")
+                return redirect(url_for("perfil"))
+
+            # regla mínima: 1 mayúscula + 1 especial
+            especiales = set("!@#$%^&*()-_=+[]{};:,.?/\\|`~")
+            if not any(c.isupper() for c in nueva):
+                flash("La nueva contraseña debe incluir al menos 1 mayúscula.", "warning")
+                return redirect(url_for("perfil"))
+            if not any(c in especiales for c in nueva):
+                flash("La nueva contraseña debe incluir al menos 1 caracter especial.", "warning")
+                return redirect(url_for("perfil"))
+
+            if nueva != confirma:
+                flash("La confirmación no coincide.", "warning")
+                return redirect(url_for("perfil"))
+
+            user.set_password(nueva)
+            db.session.commit()
+            flash("Contraseña cambiada correctamente.", "success")
+            return redirect(url_for("perfil"))
+
+    # URL de avatar
+    avatar_url = (
+        url_for("static", filename=f"uploads/profiles/{user.photo_filename}")
+        if user.photo_filename
+        else url_for("static", filename="img/default_user.png")  # crea esta imagen
+    )
+
+    inner = render_template_string("""
+    <div class="perfil-shell">
+
+      <!-- HEADER SGSI -->
+      <div class="perfil-header-card">
+        <div class="perfil-header-overlay">
+          <div class="perfil-header-text">
+            <h3 class="perfil-title m-0">Perfil de usuario</h3>
+            <div class="perfil-subtitle">
+              Administra tu foto de perfil y actualiza tu contraseña de acceso
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="perfil-card">
+        <div class="card-body">
+
+          <!-- DATOS USUARIO -->
+          <div class="perfil-section-title">Información del usuario</div>
+
+          <div class="perfil-user-box mb-4">
+            <img src="{{ avatar_url }}" alt="Foto" class="perfil-avatar">
+
+            <div class="perfil-user-info">
+              <div class="perfil-user-name">👤 {{ user.username }}</div>
+              <div class="perfil-user-meta">Rol: <b>{{ user.role }}</b></div>
+              {% if user.email %}
+                <div class="perfil-user-meta">Correo: <b>{{ user.email }}</b></div>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- FOTO -->
+          <div class="perfil-section-title">🖼️ Cambiar foto</div>
+
+          <form method="POST" enctype="multipart/form-data" class="mb-4">
+            <input type="hidden" name="accion" value="subir_foto">
+
+            <div class="row g-3 align-items-end">
+              <div class="col-md-8">
+                <label class="form-label fw-semibold">Seleccionar imagen</label>
+                <input type="file" name="foto" class="form-control" accept="image/*" required>
+              </div>
+              <div class="col-md-4 text-md-end">
+                <button class="btn btn-primary rounded-pill px-4 fw-semibold">Subir foto</button>
+              </div>
+            </div>
+          </form>
+
+          <!-- CONTRASEÑA -->
+          <div class="perfil-section-title">🔑 Cambiar contraseña</div>
+
+          <form method="POST">
+            <input type="hidden" name="accion" value="cambiar_password">
+
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label fw-semibold">Contraseña actual</label>
+                <input type="password" name="password_actual" class="form-control" required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label fw-semibold">Nueva contraseña</label>
+                <input type="password" name="password_nueva" class="form-control" required>
+                <div class="text-muted small mt-1">Mínimo 10 caracteres, 1 mayúscula y 1 carácter especial</div>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label fw-semibold">Confirmar contraseña</label>
+                <input type="password" name="password_confirma" class="form-control" required>
+              </div>
+            </div>
+
+            <div class="text-center text-md-start">
+              <button class="btn btn-success rounded-pill px-4 fw-semibold mt-4">Guardar contraseña</button>
+            </div>
+          </form>
+
+        </div>
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .perfil-shell{
+        width:96%;
+        max-width:1200px;
+        margin:26px auto 24px auto;
+      }
+
+      .perfil-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .perfil-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }
+
+      .perfil-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }
+
+      .perfil-header-overlay::before{
+        content:"👤";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .perfil-header-text{
+        max-width:1100px;
+        width:100%;
+        display:block !important;
+        transform:none !important;
+      }
+
+      .perfil-header-text::before{
+        content:"SGSI · Perfil de Usuario";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }
+
+      .perfil-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .perfil-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+        line-height:1.25;
+        font-weight:800;
+      }
+
+      .perfil-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .perfil-header-actions .btn,
+      .perfil-btn-main,
+      .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .perfil-btn-main{
+        background:#ffffff;
+        color:#0f172a !important;
+        border:1px solid #cfd8e3 !important;
+      }
+
+      .perfil-btn-main:hover{
+        background:#edf5ff;
+        color:#0b65d8 !important;
+        border-color:#9ec5fe !important;
+      }
+
+      .perfil-card,
+      .card{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
+      }
+
+      .perfil-card .card-body{
+        padding:22px;
+      }
+
+      .perfil-section-title,
+      .card h5,
+      .card h6{
+        font-weight:950;
+        font-size:.95rem;
+        color:#0b4a8f;
+        padding-bottom:8px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+        margin-bottom:16px;
+      }
+
+      .perfil-user-box{
+        display:flex;
+        align-items:center;
+        gap:18px;
+        background:#f8fbff;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        padding:16px;
+        box-shadow:0 8px 18px rgba(15,23,42,.08);
+      }
+
+      .perfil-avatar{
+        width:78px;
+        height:78px;
+        border-radius:50%;
+        object-fit:cover;
+        border:3px solid #0b4a8f;
+        box-shadow:0 6px 16px rgba(0,0,0,.12);
+        flex:0 0 auto;
+      }
+
+      .perfil-user-info{
+        min-width:0;
+      }
+
+      .perfil-user-name{
+        font-size:1.05rem;
+        font-weight:950;
+        color:#101827;
+        line-height:1.2;
+        margin-bottom:4px;
+      }
+
+      .perfil-user-meta{
+        color:#607086;
+        font-size:.90rem;
+        line-height:1.35;
+        font-weight:700;
+      }
+
+      .form-label{
+        font-size:.72rem;
+        font-weight:900;
+        color:#0b4a8f;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
+      }
+
+      .form-control,
+      .form-select{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        box-shadow:none !important;
+      }
+
+      .form-control:focus,
+      .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#ffffff;
+      }
+
+      .badge{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }
+
+      @media (max-width:992px){
+        .perfil-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .perfil-header-card{
+          min-height:88px;
+        }
+
+        .perfil-title{
+          font-size:1.20rem;
+        }
+
+        .perfil-subtitle{
+          font-size:.68rem;
+        }
+
+        .perfil-card .card-body{
+          padding:16px;
+        }
+
+        .perfil-user-box{
+          flex-direction:column;
+          align-items:flex-start;
+          text-align:left;
+        }
+      }
+
+      @media (max-width:768px){
+        .perfil-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .perfil-header-overlay::before{
+          margin:0;
+        }
+
+        .perfil-header-text::before{
+          margin-left:auto;
+          margin-right:auto;
+        }
+
+        .perfil-title,
+        .perfil-subtitle{
+          text-align:center;
+        }
+
+        .perfil-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """, user=user, avatar_url=avatar_url)
+
+    return render_template_string(BASE, content=Markup(inner))
+
+
+# ============================================================================================================================================
+#                                                                   Fin del módulo de Perfil
+# ============================================================================================================================================
+
+# ============================================================================================================================================
+#                                                               Módulo de envio del password
+# ============================================================================================================================================
+
 def enviar_credenciales_email(destino, username, password, nombre_completo=None):
     cfg = get_email_config()
 
@@ -1869,8 +4130,8 @@ import math
 import re
 import json
 import sqlite3
-# GRAC-RAM: importación diferida en el bloque de optimización
-# GRAC-RAM: importación diferida en el bloque de optimización
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 from flask import jsonify
 
 
@@ -4409,8 +6670,8 @@ BASE = """
 
     .sgsi-brand{
       height:var(--arky-topbar-h);
-      width:220px;
-      min-width:220px;
+      width:230px;
+      min-width:230px;
       display:flex;
       align-items:center;
       justify-content:flex-start;
@@ -4421,9 +6682,9 @@ BASE = """
     }
 
     .sgsi-logo{
-      height:44px;
+      height:48px;
       width:auto;
-      max-width:205px;
+      max-width:220px;
       object-fit:contain;
       object-position:left center;
       filter:drop-shadow(0 4px 9px rgba(11,58,110,.14));
@@ -4538,13 +6799,13 @@ BASE = """
       }
 
       .sgsi-brand{
-        width:190px;
-        min-width:190px;
+        width:200px !important;
+        min-width:200px !important;
       }
 
       .sgsi-logo{
-        height:40px;
-        max-width:180px;
+        height:44px !important;
+        max-width:190px !important;
       }
     }
 
@@ -4561,13 +6822,13 @@ BASE = """
       }
 
       .sgsi-brand{
-        width:160px;
-        min-width:160px;
+        width:170px !important;
+        min-width:170px !important;
       }
 
       .sgsi-logo{
-        height:36px;
-        max-width:150px;
+        height:40px !important;
+        max-width:160px !important;
       }
 
       .sgsi-user-name{
@@ -5343,7 +7604,7 @@ def _sgsi_build_global_menu_html():
         # Reglas por label del menú
         # ============================================================
         MENU_ACTIVE_RULES = {
-            "Análisis de Riesgos de Procesos con IA": {"paths": ["/procesos_ia"], "endpoints": ["pra_index", "pra_new", "pra_process", "pra_risk", "pra_edit"]},
+            "Análisis de Riesgos de Procesos con IA": {"paths": ["/procesos_ia"], "endpoints": ["pra_index", "pra_new", "pra_files_new", "pra_process", "pra_risk", "pra_edit"]},
             # Gobierno / Dirección
             "Declaración de Aplicabilidad (SoA)": {
                 "paths": ["/soa"],
@@ -6031,11 +8292,7 @@ def _sgsi_build_global_menu_html():
         return render_template_string("""
         <aside id="sgsiGlobalMenu" class="sgsi-global-menu-wrap">
 
-          <div id="sgsiGlobalMenuToggle" class="sgsi-global-menu-arrow">
-            <span class="sgsi-arrow-icon">‹</span>
-          </div>
-
-          <div class="sgsi-menu-fixed-shell">
+<div class="sgsi-menu-fixed-shell">
 
             <div class="sgsi-menu-scroll-only" id="sgsiGlobalMenuScroll">
 
@@ -6384,6 +8641,151 @@ def _sgsi_build_global_menu_html():
               left:0 !important;
             }
           }
+
+          /* GRAC v10 — barra lateral compacta de iconos + expansión al pasar el mouse.
+             Mantiene el contenido aprovechando el ancho libre, sin moverlo al pasar el cursor. */
+          :root {
+            --grac-rail-width:64px;
+            --grac-menu-expanded-width:245px;
+            --sgsi-content-left:var(--grac-rail-width);
+          }
+          body,
+          body.sgsi-menu-collapsed {
+            padding-left:var(--grac-rail-width) !important;
+          }
+          body.grac-menu-pinned {
+            padding-left:var(--grac-menu-expanded-width) !important;
+          }
+          #sgsiGlobalMenu,
+          body.sgsi-menu-collapsed #sgsiGlobalMenu {
+            left:0 !important;
+            width:var(--grac-menu-expanded-width) !important;
+            pointer-events:none !important;
+          }
+          #sgsiGlobalMenu .sgsi-menu-fixed-shell,
+          body.sgsi-menu-collapsed #sgsiGlobalMenu .sgsi-menu-fixed-shell {
+            box-sizing:border-box !important;
+            width:var(--grac-rail-width) !important;
+            padding:8px 5px !important;
+            opacity:1 !important;
+            transform:none !important;
+            pointer-events:auto !important;
+            overflow:hidden !important;
+            transition:width .22s ease,box-shadow .22s ease !important;
+          }
+          #sgsiGlobalMenu:is(:hover, :has(:focus-visible)) .sgsi-menu-fixed-shell,
+          body.grac-menu-pinned #sgsiGlobalMenu .sgsi-menu-fixed-shell {
+            width:var(--grac-menu-expanded-width) !important;
+          }
+          #sgsiGlobalMenu .sgsi-menu-scroll-only {
+            overflow-y:auto !important;
+            overflow-x:hidden !important;
+            scrollbar-width:none;
+          }
+          #sgsiGlobalMenu:is(:hover, :has(:focus-visible)) .sgsi-menu-scroll-only,
+          body.grac-menu-pinned #sgsiGlobalMenu .sgsi-menu-scroll-only {
+            scrollbar-width:thin;
+          }
+          #sgsiGlobalMenu .sgsi-menu-scroll-only::-webkit-scrollbar {width:0 !important;}
+          #sgsiGlobalMenu:is(:hover, :has(:focus-visible)) .sgsi-menu-scroll-only::-webkit-scrollbar,
+          body.grac-menu-pinned #sgsiGlobalMenu .sgsi-menu-scroll-only::-webkit-scrollbar {
+            width:6px !important;
+          }
+          #sgsiGlobalMenu .sgsi-global-root-toggle,
+          #sgsiGlobalMenu .sgsi-global-panel-control-btn,
+          #sgsiGlobalMenu button.sgsi-global-root-toggle {
+            box-sizing:border-box !important;
+            width:46px !important;
+            max-width:46px !important;
+            min-width:46px !important;
+            min-height:38px !important;
+            height:38px !important;
+            margin:0 auto !important;
+            padding:0 !important;
+            display:flex !important;
+            align-items:center !important;
+            justify-content:center !important;
+            gap:0 !important;
+            overflow:hidden !important;
+          }
+          #sgsiGlobalMenu .sgsi-global-root-toggle > i,
+          #sgsiGlobalMenu .sgsi-global-panel-control-btn > i {
+            box-sizing:border-box !important;
+            flex:0 0 20px !important;
+            width:20px !important;
+            text-align:center !important;
+            font-size:1.05rem !important;
+          }
+          #sgsiGlobalMenu .sgsi-global-root-toggle > span,
+          #sgsiGlobalMenu .sgsi-global-panel-control-btn > span,
+          #sgsiGlobalMenu .sgsi-global-item > span,
+          #sgsiGlobalMenu .sgsi-global-node-toggle > span {
+            box-sizing:border-box !important;
+            display:none !important;
+          }
+          #sgsiGlobalMenu .sgsi-global-root-toggle::after,
+          #sgsiGlobalMenu .sgsi-global-node-toggle::after {
+            display:none !important;
+          }
+          #sgsiGlobalMenu .sgsi-global-panel.sgsi-open {
+            display:none !important;
+          }
+          #sgsiGlobalMenu:is(:hover, :has(:focus-visible)) .sgsi-global-panel.sgsi-open,
+          body.grac-menu-pinned #sgsiGlobalMenu .sgsi-global-panel.sgsi-open {
+            display:block !important;
+          }
+          #sgsiGlobalMenu:is(:hover, :has(:focus-visible)) .sgsi-global-root-toggle,
+          #sgsiGlobalMenu:is(:hover, :has(:focus-visible)) .sgsi-global-panel-control-btn,
+          body.grac-menu-pinned #sgsiGlobalMenu .sgsi-global-root-toggle,
+          body.grac-menu-pinned #sgsiGlobalMenu .sgsi-global-panel-control-btn {
+            width:100% !important;
+            max-width:100% !important;
+            min-width:0 !important;
+            margin:0 !important;
+            padding:0 8px !important;
+            justify-content:flex-start !important;
+            gap:7px !important;
+          }
+          #sgsiGlobalMenu:is(:hover, :has(:focus-visible)) .sgsi-global-root-toggle > span,
+          #sgsiGlobalMenu:is(:hover, :has(:focus-visible)) .sgsi-global-panel-control-btn > span,
+          #sgsiGlobalMenu:is(:hover, :has(:focus-visible)) .sgsi-global-item > span,
+          #sgsiGlobalMenu:is(:hover, :has(:focus-visible)) .sgsi-global-node-toggle > span,
+          body.grac-menu-pinned #sgsiGlobalMenu .sgsi-global-root-toggle > span,
+          body.grac-menu-pinned #sgsiGlobalMenu .sgsi-global-panel-control-btn > span,
+          body.grac-menu-pinned #sgsiGlobalMenu .sgsi-global-item > span,
+          body.grac-menu-pinned #sgsiGlobalMenu .sgsi-global-node-toggle > span {
+            display:block !important;
+            min-width:0 !important;
+            flex:1 1 auto !important;
+            white-space:normal !important;
+          }
+          #sgsiGlobalMenu:is(:hover, :has(:focus-visible)) .sgsi-global-root-toggle::after,
+          #sgsiGlobalMenu:is(:hover, :has(:focus-visible)) .sgsi-global-node-toggle::after,
+          body.grac-menu-pinned #sgsiGlobalMenu .sgsi-global-root-toggle::after,
+          body.grac-menu-pinned #sgsiGlobalMenu .sgsi-global-node-toggle::after {
+            display:block !important;
+          }
+          #sgsiGlobalMenu .sgsi-global-menu-arrow {
+            right:calc(var(--grac-menu-expanded-width) - var(--grac-rail-width) - 12px) !important;
+            transition:right .22s ease !important;
+            pointer-events:auto !important;
+          }
+          #sgsiGlobalMenu:is(:hover, :has(:focus-visible)) .sgsi-global-menu-arrow,
+          body.grac-menu-pinned #sgsiGlobalMenu .sgsi-global-menu-arrow {
+            right:-12px !important;
+          }
+          #sgsiGlobalMenu .sgsi-global-menu-arrow .sgsi-arrow-icon {
+            transform:none !important;
+          }
+          body.grac-menu-pinned #sgsiGlobalMenu .sgsi-global-menu-arrow .sgsi-arrow-icon {
+            transform:rotate(180deg) !important;
+          }
+          @media(max-width:992px) {
+            body,body.sgsi-menu-collapsed {padding-left:var(--grac-rail-width) !important;}
+            body.grac-menu-pinned {padding-left:var(--grac-rail-width) !important;}
+            #sgsiGlobalMenu {left:0 !important;}
+          }
+
         </style>
 
         <script>
@@ -6450,17 +8852,6 @@ def _sgsi_build_global_menu_html():
               scroller.addEventListener("scroll", saveScroll);
             }
 
-            const menuToggle = document.getElementById("sgsiGlobalMenuToggle");
-
-            if(menuToggle){
-              menuToggle.addEventListener("click", function(e){
-                e.preventDefault();
-                e.stopPropagation();
-                document.body.classList.toggle("sgsi-menu-collapsed");
-                saveScroll();
-              });
-            }
-
             window.addEventListener("beforeunload", saveScroll);
 
             window.addEventListener("pageshow", function(){
@@ -6470,3482 +8861,30 @@ def _sgsi_build_global_menu_html():
             setTimeout(restoreScroll, 80);
           })();
         </script>
+
+    <script id="grac-hover-menu-v11">
+      (function(){
+        // El menú se controla únicamente con hover/foco: sin flecha de fijación.
+        var menu = document.getElementById('sgsiGlobalMenu') || document.getElementById('sgsiLocalMenu');
+        if (!menu) return;
+        document.body.classList.remove('grac-menu-pinned', 'sgsi-menu-collapsed');
+        // Elimina cualquier preferencia previa de fijación de la versión anterior.
+        try {sessionStorage.removeItem('grac_menu_pinned_v10');} catch(e) {}
+        // Conserva los nombres accesibles de los iconos cuando está contraído.
+        menu.querySelectorAll('a,button').forEach(function(control){
+          var labelNode = control.querySelector('span');
+          var name = labelNode ? labelNode.textContent.trim() : '';
+          if(name){
+            control.setAttribute('aria-label',name);
+            control.setAttribute('title',name);
+          }
+        });
+      })();
+    </script>
         """, sections=sections, center_active=(current_path == "/"))
 
     except Exception as e:
         print("Error construyendo menú global SGSI:", repr(e))
         return ""
-
-
-@app.after_request
-def inject_sgsi_global_vertical_menu(response):
-    try:
-        content_type = response.headers.get("Content-Type", "")
-
-        if "text/html" not in content_type:
-            return response
-
-        user_id = session.get("user_id")
-        if not user_id:
-            return response
-
-        endpoint = request.endpoint or ""
-
-        rutas_excluidas = {
-            "login",
-            "logout",
-            "static",
-            "dashboard_status",
-            "menu",
-            "verificar_otp",
-            "configurar_otp"
-        }
-
-        # Las pantallas de autenticación y OTP deben mostrarse
-        # completamente aisladas del menú, encabezado y navegación interna de GRAC.
-        rutas_sin_menu = (
-            "/verificar_otp",
-            "/configurar_otp",
-            "/otp/"
-        )
-
-        if endpoint in rutas_excluidas or request.path.startswith(rutas_sin_menu):
-            return response
-
-        html = response.get_data(as_text=True)
-
-        if not html or "sgsiGlobalMenu" in html:
-            return response
-
-        menu_html = _sgsi_build_global_menu_html()
-        if not menu_html:
-            return response
-
-        if "</header>" in html:
-            html = html.replace("</header>", "</header>\n" + menu_html, 1)
-        elif "<body>" in html:
-            html = html.replace("<body>", "<body>\n" + menu_html, 1)
-        elif "</body>" in html:
-            html = html.replace("</body>", menu_html + "\n</body>", 1)
-        else:
-            html = menu_html + html
-
-        response.set_data(html)
-        response.headers["Content-Length"] = str(len(response.get_data()))
-
-    except Exception as e:
-        print("No se pudo inyectar menú global SGSI:", repr(e))
-
-    return response
-
-
-
-
-# ============================================================
-# ADMINISTRACIÓN: DISEÑO SENCILLO DEL CENTRO DE CONTROL
-# ============================================================
-@app.route('/admin/dashboard_config', methods=['GET', 'POST'])
-@login_required
-def dashboard_config():
-    usuario_actual = User.query.get(session.get('user_id'))
-    if not usuario_actual:
-        flash("No fue posible identificar el usuario autenticado.", "danger")
-        return redirect(url_for('login'))
-
-    if request.method == 'POST':
-        action = (request.form.get('action') or 'save').strip().lower()
-        try:
-            if action in {'create_custom', 'update_custom'}:
-                data, error = _dashboard_custom_widget_form_data(request.form)
-                if error:
-                    flash(error, "danger")
-                    return redirect(url_for('dashboard_config'))
-
-                if action == 'create_custom':
-                    existing = DashboardCustomWidget.query.filter_by(
-                        user_id=usuario_actual.id,
-                        source_key=data['source_key'],
-                        widget_type=data['widget_type'],
-                    ).first()
-                    if existing:
-                        _dashboard_add_key_to_selection(usuario_actual.id, _dashboard_custom_key(existing.id))
-                        flash("Esa fuente ya estaba creada con la misma presentación. Se dejó visible en el Centro de Control.", "info")
-                    else:
-                        widget = DashboardCustomWidget(user_id=usuario_actual.id, **data)
-                        db.session.add(widget)
-                        db.session.commit()
-                        _dashboard_add_key_to_selection(usuario_actual.id, _dashboard_custom_key(widget.id))
-                        flash("Visualización creada y agregada al Centro de Control.", "success")
-                else:
-                    widget_id = int(request.form.get('custom_id') or 0)
-                    widget = DashboardCustomWidget.query.filter_by(id=widget_id, user_id=usuario_actual.id).first()
-                    if not widget:
-                        flash("La visualización no existe o no pertenece al usuario.", "danger")
-                        return redirect(url_for('dashboard_config'))
-                    duplicate = DashboardCustomWidget.query.filter(
-                        DashboardCustomWidget.user_id == usuario_actual.id,
-                        DashboardCustomWidget.source_key == data['source_key'],
-                        DashboardCustomWidget.widget_type == data['widget_type'],
-                        DashboardCustomWidget.id != widget.id,
-                    ).first()
-                    if duplicate:
-                        flash("Ya existe otra visualización con esa fuente y presentación.", "warning")
-                        return redirect(url_for('dashboard_config', edit_widget=widget.id))
-                    for field, value in data.items():
-                        setattr(widget, field, value)
-                    widget.updated_at = datetime.utcnow()
-                    db.session.commit()
-                    flash("Visualización actualizada correctamente.", "success")
-
-            elif action == 'delete_custom':
-                widget_id = int(request.form.get('custom_id') or 0)
-                widget = DashboardCustomWidget.query.filter_by(id=widget_id, user_id=usuario_actual.id).first()
-                if not widget:
-                    flash("La visualización no existe o no pertenece al usuario.", "danger")
-                    return redirect(url_for('dashboard_config'))
-                key = _dashboard_custom_key(widget.id)
-                _dashboard_remove_key_from_selection(usuario_actual.id, key)
-                db.session.delete(widget)
-                db.session.commit()
-                flash("Visualización eliminada.", "success")
-
-            elif action == 'reset':
-                _dashboard_reset_selected_keys(usuario_actual.id)
-                flash("El Centro de Control volvió a su diseño inicial.", "success")
-
-            else:
-                available = _dashboard_available_widget_map(usuario_actual.id)
-                default_position = {}
-                kind_order = {"kpi": 0, "chart": 1}
-                kind_counters = {"kpi": 0, "chart": 0}
-                for key, item in available.items():
-                    kind = item.get("kind", "chart")
-                    kind_counters[kind] = kind_counters.get(kind, 0) + 1
-                    default_position[key] = kind_counters[kind]
-
-                seen = set()
-                sortable = []
-                for key in request.form.getlist('widgets'):
-                    key = str(key or '').strip()
-                    if key not in available or key in seen:
-                        continue
-                    seen.add(key)
-                    meta = available[key]
-                    kind = meta.get("kind", "chart")
-                    try:
-                        order_value = int(request.form.get(f'order_{key}', default_position.get(key, 1)))
-                    except Exception:
-                        order_value = default_position.get(key, 1)
-                    sortable.append((kind_order.get(kind, 99), max(1, min(order_value, 999)), default_position.get(key, 999), key))
-
-                sortable.sort(key=lambda row: (row[0], row[1], row[2]))
-                _dashboard_save_selected_keys(usuario_actual.id, [row[3] for row in sortable])
-                flash("Elementos visibles y orden guardados correctamente.", "success")
-
-            try:
-                registrar_log(usuario_actual.username, "Actualizó el diseño de su Centro de Control personal.")
-            except Exception:
-                pass
-            return redirect(url_for('dashboard_config'))
-
-        except Exception as exc:
-            db.session.rollback()
-            flash(f"No se pudo aplicar la configuración: {exc}", "danger")
-
-    selected_keys = _dashboard_get_selected_keys(usuario_actual.id)
-    selected_set = set(selected_keys)
-    available = _dashboard_available_widget_map(usuario_actual.id)
-
-    position_map = {}
-    selected_kind_counters = {"kpi": 0, "chart": 0}
-    for key in selected_keys:
-        meta = available.get(key)
-        if not meta:
-            continue
-        kind = meta.get("kind", "chart")
-        selected_kind_counters[kind] = selected_kind_counters.get(kind, 0) + 1
-        position_map[key] = selected_kind_counters[kind]
-
-    group_order = [
-        "Indicadores superiores", "Madurez y cumplimiento", "Métricas operativas",
-        "Gráficas de madurez y cumplimiento", "Gráficas operativas",
-        "Visualizaciones creadas por el usuario", "Elementos creados por el usuario",
-    ]
-    widget_groups = []
-    for group_name in group_order:
-        widgets = []
-        group_position = 0
-        for key, item in available.items():
-            if item.get("group") != group_name:
-                continue
-            group_position += 1
-            widget = dict(item)
-            widget["key"] = key
-            widget["dom_id"] = widget.get("dom_id") or _dashboard_dom_id(key)
-            widget["default_order"] = group_position
-            widget["presentation_label"] = widget.get("presentation_label") or ("Indicador" if widget.get("kind") == "kpi" else "Gráfica original")
-            widgets.append(widget)
-        if widgets:
-            widget_groups.append({"title": group_name, "widgets": widgets})
-
-    custom_widgets = _dashboard_custom_widgets_for_user(usuario_actual.id)
-    custom_rows = []
-    for widget in custom_widgets:
-        source = DASHBOARD_DATA_SOURCE_MAP.get(widget.source_key, {})
-        custom_rows.append({
-            "id": widget.id,
-            "key": _dashboard_custom_key(widget.id),
-            "source_label": source.get("label", widget.source_key),
-            "type_label": DASHBOARD_VISUALIZATION_LABELS.get(widget.widget_type, widget.widget_type),
-            "visible": _dashboard_custom_key(widget.id) in selected_set,
-        })
-
-    edit_widget = None
-    edit_id = request.args.get('edit_widget', type=int)
-    if edit_id:
-        edit_widget = DashboardCustomWidget.query.filter_by(id=edit_id, user_id=usuario_actual.id).first()
-
-    first_source = DASHBOARD_DATA_SOURCE_CATALOG[0]
-    if edit_widget:
-        edit_source = DASHBOARD_DATA_SOURCE_MAP.get(edit_widget.source_key, first_source)
-        allowed = edit_source.get("allowed_views", [])
-        current_view = edit_widget.widget_type if edit_widget.widget_type in allowed else (allowed[0] if allowed else "gauge")
-        builder_values = {"custom_id": edit_widget.id, "source_key": edit_widget.source_key, "widget_type": current_view}
-    else:
-        builder_values = {"custom_id": "", "source_key": first_source["key"], "widget_type": first_source.get("allowed_views", ["gauge"])[0]}
-
-    source_groups = []
-    names = []
-    for source in DASHBOARD_DATA_SOURCE_CATALOG:
-        name = source.get("group", "Otras fuentes")
-        if name not in names:
-            names.append(name)
-    for name in names:
-        source_groups.append({"title": name, "sources": [dict(item) for item in DASHBOARD_DATA_SOURCE_CATALOG if item.get("group") == name]})
-
-    content = render_template_string("""
-    <div class="dashsimple-shell">
-      <div class="dashsimple-header">
-        <div class="dashsimple-header-icon"><i class="bi bi-grid-1x2-fill"></i></div>
-        <div>
-          <div class="dashsimple-eyebrow">SGSI · Administración</div>
-          <h3>Diseñar Centro de Control</h3>
-          <p>Seleccione una fuente de datos y la forma en que desea verla. Nada más.</p>
-        </div>
-        <a href="{{ url_for('menu') }}" class="btn btn-light rounded-pill px-4 fw-bold ms-auto">
-          <i class="bi bi-speedometer2 me-1"></i> Ver Centro de Control
-        </a>
-      </div>
-
-      <section class="dashsimple-builder" id="customBuilder">
-        <div class="dashsimple-builder-title">
-          <div>
-            <h4>{{ 'Editar visualización' if edit_widget else 'Agregar una visualización' }}</h4>
-            <p>Los niveles de madurez permiten araña o velocímetro. Las demás fuentes muestran únicamente las opciones compatibles.</p>
-          </div>
-          {% if edit_widget %}
-            <a href="{{ url_for('dashboard_config') }}#customBuilder" class="btn btn-outline-secondary rounded-pill btn-sm">Cancelar</a>
-          {% endif %}
-        </div>
-
-        <form method="post" class="dashsimple-two-fields">
-          <input type="hidden" name="action" value="{{ 'update_custom' if edit_widget else 'create_custom' }}">
-          <input type="hidden" name="custom_id" value="{{ builder.custom_id }}">
-
-          <div class="dashsimple-field">
-            <label>1. Fuente de datos</label>
-            <select name="source_key" id="dashsimpleSource" class="form-select" required>
-              {% for group in source_groups %}
-                <optgroup label="{{ group.title }}">
-                  {% for source in group.sources %}
-                    <option value="{{ source.key }}"
-                            data-views="{{ source.allowed_views|join(',') }}"
-                            data-kind="{{ source.data_kind }}"
-                            data-description="{{ source.description }}"
-                            {% if builder.source_key == source.key %}selected{% endif %}>
-                      {{ source.label }}
-                    </option>
-                  {% endfor %}
-                </optgroup>
-              {% endfor %}
-            </select>
-            <small id="dashsimpleSourceHelp"></small>
-          </div>
-
-          <div class="dashsimple-field">
-            <label>2. ¿Cómo lo quiere presentar?</label>
-            <select name="widget_type" id="dashsimpleView" class="form-select" required>
-              {% for key, label in visualization_options.items() %}
-                {% if key != 'kpi' %}
-                  <option value="{{ key }}" {% if builder.widget_type == key %}selected{% endif %}>{{ label }}</option>
-                {% endif %}
-              {% endfor %}
-            </select>
-            <small id="dashsimpleViewHelp"></small>
-          </div>
-
-          <div class="dashsimple-submit">
-            <button type="submit" class="btn btn-primary rounded-pill px-4 fw-bold">
-              <i class="bi {{ 'bi-save2' if edit_widget else 'bi-plus-circle' }} me-1"></i>
-              {{ 'Guardar cambio' if edit_widget else 'Agregar al Centro de Control' }}
-            </button>
-          </div>
-        </form>
-      </section>
-
-      {% if custom_rows %}
-        <section class="dashsimple-created">
-          <div class="dashsimple-section-head">
-            <div><h4>Visualizaciones creadas</h4><p>Fuente y presentación seleccionadas por el usuario.</p></div>
-            <span class="badge rounded-pill text-bg-primary">{{ custom_rows|length }}</span>
-          </div>
-          <div class="dashsimple-created-grid">
-            {% for row in custom_rows %}
-              <div class="dashsimple-created-row">
-                <div>
-                  <strong>{{ row.source_label }}</strong>
-                  <span>{{ row.type_label }}</span>
-                  <span class="badge rounded-pill {{ 'text-bg-success' if row.visible else 'text-bg-secondary' }}">{{ 'Visible' if row.visible else 'Oculta' }}</span>
-                </div>
-                <div class="dashsimple-row-actions">
-                  <a href="{{ url_for('dashboard_config', edit_widget=row.id) }}#customBuilder" class="btn btn-outline-primary rounded-pill btn-sm"><i class="bi bi-pencil-square"></i> Editar</a>
-                  <form method="post" class="m-0" onsubmit="return confirm('¿Eliminar esta visualización?');">
-                    <input type="hidden" name="action" value="delete_custom">
-                    <input type="hidden" name="custom_id" value="{{ row.id }}">
-                    <button type="submit" class="btn btn-outline-danger rounded-pill btn-sm"><i class="bi bi-trash3"></i> Eliminar</button>
-                  </form>
-                </div>
-              </div>
-            {% endfor %}
-          </div>
-        </section>
-      {% endif %}
-
-      <form method="post" id="dashboardConfigForm">
-        <section class="dashsimple-current">
-          <div class="dashsimple-section-head">
-            <div><h4>Qué aparece en el inicio</h4><p>Active, desactive y ordene las visualizaciones del Centro de Control.</p></div>
-            <div class="dashsimple-quick-actions">
-              <button type="button" id="dashsimpleSelectAll" class="btn btn-outline-primary rounded-pill btn-sm">Seleccionar todo</button>
-              <button type="button" id="dashsimpleClearAll" class="btn btn-outline-secondary rounded-pill btn-sm">Desmarcar todo</button>
-            </div>
-          </div>
-
-          {% for group in widget_groups %}
-            <details class="dashsimple-group" {% if group.title in ['Visualizaciones creadas por el usuario','Elementos creados por el usuario'] %}open{% endif %}>
-              <summary>{{ group.title }} <span>{{ group.widgets|length }}</span></summary>
-              <div class="dashsimple-options">
-                {% for widget in group.widgets %}
-                  <div class="dashsimple-option">
-                    <div class="form-check form-switch">
-                      <input class="form-check-input dashboard-widget-check" type="checkbox" role="switch"
-                             name="widgets" value="{{ widget.key }}" id="widget_{{ widget.dom_id }}"
-                             data-order-id="order_{{ widget.dom_id }}" data-kind="{{ widget.kind }}"
-                             {% if widget.key in selected_set %}checked{% endif %}>
-                      <label class="form-check-label" for="widget_{{ widget.dom_id }}">
-                        <strong>{{ widget.label }}</strong>
-                        <span>{{ widget.presentation_label }}</span>
-                      </label>
-                    </div>
-                    <div class="dashsimple-order">
-                      <label>Orden</label>
-                      <input type="number" min="1" max="99" name="order_{{ widget.key }}"
-                             id="order_{{ widget.dom_id }}" class="form-control"
-                             value="{{ position_map.get(widget.key, widget.default_order) }}">
-                    </div>
-                  </div>
-                {% endfor %}
-              </div>
-            </details>
-          {% endfor %}
-        </section>
-
-        <div class="dashsimple-savebar">
-          <button type="submit" name="action" value="reset" class="btn btn-outline-danger rounded-pill"
-                  onclick="return confirm('¿Restablecer el Centro de Control al diseño inicial?');">
-            <i class="bi bi-arrow-counterclockwise me-1"></i> Restablecer
-          </button>
-          <button type="submit" name="action" value="save" class="btn btn-success rounded-pill px-4 fw-bold">
-            <i class="bi bi-save2 me-1"></i> Guardar lo que aparece
-          </button>
-        </div>
-      </form>
-    </div>
-
-    <style>
-      body{background-image:url('/static/img/ccsgsi.jpg');background-size:cover;background-position:center;background-attachment:fixed;background-repeat:no-repeat;}
-      .dashsimple-shell{width:96%;max-width:1450px;margin:22px auto 36px;}
-      .dashsimple-header{display:flex;align-items:center;gap:15px;background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);border-radius:20px;padding:17px 22px;color:#fff;box-shadow:0 16px 32px rgba(15,23,42,.24);margin-bottom:14px;}
-      .dashsimple-header-icon{width:54px;height:54px;min-width:54px;border-radius:16px;background:#fff;color:#0b4a8f;display:flex;align-items:center;justify-content:center;font-size:1.35rem;}
-      .dashsimple-eyebrow{font-size:.67rem;font-weight:900;text-transform:uppercase;letter-spacing:.06em;opacity:.88;}.dashsimple-header h3{margin:2px 0 3px;color:#fff!important;font-size:1.36rem;font-weight:950;}.dashsimple-header p{margin:0;font-size:.79rem;opacity:.95;}
-      .dashsimple-builder,.dashsimple-created,.dashsimple-current,.dashsimple-savebar{background:rgba(255,255,255,.98);border:1px solid #bdd7ee;border-radius:18px;box-shadow:0 12px 28px rgba(15,55,95,.12);}
-      .dashsimple-builder{padding:18px 20px;margin-bottom:14px;}.dashsimple-builder-title,.dashsimple-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding-bottom:12px;border-bottom:1px solid #d7e6f3;margin-bottom:14px;}.dashsimple-builder-title h4,.dashsimple-section-head h4{margin:0;color:#123f72;font-size:1rem;font-weight:950;}.dashsimple-builder-title p,.dashsimple-section-head p{margin:4px 0 0;color:#637991;font-size:.73rem;}
-      .dashsimple-two-fields{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) auto;gap:14px;align-items:end;}.dashsimple-field label{display:block;color:#294d72;font-size:.74rem;font-weight:950;margin-bottom:6px;}.dashsimple-field .form-select{min-height:44px;font-size:.82rem;}.dashsimple-field small{display:block;min-height:18px;margin-top:5px;color:#6a7d91;font-size:.66rem;}.dashsimple-submit .btn{min-height:44px;white-space:nowrap;font-size:.80rem;}
-      .dashsimple-created{padding:18px 20px;margin-bottom:14px;}.dashsimple-created-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}.dashsimple-created-row{border:1px solid #d4e4f1;border-radius:14px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px;background:#fff;}.dashsimple-created-row strong{display:block;color:#173d69;font-size:.81rem;}.dashsimple-created-row span:not(.badge){display:block;color:#6b7f94;font-size:.69rem;margin:3px 0 6px;}.dashsimple-row-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap;justify-content:flex-end;}
-      .dashsimple-current{padding:18px 20px;}.dashsimple-quick-actions{display:flex;gap:8px;flex-wrap:wrap;}.dashsimple-group{border:1px solid #d6e4f0;border-radius:14px;margin-bottom:10px;background:#fbfdff;overflow:hidden;}.dashsimple-group summary{cursor:pointer;padding:12px 14px;color:#173d69;font-size:.80rem;font-weight:950;display:flex;justify-content:space-between;align-items:center;}.dashsimple-group summary span{font-size:.67rem;background:#dcecff;color:#0b4a8f;padding:3px 9px;border-radius:999px;}.dashsimple-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;padding:0 12px 12px;}.dashsimple-option{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #dbe7f1;border-radius:12px;padding:10px 12px;background:#fff;}.dashsimple-option .form-check{display:flex;align-items:flex-start;gap:9px;min-width:0;}.dashsimple-option .form-check-input{width:2.2em;height:1.18em;margin-top:2px;}.dashsimple-option label{min-width:0;}.dashsimple-option strong{display:block;color:#173d69;font-size:.76rem;line-height:1.2;}.dashsimple-option label span{display:block;color:#75869a;font-size:.65rem;margin-top:2px;}.dashsimple-order{width:68px;flex:0 0 68px;text-align:center;}.dashsimple-order label{display:block;font-size:.60rem;font-weight:900;color:#687b90;margin-bottom:3px;}.dashsimple-order input{text-align:center;min-height:34px;padding:4px;font-size:.75rem;font-weight:850;}
-      .dashsimple-savebar{margin-top:14px;padding:14px 18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;}
-      @media(max-width:1050px){.dashsimple-two-fields{grid-template-columns:1fr 1fr;}.dashsimple-submit{grid-column:span 2;}.dashsimple-submit .btn{width:100%;}.dashsimple-options,.dashsimple-created-grid{grid-template-columns:1fr;}}
-      @media(max-width:700px){.dashsimple-shell{width:98%;margin-top:8px;}.dashsimple-header{flex-direction:column;text-align:center;}.dashsimple-header .btn{margin-left:0!important;width:100%;}.dashsimple-two-fields{grid-template-columns:1fr;}.dashsimple-submit{grid-column:span 1;}.dashsimple-builder-title,.dashsimple-section-head{flex-direction:column;text-align:center;align-items:center;}.dashsimple-created-row{flex-direction:column;text-align:center;}.dashsimple-row-actions{justify-content:center;}.dashsimple-option{align-items:flex-start;}.dashsimple-savebar .btn{width:100%;}}
-    </style>
-
-    <script>
-      (function(){
-        const source = document.getElementById('dashsimpleSource');
-        const view = document.getElementById('dashsimpleView');
-        const sourceHelp = document.getElementById('dashsimpleSourceHelp');
-        const viewHelp = document.getElementById('dashsimpleViewHelp');
-        const checks = Array.from(document.querySelectorAll('.dashboard-widget-check'));
-        const selectAll = document.getElementById('dashsimpleSelectAll');
-        const clearAll = document.getElementById('dashsimpleClearAll');
-
-        function refreshViews(){
-          if(!source || !view) return;
-          const option = source.options[source.selectedIndex];
-          if(!option) return;
-          const allowed = (option.dataset.views || '').split(',').filter(Boolean);
-          Array.from(view.options).forEach(function(item){item.disabled = !allowed.includes(item.value);});
-          if(!allowed.includes(view.value)){view.value = allowed[0] || '';}
-          if(sourceHelp) sourceHelp.textContent = option.dataset.description || '';
-          if(viewHelp){
-            const kind = option.dataset.kind || '';
-            viewHelp.textContent = kind === 'maturity' ? 'Disponible: araña o velocímetro.' : (kind === 'timeline' ? 'Disponible: línea en el tiempo o barras.' : 'Se muestran únicamente las presentaciones compatibles.');
-          }
-        }
-
-        function renumber(){
-          const counters = {kpi:1, chart:1};
-          checks.forEach(function(check){
-            if(!check.checked) return;
-            const kind = check.dataset.kind || 'chart';
-            const input = document.getElementById(check.dataset.orderId);
-            if(input){input.value = counters[kind] || 1;}
-            counters[kind] = (counters[kind] || 1) + 1;
-          });
-        }
-
-        if(source) source.addEventListener('change', refreshViews);
-        if(selectAll) selectAll.addEventListener('click', function(){checks.forEach(function(check){check.checked=true;});renumber();});
-        if(clearAll) clearAll.addEventListener('click', function(){checks.forEach(function(check){check.checked=false;});});
-        refreshViews();
-      })();
-    </script>
-    """,
-    usuario=usuario_actual,
-    widget_groups=widget_groups,
-    selected_set=selected_set,
-    position_map=position_map,
-    source_groups=source_groups,
-    custom_rows=custom_rows,
-    edit_widget=edit_widget,
-    builder=builder_values,
-    visualization_options=DASHBOARD_VISUALIZATION_LABELS)
-
-    return render_template_string(BASE, content=content, current_user=usuario_actual)
-
-
-# =========================
-# API JSON TABLERO PRINCIPAL
-# =========================
-@app.route('/dashboard/status', methods=['GET'])
-@login_required
-def dashboard_status():
-    try:
-        user_id = session.get("user_id")
-        selected_keys = _dashboard_get_selected_keys(user_id)
-        payload = _dashboard_build_payload(selected_keys, user_id)
-        return jsonify({
-            "ok": True,
-            "iso_radar_b64": payload.get("iso_radar_b64", ""),
-            "iso_pct": float(payload.get("iso_pct", 0) or 0),
-            "nist_radar_b64": payload.get("nist_radar_b64", ""),
-            "nist_pct": float(payload.get("nist_pct", 0) or 0),
-            "datos_gauge_b64": payload.get("datos_gauge_b64", ""),
-            "datos_pct": float(payload.get("datos_pct", 0) or 0),
-            "scorecard_terceros_pct": float(payload.get("scorecard_terceros_pct", 0) or 0),
-            "pci_pct": float(payload.get("pci_pct", 0) or 0),
-            "pci_gauge_b64": payload.get("pci_gauge_b64", ""),
-            "soc2_pct": float(payload.get("soc2_pct", 0) or 0),
-            "soc2_radar_b64": payload.get("soc2_radar_b64", ""),
-            "ai_maturity_pct": float(payload.get("ai_maturity_pct", 0) or 0),
-            "ai_radar_b64": payload.get("ai_radar_b64", ""),
-            "risks_active_count": float(payload.get("risks_active_count", 0) or 0),
-            "risks_outside_appetite_count": float(payload.get("risks_outside_appetite_count", 0) or 0),
-            "incidents_open_count": float(payload.get("incidents_open_count", 0) or 0),
-            "incidents_compliance_pct": float(payload.get("incidents_compliance_pct", 0) or 0),
-            "vulnerabilities_open_count": float(payload.get("vulnerabilities_open_count", 0) or 0),
-            "vulnerabilities_critical_count": float(payload.get("vulnerabilities_critical_count", 0) or 0),
-            "plans_open_count": float(payload.get("plans_open_count", 0) or 0),
-            "plans_overdue_count": float(payload.get("plans_overdue_count", 0) or 0),
-            "legal_noncompliant_count": float(payload.get("legal_noncompliant_count", 0) or 0),
-            "providers_high_count": float(payload.get("providers_high_count", 0) or 0),
-            "security_culture_pct": float(payload.get("security_culture_pct", 0) or 0),
-            "riesgos_b64": payload.get("riesgos_b64", ""),
-            "incidentes_b64": payload.get("incidentes_b64", ""),
-            "vulnerabilidades_b64": payload.get("vulnerabilidades_b64", ""),
-            "proveedores_criticidad_b64": payload.get("proveedores_criticidad_b64", ""),
-            "planes_accion_estado_b64": payload.get("planes_accion_estado_b64", ""),
-            "requisitos_legales_estado_b64": payload.get("requisitos_legales_estado_b64", ""),
-            "custom_widgets": payload.get("custom_widgets", {}),
-            "selected_widgets": selected_keys,
-        })
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-# ====================
-# Menú principal con tablero compacto
-# ====================
-
-
-# ============================================================================
-# GRAC MOBILE — DISTRIBUCIÓN DESDE ADMINISTRACIÓN (ANDROID + IOS TESTFLIGHT)
-# ============================================================================
-# Android: el APK se almacena fuera de /static y se entrega únicamente a
-# usuarios autenticados con permiso "Aplicación móvil".
-# iOS: se publica el enlace de invitación de TestFlight (no se almacena IPA).
-# El historial se conserva en una DB independiente para no modificar sgsi.db.
-
-MOBILE_RELEASE_DB_PATH = os.path.join(app.instance_path, "mobile_app.db")
-MOBILE_RELEASE_DIR = os.path.join(app.instance_path, "mobile_releases")
-os.makedirs(MOBILE_RELEASE_DIR, exist_ok=True)
-
-# Un APK release puede superar los 50 MB. La ruta valida además un máximo propio.
-app.config["MAX_CONTENT_LENGTH"] = max(
-    int(app.config.get("MAX_CONTENT_LENGTH") or 0),
-    300 * 1024 * 1024,
-)
-
-
-def get_mobile_release_db_connection():
-    os.makedirs(app.instance_path, exist_ok=True)
-    conn = sqlite3.connect(MOBILE_RELEASE_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_mobile_release_db():
-    conn = get_mobile_release_db_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS mobile_releases (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            platform TEXT NOT NULL,
-            version TEXT NOT NULL,
-            build_number INTEGER NOT NULL DEFAULT 1,
-            min_version TEXT,
-            min_build INTEGER NOT NULL DEFAULT 1,
-            mandatory INTEGER NOT NULL DEFAULT 0,
-            release_notes TEXT,
-            file_name TEXT,
-            stored_name TEXT,
-            distribution_url TEXT,
-            is_active INTEGER NOT NULL DEFAULT 1,
-            published_at TEXT NOT NULL,
-            published_by TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE INDEX IF NOT EXISTS idx_mobile_releases_platform_active
-        ON mobile_releases(platform, is_active, id DESC)
-    """)
-    conn.commit()
-    conn.close()
-
-
-def _mobile_release_row(release_id):
-    conn = get_mobile_release_db_connection()
-    row = conn.execute(
-        "SELECT * FROM mobile_releases WHERE id = ?",
-        (int(release_id),),
-    ).fetchone()
-    conn.close()
-    return row
-
-
-def _mobile_release_active(platform):
-    init_mobile_release_db()
-    conn = get_mobile_release_db_connection()
-    row = conn.execute("""
-        SELECT *
-        FROM mobile_releases
-        WHERE platform = ? AND is_active = 1
-        ORDER BY id DESC
-        LIMIT 1
-    """, ((platform or "").strip().lower(),)).fetchone()
-    conn.close()
-    return row
-
-
-def _mobile_release_history(limit=50):
-    init_mobile_release_db()
-    conn = get_mobile_release_db_connection()
-    rows = conn.execute("""
-        SELECT *
-        FROM mobile_releases
-        ORDER BY published_at DESC, id DESC
-        LIMIT ?
-    """, (int(limit),)).fetchall()
-    conn.close()
-    return rows
-
-
-def _mobile_release_version_tuple(value):
-    """Convierte 1.2.3 / 1.2 / v1.2.3 en una tupla comparable."""
-    raw = str(value or "0").strip().lower().lstrip("v")
-    nums = re.findall(r"\d+", raw)
-    parts = [int(x) for x in nums[:4]]
-    while len(parts) < 4:
-        parts.append(0)
-    return tuple(parts)
-
-
-def _mobile_release_is_newer(latest_version, latest_build, current_version, current_build):
-    latest_v = _mobile_release_version_tuple(latest_version)
-    current_v = _mobile_release_version_tuple(current_version)
-    if latest_v != current_v:
-        return latest_v > current_v
-    return int(latest_build or 0) > int(current_build or 0)
-
-
-def _mobile_release_is_below_min(current_version, current_build, min_version, min_build):
-    min_v = _mobile_release_version_tuple(min_version or "0")
-    current_v = _mobile_release_version_tuple(current_version)
-    if current_v != min_v:
-        return current_v < min_v
-    return int(current_build or 0) < int(min_build or 0)
-
-
-def _mobile_release_qr_data_uri(value):
-    value = (value or "").strip()
-    if not value:
-        return None
-    try:
-        img = qrcode.make(value)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
-    except Exception:
-        return None
-
-
-def _mobile_release_allowed(user):
-    if not user:
-        return False
-    return user.role == "admin" or verificar_permiso(user, "Aplicación móvil")
-
-
-def _mobile_release_external_download_url(row):
-    if not row:
-        return None
-    if row["platform"] == "ios":
-        return (row["distribution_url"] or "").strip() or None
-    return url_for("mobile_app_user_download", release_id=row["id"], _external=True)
-
-
-def _mobile_release_publish(
-    *, platform, version, build_number, min_version, min_build,
-    mandatory, release_notes, published_by, file_name=None,
-    stored_name=None, distribution_url=None,
-):
-    init_mobile_release_db()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn = get_mobile_release_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "UPDATE mobile_releases SET is_active = 0 WHERE platform = ?",
-        (platform,),
-    )
-    cur.execute("""
-        INSERT INTO mobile_releases (
-            platform, version, build_number, min_version, min_build,
-            mandatory, release_notes, file_name, stored_name,
-            distribution_url, is_active, published_at, published_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-    """, (
-        platform,
-        version,
-        int(build_number),
-        min_version or version,
-        int(min_build),
-        1 if mandatory else 0,
-        release_notes,
-        file_name,
-        stored_name,
-        distribution_url,
-        now,
-        published_by,
-    ))
-    release_id = cur.lastrowid
-    conn.commit()
-    conn.close()
-    return release_id
-
-
-init_mobile_release_db()
-
-
-
-# ============================================================================
-# GRAC MOBILE — MÓDULO DE CONSULTA Y DESCARGA (WEB / ON-PREMISE)
-# Independiente de Administración. Solo lectura, sin publicar ni eliminar.
-# Acceso por el permiso individual "Aplicación móvil".
-# ============================================================================
-@app.route("/aplicacion_movil", methods=["GET"])
-@login_required
-def aplicacion_movil():
-    usuario = User.query.get(session.get("user_id"))
-    if not _mobile_release_allowed(usuario):
-        abort(403, description="No tiene permiso para acceder al módulo Aplicación móvil.")
-
-    android = _mobile_release_active("android")
-    ios = _mobile_release_active("ios")
-    android_url = _mobile_release_external_download_url(android)
-    ios_url = _mobile_release_external_download_url(ios)
-    android_qr = _mobile_release_qr_data_uri(android_url)
-    ios_qr = _mobile_release_qr_data_uri(ios_url)
-
-    # Las tarjetas reproducen la información de descarga visible en
-    # Administración, SIN formularios de publicación, historial ni edición.
-    contenido = render_template_string(r"""
-    <div class="grac-mobile-user-shell">
-      <div class="grac-mobile-user-hero">
-        <div class="grac-mobile-user-icon"><i class="bi bi-phone"></i></div>
-        <div>
-          <h2>Aplicación móvil</h2>
-          <p>Distribución controlada de GRAC Mobile para Android y iOS mediante TestFlight.</p>
-        </div>
-      </div>
-      <div class="row g-3">
-        <div class="col-xl-6">
-          <div class="card border-0 shadow-sm h-100 grac-mobile-user-card">
-            <div class="card-body p-4">
-              <div class="d-flex align-items-center gap-3 mb-3">
-                <div class="grac-mobile-platform android"><i class="bi bi-android2"></i></div>
-                <div><h4 class="mb-0 fw-bold">Android</h4>
-                  <div class="text-muted small">Descarga directa del APK publicado en GRAC</div>
-                </div>
-              </div>
-              {% if android %}
-              <div class="grac-mobile-version mb-3">
-                <div><b>Versión:</b> {{ android['version'] }} · Build {{ android['build_number'] }}</div>
-                <div><b>Publicada:</b> {{ android['published_at'] }}</div>
-                <div><b>Por:</b> {{ android['published_by'] or '—' }}</div>
-                <div><b>Mínima:</b> {{ android['min_version'] or android['version'] }} · Build {{ android['min_build'] }}</div>
-                <div><b>Actualización:</b> {% if android['mandatory'] %}<span class="badge bg-danger">Obligatoria</span>{% else %}<span class="badge bg-success">Opcional</span>{% endif %}</div>
-              </div>
-              <div class="d-flex flex-wrap align-items-center gap-3">
-                <a href="{{ android_url }}" class="btn btn-primary rounded-pill px-4" data-no-progress="true"><i class="bi bi-download me-1"></i> Descargar APK</a>
-                {% if android_qr %}<img class="grac-mobile-qr" src="{{ android_qr }}" alt="Código QR para descargar Android">{% endif %}
-              </div>
-              {% else %}<div class="alert alert-warning">Todavía no hay una versión Android publicada en este servidor.</div>{% endif %}
-            </div>
-          </div>
-        </div>
-        <div class="col-xl-6">
-          <div class="card border-0 shadow-sm h-100 grac-mobile-user-card">
-            <div class="card-body p-4">
-              <div class="d-flex align-items-center gap-3 mb-3">
-                <div class="grac-mobile-platform ios"><i class="bi bi-apple"></i></div>
-                <div><h4 class="mb-0 fw-bold">iOS / iPadOS</h4>
-                  <div class="text-muted small">Instalación mediante Apple TestFlight</div>
-                </div>
-              </div>
-              {% if ios %}
-              <div class="grac-mobile-version mb-3">
-                <div><b>Versión:</b> {{ ios['version'] }} · Build {{ ios['build_number'] }}</div>
-                <div><b>Publicada:</b> {{ ios['published_at'] }}</div>
-                <div><b>Por:</b> {{ ios['published_by'] or '—' }}</div>
-                <div><b>Mínima:</b> {{ ios['min_version'] or ios['version'] }} · Build {{ ios['min_build'] }}</div>
-                <div><b>Actualización:</b> {% if ios['mandatory'] %}<span class="badge bg-danger">Obligatoria</span>{% else %}<span class="badge bg-success">Opcional</span>{% endif %}</div>
-              </div>
-              <div class="d-flex flex-wrap align-items-center gap-3">
-                <a href="{{ ios_url }}" class="btn btn-dark rounded-pill px-4" target="_blank" rel="noopener noreferrer" data-no-progress="true"><i class="bi bi-apple me-1"></i> Abrir en TestFlight</a>
-                {% if ios_qr %}<img class="grac-mobile-qr" src="{{ ios_qr }}" alt="Código QR TestFlight">{% endif %}
-              </div>
-              {% else %}<div class="alert alert-warning">Todavía no hay un enlace de TestFlight publicado en este servidor.</div>{% endif %}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <style>
-      .grac-mobile-user-shell{width:96%;max-width:1200px;margin:24px auto 28px;}
-      .grac-mobile-user-hero{display:flex;align-items:center;gap:16px;min-height:94px;padding:18px 25px;margin-bottom:18px;color:white;border-radius:20px;background:linear-gradient(115deg,#062b55,#0b4a8f,#226ab5);box-shadow:0 12px 26px rgba(20,60,110,.21);}
-      .grac-mobile-user-hero h2{font-size:1.55rem!important;font-weight:850;margin:0 0 4px!important;color:#fff!important;}
-      .grac-mobile-user-hero p{font-size:.92rem;margin:0;color:rgba(255,255,255,.94);}
-      .grac-mobile-user-icon{width:56px;height:56px;min-width:56px;border-radius:14px;background:white;color:#0b4a8f;display:flex;align-items:center;justify-content:center;font-size:1.6rem;}
-      .grac-mobile-user-card{border-radius:22px;overflow:hidden;}
-      .grac-mobile-platform{width:60px;height:60px;min-width:60px;border-radius:17px;display:flex;align-items:center;justify-content:center;font-size:2rem;}
-      .grac-mobile-platform.android{background:#e7f7ee;color:#198754;}
-      .grac-mobile-platform.ios{background:#edf1f5;color:#111827;}
-      .grac-mobile-version{background:#f8fafc;border:1px solid #e7edf4;border-radius:16px;padding:16px 20px;line-height:1.85;}
-      .grac-mobile-qr{width:135px;height:135px;border-radius:16px;border:1px solid #e3e8ef;padding:8px;background:white;object-fit:contain;}
-      @media(max-width:768px){.grac-mobile-user-hero{padding:16px;gap:12px}.grac-mobile-user-hero h2{font-size:1.3rem!important}.grac-mobile-user-shell{width:98%}}
-    </style>
-    """, android=android, ios=ios,
-         android_url=android_url, ios_url=ios_url,
-         android_qr=android_qr, ios_qr=ios_qr)
-    return render_template_string(BASE, content=Markup(contenido))
-
-
-@app.route("/aplicacion_movil/descargar/<int:release_id>", methods=["GET"])
-@login_required
-def mobile_app_user_download(release_id):
-    usuario = User.query.get(session.get("user_id"))
-    if not _mobile_release_allowed(usuario):
-        abort(403, description="No tiene permiso para descargar GRAC Mobile.")
-
-    release = _mobile_release_row(release_id)
-    # Solo la versión Android actualmente publicada está disponible al usuario.
-    if (not release or release["platform"] != "android"
-            or not release["is_active"] or not release["stored_name"]):
-        abort(404)
-    archivo = safe_join(MOBILE_RELEASE_DIR, release["stored_name"])
-    if not archivo or not os.path.isfile(archivo):
-        abort(404)
-
-    registrar_log(usuario.username, f"Descargó GRAC Mobile Android versión {release['version']} build {release['build_number']}.")
-    return send_file(
-        archivo,
-        mimetype="application/vnd.android.package-archive",
-        as_attachment=True,
-        download_name=f"GRAC-Mobile-{release['version']}-build-{release['build_number']}.apk",
-        conditional=True,
-    )
-
-
-@app.route("/admin/mobile-app", methods=["GET", "POST"])
-@login_required
-def admin_mobile_app():
-    user = User.query.get(session.get("user_id"))
-    if not _mobile_release_allowed(user):
-        registrar_log(
-            user.username if user else "Desconocido",
-            "Intento de acceso no autorizado al módulo Aplicación móvil.",
-        )
-        flash("No tiene permiso para acceder a Aplicación móvil.", "danger")
-        return redirect(url_for("menu"))
-
-    if request.method == "POST":
-        # La consulta/descarga es permitida a usuarios con permiso, pero toda
-        # publicación, activación o eliminación es exclusiva del administrador.
-        if user.role != "admin":
-            flash("Solo el administrador puede publicar o modificar versiones.", "danger")
-            return redirect(url_for("admin_mobile_app"))
-
-        action = (request.form.get("action") or "").strip().lower()
-
-        if action in {"publish_android", "publish_ios"}:
-            platform = "android" if action == "publish_android" else "ios"
-            version = (request.form.get("version") or "").strip()
-            min_version = (request.form.get("min_version") or version).strip() or version
-            notes = (request.form.get("release_notes") or "").strip()
-            mandatory = request.form.get("mandatory") == "1"
-
-            try:
-                build_number = max(1, int(request.form.get("build_number") or 1))
-                min_build = max(1, int(request.form.get("min_build") or 1))
-            except Exception:
-                flash("El número de build debe ser un entero mayor a cero.", "warning")
-                return redirect(url_for("admin_mobile_app"))
-
-            if not version:
-                flash("La versión es obligatoria.", "warning")
-                return redirect(url_for("admin_mobile_app"))
-
-            file_name = None
-            stored_name = None
-            distribution_url = None
-
-            if platform == "android":
-                if request.content_length and request.content_length > 260 * 1024 * 1024:
-                    flash("El APK supera el máximo permitido de 260 MB.", "danger")
-                    return redirect(url_for("admin_mobile_app"))
-
-                apk = request.files.get("apk_file")
-                if not apk or not apk.filename:
-                    flash("Debes seleccionar el archivo APK de Android.", "warning")
-                    return redirect(url_for("admin_mobile_app"))
-
-                original = secure_filename(apk.filename)
-                if not original.lower().endswith(".apk"):
-                    flash("Solo se permite publicar archivos .apk.", "danger")
-                    return redirect(url_for("admin_mobile_app"))
-
-                safe_version = re.sub(r"[^0-9A-Za-z._-]+", "-", version).strip("-") or "version"
-                stored_name = f"GRAC-Mobile-{safe_version}-{build_number}-{uuid.uuid4().hex[:10]}.apk"
-                target = os.path.join(MOBILE_RELEASE_DIR, stored_name)
-                apk.save(target)
-
-                if not os.path.isfile(target) or os.path.getsize(target) <= 0:
-                    try:
-                        if os.path.isfile(target):
-                            os.remove(target)
-                    except Exception:
-                        pass
-                    flash("No fue posible guardar el APK.", "danger")
-                    return redirect(url_for("admin_mobile_app"))
-
-                file_name = original
-
-            else:
-                distribution_url = (request.form.get("testflight_url") or "").strip()
-                try:
-                    parsed = urlparse(distribution_url)
-                except Exception:
-                    parsed = None
-                if (
-                    not parsed
-                    or parsed.scheme != "https"
-                    or (parsed.netloc or "").lower() != "testflight.apple.com"
-                ):
-                    flash(
-                        "Ingresa un enlace válido de TestFlight, por ejemplo https://testflight.apple.com/join/XXXXXXXX.",
-                        "warning",
-                    )
-                    return redirect(url_for("admin_mobile_app"))
-
-            release_id = _mobile_release_publish(
-                platform=platform,
-                version=version,
-                build_number=build_number,
-                min_version=min_version,
-                min_build=min_build,
-                mandatory=mandatory,
-                release_notes=notes,
-                published_by=user.username,
-                file_name=file_name,
-                stored_name=stored_name,
-                distribution_url=distribution_url,
-            )
-            registrar_log(
-                user.username,
-                f"Publicó GRAC Mobile {platform.upper()} versión {version} build {build_number} (release #{release_id}).",
-            )
-            flash(
-                f"GRAC Mobile {platform.upper()} {version} (build {build_number}) publicado correctamente.",
-                "success",
-            )
-            return redirect(url_for("admin_mobile_app"))
-
-        if action == "activate":
-            release_id = request.form.get("release_id", type=int)
-            row = _mobile_release_row(release_id)
-            if not row:
-                flash("La versión indicada no existe.", "warning")
-                return redirect(url_for("admin_mobile_app"))
-            conn = get_mobile_release_db_connection()
-            conn.execute(
-                "UPDATE mobile_releases SET is_active = 0 WHERE platform = ?",
-                (row["platform"],),
-            )
-            conn.execute(
-                "UPDATE mobile_releases SET is_active = 1 WHERE id = ?",
-                (release_id,),
-            )
-            conn.commit()
-            conn.close()
-            registrar_log(
-                user.username,
-                f"Activó GRAC Mobile {row['platform'].upper()} versión {row['version']} build {row['build_number']}.",
-            )
-            flash("Versión activada correctamente.", "success")
-            return redirect(url_for("admin_mobile_app"))
-
-        if action == "delete":
-            release_id = request.form.get("release_id", type=int)
-            row = _mobile_release_row(release_id)
-            if not row:
-                flash("La versión indicada no existe.", "warning")
-                return redirect(url_for("admin_mobile_app"))
-            if row["stored_name"]:
-                target = safe_join(MOBILE_RELEASE_DIR, row["stored_name"])
-                try:
-                    if target and os.path.isfile(target):
-                        os.remove(target)
-                except Exception as exc:
-                    print("No se pudo eliminar APK histórico:", repr(exc))
-            conn = get_mobile_release_db_connection()
-            conn.execute("DELETE FROM mobile_releases WHERE id = ?", (release_id,))
-            conn.commit()
-            conn.close()
-            registrar_log(
-                user.username,
-                f"Eliminó release GRAC Mobile #{release_id} ({row['platform']} {row['version']}).",
-            )
-            flash("Versión eliminada del historial.", "success")
-            return redirect(url_for("admin_mobile_app"))
-
-        flash("Acción no reconocida.", "warning")
-        return redirect(url_for("admin_mobile_app"))
-
-    android = _mobile_release_active("android")
-    ios = _mobile_release_active("ios")
-    history = _mobile_release_history(100) if user.role == "admin" else []
-
-    android_url = _mobile_release_external_download_url(android)
-    ios_url = _mobile_release_external_download_url(ios)
-    android_qr = _mobile_release_qr_data_uri(android_url)
-    ios_qr = _mobile_release_qr_data_uri(ios_url)
-
-    inner = render_template_string(r"""
-    <div class="container-fluid mobile-admin-shell">
-      <!-- CABECERA alineada con los demás módulos de Administración -->
-      <div class="mobile-admin-header-card">
-        <div class="mobile-admin-header-overlay">
-          <div class="mobile-admin-header-icon"><i class="bi bi-phone"></i></div>
-          <div class="mobile-admin-header-text">
-            <div class="mobile-admin-header-badge">SGSI · Administración</div>
-            <h2 class="mobile-admin-title">Aplicación móvil</h2>
-            <div class="mobile-admin-subtitle">Distribución controlada de GRAC Mobile para Android y iOS mediante TestFlight.</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="row g-3">
-        <div class="col-xl-6">
-          <div class="card border-0 shadow-sm h-100">
-            <div class="card-body p-4">
-              <div class="d-flex align-items-center gap-3 mb-3">
-                <div class="mobile-platform-icon android"><i class="bi bi-android2"></i></div>
-                <div>
-                  <h4 class="mb-0 fw-bold">Android</h4>
-                  <div class="text-muted small">Descarga directa del APK publicado en GRAC</div>
-                </div>
-              </div>
-              {% if android %}
-                <div class="mobile-version-box mb-3">
-                  <div><b>Versión:</b> {{ android['version'] }} · Build {{ android['build_number'] }}</div>
-                  <div><b>Publicada:</b> {{ android['published_at'] }}</div>
-                  <div><b>Por:</b> {{ android['published_by'] or '—' }}</div>
-                  <div><b>Mínima:</b> {{ android['min_version'] or android['version'] }} · Build {{ android['min_build'] }}</div>
-                  <div><b>Actualización:</b> {% if android['mandatory'] %}<span class="badge bg-danger">Obligatoria</span>{% else %}<span class="badge bg-success">Opcional</span>{% endif %}</div>
-                </div>
-                {% if android['release_notes'] %}<div class="alert alert-light border"><b>Novedades:</b><br>{{ android['release_notes'] }}</div>{% endif %}
-                <div class="d-flex flex-wrap gap-3 align-items-center">
-                  <a class="btn btn-primary rounded-pill px-4" href="{{ android_url }}" data-no-progress="true">
-                    <i class="bi bi-download me-1"></i> Descargar APK
-                  </a>
-                  {% if android_qr %}<img src="{{ android_qr }}" class="mobile-qr" alt="QR Android">{% endif %}
-                </div>
-              {% else %}
-                <div class="alert alert-warning mb-0">Todavía no hay una versión Android publicada.</div>
-              {% endif %}
-            </div>
-          </div>
-        </div>
-
-        <div class="col-xl-6">
-          <div class="card border-0 shadow-sm h-100">
-            <div class="card-body p-4">
-              <div class="d-flex align-items-center gap-3 mb-3">
-                <div class="mobile-platform-icon ios"><i class="bi bi-apple"></i></div>
-                <div>
-                  <h4 class="mb-0 fw-bold">iOS / iPadOS</h4>
-                  <div class="text-muted small">Instalación mediante Apple TestFlight</div>
-                </div>
-              </div>
-              {% if ios %}
-                <div class="mobile-version-box mb-3">
-                  <div><b>Versión:</b> {{ ios['version'] }} · Build {{ ios['build_number'] }}</div>
-                  <div><b>Publicada:</b> {{ ios['published_at'] }}</div>
-                  <div><b>Por:</b> {{ ios['published_by'] or '—' }}</div>
-                  <div><b>Mínima:</b> {{ ios['min_version'] or ios['version'] }} · Build {{ ios['min_build'] }}</div>
-                  <div><b>Actualización:</b> {% if ios['mandatory'] %}<span class="badge bg-danger">Obligatoria</span>{% else %}<span class="badge bg-success">Opcional</span>{% endif %}</div>
-                </div>
-                {% if ios['release_notes'] %}<div class="alert alert-light border"><b>Novedades:</b><br>{{ ios['release_notes'] }}</div>{% endif %}
-                <div class="d-flex flex-wrap gap-3 align-items-center">
-                  <a class="btn btn-dark rounded-pill px-4" href="{{ ios_url }}" target="_blank" rel="noopener" data-no-progress="true">
-                    <i class="bi bi-apple me-1"></i> Abrir en TestFlight
-                  </a>
-                  {% if ios_qr %}<img src="{{ ios_qr }}" class="mobile-qr" alt="QR TestFlight">{% endif %}
-                </div>
-              {% else %}
-                <div class="alert alert-warning mb-0">Todavía no hay un enlace de TestFlight publicado.</div>
-              {% endif %}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {% if is_admin %}
-      <div class="row g-3 mt-1">
-        <div class="col-xl-6">
-          <div class="card border-0 shadow-sm h-100">
-            <div class="card-header bg-white border-0 pt-4 px-4"><h5 class="fw-bold mb-0">Publicar Android</h5></div>
-            <div class="card-body px-4 pb-4">
-              <form method="post" enctype="multipart/form-data" data-progress-text="Publicando APK de GRAC Mobile...">
-                <input type="hidden" name="action" value="publish_android">
-                <div class="row g-3">
-                  <div class="col-md-6"><label class="form-label">Versión</label><input class="form-control" name="version" placeholder="0.2.0" required></div>
-                  <div class="col-md-6"><label class="form-label">Build</label><input class="form-control" type="number" min="1" name="build_number" value="3" required></div>
-                  <div class="col-md-6"><label class="form-label">Versión mínima</label><input class="form-control" name="min_version" placeholder="0.2.0"></div>
-                  <div class="col-md-6"><label class="form-label">Build mínimo</label><input class="form-control" type="number" min="1" name="min_build" value="1"></div>
-                  <div class="col-12"><label class="form-label">APK</label><input class="form-control" type="file" accept=".apk,application/vnd.android.package-archive" name="apk_file" required></div>
-                  <div class="col-12"><label class="form-label">Notas de versión</label><textarea class="form-control" rows="3" name="release_notes" placeholder="Cambios incluidos en esta versión..."></textarea></div>
-                  <div class="col-12 form-check ms-2"><input class="form-check-input" type="checkbox" value="1" name="mandatory" id="androidMandatory"><label class="form-check-label" for="androidMandatory">Actualización obligatoria</label></div>
-                  <div class="col-12"><button class="btn btn-primary rounded-pill px-4" type="submit"><i class="bi bi-cloud-arrow-up me-1"></i> Publicar Android</button></div>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-
-        <div class="col-xl-6">
-          <div class="card border-0 shadow-sm h-100">
-            <div class="card-header bg-white border-0 pt-4 px-4"><h5 class="fw-bold mb-0">Publicar iOS / TestFlight</h5></div>
-            <div class="card-body px-4 pb-4">
-              <form method="post">
-                <input type="hidden" name="action" value="publish_ios">
-                <div class="row g-3">
-                  <div class="col-md-6"><label class="form-label">Versión</label><input class="form-control" name="version" placeholder="0.2.0" required></div>
-                  <div class="col-md-6"><label class="form-label">Build</label><input class="form-control" type="number" min="1" name="build_number" value="3" required></div>
-                  <div class="col-md-6"><label class="form-label">Versión mínima</label><input class="form-control" name="min_version" placeholder="0.2.0"></div>
-                  <div class="col-md-6"><label class="form-label">Build mínimo</label><input class="form-control" type="number" min="1" name="min_build" value="1"></div>
-                  <div class="col-12"><label class="form-label">Enlace público TestFlight</label><input class="form-control" type="url" name="testflight_url" placeholder="https://testflight.apple.com/join/XXXXXXXX" required></div>
-                  <div class="col-12"><label class="form-label">Notas de versión</label><textarea class="form-control" rows="3" name="release_notes" placeholder="Cambios incluidos en esta versión..."></textarea></div>
-                  <div class="col-12 form-check ms-2"><input class="form-check-input" type="checkbox" value="1" name="mandatory" id="iosMandatory"><label class="form-check-label" for="iosMandatory">Actualización obligatoria</label></div>
-                  <div class="col-12"><button class="btn btn-dark rounded-pill px-4" type="submit"><i class="bi bi-apple me-1"></i> Publicar TestFlight</button></div>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card border-0 shadow-sm mt-3">
-        <div class="card-header bg-white border-0 pt-4 px-4 d-flex justify-content-between align-items-center">
-          <h5 class="fw-bold mb-0">Historial de versiones</h5>
-          <span class="badge bg-light text-dark">{{ history|length }} registros</span>
-        </div>
-        <div class="table-responsive">
-          <table class="table table-hover align-middle mb-0">
-            <thead class="table-light"><tr><th>Plataforma</th><th>Versión</th><th>Build</th><th>Publicación</th><th>Estado</th><th>Acciones</th></tr></thead>
-            <tbody>
-            {% for r in history %}
-              <tr>
-                <td>{% if r['platform']=='ios' %}<i class="bi bi-apple me-1"></i> iOS{% else %}<i class="bi bi-android2 me-1"></i> Android{% endif %}</td>
-                <td>{{ r['version'] }}</td>
-                <td>{{ r['build_number'] }}</td>
-                <td>{{ r['published_at'] }}<br><small class="text-muted">{{ r['published_by'] or '' }}</small></td>
-                <td>{% if r['is_active'] %}<span class="badge bg-success">Activa</span>{% else %}<span class="badge bg-secondary">Histórica</span>{% endif %}</td>
-                <td class="text-nowrap">
-                  {% if not r['is_active'] %}
-                  <form method="post" class="d-inline">
-                    <input type="hidden" name="action" value="activate"><input type="hidden" name="release_id" value="{{ r['id'] }}">
-                    <button class="btn btn-sm btn-outline-primary rounded-pill" type="submit">Activar</button>
-                  </form>
-                  {% endif %}
-                  <form method="post" class="d-inline" onsubmit="return confirm('¿Eliminar esta versión del historial?');">
-                    <input type="hidden" name="action" value="delete"><input type="hidden" name="release_id" value="{{ r['id'] }}">
-                    <button class="btn btn-sm btn-outline-danger rounded-pill" type="submit">Eliminar</button>
-                  </form>
-                </td>
-              </tr>
-            {% else %}
-              <tr><td colspan="6" class="text-center text-muted py-4">No hay versiones publicadas todavía.</td></tr>
-            {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      {% endif %}
-    </div>
-
-    <style>
-      .mobile-admin-shell{
-        width:96%;
-        max-width:1100px;
-        margin:26px auto 24px auto;
-        overflow:hidden;
-      }
-      .mobile-admin-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }
-      .mobile-admin-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-      .mobile-admin-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-        min-width:0;
-      }
-      .mobile-admin-header-icon{
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-      .mobile-admin-header-text{
-        max-width:900px;
-        min-width:0;
-      }
-      .mobile-admin-header-badge{
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }
-      .mobile-admin-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem !important;
-        line-height:1.1 !important;
-        margin:0 !important;
-        text-shadow:0 4px 14px rgba(0,0,0,.45);
-        overflow-wrap:break-word;
-      }
-      .mobile-admin-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem !important;
-        line-height:1.25 !important;
-        margin-top:3px;
-        overflow-wrap:break-word;
-      }
-      .mobile-platform-icon{width:54px;height:54px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:1.65rem;}
-      .mobile-platform-icon.android{background:#e7f7ee;color:#198754;}
-      .mobile-platform-icon.ios{background:#edf1f5;color:#111827;}
-      .mobile-version-box{background:#f8fafc;border:1px solid #e7edf4;border-radius:16px;padding:14px 16px;line-height:1.75;}
-      .mobile-qr{width:118px;height:118px;border-radius:14px;border:1px solid #e3e8ef;padding:6px;background:#fff;}
-      .mobile-admin-shell .card{border-radius:20px;overflow:hidden;}
-    </style>
-    """,
-        android=android,
-        ios=ios,
-        history=history,
-        android_url=android_url,
-        ios_url=ios_url,
-        android_qr=android_qr,
-        ios_qr=ios_qr,
-        is_admin=(user.role == "admin"),
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-
-@app.route("/admin/mobile-app/download/<int:release_id>")
-@login_required
-def admin_mobile_app_download(release_id):
-    user = User.query.get(session.get("user_id"))
-    if not _mobile_release_allowed(user):
-        flash("No tiene permiso para descargar GRAC Mobile.", "danger")
-        return redirect(url_for("menu"))
-
-    row = _mobile_release_row(release_id)
-    if not row or row["platform"] != "android" or not row["stored_name"]:
-        abort(404)
-
-    full_path = safe_join(MOBILE_RELEASE_DIR, row["stored_name"])
-    if not full_path or not os.path.isfile(full_path):
-        abort(404)
-
-    registrar_log(
-        user.username,
-        f"Descargó GRAC Mobile Android versión {row['version']} build {row['build_number']}.",
-    )
-    return send_file(
-        full_path,
-        mimetype="application/vnd.android.package-archive",
-        as_attachment=True,
-        download_name=f"GRAC-Mobile-{row['version']}-build-{row['build_number']}.apk",
-        conditional=True,
-    )
-
-
-@app.route('/')
-@login_required
-def menu():
-    usuario_actual = User.query.get(session.get('user_id'))
-    selected_widget_keys = _dashboard_get_selected_keys(session.get('user_id'))
-    dashboard = _dashboard_build_payload(selected_widget_keys, session.get('user_id'))
-    dashboard_kpis, dashboard_charts = _dashboard_prepare_view(
-        selected_widget_keys,
-        dashboard,
-        session.get('user_id'),
-    )
-
-    if usuario_actual and usuario_actual.role == "admin":
-        sections = MENU_SECTIONS
-    else:
-        sections = []
-        for sec in MENU_SECTIONS:
-            allowed_items = filtrar_items_menu(
-                sec.get("items", []), usuario_actual,
-                seccion_admin=(sec.get("title") == "Administración")
-            )
-            if allowed_items:
-                sec2 = dict(sec)
-                sec2["items"] = allowed_items
-                sections.append(sec2)
-
-    content = render_template_string("""
-    <div class="soa-shell">
-
-      <div class="sgsi-layout">
-
-        <!-- MENÚ LATERAL COMPLETO -->
-        <aside id="sgsiLocalMenu" class="sgsi-leftnav-wrap">
-
-          <div id="sgsiLocalMenuToggle" class="sgsi-leftnav-arrow">
-            <span class="sgsi-arrow-icon">‹</span>
-          </div>
-
-          <div class="sgsi-leftnav-card">
-
-            <div class="sgsi-leftnav-list">
-
-              <a class="sgsi-leftnav-link sgsi-panel-control-btn" href="/">
-                <i class="bi bi-speedometer2"></i>
-                <span>Centro de Control</span>
-              </a>
-
-              {% macro render_menu_items(items, prefix) %}
-                {% for it in items %}
-                  {% set item_id = prefix ~ "_item_" ~ loop.index %}
-
-                  {% if it.get("children") %}
-                    <li class="sgsi-node">
-                      <a class="sgsi-dropdown-item sgsi-node-toggle"
-                         href="javascript:void(0);"
-                         data-target="{{ item_id }}">
-                        <i class="bi {{ it.get('icon','bi-box') }}"></i>
-                        <span>{{ it["label"] }}</span>
-                      </a>
-
-                      <ul class="sgsi-panel sgsi-subpanel" id="{{ item_id }}">
-                        {{ render_menu_items(it["children"], item_id) }}
-                      </ul>
-                    </li>
-                  {% else %}
-                    <li>
-                      <a class="sgsi-dropdown-item" href="{{ it.get('href', '#') }}">
-                        <i class="bi {{ it.get('icon','bi-dot') }}"></i>
-                        <span>{{ it["label"] }}</span>
-                      </a>
-                    </li>
-                  {% endif %}
-                {% endfor %}
-              {% endmacro %}
-
-              {% for sec in sections %}
-                {% set sid = "sgsi_root_" ~ loop.index %}
-
-                <div class="sgsi-root-item">
-                  <button class="sgsi-leftnav-link sgsi-root-toggle"
-                          type="button"
-                          data-target="{{ sid }}">
-                    <i class="bi {{ sec.get('icon', 'bi-grid-1x2') }}"></i>
-                    <span>{{ sec["title"] }}</span>
-                  </button>
-
-                  <ul class="sgsi-panel" id="{{ sid }}">
-                    {{ render_menu_items(sec["items"], sid) }}
-                  </ul>
-                </div>
-              {% endfor %}
-
-            </div>
-          </div>
-        </aside>
-
-        <!-- TABLERO -->
-        <main class="sgsi-dashboard-zone">
-
-          {% if dashboard_kpis %}
-            <section class="sgsi-stats-grid">
-              {% for item in dashboard_kpis %}
-                <div class="sgsi-stat-card">
-                  <div class="sgsi-stat-icon {{ item.color }}">
-                    <i class="bi {{ item.icon }}"></i>
-                  </div>
-                  <div class="sgsi-stat-text">
-                    <div class="sgsi-stat-title">{{ item.title }}</div>
-                    <div class="sgsi-stat-value {{ item.color }}-text" id="{{ item.element_id }}">
-                      {{ item.display_value }}
-                    </div>
-                    <div class="sgsi-stat-link">{{ item.subtitle }}</div>
-                  </div>
-                </div>
-              {% endfor %}
-            </section>
-          {% endif %}
-
-          {% if dashboard_charts %}
-            <section class="sgsi-dashboard-grid">
-              {% for item in dashboard_charts %}
-                <div class="sgsi-chart-card">
-                  <div class="sgsi-chart-head">
-                    <h3>{{ item.title }}</h3>
-                    <span>{{ item.display_value }}</span>
-                  </div>
-                  <div class="sgsi-chart-body">
-                    <img id="{{ item.image_id }}"
-                         src="data:image/png;base64,{{ item.image }}"
-                         class="sgsi-chart-img"
-                         alt="{{ item.title }}">
-                  </div>
-                </div>
-              {% endfor %}
-            </section>
-          {% endif %}
-
-          {% if not dashboard_kpis and not dashboard_charts %}
-            <section class="sgsi-dashboard-empty">
-              <div class="sgsi-dashboard-empty-icon"><i class="bi bi-layout-wtf"></i></div>
-              <h3>Tu Centro de Control no tiene elementos seleccionados</h3>
-              <p>Ingresa al diseñador, selecciona una fuente de datos y elige cómo presentarla.</p>
-              <a href="{{ url_for('dashboard_config') }}" class="btn btn-primary rounded-pill px-4 fw-bold">
-                Construir Centro de Control
-              </a>
-            </section>
-          {% endif %}
-
-        </main>
-      </div>
-    </div>
-
-    <style>
-      :root{
-        --sgsi-sidebar-w:245px;
-        --sgsi-card:#ffffff;
-        --sgsi-purple:#074883;
-        --sgsi-purple-2:#1d5fae;
-        --sgsi-lav:#dcecff;
-        --sgsi-lav-2:#c9e3ff;
-        --sgsi-border:#a9cdeb;
-        --sgsi-text:#0f3766;
-        --sgsi-muted:#425f7f;
-      }
-
-      .soa-shell{
-        width:100%;
-        margin:0 0 34px 0;
-      }
-
-      .sgsi-layout{
-        display:grid;
-        grid-template-columns:var(--sgsi-sidebar-w) minmax(0,1fr);
-        gap:16px;
-        align-items:start;
-        transition:all .22s ease;
-      }
-
-      .sgsi-leftnav-wrap{
-        position:sticky;
-        top:var(--arky-topbar-h, 86px);
-        align-self:start;
-        z-index:30;
-      }
-
-      .sgsi-leftnav-card{
-        background:linear-gradient(180deg,rgba(238,247,255,.97) 0%,rgba(213,234,255,.95) 48%,rgba(198,222,245,.94) 100%);
-        border:1px solid var(--sgsi-border);
-        border-radius:0 18px 18px 0;
-        box-shadow:10px 0 30px rgba(28,91,160,.18), inset -1px 0 rgba(255,255,255,.65);
-        padding:8px 7px;
-        max-height:calc(100vh - var(--arky-topbar-h, 86px)) !important;
-        overflow-y:auto !important;
-        overflow-x:hidden !important;
-        backdrop-filter:blur(14px);
-        -webkit-backdrop-filter:blur(14px);
-      }
-
-      .sgsi-leftnav-card::-webkit-scrollbar{ width:7px; }
-      .sgsi-leftnav-card::-webkit-scrollbar-thumb{ background:#b8a3d8; border-radius:999px; }
-      .sgsi-leftnav-card::-webkit-scrollbar-track{ background:#eef4ff; border-radius:999px; }
-
-      .sgsi-leftnav-header{
-        display:flex;
-        align-items:center;
-        gap:10px;
-        padding:10px 10px 14px;
-        border-bottom:1px solid var(--sgsi-border);
-        margin-bottom:12px;
-      }
-
-      .sgsi-leftnav-header-icon{
-        width:40px;
-        height:40px;
-        border-radius:14px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        background:linear-gradient(135deg,var(--sgsi-purple),var(--sgsi-purple-2));
-        color:#fff;
-        box-shadow:0 10px 22px rgba(75,11,130,.22);
-        flex:0 0 auto;
-      }
-
-      .sgsi-leftnav-title{
-        font-size:.94rem;
-        font-weight:950;
-        color:var(--sgsi-text);
-        line-height:1.1;
-      }
-
-      .sgsi-leftnav-subtitle{
-        margin-top:3px;
-        font-size:.72rem;
-        color:var(--sgsi-muted);
-        font-weight:750;
-        line-height:1.2;
-      }
-
-      .sgsi-leftnav-list{
-        display:flex;
-        flex-direction:column;
-        gap:7px;
-      }
-
-      .sgsi-leftnav-link{
-        width:100%;
-        display:flex !important;
-        align-items:center;
-        justify-content:flex-start;
-        gap:7px;
-        border:1px solid transparent !important;
-        border-radius:14px !important;
-        background:transparent !important;
-        color:#26384f !important;
-        padding:8px 9px !important;
-        font-size:.72rem !important;
-        font-weight:850 !important;
-        white-space:normal !important;
-        text-align:left;
-        line-height:1.15 !important;
-        min-height:36px !important;
-        text-decoration:none !important;
-        transition:all .18s ease;
-      }
-
-      .sgsi-leftnav-link:hover,
-      .sgsi-leftnav-link.sgsi-active{
-        background:var(--sgsi-lav) !important;
-        color:var(--sgsi-purple) !important;
-        border-color:var(--sgsi-border) !important;
-      }
-
-      .sgsi-panel-control-btn{
-        background:linear-gradient(135deg,var(--sgsi-purple) 0%,#1d5fae 58%,#3f8fd6 100%) !important;
-        color:#ffffff !important;
-        border:1px solid rgba(255,255,255,.40) !important;
-        box-shadow:0 12px 26px rgba(75,11,130,.24) !important;
-      }
-
-      .sgsi-root-toggle::after,
-      .sgsi-node-toggle::after{
-        content:"⌄";
-        margin-left:auto;
-        font-size:13px;
-        font-weight:950;
-        transition:transform .18s ease;
-      }
-
-      .sgsi-root-toggle.sgsi-active::after,
-      .sgsi-node-toggle.sgsi-active::after{
-        transform:rotate(180deg);
-      }
-
-      .sgsi-panel{
-        display:none;
-        list-style:none;
-        margin:6px 0 0 0 !important;
-        padding:6px 0 6px 9px !important;
-        background:var(--sgsi-lav) !important;
-        border:1px solid var(--sgsi-border) !important;
-        border-radius:15px !important;
-        overflow:visible !important;
-      }
-
-      .sgsi-panel.sgsi-open{ display:block !important; }
-
-      .sgsi-subpanel{
-        margin-left:5px !important;
-        padding-left:8px !important;
-        border-left:2px solid #a88fd3 !important;
-      }
-
-      .sgsi-dropdown-item{
-        display:flex;
-        align-items:center;
-        gap:6px;
-        padding:6px 7px;
-        border-radius:12px;
-        font-size:.68rem;
-        font-weight:800;
-        color:#26384f !important;
-        white-space:normal;
-        line-height:1.16;
-        text-decoration:none;
-        margin:3px 4px;
-        background:rgba(241,247,255,.74);
-        border:1px solid rgba(181,205,230,.78);
-        transition:all .18s ease;
-      }
-
-      .sgsi-dropdown-item:hover,
-      .sgsi-dropdown-item.sgsi-active{
-        background:#ffffff !important;
-        color:var(--sgsi-purple) !important;
-        box-shadow:0 8px 16px rgba(43,0,79,.08);
-      }
-
-      .sgsi-leftnav-arrow{
-        position:absolute;
-        right:-13px;
-        top:22px;
-        width:26px;
-        height:58px;
-        border-radius:999px;
-        background:linear-gradient(135deg,var(--sgsi-purple),#1d5fae);
-        color:#ffffff;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        cursor:pointer;
-        box-shadow:0 10px 22px rgba(43,0,79,.22);
-        border:2px solid #fff;
-        z-index:20;
-      }
-
-      .sgsi-arrow-icon{
-        font-size:26px;
-        font-weight:950;
-        line-height:1;
-        position:relative;
-        top:-1px;
-      }
-
-      body.sgsi-menu-collapsed .sgsi-layout{
-        grid-template-columns:0 minmax(0,1fr);
-        gap:0;
-      }
-
-      body.sgsi-menu-collapsed .sgsi-leftnav-card{
-        opacity:0;
-        pointer-events:none;
-        transform:translateX(-245px);
-      }
-
-      body.sgsi-menu-collapsed .sgsi-leftnav-arrow{
-        right:-44px;
-      }
-
-      body.sgsi-menu-collapsed .sgsi-arrow-icon{ transform:rotate(180deg); }
-
-      .sgsi-dashboard-zone{ min-width:0; overflow:hidden; }
-
-      .sgsi-dashboard-toolbar{
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:12px;
-        margin:0 0 14px;
-        padding:10px 14px;
-        border:1px solid var(--sgsi-border);
-        border-radius:16px;
-        background:rgba(248,252,255,.93);
-        box-shadow:0 10px 22px rgba(43,0,79,.07);
-      }
-      .sgsi-dashboard-toolbar-text{font-size:.74rem;font-weight:900;color:#355777;}
-      .sgsi-dashboard-config-btn{font-size:.70rem!important;font-weight:900!important;padding:6px 14px!important;}
-      .sgsi-dashboard-empty{
-        max-width:760px;
-        margin:30px auto;
-        padding:42px 24px;
-        text-align:center;
-        background:rgba(248,252,255,.96);
-        border:1px solid var(--sgsi-border);
-        border-radius:24px;
-        box-shadow:0 18px 34px rgba(43,0,79,.10);
-      }
-      .sgsi-dashboard-empty-icon{width:64px;height:64px;border-radius:20px;margin:0 auto 14px;display:flex;align-items:center;justify-content:center;background:#eaf3ff;color:#0b4a8f;font-size:1.7rem;}
-      .sgsi-dashboard-empty h3{font-size:1.05rem;font-weight:950;color:#173a61;margin-bottom:7px;}
-      .sgsi-dashboard-empty p{font-size:.78rem;color:#64788e;margin-bottom:18px;}
-
-      .sgsi-stats-grid{
-        width:100%;
-        max-width:1160px;
-        margin:0 auto 20px auto;
-        display:grid;
-        grid-template-columns:repeat(auto-fit, minmax(230px, 1fr));
-        justify-content:center;
-        align-items:stretch;
-        gap:14px;
-      }
-
-      .sgsi-stat-card{
-        width:100%;
-        min-width:0;
-        min-height:104px;
-        padding:16px 14px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        gap:12px;
-        background:rgba(248,252,255,.96);
-        border:1px solid var(--sgsi-border);
-        border-radius:22px;
-        box-shadow:0 18px 34px rgba(43,0,79,.10);
-        text-align:center;
-        overflow:hidden;
-        transition:all .20s ease;
-      }
-
-      .sgsi-stat-card:hover{ transform:translateY(-3px); box-shadow:0 24px 42px rgba(43,0,79,.14); }
-
-      .sgsi-stat-icon{
-        width:48px;
-        height:48px;
-        min-width:48px;
-        flex:0 0 48px;
-        border-radius:16px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.18rem;
-      }
-
-      .sgsi-stat-icon.blue{background:#eef4ff;color:#0f56b3;}
-      .sgsi-stat-icon.orange{background:#fff3e8;color:#c95508;}
-      .sgsi-stat-icon.green{background:#ecfdf3;color:#087c3d;}
-      .sgsi-stat-icon.purple{background:#f2eaff;color:#5521a8;}
-      .blue-text{color:#0f56b3 !important;} .orange-text{color:#c95508 !important;} .green-text{color:#087c3d !important;} .purple-text{color:#5521a8 !important;}
-
-      .sgsi-stat-text{ min-width:0; flex:1 1 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; overflow:hidden; }
-      .sgsi-stat-title{ width:100%; font-size:.72rem; font-weight:950; color:#17263b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      .sgsi-stat-value{ width:100%; margin-top:3px; font-size:1.25rem; line-height:1.05; font-weight:950; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      .sgsi-stat-link{ width:100%; margin-top:5px; color:var(--sgsi-muted); font-size:.65rem; font-weight:850; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-
-      .sgsi-dashboard-grid{ display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:18px; }
-      .sgsi-chart-card{ grid-column:span 4; background:rgba(248,252,255,.96); border:1px solid var(--sgsi-border); border-radius:24px; box-shadow:0 18px 34px rgba(43,0,79,.11); min-height:360px; overflow:hidden; }
-      .sgsi-chart-head{ padding:16px 18px 10px 18px; display:flex; justify-content:space-between; gap:10px; border-bottom:1px solid var(--sgsi-border); background:linear-gradient(180deg,#fff 0%,#f2f7ff 100%); }
-      .sgsi-chart-head h3{ margin:0; font-size:.92rem; font-weight:950; color:#17263b; }
-      .sgsi-chart-head span{ font-size:.72rem; font-weight:900; color:var(--sgsi-purple-2); }
-      .sgsi-chart-body{ min-height:295px; display:flex; align-items:center; justify-content:center; padding:10px 14px 16px; }
-      .sgsi-chart-img{ width:100%; height:295px; object-fit:contain; }
-
-      @media(max-width:1200px){
-        .sgsi-layout{ grid-template-columns:1fr; }
-        .sgsi-leftnav-wrap{ position:relative; top:auto; }
-        .sgsi-leftnav-card{ max-height:560px !important; }
-        .sgsi-stats-grid{ max-width:740px; grid-template-columns:repeat(2, minmax(260px, 1fr)); gap:14px; }
-        .sgsi-chart-card{ grid-column:span 6; }
-      }
-
-      @media(max-width:991px){
-        .sgsi-stats-grid{ max-width:340px; grid-template-columns:minmax(260px, 320px); }
-        .sgsi-chart-card{ grid-column:span 12; }
-      }
-    
-      /* Compactar menú local de Centro de Control */
-      .sgsi-leftnav-card{
-        padding:8px 7px !important;
-        border-radius:0 16px 16px 0 !important;
-      }
-      .sgsi-leftnav-link{
-        font-size:.70rem !important;
-        min-height:35px !important;
-        padding:7px 8px !important;
-        border-radius:11px !important;
-        gap:6px !important;
-      }
-      .sgsi-dropdown-item{
-        font-size:.66rem !important;
-        padding:6px 7px !important;
-        border-radius:10px !important;
-        gap:6px !important;
-      }
-      .sgsi-panel{
-        margin-top:4px !important;
-        padding:4px 0 4px 6px !important;
-        border-radius:12px !important;
-      }
-      .sgsi-leftnav-arrow{
-        top:16px !important;
-        width:22px !important;
-        height:50px !important;
-      }
-
-</style>
-
-    <script>
-      function sgsiTogglePanel(trigger){
-        const id = trigger.getAttribute("data-target");
-        const panel = id ? document.getElementById(id) : null;
-        if(!panel) return;
-
-        const isOpen = panel.classList.contains("sgsi-open");
-
-        if(isOpen){
-          panel.classList.remove("sgsi-open");
-          trigger.classList.remove("sgsi-active");
-        }else{
-          panel.classList.add("sgsi-open");
-          trigger.classList.add("sgsi-active");
-        }
-      }
-
-      document.addEventListener("click", function(e){
-        const trigger = e.target.closest(".sgsi-root-toggle, .sgsi-node-toggle");
-
-        if(trigger){
-          e.preventDefault();
-          e.stopPropagation();
-          sgsiTogglePanel(trigger);
-          return;
-        }
-
-        const menuToggle = e.target.closest("#sgsiLocalMenuToggle");
-
-        if(menuToggle){
-          e.preventDefault();
-          document.body.classList.toggle("sgsi-menu-collapsed");
-        }
-      });
-    </script>
-    """,
-    sections=sections,
-    dashboard=dashboard,
-    dashboard_kpis=dashboard_kpis,
-    dashboard_charts=dashboard_charts,
-    selected_widget_keys=selected_widget_keys)
-
-    return render_template_string(
-        BASE,
-        content=content,
-        current_user=usuario_actual
-    )
-
-# ============================================================================================================================================
-#                                                               Fin del Menu Principal
-# ============================================================================================================================================
-
-
-# ============================================================================================================================================
-#                                                               Módulo de Áreas de la Empresa
-# ============================================================================================================================================
-
-
-
-
-# =========================
-# Areas - area
-# =========================
-
-@app.route('/areas_area', methods=['GET', 'POST'])
-@login_required
-def areas_area():
-    user = User.query.filter_by(username=session['username']).first()
-
-    if user.role == 'auditor':
-        flash("El auditor solo puede consultar información.", "warning")
-        return redirect(url_for('areas'))
-
-    # Crear / Editar Área
-    if request.method == 'POST':
-        rid = request.form.get('id', type=int)
-
-        area = (request.form.get('area') or "").strip()
-        responsable_nombre = (request.form.get('responsable_nombre') or "").strip()
-        responsable_cargo = (request.form.get('responsable_cargo') or "").strip()
-
-        if not all([area, responsable_nombre, responsable_cargo]):
-            flash("Todos los campos del área son obligatorios.", "danger")
-            return redirect(url_for('areas_area'))
-
-        if rid:
-            item = AreaEmpresa.query.get(rid)
-            if not item:
-                flash("Área no encontrada.", "danger")
-                return redirect(url_for('areas_area'))
-        else:
-            item = AreaEmpresa()
-
-        item.area = area
-        item.responsable_nombre = responsable_nombre
-        item.responsable_cargo = responsable_cargo
-
-        db.session.add(item)
-        db.session.commit()
-        flash("Área guardada correctamente.", "success")
-        return redirect(url_for('areas_area'))
-
-    # GET
-    edit_id = request.args.get('edit', type=int)
-    edit_item = AreaEmpresa.query.get(edit_id) if edit_id else None
-    items = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
-
-    html = """
-    <div class="areas-shell">
-
-      <!-- CABECERA -->
-      <div class="areas-header-card">
-        <div class="areas-header-overlay">
-          <div class="areas-header-text">
-            <h3 class="areas-title m-0">Áreas de la Empresa</h3>
-            <div class="areas-subtitle">
-              Administra las áreas organizacionales y asigna el responsable
-              principal de cada una junto con su cargo.
-            </div>
-          </div>
-        </div>
-      </div>
-
-
-      <!-- FORMULARIO -->
-      <div class="areas-card p-4 mb-3">
-        <div class="areas-section-title">
-          {% if edit_item %}Editar área{% else %}Registrar nueva área{% endif %}
-        </div>
-
-        <form method="post" action="{{ url_for('areas_area') }}">
-          {% if edit_item %}
-            <input type="hidden" name="id" value="{{ edit_item.id }}">
-          {% endif %}
-
-          <div class="row g-3">
-
-            <div class="col-md-4">
-              <label class="form-label">Área</label>
-              <input type="text"
-                     name="area"
-                     class="form-control"
-                     required
-                     value="{{ edit_item.area if edit_item else '' }}">
-            </div>
-
-            <div class="col-md-4">
-              <label class="form-label">Nombre responsable del área</label>
-              <input type="text"
-                     name="responsable_nombre"
-                     class="form-control"
-                     required
-                     value="{{ edit_item.responsable_nombre if edit_item else '' }}">
-            </div>
-
-            <div class="col-md-4">
-              <label class="form-label">Cargo (Responsable de área)</label>
-              <input type="text"
-                     name="responsable_cargo"
-                     class="form-control"
-                     required
-                     value="{{ edit_item.responsable_cargo if edit_item else '' }}">
-            </div>
-
-          </div>
-
-          <div class="mt-4 d-flex justify-content-center gap-2">
-            <button type="submit" class="btn btn-success rounded-pill px-4">
-              {% if edit_item %}Guardar cambios{% else %}Agregar área{% endif %}
-            </button>
-
-            {% if edit_item %}
-              <a href="{{ url_for('areas_area') }}"
-                 class="btn btn-outline-secondary rounded-pill px-4">
-                Cancelar
-              </a>
-            {% endif %}
-          </div>
-        </form>
-      </div>
-
-      <!-- TABLA -->
-      <div class="areas-card p-3">
-        <div class="areas-section-title">
-          Listado de áreas registradas
-        </div>
-
-        <div class="table-responsive areas-table-wrap">
-          <table class="table table-bordered table-sm align-middle mb-0">
-            <thead class="areas-table-head">
-              <tr class="text-center">
-                <th>Área</th>
-                <th>Responsable del área</th>
-                <th>Cargo (Resp.)</th>
-                <th style="width:16%; min-width:170px;">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for it in items %}
-              <tr>
-                <td><b>{{ it.area }}</b></td>
-                <td>{{ it.responsable_nombre }}</td>
-                <td>{{ it.responsable_cargo }}</td>
-                <td class="text-center">
-                  <a href="{{ url_for('areas_area', edit=it.id) }}"
-                     class="btn btn-warning btn-sm rounded-pill px-3">
-                    Editar
-                  </a>
-
-                  <a href="{{ url_for('areas_delete', id=it.id) }}"
-                     class="btn btn-danger btn-sm rounded-pill px-3"
-                     onclick="return confirm('¿Eliminar este registro?');">
-                    Eliminar
-                  </a>
-                </td>
-              </tr>
-              {% endfor %}
-
-              {% if items|length == 0 %}
-                <tr>
-                  <td colspan="4" class="text-center text-muted">
-                    Sin registros
-                  </td>
-                </tr>
-              {% endif %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .areas-shell{
-        width:96%;
-        max-width:1200px;
-        margin:26px auto 24px auto;
-        overflow:hidden;
-      }
-
-      .areas-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }
-
-      .areas-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .areas-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-        min-width:0;
-      }
-
-      .areas-header-overlay::before{
-        content:"📦";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .areas-header-text{
-        max-width:1000px;
-        min-width:0;
-      }
-
-      .areas-header-text::before{
-        content:"SGSI · Gestión de Áreas";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }
-
-      .areas-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        margin:0 !important;
-        text-shadow:0 4px 14px rgba(0,0,0,.45);
-        overflow-wrap:break-word;
-      }
-
-      .areas-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        line-height:1.25;
-        margin-top:3px;
-        overflow-wrap:break-word;
-      }
-
-      .areas-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .btn{
-        border-radius:10px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-        max-width:100%;
-      }
-
-      .areas-btn-main{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .areas-btn-main:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-      }
-
-      .areas-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-        width:100%;
-        max-width:100%;
-      }
-
-      .areas-card .card-body{
-        padding:22px;
-        overflow:hidden;
-      }
-
-      .areas-section-title{
-        font-weight:950;
-        font-size:.95rem;
-        color:#0b4a8f;
-        margin-bottom:16px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-        padding-bottom:8px;
-        overflow-wrap:break-word;
-      }
-
-      .areas-table-wrap{
-        border:1px solid #e2ebf5;
-        border-radius:14px;
-        background:#ffffff;
-        overflow-x:auto;
-        overflow-y:hidden;
-        box-shadow:inset 0 1px 0 rgba(255,255,255,.35);
-        width:100%;
-        max-width:100%;
-      }
-
-      .areas-table-wrap .table{
-        margin-bottom:0;
-        min-width:780px;
-      }
-
-      .areas-table-wrap thead th,
-      .areas-table-head th{
-        background:#eef5ff !important;
-        font-weight:950;
-        color:#0b4a8f;
-        border-bottom:1px solid #d7dee7 !important;
-        vertical-align:middle !important;
-        white-space:nowrap;
-        font-size:.82rem;
-      }
-
-      .areas-table-wrap tbody td{
-        vertical-align:middle;
-        font-size:.85rem;
-        color:#334155;
-      }
-
-      .areas-table-wrap tbody tr:last-child td{
-        border-bottom:none;
-      }
-
-      .areas-table-wrap tbody tr:hover{
-        background:#f8fbff;
-      }
-
-      .form-control,
-      .form-select{
-        border-radius:10px;
-        border:1px solid #d9e3f0;
-        min-height:40px;
-        font-size:.86rem;
-        background:#f8fafc;
-        max-width:100%;
-      }
-
-      .form-control:focus,
-      .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#ffffff;
-      }
-
-      .input-group-text{
-        border-radius:0 10px 10px 0;
-        background:#eef5ff;
-        border-color:#d9e3f0;
-        color:#0b4a8f;
-        font-weight:900;
-      }
-
-      .areas-soft-box{
-        background:#f8fbff;
-        border:1px solid #e2ebf5;
-        border-radius:14px;
-        padding:14px 16px;
-        min-width:0;
-        max-width:100%;
-        overflow:hidden;
-        overflow-wrap:break-word;
-      }
-
-      h3{
-        color:#ffffff;
-        margin:0;
-      }
-
-      @media (max-width:992px){
-        .areas-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .areas-title{
-          font-size:1.20rem;
-        }
-
-        .areas-subtitle{
-          font-size:.68rem;
-        }
-
-        .areas-card .card-body{
-          padding:16px;
-        }
-      }
-
-      @media (max-width:768px){
-        .areas-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .areas-header-overlay::before{
-          margin:0;
-        }
-
-        .areas-title,
-        .areas-subtitle{
-          text-align:center;
-        }
-
-        .areas-header-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(html, edit_item=edit_item, items=items)
-    return render_template_string(BASE, content=Markup(inner))
-
-# =========================
-# División
-# =========================
-
-@app.route('/areas_division', methods=['GET', 'POST'])
-@login_required
-def areas_division():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El auditor solo puede consultar información.", "warning")
-        return redirect(url_for('areas'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Configuración Parámetros de la Empresa"):
-        flash("No tiene permiso para gestionar Divisiones.", "danger")
-        return redirect(url_for('areas'))
-    
-    # Crear / Editar División
-    if request.method == 'POST':
-        rid = request.form.get('id', type=int)
-
-        area_id = request.form.get('area_id', type=int)
-        nombre_division = (request.form.get('nombre_division') or "").strip()
-        encargado_nombre = (request.form.get('encargado_nombre') or "").strip()
-        encargado_cargo = (request.form.get('encargado_cargo') or "").strip()
-
-        if not all([area_id, nombre_division, encargado_nombre, encargado_cargo]):
-            flash("Todos los campos de la división son obligatorios.", "danger")
-            return redirect(url_for('areas_division'))
-
-        if not AreaEmpresa.query.get(area_id):
-            flash("El área seleccionada no existe.", "danger")
-            return redirect(url_for('areas_division'))
-
-        if rid:
-            div = DivisionEmpresa.query.get(rid)
-            if not div:
-                flash("División no encontrada.", "danger")
-                return redirect(url_for('areas_division'))
-        else:
-            div = DivisionEmpresa()
-
-        div.area_id = area_id
-        div.nombre_division = nombre_division
-        div.encargado_nombre = encargado_nombre
-        div.encargado_cargo = encargado_cargo
-
-        db.session.add(div)
-        db.session.commit()
-        flash("División guardada correctamente.", "success")
-        return redirect(url_for('areas_division'))
-
-    # GET
-    edit_id = request.args.get('edit', type=int)
-    edit_item = DivisionEmpresa.query.get(edit_id) if edit_id else None
-
-    areas_list = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
-    divisiones_list = DivisionEmpresa.query.join(AreaEmpresa).order_by(
-        AreaEmpresa.area.asc(), DivisionEmpresa.nombre_division.asc()
-    ).all()
-
-    html = """
-    <div class="divisiones-shell">
-
-      <!-- CABECERA -->
-      <div class="divisiones-header-card">
-        <div class="divisiones-header-overlay">
-          <div class="divisiones-header-text">
-            <h3 class="divisiones-title m-0">Divisiones de la Empresa</h3>
-            <div class="divisiones-subtitle">
-              Administra las divisiones organizacionales, asociándolas a su área
-              y definiendo el encargado principal con su respectivo cargo.
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- FORMULARIO -->
-      <div class="divisiones-card p-4 mb-3">
-        <div class="divisiones-section-title">
-          {% if edit_item %}Editar división{% else %}Registrar nueva división{% endif %}
-        </div>
-
-        <form method="post" action="{{ url_for('areas_division') }}">
-          {% if edit_item %}
-            <input type="hidden" name="id" value="{{ edit_item.id }}">
-          {% endif %}
-
-          <div class="row g-3">
-
-            <div class="col-md-4">
-              <label class="form-label">Área</label>
-              <select name="area_id" class="form-select" required>
-                <option value="">-- Seleccione un área --</option>
-                {% for a in areas_list %}
-                  <option value="{{ a.id }}"
-                    {% if edit_item and edit_item.area_id == a.id %}selected{% endif %}>
-                    {{ a.area }}
-                  </option>
-                {% endfor %}
-              </select>
-            </div>
-
-            <div class="col-md-4">
-              <label class="form-label">Nombre de la división</label>
-              <input type="text"
-                     name="nombre_division"
-                     class="form-control"
-                     required
-                     value="{{ edit_item.nombre_division if edit_item else '' }}">
-            </div>
-
-            <div class="col-md-4">
-              <label class="form-label">Nombre del encargado de la división</label>
-              <input type="text"
-                     name="encargado_nombre"
-                     class="form-control"
-                     required
-                     value="{{ edit_item.encargado_nombre if edit_item else '' }}">
-            </div>
-
-            <div class="col-md-4">
-              <label class="form-label">Cargo (Encargado de división)</label>
-              <input type="text"
-                     name="encargado_cargo"
-                     class="form-control"
-                     required
-                     value="{{ edit_item.encargado_cargo if edit_item else '' }}">
-            </div>
-
-          </div>
-
-          <div class="mt-4 d-flex justify-content-center gap-2">
-            <button type="submit" class="btn btn-success rounded-pill px-4">
-              {% if edit_item %}Guardar cambios{% else %}Agregar división{% endif %}
-            </button>
-
-            {% if edit_item %}
-              <a href="{{ url_for('areas_division') }}"
-                 class="btn btn-outline-secondary rounded-pill px-4">
-                Cancelar
-              </a>
-            {% endif %}
-          </div>
-        </form>
-      </div>
-
-      <!-- TABLA -->
-      <div class="divisiones-card p-3">
-        <div class="divisiones-section-title">
-          Listado de divisiones registradas
-        </div>
-
-        <div class="table-responsive divisiones-table-wrap">
-          <table class="table table-bordered table-sm align-middle mb-0">
-            <thead class="divisiones-table-head">
-              <tr class="text-center">
-                <th>Área</th>
-                <th>División</th>
-                <th>Encargado</th>
-                <th>Cargo (Enc. Div.)</th>
-                <th style="width:16%; min-width:170px;">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for d in divisiones_list %}
-              <tr>
-                <td>{{ d.area.area if d.area else '' }}</td>
-                <td><b>{{ d.nombre_division }}</b></td>
-                <td>{{ d.encargado_nombre }}</td>
-                <td>{{ d.encargado_cargo }}</td>
-                <td class="text-center">
-                  <a href="{{ url_for('areas_division', edit=d.id) }}"
-                     class="btn btn-warning btn-sm rounded-pill px-3">
-                    Editar
-                  </a>
-
-                  <a href="{{ url_for('division_delete', id=d.id) }}"
-                     class="btn btn-danger btn-sm rounded-pill px-3"
-                     onclick="return confirm('¿Eliminar esta división?');">
-                    Eliminar
-                  </a>
-                </td>
-              </tr>
-              {% endfor %}
-
-              {% if divisiones_list|length == 0 %}
-                <tr>
-                  <td colspan="5" class="text-center text-muted">
-                    Sin registros
-                  </td>
-                </tr>
-              {% endif %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-    </div>
-
-   <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .divisiones-shell{
-        width:96%;
-        max-width:1200px;
-        margin:26px auto 24px auto;
-        overflow:hidden;
-      }
-
-      .divisiones-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }
-
-      .divisiones-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .divisiones-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-        min-width:0;
-      }
-
-      .divisiones-header-overlay::before{
-        content:"🏛️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .divisiones-header-text{
-        max-width:1000px;
-        min-width:0;
-      }
-
-      .divisiones-header-text::before{
-        content:"SGSI · Gestión de Divisiones";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }
-
-      .divisiones-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        margin:0 !important;
-        text-shadow:0 4px 14px rgba(0,0,0,.45);
-        overflow-wrap:break-word;
-      }
-
-      .divisiones-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        line-height:1.25;
-        margin-top:3px;
-        overflow-wrap:break-word;
-      }
-
-      .divisiones-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .btn{
-        border-radius:10px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-        max-width:100%;
-      }
-
-      .divisiones-btn-main{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .divisiones-btn-main:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-      }
-
-      .divisiones-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-        width:100%;
-        max-width:100%;
-      }
-
-      .divisiones-card .card-body{
-        padding:22px;
-        overflow:hidden;
-      }
-
-      .divisiones-section-title{
-        font-weight:950;
-        font-size:.95rem;
-        color:#0b4a8f;
-        margin-bottom:16px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-        padding-bottom:8px;
-        overflow-wrap:break-word;
-      }
-
-      .divisiones-table-wrap{
-        border:1px solid #e2ebf5;
-        border-radius:14px;
-        background:#ffffff;
-        overflow-x:auto;
-        overflow-y:hidden;
-        box-shadow:inset 0 1px 0 rgba(255,255,255,.35);
-        width:100%;
-        max-width:100%;
-      }
-
-      .divisiones-table-wrap .table{
-        margin-bottom:0;
-        min-width:780px;
-      }
-
-      .divisiones-table-wrap thead th,
-      .divisiones-table-head th{
-        background:#eef5ff !important;
-        font-weight:950;
-        color:#0b4a8f;
-        border-bottom:1px solid #d7dee7 !important;
-        vertical-align:middle !important;
-        white-space:nowrap;
-        font-size:.82rem;
-      }
-
-      .divisiones-table-wrap tbody td{
-        vertical-align:middle;
-        font-size:.85rem;
-        color:#334155;
-      }
-
-      .divisiones-table-wrap tbody tr:last-child td{
-        border-bottom:none;
-      }
-
-      .divisiones-table-wrap tbody tr:hover{
-        background:#f8fbff;
-      }
-
-      .form-control,
-      .form-select{
-        border-radius:10px;
-        border:1px solid #d9e3f0;
-        min-height:40px;
-        font-size:.86rem;
-        background:#f8fafc;
-        max-width:100%;
-      }
-
-      .form-control:focus,
-      .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#ffffff;
-      }
-
-      .input-group-text{
-        border-radius:0 10px 10px 0;
-        background:#eef5ff;
-        border-color:#d9e3f0;
-        color:#0b4a8f;
-        font-weight:900;
-      }
-
-      .divisiones-soft-box{
-        background:#f8fbff;
-        border:1px solid #e2ebf5;
-        border-radius:14px;
-        padding:14px 16px;
-        min-width:0;
-        max-width:100%;
-        overflow:hidden;
-        overflow-wrap:break-word;
-      }
-
-      h3{
-        color:#ffffff;
-        margin:0;
-      }
-
-      @media (max-width:992px){
-        .divisiones-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .divisiones-title{
-          font-size:1.20rem;
-        }
-
-        .divisiones-subtitle{
-          font-size:.68rem;
-        }
-
-        .divisiones-card .card-body{
-          padding:16px;
-        }
-      }
-
-      @media (max-width:768px){
-        .divisiones-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .divisiones-header-overlay::before{
-          margin:0;
-        }
-
-        .divisiones-title,
-        .divisiones-subtitle{
-          text-align:center;
-        }
-
-        .divisiones-header-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(
-        html,
-        edit_item=edit_item,
-        areas_list=areas_list,
-        divisiones_list=divisiones_list
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-
-@app.route('/areas/<int:area_id>/info', methods=['GET'])
-@login_required
-def areas_info(area_id):
-    a = AreaEmpresa.query.get_or_404(area_id)
-    # OJO: aquí usamos los nombres reales de tu modelo:
-    resp  = getattr(a, 'responsable_nombre', '') or ''
-    cargo = getattr(a, 'responsable_cargo', '') or ''
-    return jsonify({"responsable": resp, "cargo": cargo})
-
-@app.route('/areas/<int:area_id>/divisiones_json')
-@login_required
-def areas_divisiones_json(area_id):
-    divs = (
-        DivisionEmpresa.query
-        .filter_by(area_id=area_id)
-        .order_by(DivisionEmpresa.nombre_division.asc())
-        .all()
-    )
-
-    return jsonify({
-        "divisiones": [
-            {
-                "id": d.id,
-                "nombre": d.nombre_division
-            }
-            for d in divs
-        ]
-    })
-
-
-@app.route('/areas/delete')
-@login_required
-def areas_delete():
-    rid = request.args.get('id', type=int)
-    it = AreaEmpresa.query.get(rid)
-
-    if not it:
-        flash("Registro no encontrado.", "danger")
-        return redirect(url_for('areas'))
-
-    # 🔎 1) Verificar si el área tiene divisiones asociadas
-    divisiones_asociadas = DivisionEmpresa.query.filter_by(area_id=it.id).count()
-
-    if divisiones_asociadas > 0:
-        flash(
-            "No se puede eliminar el área porque tiene una o varias divisiones asociadas. "
-            "Elimina primero las divisiones o reasígnalas.",
-            "danger"
-        )
-        return redirect(url_for('areas'))
-
-    # ✅ 2) Si no tiene divisiones, intentar eliminar
-    try:
-        db.session.delete(it)
-        db.session.commit()
-        flash("Área eliminada correctamente.", "success")
-    except IntegrityError:
-        db.session.rollback()
-        flash(
-            "No se pudo eliminar el área porque está referenciada en otros módulos "
-            "(inventarios, proveedores, etc.).",
-            "danger"
-        )
-
-    return redirect(url_for('areas'))
-
-    # Si no es área con divisiones asociadas (o es una división), se puede eliminar
-    db.session.delete(it)
-    db.session.commit()
-    flash("Eliminado correctamente.", "success")
-    return redirect(url_for('areas'))
-
-@app.route('/divisiones/delete')
-@login_required
-def division_delete():
-    rid = request.args.get('id', type=int)
-    d = DivisionEmpresa.query.get(rid)
-    if d:
-        db.session.delete(d)
-        db.session.commit()
-        flash("División eliminada correctamente.", "success")
-    else:
-        flash("División no encontrada.", "danger")
-    return redirect(url_for('areas_division'))
-
-# =========================
-# Configuración de Correo
-# =========================
-
-@app.route("/config/email", methods=["GET", "POST"])
-@login_required
-@admin_or_access_manager_required
-def config_email():
-    cfg = EmailConfig.query.first()
-    if not cfg:
-        cfg = EmailConfig()
-        db.session.add(cfg)
-        db.session.commit()
-
-    if request.method == "POST":
-        cfg.smtp_host = (request.form.get("smtp_host") or "smtp.gmail.com").strip()
-        cfg.smtp_port = int(request.form.get("smtp_port") or 587)
-
-        cfg.smtp_user = (request.form.get("smtp_user") or "").strip() or None
-        cfg.smtp_pass = (request.form.get("smtp_pass") or "").strip() or None
-
-        cfg.smtp_from = (request.form.get("smtp_from") or "").strip() or None
-        cfg.app_name  = (request.form.get("app_name")  or "SGSI").strip()
-
-        if not cfg.smtp_from:
-            cfg.smtp_from = cfg.smtp_user
-
-        db.session.commit()
-        flash("Configuración SMTP guardada correctamente.", "success")
-
-        # ✅ CORREGIDO: antes decía url_for("areas") y ese endpoint no existe
-        return redirect(url_for("config_email"))
-
-    inner = render_template_string("""
-    <div class="smtp-shell">
-
-      <div class="smtp-header-card">
-        <div class="smtp-header-overlay">
-          <div class="smtp-header-text">
-            <h3 class="smtp-title m-0">Configuración de correo (SMTP)</h3>
-            <div class="smtp-subtitle">
-              Configura los parámetros del servidor SMTP para el envío de notificaciones,
-              alertas y comunicaciones automáticas del sistema.
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="smtp-card p-4">
-        <div class="smtp-section-title">
-          Parámetros de conexión SMTP
-        </div>
-
-        <form method="POST" class="row g-3">
-
-          <div class="col-md-6">
-            <label class="form-label">SMTP Host</label>
-            <input name="smtp_host"
-                   class="form-control"
-                   value="{{ cfg.smtp_host or 'smtp.gmail.com' }}"
-                   required>
-          </div>
-
-          <div class="col-md-6">
-            <label class="form-label">SMTP Port</label>
-            <input name="smtp_port"
-                   type="number"
-                   class="form-control"
-                   value="{{ cfg.smtp_port or 587 }}"
-                   required>
-          </div>
-
-          <div class="col-md-6">
-            <label class="form-label">SMTP User (correo)</label>
-            <input name="smtp_user"
-                   type="email"
-                   class="form-control"
-                   value="{{ cfg.smtp_user or '' }}">
-            <div class="form-text">Ej: tu-cuenta@gmail.com</div>
-          </div>
-
-          <div class="col-md-6">
-            <label class="form-label">SMTP Pass (contraseña de app)</label>
-            <input name="smtp_pass"
-                   type="password"
-                   class="form-control"
-                   value="{{ cfg.smtp_pass or '' }}">
-            <div class="form-text">En Gmail usa “App Password”, no tu clave normal.</div>
-          </div>
-
-          <div class="col-md-6">
-            <label class="form-label">From (opcional)</label>
-            <input name="smtp_from"
-                   type="email"
-                   class="form-control"
-                   value="{{ cfg.smtp_from or '' }}">
-            <div class="form-text">Si queda vacío, se usa SMTP User.</div>
-          </div>
-
-          <div class="col-md-6">
-            <label class="form-label">Nombre de la app</label>
-            <input name="app_name"
-                   class="form-control"
-                   value="{{ cfg.app_name or 'SGSI' }}"
-                   required>
-          </div>
-
-          <div class="col-12 d-flex justify-content-center mt-3">
-            <button class="btn btn-success rounded-pill px-4">
-              💾 Guardar
-            </button>
-          </div>
-
-        </form>
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .smtp-shell{
-        width:96%;
-        max-width:1200px;
-        margin:26px auto 24px auto;
-        overflow:hidden;
-      }
-
-      .smtp-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }
-
-      .smtp-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .smtp-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-        min-width:0;
-      }
-
-      .smtp-header-overlay::before{
-        content:"✉️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .smtp-header-text{
-        max-width:1000px;
-        min-width:0;
-      }
-
-      .smtp-header-text::before{
-        content:"SGSI · Configuración SMTP";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }
-
-      .smtp-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        margin:0 !important;
-        text-shadow:0 4px 14px rgba(0,0,0,.45);
-        overflow-wrap:break-word;
-      }
-
-      .smtp-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        line-height:1.25;
-        margin-top:3px;
-        overflow-wrap:break-word;
-      }
-
-      .btn{
-        border-radius:10px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-        max-width:100%;
-      }
-
-      .smtp-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-        width:100%;
-        max-width:100%;
-      }
-
-      .smtp-section-title{
-        font-weight:950;
-        font-size:.95rem;
-        color:#0b4a8f;
-        margin-bottom:16px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-        padding-bottom:8px;
-      }
-
-      .form-control,
-      .form-select{
-        border-radius:10px;
-        border:1px solid #d9e3f0;
-        min-height:40px;
-        font-size:.86rem;
-        background:#f8fafc;
-        max-width:100%;
-      }
-
-      .form-control:focus,
-      .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#ffffff;
-      }
-
-      h3{
-        color:#ffffff;
-        margin:0;
-      }
-
-      @media (max-width:992px){
-        .smtp-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .smtp-title{
-          font-size:1.20rem;
-        }
-
-        .smtp-subtitle{
-          font-size:.68rem;
-        }
-      }
-
-      @media (max-width:768px){
-        .smtp-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .smtp-header-overlay::before{
-          margin:0;
-        }
-
-        .smtp-title,
-        .smtp-subtitle{
-          text-align:center;
-        }
-      }
-    </style>
-    """, cfg=cfg)
-
-    return render_template_string(BASE, content=Markup(inner))
-
-
-# ============================================================================
-# CENTRO DE ALERTAS - CONFIGURACIÓN, EVALUACIÓN Y CORREO
-# ============================================================================
-
-ALERT_DEFAULT_RULES = [
-    {
-        "code": "risks_outside_appetite", "name": "Riesgos fuera del apetito",
-        "module": "Riesgos", "metric_key": "risks_outside_appetite_inclusive",
-        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
-        "description": "Riesgos activos cuyo nivel residual es mayor o igual al apetito configurado.",
-        "url": "/riesgos",
-    },
-    {
-        "code": "vulnerabilities_critical", "name": "Vulnerabilidades críticas abiertas",
-        "module": "Vulnerabilidades", "metric_key": "vulnerabilities_critical_count",
-        "operator": ">", "threshold": 0, "severity": "crítica", "enabled": True,
-        "description": "Vulnerabilidades críticas que permanecen abiertas.",
-        "url": "/vulnerabilidades_menu",
-    },
-    {
-        "code": "vulnerabilities_overdue", "name": "Vulnerabilidades abiertas vencidas (fuera de SLA)",
-        "module": "Vulnerabilidades", "metric_key": "vulnerabilities_overdue_count",
-        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
-        "description": "Backlog de vulnerabilidades abiertas que superó el SLA configurado por clasificación.",
-        "url": "/vulnerabilidades_menu",
-    },
-    {
-        "code": "incidents_open", "name": "Incidentes abiertos",
-        "module": "Incidentes", "metric_key": "incidents_open_count",
-        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
-        "description": "Incidentes cuyo estado todavía no está cerrado o resuelto.",
-        "url": "/incidentes",
-    },
-    {
-        "code": "incidents_compliance", "name": "Cumplimiento de incidentes inferior a la meta",
-        "module": "Incidentes", "metric_key": "incidents_compliance_pct",
-        "operator": "<", "threshold": 90, "severity": "media", "enabled": False,
-        "description": "Cumplimiento promedio MTCD/MTIR inferior al porcentaje definido en esta regla.",
-        "url": "/metricas/incidentes/matriz",
-    },
-    {
-        "code": "plans_overdue", "name": "Planes de acción vencidos",
-        "module": "Planes de acción", "metric_key": "plans_overdue_count",
-        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
-        "description": "Planes cuya fecha objetivo venció y todavía no están cerrados.",
-        "url": "/planes_accion",
-    },
-    {
-        "code": "legal_noncompliant", "name": "Requisitos legales incumplidos",
-        "module": "Requisitos legales", "metric_key": "legal_noncompliant_count",
-        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
-        "description": "Requisitos legales o contractuales registrados como no cumplidos.",
-        "url": "/requisitos_menu",
-    },
-    {
-        "code": "providers_high", "name": "Proveedores de criticidad alta",
-        "module": "Proveedores", "metric_key": "providers_high_count",
-        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
-        "description": "Proveedores cuya evaluación presenta criticidad alta.",
-        "url": "/proveedores_menu",
-    },
-    {
-        "code": "documents_overdue", "name": "Documentos con revisión vencida",
-        "module": "Documentación", "metric_key": "documents_overdue_count",
-        "operator": ">", "threshold": 0, "severity": "media", "enabled": True,
-        "description": "Documentos vigentes que el Listado Maestro clasifica con estado de revisión Vencido.",
-        "url": "/docs/matriz?estado_revision=Vencido",
-    },
-    {
-        "code": "documents_due_soon", "name": "Documentos próximos a vencer",
-        "module": "Documentación", "metric_key": "documents_due_soon_count",
-        "operator": ">", "threshold": 0, "severity": "media", "enabled": True,
-        "description": "Documentos vigentes que el Listado Maestro clasifica como Cercano según la periodicidad configurada para su tipo.",
-        "url": "/docs/matriz?estado_revision=Cercano",
-    },
-    {
-        "code": "wazuh_high", "name": "Alertas Wazuh altas o críticas",
-        "module": "Cumplimiento continuo", "metric_key": "wazuh_high_count",
-        "operator": ">", "threshold": 0, "severity": "crítica", "enabled": True,
-        "description": "Alertas Wazuh con nivel de regla igual o superior a 10.",
-        "url": "/cumplimiento_continuo/wazuh",
-    },
-    {
-        "code": "firewall_critical", "name": "Hallazgos críticos de firewall",
-        "module": "Gobierno de Firewall", "metric_key": "firewall_critical_count",
-        "operator": ">", "threshold": 0, "severity": "crítica", "enabled": True,
-        "description": "Hallazgos críticos activos y todavía no resueltos en Gobierno de Firewall.",
-        "url": "/cumplimiento_continuo/firewall",
-    },
-    {
-        "code": "bcp_backups_failed", "name": "Backups fallidos",
-        "module": "Continuidad", "metric_key": "bcp_backups_failed_count",
-        "operator": ">", "threshold": 0, "severity": "crítica", "enabled": True,
-        "description": "Respaldos fallidos registrados en el módulo BCP/DRP.",
-        "url": "/bcp/metricas",
-    },
-    {
-        "code": "bcp_systems_without_drp", "name": "Sistemas críticos sin DRP",
-        "module": "Continuidad", "metric_key": "bcp_systems_without_drp_count",
-        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
-        "description": "Sistemas o procesos críticos sin cobertura de recuperación documentada.",
-        "url": "/bcp/metricas",
-    },
-    {
-        "code": "iso27001_below_target", "name": "Madurez ISO 27001 inferior a la meta",
-        "module": "Madurez", "metric_key": "maturity_iso_pct",
-        "operator": "<", "threshold": 60, "severity": "media", "enabled": False,
-        "description": "Porcentaje de madurez ISO 27001 inferior a la meta definida en la regla.",
-        "url": "/madurez",
-    },
-]
-
-ALERT_RULE_URLS = {item["code"]: item.get("url", "") for item in ALERT_DEFAULT_RULES}
-ALERT_OPERATORS = {">", ">=", "=", "<", "<="}
-ALERT_SEVERITIES = {"informativa", "baja", "media", "alta", "crítica"}
-
-
-def alert_get_config():
-    cfg = AlertConfig.query.first()
-    if not cfg:
-        cfg = AlertConfig()
-        db.session.add(cfg)
-        db.session.commit()
-    return cfg
-
-
-def alert_seed_defaults():
-    """Crea solo las reglas faltantes y conserva toda personalización existente."""
-    existing = {row.code for row in AlertRule.query.all()}
-    created = 0
-    for item in ALERT_DEFAULT_RULES:
-        if item["code"] in existing:
-            continue
-        db.session.add(AlertRule(
-            code=item["code"], name=item["name"], module=item["module"],
-            description=item["description"], metric_key=item["metric_key"],
-            operator=item["operator"], threshold=float(item["threshold"]),
-            severity=item["severity"], enabled=bool(item["enabled"]),
-            email_enabled=True, repeat_minutes=1440,
-        ))
-        created += 1
-    if created:
-        db.session.commit()
-    alert_get_config()
-    return created
-
-
-def alert_parse_recipients(raw):
-    values = re.split(r"[;,\n\r]+", str(raw or ""))
-    valid, invalid = [], []
-    pattern = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
-    for value in values:
-        email = value.strip().lower()
-        if not email:
-            continue
-        if pattern.match(email):
-            if email not in valid:
-                valid.append(email)
-        else:
-            invalid.append(email)
-    return valid, invalid
-
-
-def alert_compare(value, operator, threshold):
-    value = float(value or 0)
-    threshold = float(threshold or 0)
-    return {
-        ">": value > threshold,
-        ">=": value >= threshold,
-        "=": value == threshold,
-        "<": value < threshold,
-        "<=": value <= threshold,
-    }.get(operator, False)
-
-
-def alert_plain(value):
-    text_value = unicodedata.normalize("NFKD", str(value or "").strip().lower())
-    return "".join(ch for ch in text_value if not unicodedata.combining(ch))
-
-
-def alert_vulnerabilities_overdue_count():
-    config = MetricasVulnerabilidadesConfig.query.first()
-    if not config:
-        return 0.0
-    sla_by_level = {}
-    for row in (config.clasificaciones or []):
-        days = getattr(row, "tiempo_max_cierre_dias", None)
-        if days is not None and int(days) >= 0:
-            sla_by_level[alert_plain(row.clasificacion)] = int(days)
-    if not sla_by_level:
-        return 0.0
-    today = date.today()
-    total = 0
-    for item in VulnerabilidadRegistro.query.all():
-        status = alert_plain(getattr(item, "estado", ""))
-        if status in {"cerrado", "cerrada", "closed", "resuelto", "resuelta"}:
-            continue
-        identified = getattr(item, "fecha_identificacion", None)
-        if isinstance(identified, datetime):
-            identified = identified.date()
-        if not identified:
-            continue
-        level = alert_plain(getattr(item, "clasificacion", ""))
-        sla_days = sla_by_level.get(level)
-        if sla_days is None:
-            for configured_level, configured_days in sla_by_level.items():
-                if configured_level in level or level in configured_level:
-                    sla_days = configured_days
-                    break
-        if sla_days is not None and identified + datetime_module.timedelta(days=sla_days) < today:
-            total += 1
-    return float(total)
-
-
-def alert_documents_by_review_status(status_text):
-    """Devuelve los documentos con el mismo estado mostrado en el Listado Maestro."""
-    expected = alert_plain(status_text)
-    matches = []
-    for document in DocMaestroDocumento.query.all():
-        # Una versión obsoleta no debe generar alertas de revisión o vigencia.
-        if "obsolet" in alert_plain(getattr(document, "estado", "")):
-            continue
-        try:
-            review_status = calcular_estado_revision(document, getattr(document, "tipo", None)) or {}
-            current = alert_plain(review_status.get("texto", ""))
-        except Exception:
-            current = ""
-        if current == expected:
-            matches.append(document)
-    return matches
-
-
-def alert_documents_overdue_count():
-    return float(len(alert_documents_by_review_status("Vencido")))
-
-
-def alert_documents_due_soon_count():
-    return float(len(alert_documents_by_review_status("Cercano")))
-
-
-def alert_documents_message(metric_key, value):
-    """Construye un mensaje identificable para la alerta en pantalla y por correo."""
-    if metric_key == "documents_overdue_count":
-        status_text = "Vencido"
-        summary_text = "con revisión vencida"
-    elif metric_key == "documents_due_soon_count":
-        status_text = "Cercano"
-        summary_text = "próximos a vencer"
-    else:
-        return None
-
-    documents = alert_documents_by_review_status(status_text)
-    labels = []
-    for document in documents[:10]:
-        code = (getattr(document, "codigo", "") or "").strip()
-        name = (getattr(document, "nombre_documento", "") or "Documento sin nombre").strip()
-        labels.append(f"{code} - {name}" if code else name)
-    detail = "; ".join(labels)
-    if len(documents) > 10:
-        detail += f"; y {len(documents) - 10} documento(s) adicional(es)"
-    base = f"Se detectaron {alert_format_number(value)} documento(s) {summary_text} en el Listado Maestro."
-    return f"{base} Documentos: {detail}." if detail else base
 
 

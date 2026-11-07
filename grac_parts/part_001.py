@@ -3,120 +3,6 @@
 # Requisitos: pip install flask flask_sqlalchemy
 
 #from flask import Flask, request, redirect, url_for, render_template_string, send_file, flash, session, Blueprint
-# ============================================================
-# PERFIL BAJO CONSUMO DE MEMORIA — RENDER / GRAC
-# Reduce la memoria inicial sin deshabilitar módulos de la aplicación.
-# Las librerías de Excel y gráficos se importan al primer uso real.
-# ============================================================
-import os as _grac_os
-import sys as _grac_sys
-
-# Debe establecerse ANTES de la primera importación de NumPy/Matplotlib.
-_grac_os.environ.setdefault("MPLBACKEND", "Agg")
-_grac_os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-_grac_os.environ.setdefault("OMP_NUM_THREADS", "1")
-_grac_os.environ.setdefault("MKL_NUM_THREADS", "1")
-_grac_os.environ.setdefault("NUMEXPR_MAX_THREADS", "1")
-_grac_os.environ.setdefault("MALLOC_ARENA_MAX", "2")
-
-# Rendimiento de GRAC Web en instancias Render con RAM restringida.
-def _grac_env_enabled(name, default=False):
-    value = _grac_os.environ.get(name)
-    if value is None:
-        return default
-    return value.strip().lower() not in {"0", "false", "no", "off", ""}
-
-_GRAC_RENDER_RUNTIME = bool(_grac_os.environ.get("RENDER") or _grac_os.environ.get("RENDER_SERVICE_ID"))
-_GRAC_RENDER_LOW_MEMORY = _grac_env_enabled("GRAC_RENDER_LOW_MEMORY", _GRAC_RENDER_RUNTIME)
-
-# Las importaciones de exportadores permanecen diferidas hasta que alguien los use.
-# Esto evita cargar a la vez todos los generadores Word/PDF/Excel al iniciar GRAC.
-class _GRACDeferredSymbol:
-    __slots__ = ("module_name", "symbol_name", "_cached")
-
-    def __init__(self, module_name, symbol_name):
-        self.module_name = module_name
-        self.symbol_name = symbol_name
-        self._cached = None
-
-    def _resolve(self):
-        if self._cached is None:
-            from importlib import import_module
-            self._cached = getattr(import_module(self.module_name), self.symbol_name)
-        return self._cached
-
-    def __call__(self, *args, **kwargs):
-        return self._resolve()(*args, **kwargs)
-
-    def __getattr__(self, attr):
-        return getattr(self._resolve(), attr)
-
-    def __repr__(self):
-        return "<deferred %s.%s>" % (self.module_name, self.symbol_name)
-
-# Los nombres se definen antes de que se evalúen los tipos de los helpers.
-for _grac_sym in ("Document",):
-    globals()[_grac_sym] = _GRACDeferredSymbol("docx", _grac_sym)
-for _grac_sym in ("Inches", "Pt"):
-    globals()[_grac_sym] = _GRACDeferredSymbol("docx.shared", _grac_sym)
-WD_ALIGN_PARAGRAPH = _GRACDeferredSymbol("docx.enum.text", "WD_ALIGN_PARAGRAPH")
-WD_TABLE_ALIGNMENT = _GRACDeferredSymbol("docx.enum.table", "WD_TABLE_ALIGNMENT")
-for _grac_sym in ("load_workbook", "Workbook"):
-    globals()[_grac_sym] = _GRACDeferredSymbol("openpyxl", _grac_sym)
-for _grac_sym in ("Font", "PatternFill", "Alignment"):
-    globals()[_grac_sym] = _GRACDeferredSymbol("openpyxl.styles", _grac_sym)
-# El nombre Image de ReportLab también se reutiliza en el código actual.
-Image = _GRACDeferredSymbol("reportlab.platypus", "Image")
-for _grac_sym in ("ImageReader",):
-    globals()[_grac_sym] = _GRACDeferredSymbol("reportlab.lib.utils", _grac_sym)
-for _grac_sym in ("ParagraphStyle", "getSampleStyleSheet"):
-    globals()[_grac_sym] = _GRACDeferredSymbol("reportlab.lib.styles", _grac_sym)
-for _grac_sym in ("SimpleDocTemplate", "Paragraph", "Spacer", "Table", "TableStyle", "PageBreak"):
-    globals()[_grac_sym] = _GRACDeferredSymbol("reportlab.platypus", _grac_sym)
-RLImage = _GRACDeferredSymbol("reportlab.platypus", "Image")
-
-
-class _GRACLazyModule:
-    """Proxy de módulo. No importa el paquete pesado hasta que se usa."""
-    __slots__ = ("_name", "_real")
-
-    def __init__(self, name):
-        self._name = name
-        self._real = None
-
-    def _load(self):
-        if self._real is None:
-            import importlib
-            self._real = importlib.import_module(self._name)
-        return self._real
-
-    def __getattr__(self, name):
-        return getattr(self._load(), name)
-
-    def __repr__(self):
-        return "<GRAC deferred module %s>" % self._name
-
-# Las anotaciones pandas de funciones se mantienen diferidas como cadenas.
-pd = _GRACLazyModule("pandas")
-np = _GRACLazyModule("numpy")
-plt = _GRACLazyModule("matplotlib.pyplot")
-patches = _GRACLazyModule("matplotlib.patches")
-colors = _GRACLazyModule("reportlab.lib.colors")
-
-def Wedge(*args, **kwargs):
-    return patches.Wedge(*args, **kwargs)
-
-def Circle(*args, **kwargs):
-    return patches.Circle(*args, **kwargs)
-
-def FancyArrowPatch(*args, **kwargs):
-    return patches.FancyArrowPatch(*args, **kwargs)
-
-def FigureCanvas(*args, **kwargs):
-    import importlib
-    cls = importlib.import_module("matplotlib.backends.backend_agg").FigureCanvasAgg
-    return cls(*args, **kwargs)
-
 from flask import Flask, request, redirect, url_for, render_template_string, send_file, flash, session, Blueprint, make_response
 from flask_sqlalchemy import SQLAlchemy
 from passlib.hash import ldap_salted_sha1 as ssha
@@ -139,47 +25,47 @@ from datetime import datetime as dt
 from flask import Flask, render_template_string, request, redirect, url_for, session, flash
 from flask import abort
 import re
-# GRAC-RAM: importación diferida en el bloque de optimización
+import pandas as pd
 from markupsafe import Markup, escape
 from werkzeug.utils import secure_filename
 from io import BytesIO
 from collections import Counter
 import unicodedata
 import smtplib
-# GRAC-RAM: importación diferida: from reportlab.lib.utils import ImageReader
+from reportlab.lib.utils import ImageReader
 import secrets
 import io
 import math
-# GRAC-RAM: importación diferida en el bloque de optimización
-# GRAC-RAM: importación diferida en el bloque de optimización
-# GRAC-RAM: MPLBACKEND=Agg definido antes de importar bibliotecas
-# GRAC-RAM: importación diferida en el bloque de optimización
-# GRAC-RAM: importación diferida en el bloque de optimización
-# GRAC-RAM: importación diferida en el bloque de optimización
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.patches import Wedge, Circle, FancyArrowPatch
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import shutil
-# GRAC-RAM: importación diferida en el bloque de optimización
+import numpy as np
 from werkzeug.utils import secure_filename
 from uuid import uuid4
 import requests
 from requests.auth import HTTPBasicAuth
 import string
 from flask_sqlalchemy import SQLAlchemy
-# GRAC-RAM: importación diferida: from reportlab.lib.styles import ParagraphStyle
-# GRAC-RAM: colors se carga bajo demanda
-# GRAC-RAM: importación diferida en el bloque de optimización
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib import colors
+import pandas as pd
 import os
 from cryptography.fernet import Fernet
 from werkzeug.utils import secure_filename
 from flask_migrate import Migrate
 import re
 import secrets
-# GRAC-RAM: importación diferida: from docx import Document
+from docx import Document
 import requests
 from requests.auth import HTTPBasicAuth
 from cryptography.fernet import Fernet
-# GRAC-RAM: importación diferida: from docx.shared import Inches
+from docx.shared import Inches
 import traceback
-# GRAC-RAM: importación diferida: from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from email.message import EmailMessage
 import datetime as dt
 import string
@@ -245,16 +131,16 @@ from datetime import datetime, timezone
 from xml.sax.saxutils import escape as xml_escape
 from openai import OpenAIError, AuthenticationError
 from datetime import datetime, timezone, timedelta
-# GRAC-RAM: importación diferida: from reportlab.platypus import Table, TableStyle
+from reportlab.platypus import Table, TableStyle
 from flask import Blueprint
 import traceback
-# GRAC-RAM: importación diferida: from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_LEFT
-# GRAC-RAM: colors se carga bajo demanda
+from reportlab.lib import colors
 from werkzeug.exceptions import HTTPException
 import uuid
-# GRAC-RAM: importación diferida en el bloque de optimización
-# GRAC-RAM: importación diferida: from openpyxl import load_workbook
+import pandas as pd
+from openpyxl import load_workbook
 
 
 from flask import (
@@ -262,16 +148,16 @@ from flask import (
 )
 from flask_sqlalchemy import SQLAlchemy
 
-# GRAC-RAM: importación diferida en el bloque de optimización
-# GRAC-RAM: importación diferida en el bloque de optimización
+import pandas as pd
+import numpy as np
 
 
 
 # ✅ Matplotlib sin GUI (macOS/Flask)
 os.environ["MPLBACKEND"] = "Agg"
-# GRAC-RAM: importación diferida en el bloque de optimización
-# GRAC-RAM: MPLBACKEND=Agg definido antes de importar bibliotecas
-# GRAC-RAM: importación diferida en el bloque de optimización
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 # OpenAI SDK
 from openai import OpenAI
@@ -280,18 +166,20 @@ from openai import AuthenticationError, OpenAIError
 # PDF (ReportLab) - PRO
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
-# GRAC-RAM: colors se carga bajo demanda
-# GRAC-RAM: importación diferida: from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-Image = _GRACDeferredSymbol("reportlab.platypus", "Image")
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
+)
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
-# GRAC-RAM: importación diferida en el bloque de optimización
-# GRAC-RAM: MPLBACKEND=Agg definido antes de importar bibliotecas
-# GRAC-RAM: importación diferida en el bloque de optimización
+import matplotlib
+matplotlib.use("Agg")  # IMPORTANT para servidores Flask
+import matplotlib.pyplot as plt
 from flask import send_file
-Image = _GRACDeferredSymbol("reportlab.platypus", "Image")
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.pagesizes import A4, landscape
-# GRAC-RAM: importación diferida: from reportlab.lib.styles import getSampleStyleSheet
-# GRAC-RAM: colors se carga bajo demanda
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
 from reportlab.lib.units import cm
 import hashlib
 import base64
@@ -611,8 +499,8 @@ SGSI_PROGRESS_GLOBAL = """
     .sgsi-brand{
       margin-left:0 !important;
       padding-left:0 !important;
-      min-width:220px !important;
-      width:220px !important;
+      min-width:230px !important;
+      width:230px !important;
       height:58px !important;
       display:flex !important;
       align-items:center !important;
@@ -620,9 +508,9 @@ SGSI_PROGRESS_GLOBAL = """
       overflow:hidden !important;
     }
     .sgsi-logo{
-      height:44px !important;
+      height:48px !important;
       width:auto !important;
-      max-width:205px !important;
+      max-width:220px !important;
       object-fit:contain !important;
       object-position:left center !important;
       margin:0 !important;
@@ -1221,6 +1109,902 @@ def inject_sgsi_progress_bar(response):
     except Exception as e:
         print("No se pudo inyectar barra de progreso SGSI:", repr(e))
 
+    return response
+
+
+GLOBAL_BLUE_BUTTONS_STYLE = """
+<style id="grac-global-blue-buttons">
+  :root{
+    --grac-btn-primary-top:#4d98ec;
+    --grac-btn-primary-mid:#2f82df;
+    --grac-btn-primary-bottom:#1b69c8;
+    --grac-btn-border:#1d67be;
+    --grac-btn-hover-top:#68aaf2;
+    --grac-btn-hover-mid:#418fe8;
+    --grac-btn-hover-bottom:#236fcd;
+    --grac-btn-active-top:#2b7ad7;
+    --grac-btn-active-bottom:#175eb8;
+    --grac-btn-shadow:0 1px 2px rgba(15,23,42,.08),0 5px 14px rgba(43,127,221,.14);
+    --grac-btn-shadow-hover:0 2px 6px rgba(15,23,42,.14),0 8px 18px rgba(43,127,221,.20);
+    --grac-btn-focus:0 0 0 .16rem rgba(77,152,236,.18);
+    --grac-card-shadow:0 10px 24px rgba(15,23,42,.08),0 2px 6px rgba(15,23,42,.05);
+    --grac-card-border:1px solid rgba(186, 202, 221, .72);
+  }
+
+  /* Tarjetas y cuadros internos con sombra corporativa suave */
+  .card,
+  .glass-card,
+  .propia-card,
+  .invfismat-card,
+  .pra-card,
+  .admin-card,
+  .sgsi-card,
+  .sgsi-panel,
+  .module-card,
+  .content-card,
+  .dashboard-card,
+  .stats-card,
+  .table-responsive,
+  .alert,
+  .modal-content,
+  .accordion-item,
+  .list-group,
+  .list-group-item,
+  .cc-card,
+  .fwgov-kpi-card,
+  .fwgov-card,
+  .bcp-card,
+  .datamad-card,
+  .datamad-panel,
+  .chatsgsi-card {
+    box-shadow: var(--grac-card-shadow) !important;
+    border: var(--grac-card-border) !important;
+    border-radius: 14px !important;
+    background-clip: padding-box !important;
+  }
+
+  /* Botones corporativos uniformes */
+  .btn,
+  a.btn,
+  button.btn,
+  input.btn,
+  .button,
+  a.button,
+  button:not(.btn-close):not(.accordion-button):not(.navbar-toggler),
+  input[type="submit"],
+  input[type="button"],
+  .chat-send-clean,
+  .adg-btn,
+  .bcp-btn-main,
+  .grac-alert-header-button,
+  .propia-menu-btn,
+  .invfismat-btn-config-glpi,
+  .threat-main-actions .btn,
+  .threat-dashboard-actions-panel .btn,
+  .btn[class*="-btn-main"],
+  .btn[class*="-btn-soft"],
+  a.btn[class*="-btn-main"],
+  a.btn[class*="-btn-soft"],
+  [class*="btn-main"].btn,
+  [class*="btn-soft"].btn,
+  .adg-btn.adg-btn-light,
+  .adg-btn.adg-btn-primary,
+  a.button.secondary,
+  button.secondary,
+  .cpw .button,
+  .cpw button,
+  .cpw-delete {
+    display:inline-flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    gap:.42rem !important;
+    white-space:nowrap !important;
+    vertical-align:middle !important;
+    border-radius:8px !important;
+    min-height:34px !important;
+    padding:.40rem .82rem !important;
+    font-weight:750 !important;
+    font-size:.84rem !important;
+    letter-spacing:.005em !important;
+    line-height:1.05 !important;
+    border-width:1px !important;
+    border-style:solid !important;
+    text-decoration:none !important;
+    text-shadow:none !important;
+    box-shadow:var(--grac-btn-shadow) !important;
+    transition:background .18s ease,border-color .18s ease,color .18s ease,box-shadow .18s ease,transform .12s ease !important;
+  }
+
+  .btn.rounded-pill,
+  a.btn.rounded-pill,
+  button.btn.rounded-pill,
+  .button.rounded-pill {
+    border-radius:8px !important;
+  }
+
+  .btn-sm,
+  a.btn-sm,
+  button.btn-sm,
+  input.btn-sm {
+    min-height:30px !important;
+    padding:.30rem .66rem !important;
+    font-size:.77rem !important;
+    border-radius:7px !important;
+  }
+
+  .btn-lg,
+  a.btn-lg,
+  button.btn-lg,
+  input.btn-lg {
+    min-height:38px !important;
+    padding:.50rem .94rem !important;
+    font-size:.89rem !important;
+    border-radius:9px !important;
+  }
+
+  .btn-primary,
+  .btn-secondary,
+  .btn-success,
+  .btn-danger,
+  .btn-warning,
+  .btn-info,
+  .btn-dark,
+  .btn-light,
+  .btn-outline-primary,
+  .btn-outline-secondary,
+  .btn-outline-success,
+  .btn-outline-danger,
+  .btn-outline-warning,
+  .btn-outline-info,
+  .btn-outline-dark,
+  .btn-outline-light,
+  .button,
+  a.button,
+  button:not(.btn-close):not(.accordion-button):not(.navbar-toggler),
+  input[type="submit"],
+  input[type="button"],
+  .chat-send-clean,
+  .adg-btn,
+  .bcp-btn-main,
+  .grac-alert-header-button,
+  .propia-menu-btn,
+  .invfismat-btn-config-glpi,
+  .threat-main-actions .btn,
+  .threat-dashboard-actions-panel .btn,
+  .btn[class*="-btn-main"],
+  .btn[class*="-btn-soft"],
+  a.btn[class*="-btn-main"],
+  a.btn[class*="-btn-soft"],
+  .adg-btn.adg-btn-light,
+  .adg-btn.adg-btn-primary,
+  a.button.secondary,
+  button.secondary,
+  .cpw .button,
+  .cpw button,
+  .cpw-delete {
+    background:linear-gradient(180deg,var(--grac-btn-primary-top) 0%,var(--grac-btn-primary-mid) 56%,var(--grac-btn-primary-bottom) 100%) !important;
+    border-color:var(--grac-btn-border) !important;
+    color:#ffffff !important;
+  }
+
+  .btn:hover,
+  a.btn:hover,
+  button.btn:hover,
+  input.btn:hover,
+  .button:hover,
+  a.button:hover,
+  button:not(.btn-close):not(.accordion-button):not(.navbar-toggler):hover,
+  input[type="submit"]:hover,
+  input[type="button"]:hover,
+  .chat-send-clean:hover,
+  .adg-btn:hover,
+  .bcp-btn-main:hover,
+  .grac-alert-header-button:hover,
+  .propia-menu-btn:hover,
+  .invfismat-btn-config-glpi:hover,
+  .threat-main-actions .btn:hover,
+  .threat-dashboard-actions-panel .btn:hover,
+  .btn[class*="-btn-main"]:hover,
+  .btn[class*="-btn-soft"]:hover,
+  a.btn[class*="-btn-main"]:hover,
+  a.btn[class*="-btn-soft"]:hover,
+  a.button.secondary:hover,
+  button.secondary:hover,
+  .cpw .button:hover,
+  .cpw button:hover,
+  .cpw-delete:hover {
+    background:linear-gradient(180deg,var(--grac-btn-hover-top) 0%,var(--grac-btn-hover-mid) 54%,var(--grac-btn-hover-bottom) 100%) !important;
+    border-color:#1d67be !important;
+    color:#ffffff !important;
+    box-shadow:var(--grac-btn-shadow-hover) !important;
+    transform:translateY(-1px);
+  }
+
+  .btn:active,
+  a.btn:active,
+  button.btn:active,
+  input.btn:active,
+  .button:active,
+  a.button:active,
+  button:not(.btn-close):not(.accordion-button):not(.navbar-toggler):active,
+  input[type="submit"]:active,
+  input[type="button"]:active,
+  .chat-send-clean:active,
+  .adg-btn:active,
+  .bcp-btn-main:active,
+  .grac-alert-header-button:active,
+  .propia-menu-btn:active,
+  .invfismat-btn-config-glpi:active,
+  .threat-main-actions .btn:active,
+  .threat-dashboard-actions-panel .btn:active,
+  .btn[class*="-btn-main"]:active,
+  .btn[class*="-btn-soft"]:active,
+  a.btn[class*="-btn-main"]:active,
+  a.btn[class*="-btn-soft"]:active,
+  a.button.secondary:active,
+  button.secondary:active,
+  .cpw .button:active,
+  .cpw button:active,
+  .cpw-delete:active {
+    background:linear-gradient(180deg,var(--grac-btn-active-top) 0%,var(--grac-btn-active-bottom) 100%) !important;
+    border-color:#1658a9 !important;
+    color:#ffffff !important;
+    transform:translateY(0) !important;
+    box-shadow:0 1px 2px rgba(15,23,42,.1),0 4px 10px rgba(43,127,221,.16) !important;
+  }
+
+  .btn:focus,
+  .btn:focus-visible,
+  a.btn:focus,
+  a.btn:focus-visible,
+  button:focus,
+  button:focus-visible,
+  input.btn:focus,
+  input.btn:focus-visible,
+  .button:focus,
+  .button:focus-visible,
+  .chat-send-clean:focus,
+  .chat-send-clean:focus-visible,
+  .adg-btn:focus,
+  .adg-btn:focus-visible {
+    outline:none !important;
+    box-shadow:var(--grac-btn-focus),var(--grac-btn-shadow) !important;
+  }
+
+  .btn .bi,
+  .btn i,
+  .button .bi,
+  .button i,
+  button .bi,
+  button i,
+  a.button .bi,
+  a.button i {
+    vertical-align:middle;
+  }
+
+  .btn[disabled],
+  .btn.disabled,
+  button[disabled]:not(.btn-close):not(.accordion-button),
+  input[disabled].btn,
+  input[disabled][type="submit"],
+  input[disabled][type="button"] {
+    background:linear-gradient(180deg,#bfd3e8 0%,#afc4da 100%) !important;
+    border-color:#aac0d6 !important;
+    color:#eef4fb !important;
+    box-shadow:none !important;
+    transform:none !important;
+    opacity:.95 !important;
+  }
+
+  /* Menú principal izquierdo: más compacto y uniforme */
+  .sgsi-leftnav-link,
+  .sgsi-panel-control-btn,
+  .sgsi-root-toggle,
+  .sgsi-dropdown-item,
+  .sgsi-node-toggle {
+    min-height:32px !important;
+    padding:6px 8px !important;
+    border-radius:10px !important;
+    font-size:.70rem !important;
+    line-height:1.08 !important;
+    gap:6px !important;
+  }
+
+  .sgsi-leftnav-list {
+    gap:5px !important;
+  }
+
+  .sgsi-dropdown-item {
+    margin:2px 4px !important;
+    padding:6px 7px !important;
+    border-radius:10px !important;
+    font-size:.67rem !important;
+  }
+
+  .sgsi-leftnav-title { font-size:.76rem !important; }
+  .sgsi-leftnav-subtitle { font-size:.66rem !important; }
+
+  /* Ajustes visuales puntuales solicitados */
+  .chat-send-clean,
+  #chat-send-btn { min-width:96px !important; }
+
+  .fwgov-actions .btn,
+  .fwgov-scroll .btn,
+  a[href*="fwgov_export_csv"] {
+    white-space:nowrap !important;
+  }
+
+  a[href*="fwgov_export_csv"] {
+    min-width:148px !important;
+  }
+
+  a[href*="cpw_admin"].button,
+  a[href*="cpw_admin"].secondary,
+  a[href*="cpw_admin"] {
+    text-decoration:none !important;
+  }
+
+
+  /* GRAC v3: acciones propias de Gestión de Riesgos (sin alterar niveles/heatmap) */
+  .risk-primary-btn,
+  .risk-secondary-btn,
+  a.risk-action-btn,
+  button.risk-action-btn,
+  .risk-actions-wrap .risk-action-btn,
+  .risk-actions-wrap .risk-action-btn.view,
+  .risk-actions-wrap .risk-action-btn.edit,
+  .risk-actions-wrap .risk-action-btn.plan-action,
+  .risk-actions-wrap .risk-action-btn.archive,
+  .risk-actions-wrap .risk-action-btn.delete,
+  .risk-actions-wrap .risk-action-btn.restore,
+  a.bcp-btn-danger,
+  .btn.bcp-btn-danger,
+  .bcp-btn-danger,
+  .chat-send-clean,
+  #chat-send-btn {
+    background:linear-gradient(180deg,var(--grac-btn-primary-top),var(--grac-btn-primary-mid) 55%,var(--grac-btn-primary-bottom)) !important;
+    color:#fff !important;
+    border:1px solid var(--grac-btn-border) !important;
+    border-radius:8px !important;
+    box-shadow:var(--grac-btn-shadow) !important;
+    text-shadow:none !important;
+  }
+  .risk-primary-btn:hover,
+  .risk-secondary-btn:hover,
+  a.risk-action-btn:hover,
+  button.risk-action-btn:hover,
+  .risk-actions-wrap .risk-action-btn:hover,
+  .bcp-btn-danger:hover,
+  .chat-send-clean:hover,
+  #chat-send-btn:hover {
+    background:linear-gradient(180deg,var(--grac-btn-hover-top),var(--grac-btn-hover-mid) 55%,var(--grac-btn-hover-bottom)) !important;
+    border-color:var(--grac-btn-border) !important;
+    color:#fff !important;
+  }
+  .risk-secondary-btn,.risk-primary-btn {
+    min-height:34px !important;
+    height:auto !important;
+    padding:.42rem .84rem !important;
+    font-size:.83rem !important;
+  }
+  .risk-actions-wrap .risk-action-btn {
+    min-height:29px !important;
+    height:auto !important;
+    padding:.28rem .65rem !important;
+    font-size:.76rem !important;
+  }
+  .risk-actions-wrap .risk-action-btn i,
+  .risk-actions-wrap .risk-action-btn span,
+  .risk-actions-wrap .risk-action-btn svg,
+  .grac-alert-action-group .btn i,
+  button.grac-trash-button i.grac-action-icon-white,
+  button.grac-trash-button .bi,
+  #chat-send-btn i {
+    color:#fff !important;
+    fill:currentColor;
+  }
+
+  /* Íconos de eliminar: vector blanco en lugar de emoji de color */
+  button.grac-trash-button {
+    min-width:35px !important;
+    min-height:32px !important;
+    padding:.35rem .52rem !important;
+    display:inline-flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+  }
+  button.grac-trash-button .bi {
+    font-size:.98rem !important;
+    font-style:normal;
+    line-height:1;
+  }
+
+  /* Acciones del Centro de Alertas con nombre, compactas y legibles */
+  .grac-alert-action-group {
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:stretch !important;
+    gap:5px !important;
+    min-width:114px;
+  }
+  .grac-alert-action-group form {margin:0!important;width:100%;}
+  .grac-alert-action-group button.btn {
+    display:flex!important;
+    align-items:center!important;
+    justify-content:center!important;
+    width:100%!important;
+    min-width:108px!important;
+    min-height:30px!important;
+    padding:.33rem .5rem!important;
+    font-size:.76rem!important;
+    line-height:1.12!important;
+    border-radius:7px!important;
+    white-space:nowrap!important;
+  }
+  .grac-alert-action-group button.btn i {font-size:.9rem;}
+  .grac-alert-action-group button.btn span {color:#fff!important;}
+
+  /* Menú principal, incluido Centro de Control, con la misma apariencia.
+     Los nombres largos se acomodan dentro del botón, sin recortarse. */
+  #sgsiGlobalMenu .sgsi-global-root-toggle,
+  #sgsiGlobalMenu a.sgsi-global-panel-control-btn,
+  #sgsiGlobalMenu .sgsi-global-root-toggle.sgsi-active-tree {
+    display:flex!important;
+    width:100%!important;
+    min-height:33px!important;
+    height:auto!important;
+    padding:7px 7px!important;
+    gap:5px!important;
+    border-radius:8px!important;
+    border:1px solid var(--grac-btn-border)!important;
+    background:linear-gradient(180deg,var(--grac-btn-primary-top),var(--grac-btn-primary-mid) 55%,var(--grac-btn-primary-bottom))!important;
+    box-shadow:0 2px 5px rgba(22,96,180,.13)!important;
+    color:#fff!important;
+    font-size:.68rem!important;
+    line-height:1.2!important;
+    letter-spacing:-.005em!important;
+    white-space:normal!important;
+    overflow:visible!important;
+    text-align:left!important;
+    transform:none!important;
+  }
+  #sgsiGlobalMenu .sgsi-global-root-toggle:hover,
+  #sgsiGlobalMenu a.sgsi-global-panel-control-btn:hover {
+    background:linear-gradient(180deg,var(--grac-btn-hover-top),var(--grac-btn-hover-mid) 55%,var(--grac-btn-hover-bottom))!important;
+    color:#fff!important;
+  }
+  #sgsiGlobalMenu .sgsi-global-root-toggle > span,
+  #sgsiGlobalMenu a.sgsi-global-panel-control-btn > span {
+    display:block!important;
+    flex:1 1 auto!important;
+    min-width:0!important;
+    color:#fff!important;
+    white-space:normal!important;
+    overflow-wrap:break-word!important;
+    word-break:normal!important;
+    hyphens:none!important;
+    text-overflow:clip!important;
+    line-height:1.2!important;
+  }
+  #sgsiGlobalMenu .sgsi-global-root-toggle > i,
+  #sgsiGlobalMenu a.sgsi-global-panel-control-btn > i {
+    flex:0 0 14px!important;
+    width:14px!important;
+    text-align:center!important;
+    color:#fff!important;
+  }
+  #sgsiGlobalMenu .sgsi-global-menu-list {gap:5px!important;}
+  #sgsiGlobalMenu .sgsi-global-panel .sgsi-global-item,
+  #sgsiGlobalMenu .sgsi-global-panel .sgsi-global-node-toggle {
+    font-size:.65rem!important;
+    padding:5px 6px!important;
+    line-height:1.19!important;
+    white-space:normal!important;
+    height:auto!important;
+  }
+
+  /* Al ocultar menú: recuperar TODO el ancho disponible del contenido.
+     El CSS usa la clase de estado existente en GRAC, sin cambiar JS ni rutas. */
+  body.sgsi-menu-collapsed > .container.py-4 {
+    max-width:none!important;
+    width:calc(100% - 30px)!important;
+    margin-left:auto!important;
+    margin-right:auto!important;
+    padding-left:0!important;
+    padding-right:0!important;
+  }
+  body.sgsi-menu-collapsed > .container.py-4 > [class$="-shell"],
+  body.sgsi-menu-collapsed > .container.py-4 > [class$="-wrap"],
+  body.sgsi-menu-collapsed > .container.py-4 > .container,
+  body.sgsi-menu-collapsed > .container.py-4 > .container-fluid {
+    max-width:none!important;
+    width:100%!important;
+    margin-left:auto!important;
+    margin-right:auto!important;
+  }
+  body.sgsi-menu-collapsed .minc-shell,
+  body.sgsi-menu-collapsed .chatsgsi-shell,
+  body.sgsi-menu-collapsed .risk-shell {
+    max-width:none!important;
+    width:100%!important;
+  }
+  @media(max-width:767px){
+    body.sgsi-menu-collapsed > .container.py-4 {width:calc(100% - 16px)!important;}
+  }
+
+  /* GRAC v4: la matriz de cumplimiento usa el espacio disponible y deja
+     siempre la acción visible. En pantallas estrechas desplaza el contenido
+     horizontalmente DENTRO de la tabla, sin cortar los botones. */
+  .grac-cc-standard-scroll {
+    width:100% !important;
+    max-width:100% !important;
+    overflow-x:auto !important;
+    overflow-y:auto !important;
+    -webkit-overflow-scrolling:touch;
+  }
+  .grac-cc-standard-scroll .cc-standard-matrix {
+    width:100% !important;
+    min-width:0 !important;
+    table-layout:fixed !important;
+    overflow:visible !important;
+  }
+  .grac-cc-standard-scroll .cc-standard-matrix th,
+  .grac-cc-standard-scroll .cc-standard-matrix td {
+    min-width:0 !important;
+    overflow-wrap:break-word !important;
+    word-break:normal !important;
+    white-space:normal !important;
+    hyphens:auto;
+  }
+  .grac-cc-standard-scroll .cc-standard-matrix .cc-pill {
+    display:inline-block !important;
+    max-width:100% !important;
+    padding:4px 6px !important;
+    white-space:normal !important;
+    overflow-wrap:anywhere !important;
+    line-height:1.2;
+    text-align:center;
+  }
+  .grac-cc-standard-scroll .cc-standard-matrix th:last-child,
+  .grac-cc-standard-scroll .cc-standard-matrix td:last-child {
+    position:sticky;
+    right:0;
+    z-index:2;
+    background:#f8fbff !important;
+    min-width:118px !important;
+    box-shadow:-3px 0 8px rgba(15,23,42,.07);
+    text-align:center;
+  }
+  .grac-cc-standard-scroll .cc-standard-matrix thead th:last-child {
+    z-index:3;
+    background:#dcecff !important;
+  }
+  .grac-cc-standard-scroll .cc-standard-matrix td:last-child .btn {
+    box-sizing:border-box !important;
+    display:inline-flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    min-height:34px !important;
+    height:auto !important;
+    padding:6px 7px !important;
+    white-space:normal !important;
+    font-size:.78rem !important;
+    line-height:1.16 !important;
+    text-align:center !important;
+    overflow-wrap:break-word !important;
+    border-radius:8px !important;
+  }
+  @media (max-width:1000px) {
+    .grac-cc-standard-scroll .cc-standard-matrix {
+      min-width:970px !important;
+    }
+  }
+
+  /* SoA: mostrar todo azul e íconos de eliminar de color blanco */
+  .soa-filter-actions a.soa-secondary-btn,
+  a.soa-secondary-btn,
+  .soa-filter-actions a.soa-secondary-btn:hover,
+  a.soa-secondary-btn:hover,
+  .soa-file-item button.soa-evidence-delete,
+  .soa-file-item button.grac-trash-button {
+    background:linear-gradient(180deg,var(--grac-btn-primary-top) 0%,var(--grac-btn-primary-mid) 55%,var(--grac-btn-primary-bottom) 100%) !important;
+    border:1px solid var(--grac-btn-border) !important;
+    color:#ffffff !important;
+    box-shadow:var(--grac-btn-shadow) !important;
+    text-decoration:none !important;
+    border-radius:8px !important;
+  }
+  .soa-file-item button.soa-evidence-delete,
+  .soa-file-item button.grac-trash-button {
+    display:inline-flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    flex:0 0 34px !important;
+    width:34px !important;
+    min-width:34px !important;
+    min-height:32px !important;
+    height:32px !important;
+    padding:4px !important;
+  }
+  .soa-file-item button.soa-evidence-delete i,
+  .soa-file-item button.grac-trash-button i {
+    color:#fff !important;
+    -webkit-text-fill-color:#fff !important;
+    font-size:1rem !important;
+    opacity:1 !important;
+    font-style:normal !important;
+    line-height:1 !important;
+  }
+
+  /* Acciones de regresar, cancelar, cerrar, parámetros e incidentes */
+  .grac-nav-blue-btn,
+  a.grac-nav-blue-btn,
+  button.grac-nav-blue-btn,
+  .btn.grac-nav-blue-btn,
+  .ir-wrap .ir-nav-link.grac-nav-blue-btn,
+  .ir-wrap .ir-nav-link.active.grac-nav-blue-btn {
+    display:inline-flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    gap:.38rem !important;
+    width:auto;
+    max-width:100%;
+    min-height:35px !important;
+    height:auto !important;
+    padding:7px 13px !important;
+    border:1px solid var(--grac-btn-border) !important;
+    border-radius:8px !important;
+    background:linear-gradient(180deg,var(--grac-btn-primary-top) 0%,var(--grac-btn-primary-mid) 55%,var(--grac-btn-primary-bottom) 100%) !important;
+    color:#ffffff !important;
+    -webkit-text-fill-color:#ffffff !important;
+    box-shadow:var(--grac-btn-shadow) !important;
+    font-size:.85rem !important;
+    font-weight:750 !important;
+    line-height:1.16 !important;
+    text-align:center !important;
+    text-shadow:none !important;
+    text-decoration:none !important;
+    white-space:normal !important;
+    overflow-wrap:break-word;
+  }
+  .grac-nav-blue-btn:hover,
+  a.grac-nav-blue-btn:hover,
+  button.grac-nav-blue-btn:hover,
+  .btn.grac-nav-blue-btn:hover,
+  .ir-wrap .ir-nav-link.grac-nav-blue-btn:hover {
+    background:linear-gradient(180deg,var(--grac-btn-hover-top) 0%,var(--grac-btn-hover-mid) 54%,var(--grac-btn-hover-bottom) 100%) !important;
+    color:#fff !important;
+    -webkit-text-fill-color:#fff !important;
+    box-shadow:var(--grac-btn-shadow-hover) !important;
+  }
+  .grac-nav-blue-btn i,
+  .grac-nav-blue-btn .bi,
+  .grac-nav-blue-btn span {
+    color:#fff !important;
+    -webkit-text-fill-color:#fff !important;
+  }
+  .grac-nav-blue-btn svg {
+    color:#fff !important;
+    stroke:currentColor !important;
+  }
+
+
+  /* GRAC v7: ambos menús laterales usan EXACTAMENTE las mismas medidas.
+     Centro de Control tiene su propio menú local; el resto, el global. */
+  #sgsiLocalMenu .sgsi-leftnav-link,
+  #sgsiLocalMenu a.sgsi-panel-control-btn,
+  #sgsiLocalMenu button.sgsi-root-toggle,
+  #sgsiGlobalMenu .sgsi-global-root-toggle,
+  #sgsiGlobalMenu a.sgsi-global-panel-control-btn,
+  #sgsiGlobalMenu button.sgsi-global-root-toggle,
+  #sgsiGlobalMenu .sgsi-global-root-toggle.sgsi-active-tree {
+    box-sizing:border-box !important;
+    width:100% !important;
+    height:38px !important;
+    min-height:38px !important;
+    max-height:38px !important;
+    flex:0 0 38px !important;
+    padding:0 8px !important;
+    margin:0 !important;
+    border-radius:9px !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    gap:6px !important;
+    font-size:.70rem !important;
+    font-weight:850 !important;
+    line-height:1.1 !important;
+    letter-spacing:-.012em !important;
+    text-align:left !important;
+    white-space:nowrap !important;
+    transform:none !important;
+  }
+
+  #sgsiLocalMenu .sgsi-leftnav-link > span,
+  #sgsiGlobalMenu .sgsi-global-root-toggle > span {
+    box-sizing:border-box !important;
+    flex:1 1 auto !important;
+    min-width:0 !important;
+    font-size:inherit !important;
+    line-height:1.1 !important;
+    letter-spacing:inherit !important;
+    white-space:nowrap !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+  }
+
+  #sgsiLocalMenu .sgsi-leftnav-link > i,
+  #sgsiGlobalMenu .sgsi-global-root-toggle > i {
+    flex:0 0 14px !important;
+    width:14px !important;
+    font-size:.77rem !important;
+    line-height:1 !important;
+    text-align:center !important;
+  }
+
+  #sgsiLocalMenu .sgsi-root-toggle::after,
+  #sgsiGlobalMenu .sgsi-global-root-toggle::after {
+    flex-shrink:0 !important;
+    font-size:.70rem !important;
+    line-height:1 !important;
+  }
+
+  #sgsiLocalMenu .sgsi-leftnav-list,
+  #sgsiGlobalMenu .sgsi-global-menu-list {
+    gap:6px !important;
+  }
+
+
+  /* GRAC v10 — precedencia final sobre los estilos corporativos heredados. */
+  #sgsiGlobalMenu:not(:hover):not(:has(:focus-visible)) .sgsi-global-root-toggle,
+  #sgsiGlobalMenu:not(:hover):not(:has(:focus-visible)) .sgsi-global-panel-control-btn,
+  #sgsiLocalMenu:not(:hover):not(:has(:focus-visible)) .sgsi-leftnav-link,
+  #sgsiLocalMenu:not(:hover):not(:has(:focus-visible)) a.sgsi-panel-control-btn {
+    width:46px !important;
+    max-width:46px !important;
+    min-width:46px !important;
+    height:38px !important;
+    min-height:38px !important;
+    max-height:38px !important;
+    padding:0 !important;
+    margin:0 auto !important;
+    gap:0 !important;
+    justify-content:center !important;
+    overflow:hidden !important;
+  }
+  body.grac-menu-pinned #sgsiGlobalMenu .sgsi-global-root-toggle,
+  body.grac-menu-pinned #sgsiGlobalMenu .sgsi-global-panel-control-btn,
+  body.grac-menu-pinned #sgsiLocalMenu .sgsi-leftnav-link,
+  body.grac-menu-pinned #sgsiLocalMenu a.sgsi-panel-control-btn,
+  #sgsiGlobalMenu:is(:hover,:has(:focus-visible)) .sgsi-global-root-toggle,
+  #sgsiGlobalMenu:is(:hover,:has(:focus-visible)) .sgsi-global-panel-control-btn,
+  #sgsiLocalMenu:is(:hover,:has(:focus-visible)) .sgsi-leftnav-link,
+  #sgsiLocalMenu:is(:hover,:has(:focus-visible)) a.sgsi-panel-control-btn {
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    padding:0 8px !important;
+    margin:0 !important;
+    gap:7px !important;
+    justify-content:flex-start !important;
+    overflow:visible !important;
+  }
+  #sgsiGlobalMenu:not(:hover):not(:has(:focus-visible)) .sgsi-global-root-toggle > span,
+  #sgsiGlobalMenu:not(:hover):not(:has(:focus-visible)) .sgsi-global-panel-control-btn > span,
+  #sgsiLocalMenu:not(:hover):not(:has(:focus-visible)) .sgsi-leftnav-link > span {
+    display:none !important;
+  }
+  #sgsiGlobalMenu:is(:hover,:has(:focus-visible)) .sgsi-global-root-toggle > span,
+  #sgsiGlobalMenu:is(:hover,:has(:focus-visible)) .sgsi-global-panel-control-btn > span,
+  #sgsiLocalMenu:is(:hover,:has(:focus-visible)) .sgsi-leftnav-link > span,
+  body.grac-menu-pinned #sgsiGlobalMenu .sgsi-global-root-toggle > span,
+  body.grac-menu-pinned #sgsiGlobalMenu .sgsi-global-panel-control-btn > span,
+  body.grac-menu-pinned #sgsiLocalMenu .sgsi-leftnav-link > span {
+    display:block !important;
+    flex:1 1 auto !important;
+    white-space:normal !important;
+    overflow:visible !important;
+  }
+  #sgsiGlobalMenu .sgsi-global-root-toggle > i,
+  #sgsiGlobalMenu .sgsi-global-panel-control-btn > i,
+  #sgsiLocalMenu .sgsi-leftnav-link > i {
+    flex:0 0 20px !important;
+    width:20px !important;
+    font-size:1.05rem !important;
+    text-align:center !important;
+  }
+  #sgsiGlobalMenu:not(:hover):not(:has(:focus-visible)) .sgsi-global-root-toggle::after,
+  #sgsiLocalMenu:not(:hover):not(:has(:focus-visible)) .sgsi-root-toggle::after {
+    display:none !important;
+  }
+  #sgsiGlobalMenu:is(:hover,:has(:focus-visible)) .sgsi-global-root-toggle::after,
+  #sgsiLocalMenu:is(:hover,:has(:focus-visible)) .sgsi-root-toggle::after,
+  body.grac-menu-pinned #sgsiGlobalMenu .sgsi-global-root-toggle::after,
+  body.grac-menu-pinned #sgsiLocalMenu .sgsi-root-toggle::after {
+    display:block !important;
+  }
+  /* El estado fijado debe mostrar texto incluso si el mouse está fuera del menú. */
+  body.grac-menu-pinned #sgsiGlobalMenu:not(:hover):not(:has(:focus-visible)) .sgsi-global-root-toggle,
+  body.grac-menu-pinned #sgsiGlobalMenu:not(:hover):not(:has(:focus-visible)) .sgsi-global-panel-control-btn,
+  body.grac-menu-pinned #sgsiLocalMenu:not(:hover):not(:has(:focus-visible)) .sgsi-leftnav-link {
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    padding:0 8px !important;
+    margin:0 !important;
+    gap:7px !important;
+    justify-content:flex-start !important;
+    overflow:visible !important;
+  }
+  body.grac-menu-pinned #sgsiGlobalMenu:not(:hover):not(:has(:focus-visible)) .sgsi-global-root-toggle > span,
+  body.grac-menu-pinned #sgsiGlobalMenu:not(:hover):not(:has(:focus-visible)) .sgsi-global-panel-control-btn > span,
+  body.grac-menu-pinned #sgsiLocalMenu:not(:hover):not(:has(:focus-visible)) .sgsi-leftnav-link > span {
+    display:block !important;
+    flex:1 1 auto !important;
+    white-space:normal !important;
+  }
+
+</style>
+"""
+
+GLOBAL_GRAC_NAVIGATION_BUTTONS_SCRIPT = r"""
+<script id="grac-navigation-buttons-v4">
+(function () {
+  'use strict';
+  function normalizeLabel(value) {
+    return String(value || '').normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().replace(/^[^a-z0-9]+/g, '')
+      .replace(/\s+/g, ' ').trim();
+  }
+  function applyBlueNavigationButtons() {
+    var buttons = document.querySelectorAll('a, button, input[type="button"], input[type="submit"]');
+    buttons.forEach(function (item) {
+      if (item.closest('#sgsiGlobalMenu, .sgsi-sidebar, .sgsi-leftnav-list')) return;
+      var label = normalizeLabel(item.innerText || item.textContent || item.value || item.getAttribute('aria-label'));
+      var target = label === 'volver' || label.startsWith('volver a ')
+        || label === 'cancelar' || label === 'cerrar'
+        || label.includes('parametros de riesgo')
+        || label.includes('ejecucion de planes')
+        || label.includes('seguimiento y pruebas');
+      if (target) item.classList.add('grac-nav-blue-btn');
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', applyBlueNavigationButtons, {once:true});
+  } else {
+    applyBlueNavigationButtons();
+  }
+  document.addEventListener('shown.bs.modal', applyBlueNavigationButtons);
+})();
+</script>"""
+
+@app.after_request
+def inject_global_blue_button_style(response):
+    try:
+        content_type = response.headers.get("Content-Type", "")
+        if "text/html" not in content_type:
+            return response
+
+        html_response = response.get_data(as_text=True)
+        if not html_response:
+            return response
+
+        if 'id="grac-global-blue-buttons"' in html_response:
+            return response
+
+        if "</body>" in html_response:
+            html_response = html_response.replace("</body>", GLOBAL_BLUE_BUTTONS_STYLE + GLOBAL_GRAC_NAVIGATION_BUTTONS_SCRIPT + "\n</body>")
+        else:
+            html_response += GLOBAL_BLUE_BUTTONS_STYLE + GLOBAL_GRAC_NAVIGATION_BUTTONS_SCRIPT
+
+        response.set_data(html_response)
+        response.headers["Content-Length"] = str(len(response.get_data()))
+    except Exception as e:
+        print("No se pudo inyectar el estilo global de botones azules:", repr(e))
     return response
 
 # ============================================================
@@ -7744,2265 +8528,4 @@ FULL_SOA = [
 # ==========================================================================================================================================
 #                                                       Helpers Jira - Plan Remediación
 # ==========================================================================================================================================
-
-def jira_is_enabled():
-    return all([
-        JIRA_ENABLED,
-        (JIRA_BASE_URL or "").strip(),
-        (JIRA_EMAIL or "").strip(),
-        (JIRA_API_TOKEN or "").strip(),
-        (JIRA_PROJECT_KEY or "").strip()
-    ])
-
-
-def jira_auth():
-    return HTTPBasicAuth(JIRA_EMAIL, JIRA_API_TOKEN)
-
-
-def jira_headers():
-    return {
-        "Accept": "application/json",
-        "Content-Type": "application/json"
-    }
-
-
-def jira_priority_name(prioridad_local: str) -> str:
-    p = (prioridad_local or "").strip().lower()
-    if p == "alta":
-        return "High"
-    if p == "media":
-        return "Medium"
-    if p == "baja":
-        return "Low"
-    return "Medium"
-
-
-def limpiar_texto_jira(txt, max_len=None):
-    valor = (txt or "").strip()
-    if max_len:
-        valor = valor[:max_len]
-    return valor
-
-
-def descripcion_plan_para_jira(plan, vuln):
-    fecha_obj = plan.fecha_objetivo.strftime("%Y-%m-%d") if plan.fecha_objetivo else "No definida"
-
-    return f"""
-Plan de remediación generado desde el SGSI.
-
-Vulnerabilidad asociada:
-- Código: {vuln.codigo or 'N/A'}
-- Activo: {vuln.activo or 'N/A'}
-- Descripción: {vuln.descripcion_vulnerabilidad or 'N/A'}
-- CVE: {vuln.cve or 'N/A'}
-- CVSS: {vuln.cvss or 'N/A'}
-- Clasificación: {vuln.clasificacion or 'N/A'}
-- Estado vulnerabilidad: {vuln.estado or 'N/A'}
-
-Plan de remediación:
-- ID interno: {plan.id}
-- Responsable SGSI: {plan.responsable or 'N/A'}
-- Prioridad: {plan.prioridad or 'N/A'}
-- Estado: {plan.estado or 'N/A'}
-- Fecha objetivo: {fecha_obj}
-
-Acción correctiva:
-{plan.accion_correctiva or 'N/A'}
-
-Recursos necesarios:
-{plan.recursos_necesarios or 'N/A'}
-""".strip()
-
-def jira_adf_parrafo(texto: str, bold=False):
-    if not texto:
-        return {
-            "type": "paragraph",
-            "content": []
-        }
-
-    nodo = {
-        "type": "text",
-        "text": texto[:5000]
-    }
-
-    if bold:
-        nodo["marks"] = [{"type": "strong"}]
-
-    return {
-        "type": "paragraph",
-        "content": [nodo]
-    }
-
-
-def jira_adf_descripcion_plan(vuln, plan):
-    contenido = []
-
-    contenido.append(jira_adf_parrafo(f"Remediación de vulnerabilidad {vuln.codigo or '—'}", bold=True))
-    contenido.append(jira_adf_parrafo(f"Activo: {vuln.activo or '—'}"))
-    contenido.append(jira_adf_parrafo(f"Descripción vulnerabilidad: {vuln.descripcion_vulnerabilidad or '—'}"))
-    contenido.append(jira_adf_parrafo(f"Acción correctiva: {plan.accion_correctiva or '—'}"))
-    contenido.append(jira_adf_parrafo(f"Responsable SGSI: {plan.responsable or '—'}"))
-    contenido.append(jira_adf_parrafo(f"Prioridad: {plan.prioridad or '—'}"))
-    contenido.append(jira_adf_parrafo(f"Fecha objetivo: {plan.fecha_objetivo or '—'}"))
-    contenido.append(jira_adf_parrafo(f"Recursos necesarios: {plan.recursos_necesarios or '—'}"))
-    contenido.append(jira_adf_parrafo(f"Estado interno: {plan.estado or '—'}"))
-
-    return {
-        "type": "doc",
-        "version": 1,
-        "content": contenido
-    }
-
-
-def jira_consultar_issue(issue_key: str):
-    if not jira_is_enabled():
-        raise RuntimeError("Jira no está configurado correctamente.")
-
-    url = f"{JIRA_BASE_URL.rstrip('/')}/rest/api/3/issue/{issue_key}"
-    resp = requests.get(
-        url,
-        headers=jira_headers(),
-        auth=jira_auth(),
-        timeout=30
-    )
-
-    if resp.status_code != 200:
-        raise RuntimeError(f"Error consultando issue Jira: {resp.status_code} - {resp.text}")
-
-    return resp.json()
-
-def _month_range(anio: int, mes: int):
-    last_day = calendar.monthrange(anio, mes)[1]
-    start = f"{anio:04d}-{mes:02d}-01"
-    end   = f"{anio:04d}-{mes:02d}-{last_day:02d}"
-    return start, end
-
-
-# ==========================
-# HELPERS Nivel de Madurez
-# ==========================
-def to_text(v) -> str:
-    if v is None:
-        return ""
-    if isinstance(v, str):
-        return v
-    if isinstance(v, list):
-        return "\n".join([to_text(x) for x in v if x is not None])
-    if isinstance(v, dict):
-        return json.dumps(v, ensure_ascii=False, indent=2)
-    return str(v)
-
-def load_instrument_structure(xlsx_path: str):
-    xls = pd.ExcelFile(xlsx_path)
-    sheets = []
-    for sheet_name in xls.sheet_names:
-        df = xls.parse(sheet_name, header=None)
-
-        # Detectar si es "ANEXO A" por encabezado "Preguntas" en col 4
-        is_anexo_a = False
-        if df.shape[0] > 2:
-            v = str(df.iloc[1, 4]) if df.shape[1] > 4 else ""
-            if "preguntas" in v.lower():
-                is_anexo_a = True
-
-        items = []
-
-        if is_anexo_a:
-            # Header suele estar en fila 1, preguntas desde fila 3 aprox.
-            # Columnas:
-            # 0: idx, 1: control, 2: tema, 3: descripcion, 4: pregunta,
-            # 5: no aplica, 6: si, 7: parcialmente, 8: no, 9: comentarios
-            start_row = 3
-            for r in range(start_row, len(df)):
-                pregunta = df.iloc[r, 4] if df.shape[1] > 4 else None
-                if pd.isna(pregunta) or not str(pregunta).strip():
-                    continue
-
-                control = df.iloc[r, 1] if df.shape[1] > 1 else ""
-                tema = df.iloc[r, 2] if df.shape[1] > 2 else ""
-                items.append({
-                    "row": r,
-                    "tipo": "q",
-                    "control": "" if pd.isna(control) else str(control).strip(),
-                    "tema": "" if pd.isna(tema) else str(tema).strip(),
-                    "pregunta": str(pregunta).strip(),
-                    "layout": "anexo_a"
-                })
-
-        else:
-            # Capítulos (4-10): encabezado suele estar en fila 0
-            # Columnas:
-            # 1: pregunta/texto, 2..5 opciones, 6 comentarios
-            start_row = 1
-            for r in range(start_row, len(df)):
-                texto = df.iloc[r, 1] if df.shape[1] > 1 else None
-                if pd.isna(texto) or not str(texto).strip():
-                    continue
-
-                txt = str(texto).strip()
-
-                # Si parece ser un título de cláusula (ej: "4.1 ...", "5.2 ...") lo marcamos como header
-                is_header = bool(
-                    (len(txt) < 120) and (
-                        txt.startswith(("4.", "5.", "6.", "7.", "8.", "9.", "10.")) and
-                        ("¿" not in txt)
-                    )
-                )
-
-                items.append({
-                    "row": r,
-                    "tipo": "h" if is_header else "q",
-                    "pregunta": txt,
-                    "layout": "capitulo"
-                })
-
-        sheets.append({
-            "name": sheet_name,
-            "items": items
-        })
-
-    return sheets
-
-def render_action_plan_table(plan: list) -> str:
-    if not plan:
-        return "<div class='text-muted small'>Aún no se ha generado el plan de acción general.</div>"
-
-    tr = ""
-    for row in plan[:250]:
-        if not isinstance(row, dict):
-            continue
-        tr += f"""
-        <tr class="cell-small">
-          <td class="wrap" style="min-width:260px;">{xml_escape(to_text(row.get("accion")) )}</td>
-          <td class="wrap" style="min-width:220px;">{xml_escape(to_text(row.get("proposito")) )}</td>
-          <td class="wrap" style="min-width:240px;">{xml_escape(to_text(row.get("evidencia")) )}</td>
-          <td class="text-muted" style="min-width:90px;">{xml_escape(to_text(row.get("prioridad")) )}</td>
-          <td class="text-muted" style="min-width:90px;">{xml_escape(to_text(row.get("horizonte")) )}</td>
-          <td class="wrap" style="min-width:220px;">{xml_escape(to_text(row.get("dependencia")) )}</td>
-        </tr>
-        """
-
-    return f"""
-    <div class="table-responsive mt-2" style="max-height: 460px; overflow:auto;">
-      <table class="table table-sm table-striped align-middle table-tight">
-        <thead>
-          <tr>
-            <th>Acción</th>
-            <th>Propósito</th>
-            <th>Evidencia</th>
-            <th>Prioridad</th>
-            <th>Horizonte</th>
-            <th>Dependencia</th>
-          </tr>
-        </thead>
-        <tbody>
-          {tr if tr else "<tr><td colspan='6' class='text-muted'>Sin datos.</td></tr>"}
-        </tbody>
-      </table>
-    </div>
-    """
-
-def normalize_action_plan_payload(parsed):
-    """
-    Acepta respuesta IA como:
-      A) {"action_plan":[{...}]}
-      B) {"plan":[{...}]}
-      C) [{...}, {...}]   <-- lista directa (tu caso)
-    Retorna SIEMPRE: {"action_plan":[{...}]}  (dict)
-    Además normaliza llaves con acentos: acción->accion, propósito->proposito.
-    """
-    def _strip_accents_keys(d: dict) -> dict:
-        if not isinstance(d, dict):
-            return {}
-        # mapa de llaves esperadas (acentos -> sin acentos)
-        key_map = {
-            "acción": "accion",
-            "propósito": "proposito",
-            "evidéncia": "evidencia",
-            "responsáble": "responsable",
-            "capítulo": "capitulo",
-            "fase": "fase",
-            "requisito": "requisito",
-            "prioridad": "prioridad",
-            "horizonte": "horizonte",
-            "dependencia": "dependencia",
-        }
-        out = {}
-        for k, v in d.items():
-            kk = (k or "").strip()
-            kk_low = kk.lower()
-            kk_norm = key_map.get(kk_low, kk_low)
-
-            # también soporta variantes comunes
-            if kk_norm == "accion" or kk_norm == "acción":
-                kk_norm = "accion"
-            elif kk_norm == "proposito" or kk_norm == "propósito":
-                kk_norm = "proposito"
-
-            out[kk_norm] = v
-        return out
-
-    # 1) determinar lista de filas
-    rows = None
-    if isinstance(parsed, list):
-        rows = parsed
-    elif isinstance(parsed, dict):
-        # varias llaves posibles
-        rows = parsed.get("action_plan") or parsed.get("plan") or parsed.get("acciones")
-        if rows is None:
-            # a veces viene {"action_plan": {...}} malformado
-            rows = []
-    else:
-        rows = []
-
-    if not isinstance(rows, list):
-        rows = []
-
-    # 2) normalizar filas
-    cleaned_rows = []
-    for r in rows:
-        if not isinstance(r, dict):
-            continue
-        rr = _strip_accents_keys(r)
-
-        cleaned_rows.append({
-            # usa tus nombres esperados en UI
-            "accion": harden_no_conditionals(to_text(rr.get("accion"))).strip(),
-            "proposito": harden_no_conditionals(to_text(rr.get("proposito"))).strip(),
-            "evidencia": harden_no_conditionals(to_text(rr.get("evidencia"))).strip(),
-            "prioridad": (to_text(rr.get("prioridad")) or "").strip(),
-            "horizonte": (to_text(rr.get("horizonte")) or "").strip(),
-            "dependencia": harden_no_conditionals(to_text(rr.get("dependencia"))).strip(),
-            "responsable": harden_no_conditionals(to_text(rr.get("responsable"))).strip(),
-            "capitulo": (to_text(rr.get("capitulo")) or "").strip(),
-            "fase": (to_text(rr.get("fase")) or "").strip(),
-            "requisito": harden_no_conditionals(to_text(rr.get("requisito"))).strip(),
-        })
-
-    return {"action_plan": cleaned_rows}
-
-
- 
-# =========================
-# Helper Evidencias SOA
-# =========================
-
-EVIDENCE_EXTENSIONS = {"pdf", "doc", "docx", "xls", "xlsx"}
-
-def allowed_evidence_file(filename: str) -> bool:
-    return (
-        "." in filename and
-        filename.rsplit(".", 1)[1].lower() in EVIDENCE_EXTENSIONS
-    )
-
-
-# configuración del correo
-
-def get_email_config():
-    """
-    Obtiene la configuración SMTP desde la base de datos (EmailConfig)
-    o como fallback desde variables de entorno.
-    """
-
-    # 1️⃣ Intentar desde BD
-    try:
-        cfg = EmailConfig.query.first()
-    except Exception:
-        cfg = None
-
-    if cfg:
-        return {
-            "SMTP_HOST": cfg.smtp_host,
-            "SMTP_PORT": int(cfg.smtp_port or 587),
-            "SMTP_USER": cfg.smtp_user,
-            "SMTP_PASS": cfg.smtp_pass,
-            "SMTP_FROM": cfg.smtp_from or cfg.smtp_user,
-            "APP_NAME":  cfg.app_name or "SGSI",
-        }
-
-    # 2️⃣ Fallback a variables de entorno
-    return {
-        "SMTP_HOST": os.getenv("SMTP_HOST"),
-        "SMTP_PORT": int(os.getenv("SMTP_PORT", "587")),
-        "SMTP_USER": os.getenv("SMTP_USER"),
-        "SMTP_PASS": os.getenv("SMTP_PASS"),
-        "SMTP_FROM": os.getenv("SMTP_FROM"),
-        "APP_NAME":  os.getenv("APP_NAME", "SGSI"),
-    }
-
-# Tipo de Riesgos
-
-def gattr(obj, name):
-    if name == "tipo_riesgo_nombre":
-        tr = getattr(obj, "tipo_riesgo", None)
-        return tr.nombre if tr else ""
-    return getattr(obj, name, None)
-
-# Metricas de Riesgos
-
-RISK_ORDER = ["Bajo", "Moderado", "Alto", "Extremo"]  # orden oficial
-
-def normalize_level(s: str) -> str:
-    if s is None:
-        return ""
-    x = str(s).strip().lower()
-
-    # quitar acentos simples
-    x = (x.replace("á","a").replace("é","e").replace("í","i")
-           .replace("ó","o").replace("ú","u"))
-
-    # 1) si viene numérico (ej: "16", "20") interpreta como matriz prob*impacto
-    if x.isdigit():
-        v = int(x)
-        if v <= 4:
-            return "Bajo"
-        elif v <= 9:
-            return "Moderado"
-        elif v <= 15:
-            return "Alto"
-        else:
-            return "Extremo"
-
-    # 2) sinónimos / variantes comunes
-    if x in ["bajo", "low"]:
-        return "Bajo"
-    if x in ["medio", "moderado", "moderate", "medium"]:
-        return "Moderado"
-    if x in ["alto", "high"]:
-        return "Alto"
-    if x in ["Extremo", "extreme ", "severo", "several"]:
-        return "Extremo"
-
-    # 3) detección por contains
-    if "crit" in x:
-        return "Extremo"
-    if "alt" in x:
-        return "Alto"
-    if "mod" in x or "med" in x:
-        return "Moderado"
-    if "baj" in x:
-        return "Bajo"
-    return ""
-
-def safe_appetite_level(raw: str, default="Moderado") -> str:
-    lvl = normalize_level(raw)
-    return lvl if lvl in RISK_ORDER else default
-
-def dominant_level(level_counts: dict) -> str:
-    """
-    Retorna el nivel dominante (el más frecuente).
-    Si hay empate, gana el nivel MÁS alto (Extremo > Crítico > ...).
-    """
-    best_lvl = ""
-    best_count = -1
-    for lvl in RISK_ORDER:
-        c = int(level_counts.get(lvl, 0) or 0)
-        if c > best_count:
-            best_count = c
-            best_lvl = lvl
-        elif c == best_count and c > 0:
-            # empate: el más alto según RISK_ORDER
-            if level_rank(lvl) > level_rank(best_lvl):
-                best_lvl = lvl
-    return best_lvl if best_count > 0 else ""
-
-def build_trend_text_dominant(trend_rows):
-    if not trend_rows:
-        return {
-            "inherente": "No hay datos con fecha para analizar tendencia.",
-            "residual": "No hay datos con fecha para analizar tendencia.",
-        }
-
-    first = trend_rows[0]
-    last = trend_rows[-1]
-
-    inh_ini, inh_fin = first["inh_dominante"], last["inh_dominante"]
-    res_ini, res_fin = first["res_dominante"], last["res_dominante"]
-
-    def describe(start, end, label):
-        if start == "Sin dato" or end == "Sin dato":
-            return f"No hay suficiente información para determinar tendencia {label}."
-        if start == end:
-            return f"La criticidad dominante {label} se mantiene en **{start}**."
-        # sube o baja según ranking
-        if level_rank(end) > level_rank(start):
-            return f"La criticidad dominante {label} **aumenta** de **{start}** a **{end}**."
-        else:
-            return f"La criticidad dominante {label} **disminuye** de **{start}** a **{end}**."
-
-    return {
-        "inherente": describe(inh_ini, inh_fin, "INHERENTE"),
-        "residual": describe(res_ini, res_fin, "RESIDUAL"),
-    }
-
-
-def level_rank(level: str) -> int:
-    lvl = normalize_level(level)
-    if lvl in RISK_ORDER:
-        return RISK_ORDER.index(lvl)
-    return -1
-
-def is_outside_appetite(residual_level: str, appetite_level: str) -> bool:
-    """True si residual >= apetito (umbral)."""
-    r = level_rank(residual_level)
-    a = level_rank(appetite_level)
-    if r < 0 or a < 0:
-        return False
-    return r >= a
-
-def build_trend_text(trend_rows, order_levels):
-    """
-    Genera análisis en texto para Inherente y Residual por criticidad.
-    Usa la primera y última fila disponible como comparación (inicio vs fin).
-    """
-    if not trend_rows:
-        return {
-            "inherente": "No hay datos con fecha para analizar tendencia.",
-            "residual": "No hay datos con fecha para analizar tendencia.",
-        }
-
-    first = trend_rows[0]
-    last = trend_rows[-1]
-
-    def one_side(prefix: str) -> str:
-        # prefix: "inh_" o "res_"
-        lines = []
-        total_first = 0
-        total_last = 0
-
-        deltas = []
-        for lvl in order_levels:
-            a = int(first.get(f"{prefix}{lvl}", 0) or 0)
-            b = int(last.get(f"{prefix}{lvl}", 0) or 0)
-            d = b - a
-            total_first += a
-            total_last += b
-            deltas.append((lvl, a, b, d))
-
-        # Resumen general
-        if total_last > total_first:
-            general = f"Aumenta el total ({total_first} → {total_last})."
-        elif total_last < total_first:
-            general = f"Disminuye el total ({total_first} → {total_last})."
-        else:
-            general = f"Se mantiene el total ({total_first} → {total_last})."
-
-        # Cambios por criticidad
-        changes = []
-        for (lvl, a, b, d) in deltas:
-            if d > 0:
-                changes.append(f"{lvl}: +{d} ({a}→{b})")
-            elif d < 0:
-                changes.append(f"{lvl}: {d} ({a}→{b})")
-            else:
-                changes.append(f"{lvl}: 0 ({a}→{b})")
-
-        # Encontrar mayor subida y mayor bajada
-        max_up = max(deltas, key=lambda x: x[3])
-        max_down = min(deltas, key=lambda x: x[3])
-
-        extra = []
-        if max_up[3] > 0:
-            extra.append(f"Mayor aumento: {max_up[0]} (+{max_up[3]}).")
-        if max_down[3] < 0:
-            extra.append(f"Mayor reducción: {max_down[0]} ({max_down[3]}).")
-
-        lines.append(general)
-        lines.append("Cambios por criticidad: " + " · ".join(changes) + ".")
-        if extra:
-            lines.append(" ".join(extra))
-
-        return " ".join(lines)
-
-    return {
-        "inherente": one_side("inh_"),
-        "residual": one_side("res_"),
-    }
-
-
-def parse_any_date(s: str):
-    """Parsea fechas típicas: YYYY-MM-DD, DD/MM/YYYY, etc. Retorna datetime o None."""
-    if not s:
-        return None
-    s = str(s).strip()
-    fmts = [
-        "%Y-%m-%d", "%Y/%m/%d",
-        "%d/%m/%Y", "%d-%m-%Y",
-        "%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S",
-        "%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S",
-    ]
-    # intento ISO
-    try:
-        return datetime.fromisoformat(s)
-    except Exception:
-        pass
-    for f in fmts:
-        try:
-            return datetime.strptime(s, f)
-        except Exception:
-            continue
-    return None
-
-def period_key(dt: datetime, tendencia: str) -> str:
-    """Genera llave de periodo según tendencia."""
-    y = dt.year
-    m = dt.month
-    tendencia = (tendencia or "mensual").lower()
-
-    if tendencia == "mensual":
-        return f"{y}-{m:02d}"
-    if tendencia == "trimestral":
-        q = (m - 1) // 3 + 1
-        return f"{y}-T{q}"
-    if tendencia == "cuatrimestral":
-        c = (m - 1) // 4 + 1  # 1..3
-        return f"{y}-C{c}"
-    if tendencia == "semestral":
-        s = 1 if m <= 6 else 2
-        return f"{y}-S{s}"
-    if tendencia == "anual":
-        return f"{y}"
-
-    # fallback
-    return f"{y}-{m:02d}"
-
-# mapa de divisiones por área
-
-def divisiones_por_area():
-    out = {}
-    for a in AreaEmpresa.query.order_by(AreaEmpresa.area.asc(), AreaEmpresa.division.asc()).all():
-        if not a.division:
-            continue
-        out.setdefault(a.id, [])
-        if a.division not in out[a.id]:
-            out[a.id].append(a.division)
-    return out
-
-def get_area_divisiones_map():
-    """
-    Devuelve un dict: { nombre_area: [división1, división2, ...] } (ordenadas)
-    """
-    filas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc(),
-                                       AreaEmpresa.division.asc()).all()
-    m = {}
-    for f in filas:
-        area = (f.area or "").strip()
-        div  = (f.division or "").strip()
-        if not area:
-            continue
-        m.setdefault(area, set())
-        if div:
-            m[area].add(div)
-    # sets -> listas ordenadas
-    return {k: sorted(v) for k, v in m.items()}
-
-
-def get_areaid_divisiones_map():
-    """
-    Devuelve un dict: { area_id: [división1, división2, ...] } (ordenadas)
-    Útil si tus selects usan area_id en lugar del nombre.
-    """
-    filas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc(),
-                                       AreaEmpresa.division.asc()).all()
-    m = {}
-    for f in filas:
-        div = (f.division or "").strip()
-        m.setdefault(f.id, set())
-        if div:
-            m[f.id].add(div)
-    return {k: sorted(v) for k, v in m.items()}
-
-# para setear cálculos en servidor
-
-    def calcular_criticidad(self):
-        total = (self.valor_alcance or 0) + (self.valor_esencial or 0) + \
-                (self.valor_plan_cont or 0) + (self.valor_alternativas or 0) + \
-                (self.valor_plan_migracion or 0) + (self.valor_info_sensible or 0)
-        self.criticidad_pct = total
-        # Reglas pedidas:
-        # >61 alta (rojo), >41 media (amarillo), >26 baja (verde oscuro), >1 muy baja (verde claro), si 0 -> muy baja
-        if total > 61:
-            self.criticidad_texto = "Criticidad alta"
-            self.criticidad_color = "badge-rojo"
-        elif total > 41:
-            self.criticidad_texto = "Criticidad media"
-            self.criticidad_color = "badge-amarillo"
-        elif total > 26:
-            self.criticidad_texto = "Criticidad baja"
-            self.criticidad_color = "badge-verde-oscuro"
-        elif total > 1:
-            self.criticidad_texto = "Criticidad muy baja"
-            self.criticidad_color = "badge-verde-claro"
-        else:
-            self.criticidad_texto = "Criticidad muy baja"
-            self.criticidad_color = "badge-verde-claro"
-
-    def calcular_certificados(self):
-        # requiere_formulario: No si hay certificación, Sí si no hay
-        self.requiere_formulario = "No" if (self.tiene_certificacion == "Sí") else "Sí"
-        self.puntos_certificacion = 100 if (self.tiene_certificacion == "Sí") else 0
-        if self.puntos_certificacion > 0:
-            self.puntos_formulario = 0
-        # total + resultado
-        total = (self.puntos_certificacion or 0) + (self.puntos_formulario or 0)
-        self.calificacion_total = total
-        if total > 80:
-            self.resultado_evaluacion = "Aprobado"
-            self.resultado_color = "badge-aprobado"
-        elif total > 60:
-            self.resultado_evaluacion = "En revisión"
-            self.resultado_color = "badge-revision"
-        elif total > 0:
-            self.resultado_evaluacion = "No Aprobado"
-            self.resultado_color = "badge-noaprob"
-        else:
-            self.resultado_evaluacion = "No Aprobado"
-            self.resultado_color = "badge-noaprob"
-            
-    def is_allowed_pdf(filename: str) -> bool:
-        ext = os.path.splitext(filename.lower())[1]
-    return ext in ALLOWED_PDF_EXT
-
-    def unique_store_name(original: str) -> str:
-        # evita colisiones y oculta nombres reales
-        ext = os.path.splitext(original)[1].lower()
-        return f"{uuid4().hex}{ext}"
-
-    def obtener_cargos_desde_areas():
-        cargos = set()
-        for a in AreaEmpresa.query.all():
-            # ajusta los nombres a tu modelo de Áreas
-            if getattr(a, 'responsable_cargo', None):
-                cargos.add(a.responsable_cargo)
-            if getattr(a, 'division_cargo', None):
-                cargos.add(a.division_cargo)
-        lst = sorted(c for c in cargos if c)
-        return lst or ['Analista','Coordinador','Jefe','Gerente']  # fallback
-
-    def attribute(obj, name):
-        return getattr(obj, name, None)
-
-
-    
-def extraer_respuestas_desde_excel(path_xlsx):
-    """
-    Lee el archivo Excel del cuestionario de proveedores y
-    devuelve una lista de dicts con:
-    - codigo
-    - pregunta
-    - cumplimiento
-    - notas
-    """
-    xls = pd.ExcelFile(path_xlsx)
-
-    # En tu plantilla el cuestionario está en la hoja "Requerimientos Aplicativos"
-    df = xls.parse("Requerimientos Aplicativos", header=None)
-
-    respuestas = []
-
-    # A partir de la fila 36 empiezan las preguntas (según el archivo que subiste)
-    # Columna B -> código (1.1, 1.2, etc.)
-    # Columna C -> texto de la pregunta
-    # Columna I -> Evidencias/Notas
-    # Columna J -> Cumplimiento (lo que llenará el proveedor)
-    for i in range(36, len(df)):
-        cod = df.iloc[i, 1]
-        txt = df.iloc[i, 2]
-
-        # Si no hay código ni texto, saltamos
-        if (pd.isna(cod) and pd.isna(txt)):
-            continue
-
-        # Saltar filas de títulos tipo "Sección 1", "Referencia", etc.
-        cod_str = "" if pd.isna(cod) else str(cod).strip()
-        txt_str = "" if pd.isna(txt) else str(txt).strip()
-
-        if not txt_str:
-            continue
-
-        # Tomamos cumplimiento y notas
-        notas = df.iloc[i, 8] if df.shape[1] > 8 else None
-        cumpl = df.iloc[i, 9] if df.shape[1] > 9 else None
-
-        notas_str = "" if pd.isna(notas) else str(notas).strip()
-        cumpl_str = "" if pd.isna(cumpl) else str(cumpl).strip().upper()
-
-        respuestas.append({
-            "codigo": cod_str,
-            "pregunta": txt_str,
-            "cumplimiento": cumpl_str,
-            "notas": notas_str
-        })
-
-    return respuestas
-
-def chat_ai(prompt: str, model: str = None) -> str:
-    """
-    Mantiene la misma firma para no romper módulos existentes,
-    pero usa el proveedor activo configurado en Administración.
-    """
-    ai_cfg = get_openrouter_client()
-    provider = ai_cfg.get("provider")
-
-    if provider == "ollama":
-        base_url = ai_cfg.get("base_url", "").rstrip("/")
-        ollama_model = ai_cfg.get("model") or get_ollama_model() or "llama3.1"
-
-        if not base_url:
-            raise RuntimeError("No existe OLLAMA_BASE_URL configurada en Administración.")
-        if not ollama_model:
-            raise RuntimeError("No existe OLLAMA_MODEL configurado en Administración.")
-
-        resp = requests.post(
-            f"{base_url}/api/generate",
-            json={
-                "model": ollama_model,
-                "prompt": f"Responde en español, claro y accionable.\n\n{prompt}",
-                "stream": False,
-                "options": {
-                    "temperature": 0.2
-                }
-            },
-            timeout=300
-        )
-        resp.raise_for_status()
-
-        data = resp.json() or {}
-        return (data.get("response") or "").strip()
-
-    # OpenRouter
-    client = ai_cfg["client"]
-    model_name = model or ai_cfg.get("model") or OPENROUTER_MODEL or "deepseek/deepseek-chat"
-
-    resp = client.chat.completions.create(
-        model=model_name,
-        messages=[
-            {"role": "system", "content": "Responde en español, claro y accionable."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.2,
-    )
-
-    return (resp.choices[0].message.content or "").strip()
-
-
-# =========================
-# Inserta todos los controles si la tabla está vacía
-# =========================
-
-def populate_if_needed():
-    # Insertar controles iniciales si la tabla está vacía
-    if Control.query.first() is None:
-        for item in FULL_SOA:
-            db.session.add(Control(**item))
-        db.session.commit()
-
-    # Crear la tabla de registro de incidentes directamente en SQLite
-    conn = sqlite3.connect('sgsi.db')
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS registro_incidentes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            descripcion_corta TEXT,
-            causa TEXT,
-            fecha_inicio TEXT,
-            fecha_fin TEXT,
-            estado_actual TEXT,
-            datos_personales_involucrados TEXT,
-            violacion_datos_personales TEXT,
-            medidas_tomadas TEXT,
-            enlace_informe_interno TEXT,
-            medidas_prevencion TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-
-def create_admin():
-    if not User.query.filter_by(username='Administrador').first():
-        admin = User(username='Administrador', role='admin')
-        admin.set_password('Abcd12345%')
-        db.session.add(admin)
-        db.session.commit()
-
-
-# =========================
-# Inicialización de BD al arrancar (compatible con Flask 3.x)
-# =========================
-
-with app.app_context():
-    db.create_all()
-    populate_if_needed()
-    create_admin()
-
-
-# =========================
-# Export CSV (descargar todo)
-# =========================
-
-@app.route('/export')
-def export_csv():
-    controls = Control.query.order_by(Control.nr).all()
-    si = io.StringIO()
-    fieldnames = ['nr','chapter','topic','control_text','applicable','justification','motivation','implemented']
-    writer = csv.DictWriter(si, fieldnames=fieldnames)
-    writer.writeheader()
-    for c in controls:
-        writer.writerow(c.to_dict())
-    mem = io.BytesIO()
-    mem.write(si.getvalue().encode('utf-8'))
-    mem.seek(0)
-    return send_file(mem, as_attachment=True, download_name='soa_iso27001_export.csv', mimetype='text/csv')
-
-# =========================
-# Ruta para descargar via send_file necesita BytesIO importado
-# =========================
-
-from io import BytesIO as _BytesIO
-def io_BytesIO(b): return _BytesIO(b)
-
-# =========================
-# Ajuste para send_file con BytesIO: re-definimos send_file wrapper
-# =========================
-from flask import Response
-@app.route('/export_alt')
-def export_csv_alt():
-    controls = Control.query.order_by(Control.nr).all()
-    si = io.StringIO()
-    fieldnames = ['nr','chapter','topic','control_text','applicable','justification','motivation','implemented']
-    writer = csv.DictWriter(si, fieldnames=fieldnames)
-    writer.writeheader()
-    for c in controls:
-        writer.writerow(c.to_dict())
-    data = si.getvalue().encode('utf-8')
-    return Response(data, mimetype='text/csv', headers={'Content-Disposition':'attachment;filename=soa_iso27001_export.csv'})
-
-# =========================
-# Atajo: /export redirige a /export_alt si send_file falla
-# =========================
-@app.route('/export')
-def export_csv_redirect():
-    return export_csv_alt()
-
-# =========================
-# Manejador de errores simple
-# =========================
-@app.errorhandler(Exception)
-def handle_all_errors(e):
-    # si es un error HTTP normal (404, 403, etc.), respétalo
-    if isinstance(e, HTTPException):
-        return e
-
-    tb = traceback.format_exc()
-    html = f"""
-    <div class="alert alert-danger">
-      <h5 class="mb-2">Error interno real (traceback)</h5>
-      <pre style="white-space:pre-wrap; font-size:12px; max-height:520px; overflow:auto;">{tb}</pre>
-    </div>
-    """
-    return render_template_string(BASE, content=html), 500
-
-# =========================
-# Persona Empresas
-# =========================
-def get_personas_empresa():
-    try:
-        return EmpresaPersona.query.order_by(EmpresaPersona.nombre.asc()).all()
-    except Exception:
-        return []
-
-
-# ============================================================================================================================================
-#                                                               Autenticación de Usuarios
-# ============================================================================================================================================
-
-from functools import wraps
-from flask import (
-    render_template_string,
-    request,
-    redirect,
-    url_for,
-    flash,
-    session,
-    send_file
-)
-
-import pyotp
-import qrcode
-import io
-import base64
-
-from io import BytesIO
-
-
-# =========================
-# DECORADOR DE LOGIN
-# =========================
-def login_required(f):
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        if 'user_id' not in session:
-            flash("Por favor, inicia sesión.", "warning")
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return wrapper
-
-
-def admin_required(f):
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        user = User.query.get(session.get('user_id'))
-
-        if not user or user.role != 'admin':
-            flash("Acceso solo permitido a administradores.", "danger")
-            return redirect(url_for('menu'))
-
-        return f(*args, **kwargs)
-
-    return wrapper
-
-
-def admin_or_access_manager_required(f):
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        user = User.query.get(session.get('user_id'))
-
-        if not user or user.role not in ('admin', 'gestor_accesos'):
-            flash(
-                "Acceso solo permitido a administradores o gestores de accesos.",
-                "danger"
-            )
-            return redirect(url_for('menu'))
-
-        return f(*args, **kwargs)
-
-    return wrapper
-
-
-def verify_otp(user, otp_code):
-    if not user or not user.otp_secret:
-        return False
-
-    totp = pyotp.TOTP(user.otp_secret)
-    return totp.verify(otp_code)
-
-
-# ============================================================================================================================================
-#                                                           RENDER QR OTP
-# ============================================================================================================================================
-def _render_qr_otp_setup(user, secret):
-
-    otp_uri = pyotp.totp.TOTP(secret).provisioning_uri(
-        name=user.username,
-        issuer_name="SGSI"
-    )
-
-    qr = qrcode.make(otp_uri)
-
-    buffer = io.BytesIO()
-
-    qr.save(buffer, format="PNG")
-
-    qr_data = base64.b64encode(buffer.getvalue()).decode()
-
-    content = f"""
-    <div class="col-md-6 offset-md-3 text-center">
-
-        <h3>Configuración de Autenticación en Dos Pasos</h3>
-
-        <div class="alert alert-info">
-            Escanea este código QR con Google Authenticator,
-            Microsoft Authenticator o Authy.
-            Luego ingresa el código de 6 dígitos para activar el token.
-        </div>
-
-        <img src="data:image/png;base64,{qr_data}"
-             class="img-fluid mb-3"
-             alt="QR Code"
-             style="max-width:260px;">
-
-        <form method="post"
-              action="{url_for('verificar_otp')}"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="none"
-              spellcheck="false">
-
-            <input type="hidden" name="username" value="{user.username}">
-            <input type="hidden" name="modo" value="setup">
-
-            <div class="mt-3 mb-3">
-                <label class="form-label fw-bold">
-                    Código de Verificación
-                </label>
-
-                <input class="form-control text-center"
-                       name="otp"
-                       type="password"
-                       inputmode="numeric"
-                       pattern="[0-9]{{6}}"
-                       maxlength="6"
-                       placeholder="••••••"
-                       required
-                       autocomplete="off"
-                       autocorrect="off"
-                       autocapitalize="none"
-                       spellcheck="false">
-            </div>
-
-            <button class="btn btn-success rounded-pill px-4">
-                Activar token
-            </button>
-
-            <a href="{url_for('login')}"
-               class="btn btn-secondary rounded-pill px-4">
-                Cancelar
-            </a>
-
-        </form>
-    </div>
-    """
-
-    return render_template_string(BASE, content=content)
-
-
-# ============================================================================================================================================
-#                                                               LOGIN
-# ============================================================================================================================================
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-
-    if request.method == 'POST':
-
-        username_ingresado = (
-            request.form.get('sgsi_user_secure') or
-            ""
-        ).strip()
-
-        password_ingresado = (
-            request.form.get('sgsi_password_secure') or
-            ""
-        )
-
-        user = User.query.filter_by(
-            username=username_ingresado
-        ).first()
-
-        # ============================================================
-        # LOGIN CORRECTO
-        # ============================================================
-        if user and user.check_password(password_ingresado):
-
-            # =====================================================
-            # USUARIO SIN OTP CONFIGURADO
-            # =====================================================
-            if not user.otp_secret:
-
-                secret_temporal = pyotp.random_base32()
-
-                session['temp_user'] = user.username
-                session['pending_otp_secret'] = secret_temporal
-
-                return _render_qr_otp_setup(
-                    user,
-                    secret_temporal
-                )
-
-            # =====================================================
-            # USUARIO YA TIENE OTP
-            # =====================================================
-            session['temp_user'] = user.username
-
-            session.pop(
-                'pending_otp_secret',
-                None
-            )
-
-            return redirect(
-                url_for('verificar_otp')
-            )
-
-        # ============================================================
-        # LOGIN FALLIDO
-        # ============================================================
-        registrar_log(
-            username_ingresado or "Desconocido",
-            (
-                "Acceso fallido al sistema. "
-                f"Usuario o contraseña inválida: "
-                f"{username_ingresado or 'Desconocido'}"
-            )
-        )
-
-        flash(
-            "Usuario o contraseña incorrectos.",
-            "danger"
-        )
-
-    # ====================================================================
-    # HTML LOGIN
-    # ====================================================================
-    content = """
-    <style>
-
-      input::-ms-reveal,
-      input::-ms-clear{
-        display:none;
-      }
-
-      input[type="password"]::-webkit-credentials-auto-fill-button,
-      input[type="password"]::-webkit-textfield-decoration-container{
-        display:none !important;
-        visibility:hidden;
-        pointer-events:none;
-      }
-
-      .login-card{
-        background:#ffffff;
-        border-radius:24px;
-        padding:32px;
-        box-shadow:0 10px 30px rgba(15,23,42,.08);
-      }
-
-      .login-title{
-        font-size:2rem;
-        font-weight:900;
-        text-align:center;
-        margin-bottom:24px;
-        color:#1e293b;
-      }
-
-      .login-label{
-        font-weight:800;
-        margin-bottom:8px;
-        color:#334155;
-      }
-
-      .login-input{
-        height:52px;
-        border-radius:14px;
-        border:1px solid #dbe2ea;
-        font-size:1rem;
-        padding-left:14px;
-        transition:.2s ease;
-      }
-
-      .login-input:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .18rem rgba(63,134,214,.15);
-      }
-
-      .login-btn{
-        height:52px;
-        border-radius:14px;
-        font-weight:900;
-        font-size:1rem;
-        background:#3f86d6;
-        border:none;
-      }
-
-      .login-btn:hover{
-        background:#2f6fb6;
-      }
-
-    </style>
-
-    <div class="col-md-4 offset-md-4">
-
-      <div class="login-card">
-
-        <div class="login-title">
-          Iniciar sesión
-        </div>
-
-        <form method="post"
-              id="sgsiLoginForm"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="none"
-              spellcheck="false">
-
-            <!-- CAMPOS TRAMPA -->
-            <input type="text"
-                   style="display:none"
-                   tabindex="-1"
-                   autocomplete="off">
-
-            <input type="password"
-                   style="display:none"
-                   tabindex="-1"
-                   autocomplete="new-password">
-
-            <!-- USUARIO -->
-            <div class="mb-3">
-
-              <label class="login-label">
-                Usuario
-              </label>
-
-              <input class="form-control login-input"
-                     id="sgsi_user_secure"
-                     name="sgsi_user_secure"
-                     type="text"
-                     required
-
-                     autocomplete="off"
-                     autocorrect="off"
-                     autocapitalize="none"
-                     spellcheck="false"
-
-                     data-form-type="other"
-
-                     readonly
-                     onfocus="this.removeAttribute('readonly');"
-
-                     placeholder="Digite su usuario">
-
-            </div>
-
-            <!-- PASSWORD -->
-            <div class="mb-4">
-
-              <label class="login-label">
-                Contraseña
-              </label>
-
-              <input class="form-control login-input"
-                     id="sgsi_password_secure"
-                     name="sgsi_password_secure"
-                     type="password"
-                     required
-
-                     autocomplete="off"
-                     autocorrect="off"
-                     autocapitalize="none"
-                     spellcheck="false"
-
-                     data-form-type="other"
-                     data-lpignore="true"
-
-                     readonly
-                     onfocus="this.removeAttribute('readonly');"
-
-                     placeholder="••••••••">
-
-            </div>
-
-            <button class="btn btn-primary w-100 login-btn">
-              Ingresar
-            </button>
-
-        </form>
-
-      </div>
-
-    </div>
-
-    <script>
-
-    document.addEventListener('DOMContentLoaded', function(){
-
-        const form = document.getElementById('sgsiLoginForm');
-
-        const user = document.getElementById('sgsi_user_secure');
-
-        const pass = document.getElementById('sgsi_password_secure');
-
-        // LIMPIAR AUTOFILL
-        if(user){
-            user.value = '';
-
-            setTimeout(function(){
-                user.value = '';
-            }, 100);
-        }
-
-        if(pass){
-            pass.value = '';
-
-            setTimeout(function(){
-                pass.value = '';
-            }, 100);
-        }
-
-        // BLOQUEAR DETECCIÓN DE LOGIN
-        if(form){
-
-            form.setAttribute(
-                'autocomplete',
-                'off'
-            );
-
-            form.addEventListener(
-                'submit',
-                function(){
-
-                    user.setAttribute(
-                        'autocomplete',
-                        'off'
-                    );
-
-                    pass.setAttribute(
-                        'autocomplete',
-                        'new-password'
-                    );
-
-                }
-            );
-
-        }
-
-        // DESBLOQUEAR READONLY AL HACER FOCUS
-        [user, pass].forEach(function(el){
-
-            if(!el) return;
-
-            el.addEventListener('focus', function(){
-
-                this.removeAttribute(
-                    'readonly'
-                );
-
-                this.setAttribute(
-                    'autocomplete',
-                    'off'
-                );
-
-            });
-
-        });
-
-    });
-
-    </script>
-    """
-
-    return render_template_string(
-        BASE,
-        content=content
-    )
-
-
-# ============================================================================================================================================
-#                                                               OTP
-# ============================================================================================================================================
-@app.route('/verificar_otp', methods=['GET', 'POST'])
-def verificar_otp():
-
-    username = session.get('temp_user')
-
-    if not username:
-        flash(
-            "Primero inicia sesión.",
-            "warning"
-        )
-
-        return redirect(
-            url_for('login')
-        )
-
-    user = User.query.filter_by(
-        username=username
-    ).first()
-
-    if not user:
-
-        session.pop('temp_user', None)
-
-        session.pop(
-            'pending_otp_secret',
-            None
-        )
-
-        registrar_log(
-            username or "Desconocido",
-            (
-                "Acceso fallido al sistema. "
-                "Usuario no encontrado "
-                f"en verificación OTP: "
-                f"{username or 'Desconocido'}"
-            )
-        )
-
-        flash(
-            "Usuario no encontrado.",
-            "danger"
-        )
-
-        return redirect(
-            url_for('login')
-        )
-
-    if request.method == 'POST':
-
-        otp = (
-            request.form.get('otp') or ""
-        ).strip()
-
-        modo = (
-            request.form.get('modo') or ""
-        ).strip()
-
-        # =====================================================
-        # CONFIGURACIÓN INICIAL OTP
-        # =====================================================
-        if modo == "setup":
-
-            secret_temporal = session.get(
-                'pending_otp_secret'
-            )
-
-            if not secret_temporal:
-
-                flash(
-                    "La configuración del token expiró. "
-                    "Inicia sesión nuevamente.",
-                    "warning"
-                )
-
-                return redirect(
-                    url_for('login')
-                )
-
-            totp = pyotp.TOTP(
-                secret_temporal
-            )
-
-            if totp.verify(otp):
-
-                user.otp_secret = secret_temporal
-
-                db.session.commit()
-
-                session['user_id'] = user.id
-                session['username'] = user.username
-                session['role'] = user.role
-
-                session.pop(
-                    'temp_user',
-                    None
-                )
-
-                session.pop(
-                    'pending_otp_secret',
-                    None
-                )
-
-                registrar_log(
-                    user.username,
-                    (
-                        "Acceso exitoso al sistema. "
-                        "Token OTP configurado "
-                        f"y usuario autenticado "
-                        f"con perfil: {user.role}"
-                    )
-                )
-
-                flash(
-                    f"Token configurado correctamente. "
-                    f"Bienvenido {user.username}",
-                    "success"
-                )
-
-                return redirect(
-                    url_for('menu')
-                )
-
-            registrar_log(
-                user.username,
-                (
-                    "Configuración OTP fallida. "
-                    f"Código inválido para "
-                    f"el usuario: {user.username}"
-                )
-            )
-
-            flash(
-                "Código OTP inválido. "
-                "Escanea el QR e intenta nuevamente.",
-                "danger"
-            )
-
-            return _render_qr_otp_setup(
-                user,
-                secret_temporal
-            )
-
-        # =====================================================
-        # LOGIN NORMAL OTP
-        # =====================================================
-        if not user.otp_secret:
-
-            flash(
-                "Este usuario aún no tiene "
-                "token configurado. "
-                "Inicia sesión nuevamente.",
-                "warning"
-            )
-
-            return redirect(
-                url_for('login')
-            )
-
-        totp = pyotp.TOTP(
-            user.otp_secret
-        )
-
-        if totp.verify(otp):
-
-            session['user_id'] = user.id
-            session['username'] = user.username
-            session['role'] = user.role
-
-            session.pop(
-                'temp_user',
-                None
-            )
-
-            session.pop(
-                'pending_otp_secret',
-                None
-            )
-
-            registrar_log(
-                user.username,
-                (
-                    "Acceso exitoso al sistema. "
-                    "Usuario autenticado "
-                    f"correctamente con perfil: "
-                    f"{user.role}"
-                )
-            )
-
-            flash(
-                f"Bienvenido {user.username}",
-                "success"
-            )
-
-            return redirect(
-                url_for('menu')
-            )
-
-        registrar_log(
-            user.username,
-            (
-                "Acceso fallido al sistema. "
-                f"OTP inválido para el usuario: "
-                f"{user.username}"
-            )
-        )
-
-        flash(
-            "Código OTP inválido, intente de nuevo.",
-            "danger"
-        )
-
-    # ====================================================================
-    # HTML OTP
-    # ====================================================================
-    content = f"""
-    <div class="col-md-4 offset-md-4 text-center">
-
-      <h3>Verificación de Código OTP</h3>
-
-      <form method="post"
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="none"
-            spellcheck="false">
-
-        <input type="hidden"
-               name="username"
-               value="{user.username}">
-
-        <div class="mb-3">
-
-          <label>
-            Código OTP
-          </label>
-
-          <input class="form-control text-center"
-                 name="otp"
-                 type="password"
-                 inputmode="numeric"
-                 pattern="[0-9]{{6}}"
-                 maxlength="6"
-                 placeholder="••••••"
-                 required
-                 autocomplete="off"
-                 autocorrect="off"
-                 autocapitalize="none"
-                 spellcheck="false">
-
-        </div>
-
-        <button class="btn btn-success rounded-pill px-4">
-          Verificar
-        </button>
-
-        <a href="{url_for('login')}"
-           class="btn btn-secondary rounded-pill px-4">
-          Cancelar
-        </a>
-
-      </form>
-
-    </div>
-    """
-
-    return render_template_string(
-        BASE,
-        content=content
-    )
-
-
-# ============================================================================================================================================
-#                                                           GENERAR OTP
-# ============================================================================================================================================
-@app.route('/generar_otp/<username>')
-def generar_otp(username):
-
-    user = User.query.filter_by(
-        username=username
-    ).first()
-
-    if not user:
-        return "Usuario no encontrado", 404
-
-    secret = (
-        user.otp_secret or
-        session.get('pending_otp_secret') or
-        pyotp.random_base32()
-    )
-
-    session['temp_user'] = user.username
-
-    session['pending_otp_secret'] = secret
-
-    otp_uri = pyotp.totp.TOTP(secret).provisioning_uri(
-        name=username,
-        issuer_name="Sistema ISO27001"
-    )
-
-    img = qrcode.make(otp_uri)
-
-    buffer = BytesIO()
-
-    img.save(buffer, format="PNG")
-
-    buffer.seek(0)
-
-    return send_file(
-        buffer,
-        mimetype='image/png'
-    )
-
-
-# ============================================================================================================================================
-#                                                               LOGOUT
-# ============================================================================================================================================
-@app.route('/logout')
-def logout():
-
-    try:
-        _browser_session_revoke()
-    except Exception as exc:
-        print("No se pudo revocar la sesión al cerrar manualmente:", repr(exc))
-
-    session.clear()
-
-    flash(
-        "Sesión finalizada",
-        "info"
-    )
-
-    return redirect(
-        url_for('login')
-    )
-
-
-# ============================================================================================================================================
-#                                                   Fin módulo de Autenticación
-# ============================================================================================================================================
-
-# ============================================================================================================================================
-#                                                                   Módulo de Perfil
-# ============================================================================================================================================
-
-@app.context_processor
-def inject_user():
-    u = None
-    if 'user_id' in session:
-        u = User.query.get(session.get('user_id'))
-    return dict(current_user=u)
-
-@app.route("/perfil", methods=["GET", "POST"])
-@login_required
-def perfil():
-    user = User.query.get(session.get("user_id"))
-
-    if request.method == "POST":
-        accion = request.form.get("accion")
-
-        # ============================
-        # A) Subir foto
-        # ============================
-        if accion == "subir_foto":
-            f = request.files.get("foto")
-            if not f or f.filename == "":
-                flash("Selecciona una imagen.", "warning")
-                return redirect(url_for("perfil"))
-
-            if not allowed_file(f.filename):
-                flash("Formato no permitido. Usa PNG/JPG/JPEG/WEBP.", "danger")
-                return redirect(url_for("perfil"))
-
-            ext = f.filename.rsplit(".", 1)[1].lower()
-            filename = secure_filename(f"{uuid4().hex}.{ext}")
-            path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-            f.save(path)
-
-            # (Opcional) borrar foto anterior
-            if user.photo_filename:
-                old_path = os.path.join(app.config["UPLOAD_FOLDER"], user.photo_filename)
-                if os.path.exists(old_path):
-                    try:
-                        os.remove(old_path)
-                    except:
-                        pass
-
-            user.photo_filename = filename
-            db.session.commit()
-            flash("Foto actualizada.", "success")
-            return redirect(url_for("perfil"))
-
-        # ============================
-        # B) Cambiar contraseña
-        # ============================
-        if accion == "cambiar_password":
-            actual = request.form.get("password_actual") or ""
-            nueva = request.form.get("password_nueva") or ""
-            confirma = request.form.get("password_confirma") or ""
-
-            if not user.check_password(actual):
-                flash("La contraseña actual no es correcta.", "danger")
-                return redirect(url_for("perfil"))
-
-            if len(nueva) < 10:
-                flash("La nueva contraseña debe tener mínimo 10 caracteres.", "warning")
-                return redirect(url_for("perfil"))
-
-            # regla mínima: 1 mayúscula + 1 especial
-            especiales = set("!@#$%^&*()-_=+[]{};:,.?/\\|`~")
-            if not any(c.isupper() for c in nueva):
-                flash("La nueva contraseña debe incluir al menos 1 mayúscula.", "warning")
-                return redirect(url_for("perfil"))
-            if not any(c in especiales for c in nueva):
-                flash("La nueva contraseña debe incluir al menos 1 caracter especial.", "warning")
-                return redirect(url_for("perfil"))
-
-            if nueva != confirma:
-                flash("La confirmación no coincide.", "warning")
-                return redirect(url_for("perfil"))
-
-            user.set_password(nueva)
-            db.session.commit()
-            flash("Contraseña cambiada correctamente.", "success")
-            return redirect(url_for("perfil"))
-
-    # URL de avatar
-    avatar_url = (
-        url_for("static", filename=f"uploads/profiles/{user.photo_filename}")
-        if user.photo_filename
-        else url_for("static", filename="img/default_user.png")  # crea esta imagen
-    )
-
-    inner = render_template_string("""
-    <div class="perfil-shell">
-
-      <!-- HEADER SGSI -->
-      <div class="perfil-header-card">
-        <div class="perfil-header-overlay">
-          <div class="perfil-header-text">
-            <h3 class="perfil-title m-0">Perfil de usuario</h3>
-            <div class="perfil-subtitle">
-              Administra tu foto de perfil y actualiza tu contraseña de acceso
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="perfil-card">
-        <div class="card-body">
-
-          <!-- DATOS USUARIO -->
-          <div class="perfil-section-title">Información del usuario</div>
-
-          <div class="perfil-user-box mb-4">
-            <img src="{{ avatar_url }}" alt="Foto" class="perfil-avatar">
-
-            <div class="perfil-user-info">
-              <div class="perfil-user-name">👤 {{ user.username }}</div>
-              <div class="perfil-user-meta">Rol: <b>{{ user.role }}</b></div>
-              {% if user.email %}
-                <div class="perfil-user-meta">Correo: <b>{{ user.email }}</b></div>
-              {% endif %}
-            </div>
-          </div>
-
-          <!-- FOTO -->
-          <div class="perfil-section-title">🖼️ Cambiar foto</div>
-
-          <form method="POST" enctype="multipart/form-data" class="mb-4">
-            <input type="hidden" name="accion" value="subir_foto">
-
-            <div class="row g-3 align-items-end">
-              <div class="col-md-8">
-                <label class="form-label fw-semibold">Seleccionar imagen</label>
-                <input type="file" name="foto" class="form-control" accept="image/*" required>
-              </div>
-              <div class="col-md-4 text-md-end">
-                <button class="btn btn-primary rounded-pill px-4 fw-semibold">Subir foto</button>
-              </div>
-            </div>
-          </form>
-
-          <!-- CONTRASEÑA -->
-          <div class="perfil-section-title">🔑 Cambiar contraseña</div>
-
-          <form method="POST">
-            <input type="hidden" name="accion" value="cambiar_password">
-
-            <div class="row g-3">
-              <div class="col-md-4">
-                <label class="form-label fw-semibold">Contraseña actual</label>
-                <input type="password" name="password_actual" class="form-control" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label fw-semibold">Nueva contraseña</label>
-                <input type="password" name="password_nueva" class="form-control" required>
-                <div class="text-muted small mt-1">Mínimo 10 caracteres, 1 mayúscula y 1 carácter especial</div>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label fw-semibold">Confirmar contraseña</label>
-                <input type="password" name="password_confirma" class="form-control" required>
-              </div>
-            </div>
-
-            <div class="text-center text-md-start">
-              <button class="btn btn-success rounded-pill px-4 fw-semibold mt-4">Guardar contraseña</button>
-            </div>
-          </form>
-
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .perfil-shell{
-        width:96%;
-        max-width:1200px;
-        margin:26px auto 24px auto;
-      }
-
-      .perfil-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }
-
-      .perfil-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }
-
-      .perfil-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }
-
-      .perfil-header-overlay::before{
-        content:"👤";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .perfil-header-text{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }
-
-      .perfil-header-text::before{
-        content:"SGSI · Perfil de Usuario";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }
-
-      .perfil-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .perfil-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-        font-weight:800;
-      }
-
-      .perfil-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .perfil-header-actions .btn,
-      .perfil-btn-main,
-      .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .perfil-btn-main{
-        background:#ffffff;
-        color:#0f172a !important;
-        border:1px solid #cfd8e3 !important;
-      }
-
-      .perfil-btn-main:hover{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-        border-color:#9ec5fe !important;
-      }
-
-      .perfil-card,
-      .card{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
-        overflow:hidden;
-      }
-
-      .perfil-card .card-body{
-        padding:22px;
-      }
-
-      .perfil-section-title,
-      .card h5,
-      .card h6{
-        font-weight:950;
-        font-size:.95rem;
-        color:#0b4a8f;
-        padding-bottom:8px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-        margin-bottom:16px;
-      }
-
-      .perfil-user-box{
-        display:flex;
-        align-items:center;
-        gap:18px;
-        background:#f8fbff;
-        border:1px solid #dbe6f4;
-        border-radius:16px;
-        padding:16px;
-        box-shadow:0 8px 18px rgba(15,23,42,.08);
-      }
-
-      .perfil-avatar{
-        width:78px;
-        height:78px;
-        border-radius:50%;
-        object-fit:cover;
-        border:3px solid #0b4a8f;
-        box-shadow:0 6px 16px rgba(0,0,0,.12);
-        flex:0 0 auto;
-      }
-
-      .perfil-user-info{
-        min-width:0;
-      }
-
-      .perfil-user-name{
-        font-size:1.05rem;
-        font-weight:950;
-        color:#101827;
-        line-height:1.2;
-        margin-bottom:4px;
-      }
-
-      .perfil-user-meta{
-        color:#607086;
-        font-size:.90rem;
-        line-height:1.35;
-        font-weight:700;
-      }
-
-      .form-label{
-        font-size:.72rem;
-        font-weight:900;
-        color:#0b4a8f;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        padding:6px 10px;
-        border-radius:10px;
-        display:inline-block;
-        margin-bottom:6px;
-      }
-
-      .form-control,
-      .form-select{
-        border-radius:10px;
-        border:1px solid #d9e3f0;
-        min-height:40px;
-        font-size:.86rem;
-        background:#f8fafc;
-        box-shadow:none !important;
-      }
-
-      .form-control:focus,
-      .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
-      }
-
-      .badge{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }
-
-      @media (max-width:992px){
-        .perfil-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .perfil-header-card{
-          min-height:88px;
-        }
-
-        .perfil-title{
-          font-size:1.20rem;
-        }
-
-        .perfil-subtitle{
-          font-size:.68rem;
-        }
-
-        .perfil-card .card-body{
-          padding:16px;
-        }
-
-        .perfil-user-box{
-          flex-direction:column;
-          align-items:flex-start;
-          text-align:left;
-        }
-      }
-
-      @media (max-width:768px){
-        .perfil-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .perfil-header-overlay::before{
-          margin:0;
-        }
-
-        .perfil-header-text::before{
-          margin-left:auto;
-          margin-right:auto;
-        }
-
-        .perfil-title,
-        .perfil-subtitle{
-          text-align:center;
-        }
-
-        .perfil-header-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """, user=user, avatar_url=avatar_url)
-
-    return render_template_string(BASE, content=Markup(inner))
-
-
-# ============================================================================================================================================
-#                                                                   Fin del módulo de Perfil
-# ============================================================================================================================================
-
-# ============================================================================================================================================
-#                                                               Módulo de envio del password
-# ============================================================================================================================================
 

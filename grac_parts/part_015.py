@@ -1,1700 +1,2380 @@
-GDPR_INSTRUMENTO_TEMPLATE_XLSX = os.path.join(
-    app.root_path,
-    "static",
-    "templates",
-    "ISO27701_GDPR_Matriz.xlsx"
-)
+def ai_json_iso_generic(prompt: str,
+                        system_prompt: str = "Devuelve SOLO JSON válido. No agregues texto fuera del JSON.",
+                        model_openrouter: str = "openai/gpt-4o-mini",
+                        max_tokens: int = None) -> dict:
+    """
+    Helper IA genérico para ISO 27001.
+    Devuelve un dict JSON y soporta:
+    - OpenRouter
+    - Ollama
+    """
+    cfg = get_openai_client()
+    provider = cfg.get("provider")
 
-# Escala de evaluación: igual a NIST CSF 2.0
-# SI=100, PARCIAL=50, NO=0, NA no participa del denominador.
-GDPR_STATUS_SCORE = {
-    "SI": 100,
-    "PARCIAL": 50,
-    "NO": 0,
-    "NA": None,
-}
+    print("DEBUG IA ISO GENERIC - provider activo:", provider)
 
-# Se reutiliza exactamente el mismo criterio de niveles del módulo NIST.
-GDPR_MADUREZ_LEVELS = [
-    {
-        "nivel": "Nivel 1: Ejecutado (Performed)",
-        "descripcion": "La organización puede llevar a cabo prácticas de protección de datos de manera ad hoc.",
-        "score": 1,
-        "rango_pct": "0% – 20%",
-        "logica": "Prácticas ad hoc"
-    },
-    {
-        "nivel": "Nivel 2: Documentado (Documented)",
-        "descripcion": "La organización ha establecido y documentado prácticas relacionadas con protección de datos personales.",
-        "score": 2,
-        "rango_pct": "21% – 40%",
-        "logica": "Existe documentación"
-    },
-    {
-        "nivel": "Nivel 3: Gestionado (Managed)",
-        "descripcion": "La organización revisa el cumplimiento de los controles y asigna recursos adecuados para mantener el programa de protección de datos.",
-        "score": 3,
-        "rango_pct": "41% – 60%",
-        "logica": "Se revisa cumplimiento"
-    },
-    {
-        "nivel": "Nivel 4: Gestionado Cuantitativamente (Quantitatively Managed)",
-        "descripcion": "La organización mide la efectividad del programa de protección de datos y ejecuta acciones correctivas cuando corresponde.",
-        "score": 4,
-        "rango_pct": "61% – 80%",
-        "logica": "Se mide efectividad"
-    },
-    {
-        "nivel": "Nivel 5: Optimizado (Optimizing)",
-        "descripcion": "La organización ha institucionalizado la mejora continua y optimiza transversalmente sus prácticas de protección de datos personales.",
-        "score": 5,
-        "rango_pct": "81% – 100%",
-        "logica": "Mejora continua institucionalizada"
-    },
-]
+    # =========================
+    # OLLAMA
+    # =========================
+    if provider == "ollama":
+        base_url = (cfg.get("base_url") or "").rstrip("/")
+        model = (cfg.get("model") or "").strip()
 
-# =====================================================================
-# HELPERS
-# =====================================================================
+        if not base_url:
+            raise RuntimeError("No hay OLLAMA_BASE_URL configurada en Administración.")
+        if not model:
+            raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
 
+        full_prompt = f"{system_prompt}\n\n{prompt}".strip()
 
-GDPR_CODE_RE = re.compile(r"^\s*(\d+(?:\.\d+)+)\s*(.*)$")
-
-# =====================================================================
-# INFORME EJECUTIVO AI — PROTECCIÓN DE DATOS PERSONALES
-# =====================================================================
-
-def _gdpr_prompt_informe_ejecutivo(run: "DatosMadurezRun", resumen: dict) -> str:
-    partes = []
-
-    for dominio, data in (resumen or {}).items():
-        try:
-            pct = float(data.get("pct", 0) or 0)
-        except Exception:
-            pct = 0.0
-
-        total = int(data.get("total", 0) or 0)
-        brecha = max(0.0, 100.0 - pct)
-
-        items = data.get("items", []) or []
-        si = 0
-        parcial = 0
-        no = 0
-        na = 0
-
-        for it in items:
-            st = (it.get("estado") or "").strip().upper()
-            if st == "SI":
-                si += 1
-            elif st == "PARCIAL":
-                parcial += 1
-            elif st == "NO":
-                no += 1
-            elif st == "NA":
-                na += 1
-
-        nivel = gdpr_nivel_visual_por_pct(pct).get("nivel", "")
-
-        partes.append(
-            f"- Dominio: {dominio}\n"
-            f"  * Cumplimiento: {pct:.2f}%\n"
-            f"  * Brecha: {brecha:.2f}%\n"
-            f"  * Nivel: {nivel}\n"
-            f"  * Total ítems: {total}\n"
-            f"  * SI: {si} | PARCIAL: {parcial} | NO: {no} | NA: {na}"
+        resp = requests.post(
+            f"{base_url}/api/generate",
+            json={
+                "model": model,
+                "prompt": full_prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.2
+                }
+            },
+            timeout=300
         )
+        resp.raise_for_status()
 
-    detalle = "\n".join(partes)
+        payload = resp.json() or {}
 
-    return f"""
-Eres un consultor senior en privacidad, gobierno de datos y cumplimiento GDPR / PIMS. Debes redactar un INFORME EJECUTIVO para alta dirección, claro, breve, profesional y accionable, basado en una evaluación de madurez de protección de datos personales.
+        raw = (payload.get("response") or "").strip()
+        if not raw:
+            raw = (payload.get("message") or "").strip()
 
-DATOS GENERALES
-- Consecutivo: {run.consecutivo}
-- Cumplimiento general: {run.pct_general:.2f}%
-- Nivel general: {gdpr_nivel_visual_por_pct(run.pct_general).get("nivel","")}
+        if not raw:
+            raise RuntimeError(f"Ollama respondió sin contenido. Payload: {str(payload)[:500]}")
 
-RESULTADOS POR DOMINIO
-{detalle}
+        return _extraer_json_objeto(raw)
 
-INSTRUCCIONES
-1. Devuelve solamente JSON válido.
-2. Debes devolver exactamente esta estructura:
+    # =========================
+    # OPENROUTER
+    # =========================
+    client = cfg["client"]
+    model_name = cfg.get("model") or model_openrouter
+
+    resp = openai_call_with_retry(
+        client,
+        model=model_name,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.2,
+        max_tokens=max_tokens
+    )
+
+    raw = (resp.choices[0].message.content or "").strip() or "{}"
+
+    return _extraer_json_objeto(raw)
+
+def ai_generate_report_and_plan(company_name: str, chapter_results: dict, control_results: dict) -> dict:
+    resumen_cap = "\n".join(
+        [f"- {k}: {v.get('pct',0)}%" for k, v in chapter_results.items()]
+    )
+
+    resumen_ctrl = "\n".join(
+        [f"- {cid} ({v.get('group','')}): {v.get('pct',0)}%"
+         for cid, v in list(control_results.items())[:200]]
+    )
+
+    prompt = f"""
+Eres un consultor experto en ISO/IEC 27001:2022 y sistemas de gestión de seguridad de la información.
+
+Organización evaluada: {company_name}
+
+Resumen por capítulo:
+{resumen_cap}
+
+Resumen por controles:
+{resumen_ctrl}
+
+Tareas:
+1. Genera un executive_summary claro, ejecutivo y sin lenguaje condicional.
+2. Genera un report con análisis ejecutivo de fortalezas, brechas y enfoque de mejora.
+3. Genera un action_plan con acciones ejecutables y verificables.
+
+Devuelve SOLO JSON válido con esta estructura:
 {{
-  "informe_ejecutivo": "texto"
-}}
-
-REGLAS DEL TEXTO:
-- Escribe en español.
-- Extensión aproximada: 4 a 7 párrafos cortos.
-- Incluye:
-  a) resumen general del nivel de madurez,
-  b) fortalezas principales,
-  c) brechas principales,
-  d) dominios más débiles,
-  e) riesgos ejecutivos si no se actúa,
-  f) prioridades recomendadas para los próximos 90 días.
-- No inventes herramientas específicas.
-- Usa un tono ejecutivo, no técnico en exceso.
-- No uses markdown ni viñetas; redacta como informe.
-""".strip()
-
-def _gdpr_prompt_plan_trabajo(run: "DatosMadurezRun", resumen: dict) -> str:
-    partes = []
-
-    for dominio, data in (resumen or {}).items():
-        try:
-            pct = float(data.get("pct", 0) or 0)
-        except Exception:
-            pct = 0.0
-
-        total = int(data.get("total", 0) or 0)
-        brecha = max(0.0, 100.0 - pct)
-
-        items = data.get("items", []) or []
-        si = 0
-        parcial = 0
-        no = 0
-        na = 0
-
-        for it in items:
-            st = (it.get("estado") or "").strip().upper()
-            if st == "SI":
-                si += 1
-            elif st == "PARCIAL":
-                parcial += 1
-            elif st == "NO":
-                no += 1
-            elif st == "NA":
-                na += 1
-
-        partes.append(
-            f"- Dominio: {dominio}\n"
-            f"  * Cumplimiento: {pct:.2f}%\n"
-            f"  * Brecha: {brecha:.2f}%\n"
-            f"  * Total ítems: {total}\n"
-            f"  * SI: {si} | PARCIAL: {parcial} | NO: {no} | NA: {na}"
-        )
-
-    detalle = "\n".join(partes)
-
-    return f"""
-Eres un consultor senior en privacidad, protección de datos personales, GDPR y programas PIMS.
-Debes construir un PLAN DE TRABAJO GENERAL para cerrar brechas de cumplimiento.
-
-DATOS GENERALES
-- Consecutivo: {run.consecutivo}
-- Cumplimiento general: {run.pct_general:.2f}%
-- Nivel general: {gdpr_nivel_visual_por_pct(run.pct_general).get("nivel","")}
-
-RESULTADOS POR DOMINIO
-{detalle}
-
-INSTRUCCIONES
-1. Devuelve solamente JSON válido.
-2. Debes devolver exactamente esta estructura:
-{{
-  "plan_trabajo": [
+  "executive_summary": "texto",
+  "report": "texto",
+  "action_plan": [
     {{
-      "frente": "string",
-      "actividad": "string",
-      "prioridad": "Alta|Media|Baja",
-      "responsable_sugerido": "string",
-      "plazo": "string",
-      "entregable": "string"
+      "fase": "0-30|31-60|61-90|90+",
+      "capitulo": "Contexto|Liderazgo|Planificación|Soporte|Operación|Evaluación de desempeño|Mejora|Anexo A",
+      "requisito": "Requisito ISO 27001:2022 (ej: 6.1, 10.2, A.5.1, etc.) o 'Dominio' si aplica",
+      "accion": "Acción detallada, ejecutable, verificable",
+      "evidencia": "Evidencia verificable esperada",
+      "responsable": "Rol responsable",
+      "prioridad": "Alta|Media|Baja"
     }}
   ]
 }}
-
-REGLAS
-- Genera entre 8 y 15 actividades.
-- Prioriza primero los dominios con menor cumplimiento.
-- Usa lenguaje ejecutivo y accionable.
-- No inventes herramientas específicas.
-""".strip()
-
-# =====================================================================
-# HELPERS IA EXCLUSIVOS — PROTECCIÓN DE DATOS PERSONALES
-# No tocan Ollama ni el helper global _ai_text
-# =====================================================================
-
-def _gdpr_extraer_json_objeto(raw: str) -> dict:
-    raw = (raw or "").strip()
-    if not raw:
-        return {}
-
-    # Limpia fences tipo ```json ... ```
-    raw = raw.replace("```json", "").replace("```", "").strip()
+    """.strip()
 
     try:
-        return json.loads(raw)
-    except Exception:
-        pass
-
-    try:
-        start = raw.find("{")
-        end = raw.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return json.loads(raw[start:end+1])
-    except Exception:
-        pass
-
-    return {}
-
-
-def _gdpr_ai_text_openrouter(prompt: str, max_tokens: int = 1200) -> str:
-    """
-    Helper exclusivo para el módulo de Protección de Datos Personales.
-    Usa SOLO OpenRouter.
-    No toca Ollama ni el helper global _ai_text.
-    """
-    api_key = get_openrouter_api_key()
-    if not api_key:
-        raise RuntimeError("No hay OpenRouter API Key configurada. Ve a Administración → OpenRouter API Key.")
-
-    client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=api_key
-    )
-
-    max_tokens_safe = max(400, min(int(max_tokens or 1200), 2200))
-
-    resp = client.chat.completions.create(
-        model="deepseek/deepseek-chat",
-        temperature=0.2,
-        max_tokens=max_tokens_safe,
-        response_format={"type": "json_object"},
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "Eres un consultor senior en privacidad, protección de datos personales, GDPR y PIMS. "
-                    "Debes responder únicamente con JSON válido, sin markdown, sin comentarios "
-                    "y sin texto adicional antes o después del JSON."
-                )
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-    )
-
-    texto = (resp.choices[0].message.content or "").strip()
-
-    print(f"DEBUG GDPR OPENROUTER - longitud respuesta: {len(texto)}")
-    print(f"DEBUG GDPR OPENROUTER - preview: {texto[:500]}")
-
-    if not texto:
-        raise RuntimeError("OpenRouter respondió sin contenido.")
-
-    return texto
-
-
-def _gdpr_plan_trabajo_a_texto(plan_list) -> str:
-    if not isinstance(plan_list, list):
-        return ""
-
-    lines = []
-    for i, it in enumerate(plan_list, start=1):
-        if not isinstance(it, dict):
-            continue
-
-        frente = (it.get("frente") or "").strip()
-        actividad = (it.get("actividad") or "").strip()
-        prioridad = (it.get("prioridad") or "").strip()
-        responsable = (it.get("responsable_sugerido") or "").strip()
-        plazo = (it.get("plazo") or "").strip()
-        entregable = (it.get("entregable") or "").strip()
-
-        lines.append(
-            f"{i}. Frente: {frente or 'Sin definir'}\n"
-            f"   Actividad: {actividad or 'Sin definir'}\n"
-            f"   Prioridad: {prioridad or 'Sin definir'}\n"
-            f"   Responsable sugerido: {responsable or 'Sin definir'}\n"
-            f"   Plazo: {plazo or 'Sin definir'}\n"
-            f"   Entregable: {entregable or 'Sin definir'}"
+        data = ai_json_iso(
+            prompt=prompt,
+            system_prompt="Devuelve SOLO JSON válido. No agregues texto fuera del JSON.",
+            model_openrouter="open/gpt-4.1-mini",
+            max_tokens=OPENROUTER_MAX_TOKENS
         )
 
-    return "\n\n".join(lines).strip()
+        data["executive_summary"] = harden_no_conditionals(to_text(data.get("executive_summary")))
+        data["report"] = harden_no_conditionals(to_text(data.get("report")))
 
-def _gdpr_normalizar_texto_plano_guardado(texto: str) -> str:
+        ap = data.get("action_plan", [])
+        if isinstance(ap, list):
+            for row in ap:
+                if isinstance(row, dict):
+                    for k in ("accion", "evidencia", "responsable", "requisito", "proposito", "dependencia", "fase", "capitulo"):
+                        if k in row:
+                            row[k] = harden_no_conditionals(to_text(row.get(k)))
+        data["action_plan"] = ap
+
+        return data
+
+    except AuthenticationError:
+        raise RuntimeError("API Key inválida o no autorizada (401). Revisa tu OPENROUTER_API_KEY.")
+    except OpenAIError as e:
+        if "rate_limit" in str(e).lower() or "429" in str(e):
+            raise RuntimeError("⚠️ Límite de uso de IA alcanzado (429). El informe base y el PDF siguen funcionando.")
+        raise RuntimeError(f"Error OpenAI: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Error procesando respuesta IA ISO 27001: {e}")
+
+def build_controls_prompt_summary(control_results: dict, top_n: int = 60, annex_top_n: int = 25) -> str:
     """
-    Limpia texto guardado para Datos Personales:
-    - extrae JSON si viene {"informe_ejecutivo": "..."} o {"plan_trabajo": "..."}
-    - quita ```json
-    - convierte <br> a saltos reales
-    - elimina HTML
-    - elimina títulos generados por Ollama como **INFORME EJECUTIVO**
+    Reduce tokens del prompt:
+    - Toma los peores controles (menor % o mayor brecha).
+    - Para Anexo A, limita aún más (annex_top_n) porque suele ser enorme.
     """
-    txt = (texto or "").strip()
-    if not txt:
-        return ""
+    if not isinstance(control_results, dict) or not control_results:
+        return "N/A"
 
-    txt = txt.replace("\r\n", "\n").replace("\r", "\n")
-    txt = html.unescape(txt)
-    txt = txt.replace("```json", "").replace("```", "").strip()
-
-    # Si viene como JSON, extraer texto principal
-    try:
-        obj = json.loads(txt)
-        if isinstance(obj, dict):
-            val = (
-                obj.get("informe_ejecutivo")
-                or obj.get("plan_trabajo")
-                or obj.get("texto")
-                or ""
-            )
-            if isinstance(val, list):
-                val = _gdpr_plan_trabajo_a_texto(val)
-            if isinstance(val, str) and val.strip():
-                txt = val.strip()
-    except Exception:
+    rows = []
+    for cid, v in control_results.items():
+        cid_u = str(cid).strip().upper()
+        vv = v or {}
         try:
-            start = txt.find("{")
-            end = txt.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                obj = json.loads(txt[start:end+1])
-                if isinstance(obj, dict):
-                    val = (
-                        obj.get("informe_ejecutivo")
-                        or obj.get("plan_trabajo")
-                        or obj.get("texto")
-                        or ""
-                    )
-                    if isinstance(val, list):
-                        val = _gdpr_plan_trabajo_a_texto(val)
-                    if isinstance(val, str) and val.strip():
-                        txt = val.strip()
-        except Exception:
-            pass
-
-    txt = html.unescape(txt)
-
-    # Convertir <br> a saltos reales y quitar tags HTML
-    txt = re.sub(r"<\s*br\s*/?\s*>", "\n", txt, flags=re.IGNORECASE)
-    txt = re.sub(r"<[^>]+>", "", txt)
-
-    # Quitar restos de JSON mal guardado
-    txt = re.sub(r'^\s*\{\s*"?informe_ejecutivo"?\s*:\s*"?', "", txt, flags=re.IGNORECASE)
-    txt = re.sub(r'^\s*\{\s*"?plan_trabajo"?\s*:\s*"?', "", txt, flags=re.IGNORECASE)
-    txt = re.sub(r'"?\s*\}\s*$', "", txt)
-
-    # Quitar títulos que Ollama suele agregar
-    patrones_titulos = [
-        r"^\s*\*{1,3}\s*INFORME\s+EJECUTIVO\s*\*{1,3}\s*[:\-–—]?\s*",
-        r"^\s*#{1,6}\s*INFORME\s+EJECUTIVO\s*[:\-–—]?\s*",
-        r"^\s*INFORME\s+EJECUTIVO\s*[:\-–—]?\s*",
-        r"^\s*\*{1,3}\s*RESUMEN\s+EJECUTIVO\s*\*{1,3}\s*[:\-–—]?\s*",
-        r"^\s*#{1,6}\s*RESUMEN\s+EJECUTIVO\s*[:\-–—]?\s*",
-        r"^\s*RESUMEN\s+EJECUTIVO\s*[:\-–—]?\s*",
-        r"^\s*\*{1,3}\s*PLAN\s+DE\s+TRABAJO\s*\*{1,3}\s*[:\-–—]?\s*",
-        r"^\s*#{1,6}\s*PLAN\s+DE\s+TRABAJO\s*[:\-–—]?\s*",
-        r"^\s*PLAN\s+DE\s+TRABAJO\s*[:\-–—]?\s*",
-    ]
-
-    for patron in patrones_titulos:
-        txt = re.sub(patron, "", txt, flags=re.IGNORECASE).strip()
-
-    # Quitar markdown residual
-    txt = txt.replace("**", "").replace("__", "")
-
-    txt = re.sub(r"[ \t]+\n", "\n", txt)
-    txt = re.sub(r"\n[ \t]+", "\n", txt)
-    txt = re.sub(r"\n{3,}", "\n\n", txt)
-
-    return txt.strip()
-
-def _gdpr_plan_accion_a_texto(plan_list) -> str:
-    if not isinstance(plan_list, list):
-        return ""
-
-    lines = []
-    for i, it in enumerate(plan_list, start=1):
-        if not isinstance(it, dict):
-            continue
-
-        accion = (it.get("accion") or "").strip()
-        prioridad = (it.get("prioridad") or "").strip()
-        responsable = (it.get("responsable_sugerido") or "").strip()
-        plazo = (it.get("plazo") or "").strip()
-        evidencia = (it.get("evidencia_esperada") or "").strip()
-
-        lines.append(
-            f"{i}. Acción: {accion or 'Sin definir'}\n"
-            f"   Prioridad: {prioridad or 'Sin definir'}\n"
-            f"   Responsable sugerido: {responsable or 'Sin definir'}\n"
-            f"   Plazo: {plazo or 'Sin definir'}\n"
-            f"   Evidencia esperada: {evidencia or 'Sin definir'}"
-        )
-
-    return "\n\n".join(lines).strip()
-
-def _extraer_json_objeto(raw: str) -> dict:
-    raw = (raw or "").strip()
-    if not raw:
-        return {}
-
-    try:
-        return json.loads(raw)
-    except Exception:
-        pass
-
-    try:
-        start = raw.find("{")
-        end = raw.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return json.loads(raw[start:end+1])
-    except Exception:
-        pass
-
-    return {}
-
-def _gdpr_parse_rango_pct(rango: str):
-    if not rango:
-        return None, None
-    s = rango.replace("%", "").strip().replace("–", "-")
-    parts = [p.strip() for p in s.split("-")]
-    if len(parts) != 2:
-        return None, None
-    try:
-        return float(parts[0]), float(parts[1])
-    except Exception:
-        return None, None
-
-
-def gdpr_nivel_visual_por_pct(pct: float):
-    try:
-        p = float(pct)
-    except Exception:
-        p = 0.0
-
-    p = max(0.0, min(100.0, p))
-
-    for lvl in GDPR_MADUREZ_LEVELS:
-        lo, hi = _gdpr_parse_rango_pct(lvl.get("rango_pct", ""))
-        if lo is None or hi is None:
-            continue
-        if lo <= p <= hi:
-            score = lvl.get("score", 0)
-            color_map = {
-                1: "#dc3545",
-                2: "#fd7e14",
-                3: "#ffc107",
-                4: "#0d6efd",
-                5: "#198754",
-            }
-            return {
-                "nivel": lvl.get("nivel", "Sin nivel"),
-                "score": score,
-                "descripcion": lvl.get("descripcion", ""),
-                "color": color_map.get(score, "#6c757d")
-            }
-
-    return {
-        "nivel": "Sin nivel",
-        "score": 0,
-        "descripcion": "",
-        "color": "#6c757d"
-    }
-
-
-def calcular_progreso_datos(preguntas, form_data=None, respuestas_db=None):
-    total = len(preguntas)
-    respondidas = 0
-
-    for q in preguntas:
-        estado = ""
-        if form_data is not None:
-            estado = (form_data.get(f"st_{q.id}") or "").strip().upper()
-        elif respuestas_db is not None:
-            estado = (respuestas_db.get(q.id, {}).get("estado") or "").strip().upper()
-
-        if estado in ("SI", "PARCIAL", "NO", "NA"):
-            respondidas += 1
-
-    pct = int(round((respondidas / total) * 100)) if total > 0 else 0
-    return respondidas, total, pct
-
-
-def obtener_borrador_datos(user_id):
-    if not user_id:
-        return None
-
-    return (
-        DatosMadurezRun.query
-        .filter(
-            DatosMadurezRun.user_id == user_id,
-            DatosMadurezRun.estado == "BORRADOR"
-        )
-        .order_by(DatosMadurezRun.updated_at.desc(), DatosMadurezRun.id.desc())
-        .first()
-    )
-
-
-def cargar_respuestas_datos(run_id):
-    out = {}
-    if not run_id:
-        return out
-
-    rows = DatosMadurezRespuesta.query.filter_by(run_id=run_id).all()
-    for r in rows:
-        out[r.pregunta_id] = {
-            "estado": (r.estado or "").strip().upper(),
-            "comentario": (r.comentario or "").strip()
-        }
-    return out
-
-
-def _es_fila_totalmente_vacia(ws, row_idx, max_cols=9):
-    for c in range(1, max_cols + 1):
-        v = ws.cell(row_idx, c).value
-        if v is not None and str(v).strip() != "":
-            return False
-    return True
-
-
-def _normalizar_titulo(t: str) -> str:
-    t = (t or "").strip()
-    t = re.sub(r"\s+", " ", t)
-    return t
-
-def _gdpr_construir_radar_fig(resumen: dict):
-    """
-    Construye la figura radar y la retorna como objeto matplotlib Figure.
-    Sirve para HTML (base64) y para PDF (bytes PNG).
-    """
-    try:
-        if not resumen or not isinstance(resumen, dict):
-            return None
-
-        items = []
-        for dominio, data in resumen.items():
-            try:
-                pct = float(data.get("pct", 0) or 0)
-            except Exception:
-                pct = 0.0
-
-            pct = max(0.0, min(100.0, pct))
-            items.append((str(dominio), pct))
-
-        if not items:
-            return None
-
-        items.sort(key=lambda x: x[1], reverse=True)
-
-        def acortar_label(txt: str, max_len: int = 16) -> str:
-            txt = (txt or "").strip()
-            if len(txt) <= max_len:
-                return txt
-            return txt[:max_len - 3] + "..."
-
-        labels = [f"{acortar_label(dom)}\n({int(round(pct))}%)" for dom, pct in items]
-        values = [pct for _, pct in items]
-
-        labels_plot = labels[:]
-        values_plot = values[:]
-
-        if len(labels_plot) == 1:
-            labels_plot = [labels_plot[0], labels_plot[0], labels_plot[0]]
-            values_plot = [values_plot[0], values_plot[0], values_plot[0]]
-        elif len(labels_plot) == 2:
-            labels_plot = [labels_plot[0], labels_plot[1], labels_plot[0]]
-            values_plot = [values_plot[0], values_plot[1], values_plot[0]]
-
-        n = len(labels_plot)
-        angles = [i / float(n) * 2 * math.pi for i in range(n)]
-        angles_closed = angles + angles[:1]
-        values_closed = values_plot + values_plot[:1]
-
-        fig = plt.figure(figsize=(10.5, 8.5), dpi=150)
-        ax = plt.subplot(111, polar=True)
-
-        ax.set_theta_offset(math.pi / 2)
-        ax.set_theta_direction(-1)
-        ax.set_position([0.18, 0.16, 0.64, 0.64])
-
-        ax.set_xticks(angles)
-        ax.set_xticklabels(labels_plot, fontsize=9, fontweight="bold")
-        ax.tick_params(axis="x", pad=36)
-
-        for label, angle in zip(ax.get_xticklabels(), angles):
-            angle_deg = (angle * 180 / math.pi) % 360
-
-            if angle_deg == 90 or angle_deg == 270:
-                label.set_horizontalalignment("center")
-            elif 90 < angle_deg < 270:
-                label.set_horizontalalignment("right")
-            else:
-                label.set_horizontalalignment("left")
-
-            label.set_verticalalignment("center")
-
-        ax.set_ylim(0, 100)
-        ax.set_yticks([20, 40, 60, 80, 100])
-        ax.set_yticklabels(["20", "40", "60", "80", "100"], fontsize=9)
-        ax.set_rlabel_position(90)
-
-        ax.grid(alpha=0.25, linewidth=0.8)
-        ax.spines["polar"].set_alpha(0.18)
-
-        ax.plot(angles_closed, values_closed, linewidth=3.0)
-        ax.fill(angles_closed, values_closed, alpha=0.25)
-        ax.scatter(angles, values_plot, s=35, zorder=3)
-
-        return fig
-
-    except Exception as e:
-        print(f"[Radar Datos Personales] Error construyendo radar: {e}")
-        return None
-
-def generar_radar_datos_base64(resumen: dict) -> str | None:
-    try:
-        fig = _gdpr_construir_radar_fig(resumen)
-        if fig is None:
-            return None
-
-        buf = io.BytesIO()
-        fig.savefig(
-            buf,
-            format="png",
-            bbox_inches="tight",
-            transparent=False,
-            pad_inches=0.45
-        )
-        plt.close(fig)
-        buf.seek(0)
-        return base64.b64encode(buf.read()).decode("utf-8")
-
-    except Exception as e:
-        print(f"[Radar Datos Personales] Error generando radar base64: {e}")
-        return None
-
-
-def generar_radar_datos_png_bytes(resumen: dict) -> bytes | None:
-    try:
-        fig = _gdpr_construir_radar_fig(resumen)
-        if fig is None:
-            return None
-
-        buf = io.BytesIO()
-        fig.savefig(
-            buf,
-            format="png",
-            bbox_inches="tight",
-            transparent=False,
-            facecolor="white",
-            pad_inches=0.45
-        )
-        plt.close(fig)
-        buf.seek(0)
-        return buf.read()
-
-    except Exception as e:
-        print(f"[Radar Datos Personales] Error generando radar PNG bytes: {e}")
-        return None
-
-def gdpr_resumen_tarjetas_por_nivel(resumen: dict):
-    """
-    Cuenta cuántos dominios caen en cada nivel de madurez.
-    """
-    out = {
-        1: {"cantidad": 0, "nivel": "Nivel 1", "color": "#dc3545"},
-        2: {"cantidad": 0, "nivel": "Nivel 2", "color": "#fd7e14"},
-        3: {"cantidad": 0, "nivel": "Nivel 3", "color": "#ffc107"},
-        4: {"cantidad": 0, "nivel": "Nivel 4", "color": "#0d6efd"},
-        5: {"cantidad": 0, "nivel": "Nivel 5", "color": "#198754"},
-    }
-
-    if not resumen or not isinstance(resumen, dict):
-        return out
-
-    for _, data in resumen.items():
-        try:
-            pct = float(data.get("pct", 0) or 0)
+            pct = float(vv.get("pct", 0) or 0)
         except Exception:
             pct = 0.0
+        brecha_nivel = (vv.get("brecha_nivel", "") or "").strip()
+        try:
+            brecha_pct = float(vv.get("brecha_pct", 0) or 0)
+        except Exception:
+            brecha_pct = 0.0
+        group = (vv.get("group", "") or "").strip()
 
-        niv = gdpr_nivel_visual_por_pct(pct)
-        score = int(niv.get("score", 0) or 0)
-        if score in out:
-            out[score]["cantidad"] += 1
-
-    return out
-
-def _gdpr_construir_velocimetro_niveles_fig(resumen: dict):
-    """
-    Construye una figura con 5 mini-velocímetros, uno por nivel,
-    mostrando la cantidad de dominios en cada nivel.
-    """
-    try:
-        niveles = gdpr_resumen_tarjetas_por_nivel(resumen)
-
-        items = []
-        max_count = 0
-        for score in [1, 2, 3, 4, 5]:
-            item = niveles.get(score, {})
-            cantidad = int(item.get("cantidad", 0) or 0)
-            max_count = max(max_count, cantidad)
-            items.append({
-                "nivel": item.get("nivel", f"Nivel {score}"),
-                "cantidad": cantidad,
-                "color": item.get("color", "#6c757d")
-            })
-
-        max_value = max(max_count, 1)
-
-        fig, axes = plt.subplots(1, 5, figsize=(14, 3.8), dpi=140, subplot_kw={'projection': 'polar'})
-        if not isinstance(axes, (list, tuple, np.ndarray)):
-            axes = [axes]
-
-        for ax, item in zip(axes, items):
-            ax.set_theta_offset(math.pi)
-            ax.set_theta_direction(-1)
-            ax.set_ylim(0, 10)
-
-            # Fondo semicircular
-            theta_bg = np.linspace(0, math.pi, 200)
-            ax.plot(theta_bg, [8] * len(theta_bg), linewidth=18, alpha=0.12, solid_capstyle='round')
-
-            # Valor actual
-            frac = item["cantidad"] / max_value if max_value > 0 else 0
-            theta_val = np.linspace(0, math.pi * frac, 200) if frac > 0 else [0]
-            ax.plot(theta_val, [8] * len(theta_val), linewidth=18, color=item["color"], solid_capstyle='round')
-
-            # Aguja
-            needle_angle = math.pi * frac
-            ax.plot([needle_angle, needle_angle], [0, 7.2], color="#0b1220", linewidth=2)
-
-            # Centro
-            ax.scatter([0], [0], s=30, color="#0b1220", zorder=5)
-
-            # Limpiar ejes
-            ax.set_xticks([])
-            ax.set_yticks([])
-            ax.grid(False)
-            ax.spines["polar"].set_visible(False)
-
-            # Textos
-            ax.text(
-                0.5, 1.12, item["nivel"],
-                transform=ax.transAxes,
-                ha="center", va="center",
-                fontsize=9, fontweight="bold",
-                color=item["color"]
-            )
-
-            ax.text(
-                0.5, 0.42, f"{item['cantidad']}",
-                transform=ax.transAxes,
-                ha="center", va="center",
-                fontsize=18, fontweight="bold",
-                color="#0b1220"
-            )
-
-            ax.text(
-                0.5, 0.26, "dominios",
-                transform=ax.transAxes,
-                ha="center", va="center",
-                fontsize=8,
-                color="#4b5563"
-            )
-
-        plt.tight_layout()
-        return fig
-
-    except Exception as e:
-        print(f"[Velocimetro GDPR] Error construyendo figura: {e}")
-        return None
-
-
-def generar_velocimetro_niveles_base64(resumen: dict) -> str | None:
-    try:
-        fig = _gdpr_construir_velocimetro_niveles_fig(resumen)
-        if fig is None:
-            return None
-
-        buf = io.BytesIO()
-        fig.savefig(
-            buf,
-            format="png",
-            bbox_inches="tight",
-            transparent=True,
-            pad_inches=0.20
-        )
-        plt.close(fig)
-        buf.seek(0)
-        return base64.b64encode(buf.read()).decode("utf-8")
-
-    except Exception as e:
-        print(f"[Velocimetro GDPR] Error generando base64: {e}")
-        return None
-
-
-def generar_velocimetro_niveles_png_bytes(resumen: dict) -> bytes | None:
-    try:
-        fig = _gdpr_construir_velocimetro_niveles_fig(resumen)
-        if fig is None:
-            return None
-
-        buf = io.BytesIO()
-        fig.savefig(
-            buf,
-            format="png",
-            bbox_inches="tight",
-            transparent=False,
-            facecolor="white",
-            pad_inches=0.20
-        )
-        plt.close(fig)
-        buf.seek(0)
-        return buf.read()
-
-    except Exception as e:
-        print(f"[Velocimetro GDPR] Error generando PNG bytes: {e}")
-        return None
-
-# =====================================================================
-# HELPERS DETALLE / PREGUNTAS / ANÁLISIS POR DOMINIO
-# =====================================================================
-
-def _gdpr_get_items_dominio(run_id: int, dominio: str):
-    out = []
-
-    q = (
-        db.session.query(DatosMadurezRespuesta, DatosMadurezPregunta)
-        .join(DatosMadurezPregunta, DatosMadurezPregunta.id == DatosMadurezRespuesta.pregunta_id)
-        .filter(DatosMadurezRespuesta.run_id == run_id)
-        .filter(DatosMadurezPregunta.dominio == dominio)
-        .order_by(DatosMadurezPregunta.orden.asc(), DatosMadurezPregunta.id.asc())
-    )
-
-    for r, p in q.all():
-        out.append({
-            "pregunta_id": p.id,
-            "codigo": (p.codigo or "").strip(),
-            "titulo": (p.titulo or "").strip(),
-            "pregunta": (p.pregunta or "").strip(),
-            "estado": (r.estado or "").strip().upper(),
-            "comentario": (r.comentario or "").strip()
+        rows.append({
+            "cid": cid_u,
+            "pct": pct,
+            "brecha_pct": brecha_pct,
+            "brecha_nivel": brecha_nivel,
+            "group": group,
         })
 
+    # peores primero: menor % (equivale a mayor brecha)
+    rows.sort(key=lambda x: (x["pct"], -x["brecha_pct"]))
+
+    # separa anexoA y no-anexo
+    non_a = [r for r in rows if not r["cid"].startswith("A.")]
+    annex = [r for r in rows if r["cid"].startswith("A.")]
+
+    non_a = non_a[:max(10, int(top_n))]
+    annex = annex[:max(0, int(annex_top_n))]
+
+    out_lines = []
+    for r in non_a + annex:
+        out_lines.append(
+            f"- {r['cid']} ({r['group']}): {r['pct']}% | Brecha {r['brecha_pct']}% ({r['brecha_nivel']})"
+        )
+
+    return "\n".join(out_lines) if out_lines else "N/A"
+
+def ai_generate_general_action_plan(company_name: str, chapter_results: dict, control_results: dict) -> dict:
+    """
+    Genera SOLO:
+      - action_plan (lista detallada a nivel general)
+    Puede usar capítulos + un resumen reducido de controles para priorización.
+    """
+    client = get_openai_client()
+    raw = "{}"
+
+    resumen_cap = "\n".join(
+        [f"- {k}: {v.get('pct', 0)}% (Brecha {v.get('brecha_pct', 0)}% - {v.get('brecha_nivel','')})"
+         for k, v in (chapter_results or {}).items()]
+    )
+
+    resumen_ctrl = build_controls_prompt_summary(
+        control_results=control_results,
+        top_n=60,
+        annex_top_n=25
+    )
+
+    prompt = f"""
+Actúa como consultor senior ISO/IEC 27001:2022 y auditor líder.
+
+Empresa: {company_name}
+
+Debes generar SOLO un "Plan de acción general" DETALLADO (a nivel de control/capítulo, no por pregunta/ítem).
+
+REGLAS:
+- NO inventes hechos específicos del cliente.
+- Redacción verificable (Se debe / Se requiere / Se evidencia / Se mantiene / Se revisa / Se mide).
+- NO uses lenguaje condicional.
+- NO incluyas “Resumen ejecutivo” ni “Informe detallado”.
+- El plan debe ser accionable: acción, propósito, evidencia genérica, prioridad, horizonte y dependencia.
+
+ENTRADAS (capítulos):
+{resumen_cap if resumen_cap else "N/A"}
+
+ENTRADAS (controles resumidos - peores):
+{resumen_ctrl if resumen_ctrl else "N/A"}
+
+Devuelve SOLO JSON válido con esta estructura EXACTA:
+
+REGLA CRÍTICA:
+- NO dejes ningún campo vacío. Si no aplica un requisito exacto, usa el dominio o control más cercano.
+- 'responsable' debe ser un rol (no un nombre propio).
+
+
+IMPORTANT: Return ONLY valid JSON.
+""".strip()
+
+    try:
+        resp = openai_call_with_retry(
+            client,
+            model=OPENROUTER_MODEL_SGSI,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            response_format={"type": "json_object"},
+            max_tokens=16500,   # ✅ clave: obliga respuesta larga
+        )
+        raw = (resp.choices[0].message.content or "{}").strip() or "{}"
+
+        # ✅ FIX: normaliza si la IA devolvió LISTA raíz
+        data = normalize_plan_response(raw)   # SIEMPRE dict {"action_plan":[...]}
+
+        ap = data.get("action_plan", [])
+        if not isinstance(ap, list):
+            ap = []
+
+        cleaned = []
+        for row in ap:
+            if not isinstance(row, dict):
+                continue
+            cleaned.append({
+                "accion": harden_no_conditionals(to_text(row.get("accion"))),
+                "proposito": harden_no_conditionals(to_text(row.get("proposito"))),
+                "evidencia": harden_no_conditionals(to_text(row.get("evidencia"))),
+                "prioridad": (to_text(row.get("prioridad")) or "").strip(),
+                "horizonte": (to_text(row.get("horizonte")) or "").strip(),
+                "dependencia": harden_no_conditionals(to_text(row.get("dependencia"))),
+            })
+
+        return {"action_plan": cleaned}
+
+    except AuthenticationError:
+        raise RuntimeError("API Key inválida o no autorizada (401). Revisa tu OPENAI_API_KEY.")
+    except OpenAIError as e:
+        if "rate_limit" in str(e).lower() or "429" in str(e):
+            raise RuntimeError("⚠️ Límite de uso de IA alcanzado (429). El informe base y el PDF siguen funcionando.")
+        raise RuntimeError(f"Error OpenAI: {e}")
+    except Exception as e:
+        snippet = raw[:800] if isinstance(raw, str) else str(raw)
+        raise RuntimeError(f"Error procesando respuesta IA: {e}. Respuesta cruda (parcial): {snippet}")
+
+def ai_generate_exec_summary_and_general_plan(company_name: str, chapter_results: dict, control_results: dict) -> dict:
+    """
+    Genera:
+      - executive_summary (texto)
+      - action_plan (lista detallada a nivel general, NO por pregunta/ítem)
+    NO genera informe detallado.
+    """
+    client = get_openai_client()
+    raw = "{}"
+
+    # Resumen por capítulo
+    resumen_cap = "\n".join(
+        [f"- {k}: {v.get('pct', 0)}% (Brecha {v.get('brecha_pct', 0)}% - {v.get('brecha_nivel','')})"
+         for k, v in (chapter_results or {}).items()]
+    )
+
+    # Resumen por control (limitar para prompt)
+    resumen_ctrl = build_controls_prompt_summary(
+        control_results=control_results,
+        top_n=60,        # NO Anexo A
+        annex_top_n=25   # solo peores 25 del Anexo A
+    )
+
+    prompt = f"""
+Actúa como consultor senior ISO/IEC 27001:2022 y auditor líder.
+
+Empresa: {company_name}
+
+Debes generar SOLO un "Plan de acción general" DETALLADO (a nivel de control/capítulo, no por pregunta/ítem).
+
+REGLAS:
+- NO inventes hechos específicos del cliente.
+- Redacción verificable (Se debe / Se requiere / Se evidencia / Se mantiene / Se revisa / Se mide).
+- NO uses lenguaje condicional.
+- El plan debe diligenciar TODOS los campos: Fase, Capítulo, Requisito, Acción, Evidencia, Responsable, Prioridad.
+- NO incluyas otros campos diferentes a los del schema.
+
+ENTRADAS (capítulos):
+{resumen_cap if resumen_cap else "N/A"}
+
+ENTRADAS (controles resumidos - peores):
+{resumen_ctrl if resumen_ctrl else "N/A"}
+
+Devuelve SOLO JSON válido con esta estructura EXACTA:
+{PLAN_SCHEMA_JSON}
+
+IMPORTANT: Return ONLY valid JSON.
+""".strip()
+
+    try:
+        resp = openai_call_with_retry(
+            client,
+            model=OPENROUTER_MODEL_SGSI,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+
+        raw = (resp.choices[0].message.content or "{}").strip() or "{}"
+
+        # ✅ FIX: normaliza plan incluso si viene como LISTA
+        data = normalize_plan_response(raw)   # -> {"action_plan":[...]} (y soporta keys con acentos)
+
+        # executive_summary puede no venir en este endpoint; no lo fuerces si no existe
+        if "executive_summary" in data:
+            data["executive_summary"] = harden_no_conditionals(to_text(data.get("executive_summary")))
+
+        ap = data.get("action_plan", [])
+        if not isinstance(ap, list):
+            ap = []
+
+        def _norm_choice(x: str, allowed: set, default: str) -> str:
+            v = (to_text(x) or "").strip()
+            return v if v in allowed else default
+
+        FASES = {"0-30", "31-60", "61-90", "90+"}
+        CAPS = {
+            "Contexto", "Liderazgo", "Planificación", "Soporte",
+            "Operación", "Evaluación de desempeño", "Mejora", "Anexo A"
+        }
+        PRIOS = {"Alta", "Media", "Baja"}
+
+        cleaned = []
+        for row in ap:
+            if not isinstance(row, dict):
+                continue
+
+            fase = _norm_choice(row.get("fase"), FASES, "31-60")
+            capitulo = _norm_choice(row.get("capitulo"), CAPS, "Planificación")
+            prioridad = _norm_choice(row.get("prioridad"), PRIOS, "Media")
+
+            requisito = harden_no_conditionals(to_text(row.get("requisito"))).strip()
+            accion = harden_no_conditionals(to_text(row.get("accion"))).strip()
+            evidencia = harden_no_conditionals(to_text(row.get("evidencia"))).strip()
+            responsable = harden_no_conditionals(to_text(row.get("responsable"))).strip()
+
+            # ✅ Nunca vacío
+            if not requisito:
+                requisito = "Dominio/Control aplicable (no especificado)"
+            if not accion:
+                accion = "Definir e implementar la acción requerida con evidencia verificable y seguimiento."
+            if not evidencia:
+                evidencia = "Procedimiento/registro/acta/indicador verificable."
+            if not responsable:
+                responsable = "Líder SGSI"
+
+            cleaned.append({
+                "fase": fase,
+                "capitulo": capitulo,
+                "requisito": requisito,
+                "accion": accion,
+                "evidencia": evidencia,
+                "responsable": responsable,
+                "prioridad": prioridad,
+            })
+
+        return {"action_plan": cleaned}
+
+    except AuthenticationError:
+        raise RuntimeError("API Key inválida o no autorizada (401). Revisa tu OPENAI_API_KEY.")
+    except OpenAIError as e:
+        if "rate_limit" in str(e).lower() or "429" in str(e):
+            raise RuntimeError("⚠️ Límite de uso de IA alcanzado (429). El informe base y el PDF siguen funcionando.")
+        raise RuntimeError(f"Error OpenAI: {e}")
+    except Exception as e:
+        snippet = raw[:800] if isinstance(raw, str) else str(raw)
+        raise RuntimeError(f"Error procesando respuesta IA: {e}. Respuesta cruda (parcial): {snippet}")
+
+def ai_generate_executive_summary_from_domains(company_name: str, chapter_results: dict) -> dict:
+    """
+    Genera SOLO:
+      - executive_summary (texto)
+    Basado SOLO en chapter_results (dominios/capítulos). NO usa control_results.
+    Compatible con OpenRouter y Ollama.
+
+    Si la IA falla, devuelve un resumen ejecutivo automático y útil
+    para no bloquear el flujo.
+    """
+    resumen_cap = "\n".join(
+        [f"- {k}: {v.get('pct', 0)}% (Brecha {v.get('brecha_pct', 0)}% - {v.get('brecha_nivel','')})"
+         for k, v in (chapter_results or {}).items()]
+    )
+
+    prompt = f"""
+Actúa como consultor senior ISO/IEC 27001:2022, auditor líder y asesor de alta dirección.
+
+Empresa: {company_name}
+
+Dispones únicamente de resultados de madurez y brecha por DOMINIO/CAPÍTULO del SGSI.
+Debes generar un RESUMEN EJECUTIVO AMPLIO, DETALLADO y ORIENTADO A DIRECCIÓN.
+
+OBJETIVO
+El resumen debe explicar con profundidad:
+1. El panorama general del nivel de madurez del SGSI.
+2. Qué dominios muestran mayor fortaleza y por qué eso es relevante.
+3. Qué dominios presentan mayores brechas y qué implicaciones tienen.
+4. Cómo esas brechas afectan gobierno, operación, cumplimiento, evidencia y mejora continua.
+5. Qué prioridades estratégicas debe considerar la dirección.
+6. Una conclusión ejecutiva clara sobre el estado global del SGSI.
+
+REGLAS OBLIGATORIAS
+- BASARTE ÚNICAMENTE en los resultados por capítulo/dominio.
+- NO inventar hechos específicos del cliente.
+- NO inventar herramientas, documentos, incidentes ni tecnologías concretas.
+- NO usar lenguaje condicional.
+- NO incluir plan de acción detallado.
+- NO incluir markdown.
+- NO incluir tablas.
+- NO incluir texto fuera del JSON.
+
+ENTRADAS (capítulos / dominios):
+{resumen_cap if resumen_cap else "N/A"}
+
+FORMATO ACEPTADO DE RESPUESTA
+
+OPCIÓN 1:
+{{
+  "executive_summary": "texto amplio, detallado y ejecutivo"
+}}
+
+OPCIÓN 2:
+{{
+  "panorama_general": "...",
+  "fortalezas": "... o {{...}}",
+  "brechas": "... o {{...}}",
+  "implicaciones": "... o {{...}}",
+  "prioridades": "... o {{...}}",
+  "conclusion": "... o {{...}}",
+  "hallazgos_clave": ["...", "..."]
+}}
+""".strip()
+
+    def _clean_text(txt) -> str:
+        return harden_no_conditionals(to_text(txt)).strip()
+
+    def _dict_to_text_block(obj) -> str:
+        """
+        Convierte dict/list/str a texto limpio, sin mostrar llaves JSON.
+        """
+        if obj is None:
+            return ""
+
+        if isinstance(obj, str):
+            return _clean_text(obj)
+
+        if isinstance(obj, (int, float)):
+            return str(obj)
+
+        if isinstance(obj, list):
+            out = []
+            for x in obj:
+                txt = _dict_to_text_block(x)
+                if txt:
+                    if "\n" in txt:
+                        out.append(txt)
+                    elif txt.startswith(("•", "-", "–")):
+                        out.append(txt)
+                    else:
+                        out.append(f"• {txt}")
+            return "\n".join([x for x in out if x.strip()]).strip()
+
+        if isinstance(obj, dict):
+            out = []
+            for k, v in obj.items():
+                val = _dict_to_text_block(v)
+                if not val:
+                    continue
+
+                key_txt = _clean_text(str(k)).replace("_", " ").strip().capitalize()
+
+                # si es texto simple, lo presentamos elegante
+                if "\n" not in val and not val.startswith("•"):
+                    out.append(f"{key_txt}: {val}")
+                else:
+                    out.append(f"{key_txt}:\n{val}")
+            return "\n".join([x for x in out if x.strip()]).strip()
+
+        return _clean_text(obj)
+
+    def _get_first(data: dict, *keys):
+        for k in keys:
+            if k in data:
+                return data.get(k)
+        return None
+
+    def _compose_executive_summary_from_sections(data: dict) -> str:
+        sections = []
+
+        panorama = _dict_to_text_block(_get_first(data, "panorama_general"))
+        if panorama:
+            sections.append(panorama)
+
+        fortalezas = _dict_to_text_block(_get_first(
+            data,
+            "lectura_ejecutiva_de_fortalezas",
+            "fortalezas"
+        ))
+        if fortalezas:
+            sections.append("Fortalezas relevantes:\n" + fortalezas)
+
+        brechas = _dict_to_text_block(_get_first(
+            data,
+            "lectura_ejecutiva_de_brechas",
+            "brechas"
+        ))
+        if brechas:
+            sections.append("Brechas relevantes:\n" + brechas)
+
+        implicaciones = _dict_to_text_block(_get_first(
+            data,
+            "implicaciones_para_dirección_y_sostenibilidad_del_sistema",
+            "implicaciones"
+        ))
+        if implicaciones:
+            sections.append("Implicaciones para la dirección y la sostenibilidad del sistema:\n" + implicaciones)
+
+        prioridades = _dict_to_text_block(_get_first(
+            data,
+            "prioridades_estratégicas_de_intervención",
+            "prioridades"
+        ))
+        if prioridades:
+            sections.append("Prioridades estratégicas de intervención:\n" + prioridades)
+
+        conclusion = _dict_to_text_block(_get_first(
+            data,
+            "conclusión_ejecutiva_final",
+            "conclusion"
+        ))
+        if conclusion:
+            sections.append("Conclusión ejecutiva:\n" + conclusion)
+
+        hallazgos = _dict_to_text_block(_get_first(data, "hallazgos_clave"))
+        if hallazgos:
+            sections.append("Hallazgos clave:\n" + hallazgos)
+
+        return "\n\n".join([s for s in sections if s.strip()]).strip()
+
+    def _fallback_executive_summary(company_name: str, chapter_results: dict) -> str:
+        rows = []
+        for k, v in (chapter_results or {}).items():
+            try:
+                pct = float(v.get("pct", 0) or 0)
+            except Exception:
+                pct = 0.0
+            try:
+                gap_pct = float(v.get("brecha_pct", 0) or 0)
+            except Exception:
+                gap_pct = 0.0
+
+            rows.append({
+                "capitulo": k,
+                "pct": pct,
+                "gap_pct": gap_pct,
+                "gap_level": (v.get("brecha_nivel") or "").strip()
+            })
+
+        if not rows:
+            return (
+                f"Para la organización {company_name}, no se encontraron datos suficientes por capítulo "
+                f"para construir el resumen ejecutivo del SGSI."
+            )
+
+        rows_sorted_best = sorted(rows, key=lambda x: x["pct"], reverse=True)
+        rows_sorted_worst = sorted(rows, key=lambda x: x["pct"])
+
+        top_strengths = rows_sorted_best[:3]
+        top_gaps = rows_sorted_worst[:4]
+
+        overall = round(sum(r["pct"] for r in rows) / max(1, len(rows)), 2)
+
+        strengths_txt = ", ".join([f"{r['capitulo']} ({r['pct']}%)" for r in top_strengths])
+        gaps_txt = ", ".join([f"{r['capitulo']} ({r['pct']}%)" for r in top_gaps])
+
+        bullets = []
+        bullets.append(f"• Madurez promedio estimada del SGSI: {overall}%.")
+        bullets.append(f"• Dominios con mayor solidez: {strengths_txt}.")
+        bullets.append(f"• Dominios con mayores brechas: {gaps_txt}.")
+        bullets.append("• Las principales prioridades se concentran en fortalecer gobierno, operación, soporte y seguimiento.")
+        bullets.append("• La sostenibilidad del SGSI depende de mantener evidencia verificable, revisión periódica y cierre de brechas.")
+
+        texto = f"""
+El análisis ejecutivo del SGSI para {company_name} evidencia un nivel de madurez promedio de {overall}%, lo que refleja un sistema con bases implementadas y avances relevantes en varios dominios, aunque todavía con brechas que requieren atención prioritaria para consolidar su sostenibilidad.
+
+Desde una perspectiva directiva, los dominios con mejor desempeño son {strengths_txt}. Esto indica que la organización ya cuenta con capacidades relevantes en componentes esenciales del sistema, lo que representa una base favorable para sostener el cumplimiento y fortalecer la mejora continua.
+
+No obstante, los capítulos con menor nivel de madurez son {gaps_txt}. Estas brechas muestran que aún existen debilidades que afectan la consistencia operativa del SGSI y que pueden limitar la eficacia del modelo de gobierno, la trazabilidad de la evidencia, el seguimiento del desempeño y la consolidación del enfoque de mejora.
+
+En términos ejecutivos, estas diferencias de madurez indican que el sistema no debe evaluarse únicamente por sus fortalezas visibles, sino por la capacidad de operar de forma homogénea en todos los dominios relevantes. Cuando persisten brechas en capítulos clave, la organización puede mantener componentes bien estructurados, pero todavía con limitaciones para demostrar sostenibilidad, control y mejora continua de manera integral.
+
+Para la dirección, la prioridad debe centrarse en cerrar las brechas de los dominios con menor desempeño, reforzar la disciplina de seguimiento y asegurar que las actividades del SGSI mantengan evidencia verificable, revisión periódica y control efectivo sobre su evolución. Esto es particularmente importante para sostener la capacidad de respuesta, el cumplimiento y la gobernanza del sistema.
+
+En conclusión, el SGSI presenta una base de madurez relevante, pero aún requiere una intervención focalizada en los dominios más rezagados para asegurar un nivel de desempeño más equilibrado y sostenible. La dirección debe orientar sus esfuerzos a cerrar brechas, fortalecer la consistencia del sistema y mantener una visión integral de cumplimiento, operación y mejora continua.
+
+Hallazgos clave:
+{chr(10).join(bullets)}
+        """.strip()
+
+        return harden_no_conditionals(texto)
+
+    try:
+        data = ai_json_iso_generic(
+            prompt=prompt,
+            system_prompt=(
+                "Devuelve SOLO JSON válido. "
+                "Genera un resumen ejecutivo amplio, detallado y orientado a dirección. "
+                "No agregues texto fuera del JSON."
+            ),
+            model_openrouter=OPENROUTER_MODEL_SGSI,
+            max_tokens=3200
+        )
+
+        if not isinstance(data, dict):
+            data = {}
+
+        summary = (
+            _clean_text(data.get("executive_summary"))
+            or _clean_text(data.get("resumen_ejecutivo"))
+            or _clean_text(data.get("summary"))
+            or _clean_text(data.get("resumen"))
+            or _clean_text(data.get("texto"))
+        )
+
+        if not summary:
+            summary = _compose_executive_summary_from_sections(data)
+
+        if not summary and isinstance(data, dict):
+            bloques = []
+            for _, v in data.items():
+                txt = _dict_to_text_block(v)
+                if txt and len(txt) > 40:
+                    bloques.append(txt)
+            summary = "\n\n".join(bloques).strip()
+
+        summary = harden_no_conditionals(summary)
+
+        if not summary:
+            summary = _fallback_executive_summary(company_name, chapter_results)
+
+        return {
+            "executive_summary": summary
+        }
+
+    except Exception as e:
+        print("DEBUG RESUMEN EJECUTIVO IA ERROR:", str(e))
+        return {
+            "executive_summary": _fallback_executive_summary(company_name, chapter_results)
+        }
+
+def ai_generate_item_analysis(company_name: str, control_id: str, item_block: dict) -> dict:
+    """
+    IA por CONTROL -> SOLO ITEMS (sin subitems)
+    Devuelve:
+      {
+        "items": {
+          "<ITEM_ID>": {
+            "analisis_item": "texto auditoria-ready"
+          }
+        }
+      }
+    """
+    client = get_openai_client()
+    raw = "{}"
+
+    items = (item_block.get("items") or {}) if isinstance(item_block, dict) else {}
+
+    def summarize_counts(kpi: dict) -> str:
+        c = (kpi or {}).get("counts") or {}
+        return (
+          f"madurez={kpi.get('madurez','')} "
+          f"NO={c.get('NO',0)} PARCIAL={c.get('PARCIAL',0)} SIN_MARCAR={c.get('SIN_MARCAR',0)}"
+        )
+
+    items_lines = []
+    for item_id, pack in items.items():
+        ikpi = (pack.get("item_kpi") or {})
+        items_lines.append(f"- ITEM {item_id}: {summarize_counts(ikpi)}")
+
+    prompt = f"""
+Actúa como consultor senior ISO/IEC 27001:2022 y auditor líder.
+Empresa: {company_name}
+Control: {control_id} - {control_title(control_id)}
+
+Tengo resultados por Ítem (porcentaje y madurez según parámetros del sistema).
+Necesito que para cada Ítem generes un análisis verificable y accionable, alineado a auditoría, que incluya:
+- Intención del ítem (en términos de control interno y cumplimiento)
+- Qué falta para llevarlo a Óptimo (proceso + evidencia + responsables + periodicidad + métricas)
+- Qué mantener si ya está alto/óptimo (control de vigencia, revisión, medición)
+
+IMPORTANTE:
+- NO inventes hechos concretos de la empresa (nombres de herramientas, documentos reales, tecnologías).
+- Redacta en modo auditoría (Se debe / Se requiere / Se evidencia / Se mantiene).
+- NO repitas porcentajes en el texto final.
+
+Items:
+{chr(10).join(items_lines) if items_lines else "N/A"}
+
+Devuelve SOLO JSON válido con esta estructura exacta:
+{{
+  "items": {{
+    "<ITEM_ID>": {{
+      "analisis_item": "texto"
+    }}
+  }}
+}}
+"""
+    prompt += "\n\nIMPORTANT: Return ONLY valid JSON."
+
+    try:
+        resp = openai_call_with_retry(
+            client,
+            model=OPENROUTER_MODEL_SGSI,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+        raw = (resp.choices[0].message.content or "{}").strip() or "{}"
+        data = json.loads(raw)
+
+        # Normaliza texto
+        if isinstance(data.get("items"), dict):
+            for k, v in data["items"].items():
+                if isinstance(v, dict):
+                    v["analisis_item"] = harden_no_conditionals(to_text(v.get("analisis_item")))
+
+        return data
+    except Exception as e:
+        return {"items": {}, "error": str(e)}
+    
+def ai_generate_control_analysis(run, control_id: str, kpi: dict = None, items: list = None):
+    """
+    Genera análisis IA por control y lo guarda en run.control_ai_json.
+    Compatible con OpenRouter y Ollama.
+    El análisis profundo se concentra SOLO en:
+    - estado_actual
+    - estado_requerido
+    - plan_accion_sugerido
+    """
+    if not run:
+        raise RuntimeError("No se encontró la corrida de análisis ISO.")
+
+    control_id = (control_id or "").strip().upper()
+    if not control_id:
+        raise RuntimeError("No se recibió el control a procesar.")
+
+    if kpi is None or items is None:
+        ctx = build_report_context(run)
+        control_items = ctx.get("control_items", {}) or {}
+        items = control_items.get(control_id, []) or []
+        kpi = compute_control_kpis(control_id, items)
+
+    if not isinstance(items, list):
+        items = []
+
+    if not isinstance(kpi, dict):
+        kpi = {}
+
+    soporte = build_control_support_text(items, max_lines=80)
+    pct = float(kpi.get("pct", 0) or 0)
+    madurez = (kpi.get("madurez") or "").strip()
+    group = (kpi.get("group") or "").strip()
+    total = int(kpi.get("total", 0) or 0)
+    done = int(kpi.get("done", 0) or 0)
+    counts = kpi.get("counts") or {}
+
+    prompt = f"""
+Eres un consultor senior y auditor líder experto en ISO/IEC 27001:2022 y SGSI.
+
+Debes generar un análisis PROFUNDO del control evaluado, pero SOLO usando estos tres campos:
+- estado_actual
+- estado_requerido
+- plan_accion_sugerido
+
+DATOS DEL CONTROL
+- Organización: {run.company_name}
+- Control: {control_id}
+- Grupo: {group}
+- Nivel de madurez: {madurez}
+- Porcentaje de cumplimiento: {pct:.2f}%
+- Cumplidas: {done}
+- Total aplicables: {total}
+- Conteos: SI={counts.get("SI",0)}, PARCIAL={counts.get("PARCIAL",0)}, NO={counts.get("NO",0)}, SIN_MARCAR={counts.get("SIN_MARCAR",0)}
+
+DETALLE DE SOPORTE
+{soporte}
+
+INSTRUCCIONES OBLIGATORIAS
+1. El estado_actual debe ser profundo, técnico y explicativo.
+2. El estado_actual debe describir qué está implementado, qué está parcial, qué brechas persisten y qué implicación tienen.
+3. El estado_requerido debe ser profundo, técnico y orientado a auditoría.
+4. El estado_requerido debe explicar cómo debe operar el control en un nivel sólido u óptimo.
+5. El plan_accion_sugerido debe ser detallado y venir numerado, mínimo 3 pasos y máximo 6.
+6. No uses markdown.
+7. No incluyas texto fuera del JSON.
+8. No uses lenguaje condicional.
+9. No respondas con etiquetas cortas como “Gestionado”, “Implementado” o frases de una sola línea.
+
+EXTENSIÓN ESPERADA
+- estado_actual: entre 80 y 180 palabras
+- estado_requerido: entre 80 y 180 palabras
+- plan_accion_sugerido: entre 3 y 6 acciones numeradas
+
+Devuelve SOLO JSON válido con esta estructura exacta:
+{{
+  "estado_actual": "texto profundo",
+  "estado_requerido": "texto profundo",
+  "plan_accion_sugerido": "1. ...\\n2. ...\\n3. ..."
+}}
+""".strip()
+
+    provider = (get_ai_provider() or "openrouter").strip().lower()
+
+    raw = ""
+
+    # =========================
+    # OLLAMA
+    # =========================
+    if provider == "ollama":
+        base_url = (get_ollama_base_url() or "http://localhost:11434").strip().rstrip("/")
+        model = (get_ollama_model() or "llama3.1").strip()
+
+        if not base_url:
+            raise RuntimeError("No hay OLLAMA_BASE_URL configurada en Administración.")
+        if not model:
+            raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
+
+        resp = requests.post(
+            f"{base_url}/api/generate",
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.15
+                }
+            },
+            timeout=300
+        )
+        resp.raise_for_status()
+
+        payload = resp.json() or {}
+
+        raw = (payload.get("response") or "").strip()
+        if not raw:
+            raw = (payload.get("message") or "").strip()
+
+        if not raw:
+            raise RuntimeError(f"Ollama respondió sin contenido. Payload: {str(payload)[:500]}")
+
+    # =========================
+    # OPENROUTER
+    # =========================
+    else:
+        api_key = (get_openrouter_api_key() or "").strip()
+        if not api_key:
+            raise RuntimeError("No hay OPENROUTER_API_KEY configurada en Administración.")
+
+        client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+            default_headers={
+                "HTTP-Referer": "https://sgsi.local",
+                "X-Title": "SGSI ISO 27001 Analyzer"
+            }
+        )
+
+        resp = client.chat.completions.create(
+            model="openai/gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": "Devuelve SOLO JSON válido. No agregues texto fuera del JSON."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.15,
+            max_tokens=1800,
+            response_format={"type": "json_object"},
+        )
+
+        raw = (resp.choices[0].message.content or "").strip()
+        if not raw:
+            raise RuntimeError("OpenRouter respondió sin contenido.")
+
+    data = _extraer_json_objeto(raw)
+    data = ensure_control_ai_fields(data, kpi)
+
+    print("DEBUG IA ISO CONTROL - DATA FINAL:", data)
+
+    actual = {}
+    try:
+        actual = json.loads(run.control_ai_json or "{}")
+        if not isinstance(actual, dict):
+            actual = {}
+    except Exception:
+        actual = {}
+
+    actual[control_id] = {
+        "estado_actual": data.get("estado_actual", ""),
+        "estado_requerido": data.get("estado_requerido", ""),
+        "plan_accion_sugerido": data.get("plan_accion_sugerido", "")
+    }
+
+    run.control_ai_json = json.dumps(actual, ensure_ascii=False)
+    return actual[control_id] 
+
+def build_unified_control_analysis(cid: str, kpi: dict, items: list) -> dict:
+    """
+    Devuelve un análisis consistente por control, estructurado y dependiente del nivel de madurez.
+    NO usa IA. Usa CONTROL_STRATEGY + preguntas en brecha.
+    """
+    cid_u = (cid or "").strip().upper()
+    cfg = CONTROL_STRATEGY.get(cid_u, {})
+
+    mad = (kpi.get("madurez") or "").strip()
+    pct = float(kpi.get("pct", 0) or 0)
+    c = (kpi.get("counts") or {})
+    no = int(c.get("NO", 0) or 0)
+    parcial = int(c.get("PARCIAL", 0) or 0)
+    sm = int(c.get("SIN_MARCAR", 0) or 0)
+    total = int(kpi.get("total", 0) or 0)
+
+    intent = cfg.get("intent", "Asegurar la implementación efectiva del control según ISO/IEC 27001:2022.")
+    must_have = cfg.get("must_have", [])
+    evidence = cfg.get("evidence", [])
+    roles = cfg.get("roles", [])
+    cadence = cfg.get("cadence", "")
+    metrics = cfg.get("kpis", [])
+
+    def _norm_plain(s: str) -> str:
+        s = (s or "").strip().lower()
+        s = unicodedata.normalize("NFD", s)
+        s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+        return s
+
+    mad_n = _norm_plain(mad)
+
+    # Top brechas
+    gaps = [x for x in (items or []) if x.get("status") in ("NO", "PARCIAL", "SIN_MARCAR")]
+    gaps = sorted(gaps, key=lambda x: float(x.get("brecha_pct", 100) or 100), reverse=True)[:8]
+    brechas_top = []
+    for g in gaps:
+        q = (g.get("requisito") or "").strip()
+        st = (g.get("status") or "").strip()
+        if q:
+            brechas_top.append(f"• [{st}] {q}")
+
+    # Estado por madurez (prioriza la etiqueta; fallback por pct)
+    if mad_n == "optimo" or pct >= 80:
+        estado = "Óptimo"
+        diagnostico = "El control opera de forma consistente, con trazabilidad y evidencia vigente."
+        foco = "Sostener la disciplina: vigencia documental, revisión periódica, métricas y mejora continua."
+        acciones = [
+            "Mantener evidencias vigentes con control de cambios y versionado.",
+            "Ejecutar revisión periódica y registrar decisiones/acciones.",
+            "Asegurar medición del control (KPIs) y reporte a comité/dirección."
+        ]
+    elif mad_n == "gestionado" or pct >= 60:
+        estado = "Gestionado"
+        diagnostico = "El control está implementado y es repetible, pero aún presenta brechas de consistencia y evidencia."
+        foco = "Cerrar pendientes (PARCIAL/SIN_MARCAR) y fortalecer trazabilidad y medición."
+        acciones = [
+            "Convertir PARCIAL en SI con evidencia verificable (registros, actas, aprobaciones).",
+            "Resolver SIN_MARCAR: completar evaluación y evidencia.",
+            "Alinear responsables y cadencia de revisión, con KPIs."
+        ]
+    elif mad_n == "en desarrollo" or pct >= 40:
+        estado = "En desarrollo"
+        diagnostico = "El control existe parcialmente; la evidencia es inconsistente y la operación no es homogénea."
+        foco = "Estandarizar proceso mínimo, responsables y evidencia base."
+        acciones = [
+            "Definir el proceso del control (entradas/actividades/salidas) y un responsable.",
+            "Crear evidencia mínima: procedimiento + formatos/registros + aprobaciones.",
+            "Implementar ciclo de revisión (mensual/trimestral) y seguimiento de hallazgos."
+        ]
+    else:
+        estado = "Inicial"
+        diagnostico = "El control no está implementado o es ad-hoc; existe alto riesgo de incumplimiento y falta de evidencia."
+        foco = "Implementación prioritaria: diseño + operación + evidencia mínima inmediata."
+        acciones = [
+            "Definir política/procedimiento base del control y asignar responsables.",
+            "Implementar evidencias iniciales (registros, listas, matrices, actas) desde el primer ciclo.",
+            "Establecer un plan de cierre de NO/SIN_MARCAR con fechas y seguimiento."
+        ]
+
+    return {
+        "estado": estado + (f" ({mad})" if mad else ""),
+        "intencion": intent,
+        "diagnostico": diagnostico,
+        "foco": foco,
+        "impacto": "Se identifican brechas en requisitos aplicables que requieren cierre y evidencia verificable.",
+        "componentes_minimos": must_have,
+        "acciones_clave": acciones,
+        "evidencias_esperadas": evidence,
+        "roles_clave": roles,
+        "cadencia": cadence,
+        "metricas": metrics,
+        "brechas_top": brechas_top,
+    }
+
+
+# ==========================
+# BADGES
+# ==========================
+def score_badge(pct: float) -> str:
+    if pct >= 80:
+        return "bg-success"              # Verde
+    if pct >= 60:
+        return "bg-primary"              # Azul
+    if pct >= 40:
+        return "bg-warning text-dark"    # 🟡 Amarillo
+    return "bg-purple text-white"        # 🟣 Morado
+
+
+def gap_badge(level: str) -> str:
+    lvl = (level or "").strip().lower()
+    if lvl == "bajo":
+        return "bg-success"
+    if lvl == "medio":
+        return "bg-warning text-dark"
+    if lvl == "alto":
+        return "bg-purple text-white"
+    if lvl in ("critico", "crítico"):
+        return "bg-dark"
+    return "bg-secondary"
+
+
+# ============================================================
+# CONTROLES POR CAPÍTULO
+# ============================================================
+def _status_counts(items: list) -> dict:
+    c = {"SI": 0, "PARCIAL": 0, "NO": 0, "SIN_MARCAR": 0, "NA": 0}
+    for it in items or []:
+        st = (it.get("status") or "").strip()
+        if st in c:
+            c[st] += 1
+        else:
+            c["SIN_MARCAR"] += 1
+    return c
+
+def compute_control_kpis(cid: str, items: list) -> dict:
+    applicable = [x for x in (items or []) if x.get("applicable", True) and (x.get("status") != "NA")]
+    total = len(applicable)
+
+    if total == 0:
+        pct = 0.0
+        mad = get_maturity_label_for_pct(0)
+        done = 0
+        counts = _status_counts(items or [])
+    else:
+        score_sum = sum(int(x.get("score", 0) or 0) for x in applicable)
+        pct = round((score_sum / (total * 100) * 100) if total else 0.0, 2)
+        mad = get_maturity_label_for_pct(pct)
+        done = sum(1 for x in applicable if (x.get("status") == "SI"))
+        counts = _status_counts(applicable)
+
+    # ✅ NUEVO: brecha por control (100 - pct) + nivel/interpretación parametrizados
+    gap_info = gap_from_maturity_pct(pct)
+
+    return {
+        "control_id": cid,
+        "title": control_title(cid),
+        "pct": pct,
+        "madurez": mad,
+        "total": total,
+        "done": done,
+        "counts": counts,
+
+        # ✅ NUEVO
+        "brecha_pct": gap_info["gap_pct"],
+        "brecha_nivel": gap_info["nivel_brecha"],
+        "brecha_interp": gap_info["interpretacion"],
+    }
+
+def build_control_summary_text(kpi: dict) -> str:
+    pct = float(kpi.get("pct", 0) or 0)
+    mad = (kpi.get("madurez") or "").strip()
+    total = int(kpi.get("total", 0) or 0)
+    done = int(kpi.get("done", 0) or 0)
+    c = kpi.get("counts") or {}
+    parcial = int(c.get("PARCIAL", 0) or 0)
+    no = int(c.get("NO", 0) or 0)
+    sm = int(c.get("SIN_MARCAR", 0) or 0)
+
+    if pct >= 80:
+        estado = "Óptimo / muy sólido"
+    elif pct >= 60:
+        estado = "Gestionado / consistente"
+    elif pct >= 40:
+        estado = "En desarrollo / parcial"
+    else:
+        estado = "Débil / prioritario"
+
+    return (
+        f"Estado: {estado}. "
+        + f"Cumplimiento: {pct}%"
+        + (f" ({mad}). " if mad else ". ")
+        + "Se identifican brechas que requieren cierre y evidencias verificables."
+    )
+
+
+def build_control_detail_text(kpi: dict, items: list) -> str:
+    pct = float(kpi.get("pct", 0) or 0)
+    mad = (kpi.get("madurez") or "").strip()
+    c = kpi.get("counts") or {}
+    parcial = int(c.get("PARCIAL", 0) or 0)
+    no = int(c.get("NO", 0) or 0)
+    sm = int(c.get("SIN_MARCAR", 0) or 0)
+
+    def brecha_val(x):
+        bp = x.get("brecha_pct", None)
+        if bp is None:
+            return -1
+        try:
+            return float(bp)
+        except Exception:
+            return 0.0
+
+    gaps_sorted = sorted(
+        [x for x in (items or []) if x.get("status") in ("NO", "PARCIAL", "SIN_MARCAR")],
+        key=brecha_val,
+        reverse=True
+    )
+    top = gaps_sorted[:8]
+    bullets = []
+    for it in top:
+        req = (it.get("requisito") or "").strip()
+        st = (it.get("status") or "").strip()
+        com = (it.get("comment") or "").strip()
+        prc = (it.get("procesos") or "").strip()
+        extra = []
+        if com:
+            extra.append(f"coment: {com}")
+        if prc:
+            extra.append(f"proc: {prc}")
+        extra_txt = (" (" + " | ".join(extra) + ")") if extra else ""
+        if req:
+            bullets.append(f"• [{st}] {req}{extra_txt}")
+
+    if pct >= 80:
+        txt = (
+            f"El control se considera sólido/óptimo porque la mayoría de requisitos están en 'SI' "
+            f"y los hallazgos residuales son menores (PARCIAL={parcial}, NO={no}, SIN MARCAR={sm}). "
+            f"Para sostener el nivel {mad or ''}, asegure evidencia vigente, revisión periódica, "
+            f"y trazabilidad (responsables, aprobación, métricas y seguimiento)."
+        )
+        if bullets:
+            txt += "\n\nPuntos a vigilar (mejora continua):\n" + "\n".join(bullets)
+        return txt.strip()
+
+    txt = (
+        f"Para llevar este control a un nivel óptimo, debes cerrar primero los ítems en 'NO' y "
+        f"convertir los 'PARCIAL' en 'SI'. También se deben resolver los 'SIN MARCAR' porque por política "
+        f"se tratan como brecha.\n"
+        f"Impacto actual: NO={no}, PARCIAL={parcial}, SIN MARCAR={sm}."
+    )
+    if bullets:
+        txt += "\n\nBrechas principales (basadas en tus preguntas):\n" + "\n".join(bullets)
+    else:
+        txt += "\n\nNo hay detalle de preguntas en brecha para este control (revisar instrumento)."
+    return txt.strip()
+
+
+def build_control_strategic_text(cid: str, kpi: dict, items: list) -> dict:
+    cid_u = (cid or "").strip().upper()
+    cfg = CONTROL_STRATEGY.get(cid_u, {})
+    intent = cfg.get("intent", "Asegurar la implementación efectiva del control según ISO 27001.")
+    must_have = cfg.get("must_have", [])
+    evidence = cfg.get("evidence", [])
+    roles = cfg.get("roles", [])
+    cadence = cfg.get("cadence", "")
+    kpis = cfg.get("kpis", [])
+
+    c = (kpi.get("counts") or {})
+    no = int(c.get("NO", 0) or 0)
+    parcial = int(c.get("PARCIAL", 0) or 0)
+    sm = int(c.get("SIN_MARCAR", 0) or 0)
+    total = int(kpi.get("total", 0) or 0)
+    pct = float(kpi.get("pct", 0) or 0)
+    mad = (kpi.get("madurez") or "").strip()
+
+    gaps = [x for x in (items or []) if x.get("status") in ("NO", "PARCIAL", "SIN_MARCAR")]
+    gaps = sorted(gaps, key=lambda x: float(x.get("brecha_pct", 100) or 100), reverse=True)[:6]
+    top_gap_questions = []
+    for it in gaps:
+        q = (it.get("requisito") or "").strip()
+        st = (it.get("status") or "").strip()
+        if q:
+            top_gap_questions.append(f"• [{st}] {q}")
+
+    if pct >= 80:
+        estado = "Óptimo"
+        foco = "Sostener el control: disciplina operativa, evidencia vigente y mejora continua."
+        riesgo = "Riesgo residual controlado; riesgo principal: perder vigencia por falta de revisión."
+    elif pct >= 60:
+        estado = "Gestionado"
+        foco = "Cerrar consistencia: convertir PARCIAL/SIN_MARCAR en evidencia verificable y repetible."
+        riesgo = "Riesgo moderado por ejecución desigual o falta de trazabilidad."
+    elif pct >= 40:
+        estado = "En desarrollo"
+        foco = "Estandarizar: proceso, dueños, evidencia mínima y ciclo de revisión."
+        riesgo = "Riesgo alto por brechas operativas que pueden materializar incidentes o incumplimientos."
+    else:
+        estado = "Crítico"
+        foco = "Implementación prioritaria: definir y operar el control con evidencias básicas cuanto antes."
+        riesgo = "Riesgo crítico de incumplimiento ISO y exposición material a incidentes."
+
+    acciones = []
+    if no or parcial or sm:
+        acciones.append("Formalizar proceso: entradas, actividades, salidas, responsable y aprobación.")
+        acciones.append("Crear/actualizar evidencia mínima con versionado y trazabilidad.")
+        acciones.append("Definir revisión periódica y seguimiento (acciones, responsables, fechas).")
+        acciones.append("Incorporar métricas y revisión por la dirección cuando aplique.")
+    else:
+        acciones.append("Mantener evidencia vigente y revisiones periódicas (no solo documentos creados).")
+        acciones.append("Mejora continua: lecciones aprendidas, auditorías, KPIs y ajustes por cambios.")
+
+    return {
+        "estado": estado + (f" ({mad})" if mad else ""),
+        "intencion": intent,
+        "riesgo": riesgo,
+        "foco": foco,
+        "faltantes": [f for f in must_have],
+        "acciones_estrategicas": acciones,
+        "evidencias_esperadas": evidence,
+        "roles_clave": roles,
+        "cadencia": cadence,
+        "metricas": kpis,
+        "brechas_top": top_gap_questions,
+        "impacto_operativo": "Se identifican brechas operativas en el control que requieren cierre, trazabilidad y evidencia."
+    }
+
+
+def render_control_items_table(items: list) -> str:
+    if not items:
+        return "<div class='text-muted small'>Sin preguntas registradas para este control.</div>"
+
+    items_sorted = sorted(items, key=lambda x: int(x.get("row", 0) or 0))
+    tr = ""
+    for it in items_sorted[:500]:
+        st = display_estado(it.get("status"))
+        com = (it.get("comment") or "").strip()
+        prc = (it.get("procesos") or "").strip()
+
+        if st == "":
+            com_vis = ""
+            prc_vis = ""
+        else:
+            com_vis = com if com else "ninguno"
+            prc_vis = prc if prc else "ninguno"
+
+        bp = it.get("brecha_pct", None)
+        bp_txt = "" if bp is None else f"{float(bp):.0f}%"
+        blevel = (it.get("brecha_nivel") or "").strip()
+        binterp = (it.get("brecha_interp") or "").strip()
+
+        tr += f"""
+        <tr class="cell-small">
+          <td class="text-muted">{xml_escape(it.get("sheet",""))}</td>
+          <td class="text-muted">{xml_escape(st)}</td>
+          <td class="wrap" style="min-width:420px;">{xml_escape(it.get("requisito",""))}</td>
+          <td class="wrap" style="min-width:220px;">{xml_escape(com_vis)}</td>
+        </tr>
+        """
+
+    return f"""
+    <div class="table-responsive" style="max-height: 420px; overflow:auto;">
+      <table class="table table-sm table-striped align-middle table-tight">
+        <thead>
+          <tr>
+            <th style="min-width:160px;">Capítulo</th>
+            <th style="min-width:90px;">Estado</th>
+            <th>Pregunta/Requisito</th>
+            <th>Comentarios</th>
+          </tr>
+        </thead>
+        <tbody>{tr if tr else "<tr><td colspan='4' class='text-muted'>Sin datos.</td></tr>"}</tbody>
+      </table>
+    </div>
+    """
+
+
+# ============================================================
+# NUEVO: AGREGACIÓN POR ÍTEM/SUBÍTEM
+# ============================================================
+def compute_kpis_for_bucket(bucket_id: str, questions: list) -> dict:
+    applicable = [x for x in (questions or []) if x.get("applicable", True) and (x.get("status") != "NA")]
+    total = len(applicable)
+    if total == 0:
+        return {
+            "id": bucket_id,
+            "pct": 0.0,
+            "madurez": get_maturity_label_for_pct(0),
+            "total": 0,
+            "done": 0,
+            "counts": _status_counts([]),
+        }
+
+    score_sum = sum(int(x.get("score", 0) or 0) for x in applicable)
+    pct = round((score_sum / (total * 100) * 100) if total else 0.0, 2)
+    done = sum(1 for x in applicable if (x.get("status") == "SI"))
+    return {
+        "id": bucket_id,
+        "pct": pct,
+        "madurez": get_maturity_label_for_pct(pct),
+        "total": total,
+        "done": done,
+        "counts": _status_counts(applicable),
+    }
+
+
+def build_item_results(control_items: dict) -> dict:
+    out = {}
+
+    for cid, questions in (control_items or {}).items():
+        cid_u = (cid or "").strip()
+        if not cid_u:
+            continue
+
+        control_kpi = compute_control_kpis(cid_u, questions)
+
+        item_map = {}
+        for q in (questions or []):
+            item_id = (q.get("item_id") or "").strip()
+            sub_id  = (q.get("subitem_id") or "").strip()
+
+            if not item_id:
+                ref = q.get("ref", "")
+                sh = q.get("sheet", "")
+                item_id2, sub_id2 = get_item_subitem_ids(sh, ref, cid_u)
+                item_id = (item_id2 or cid_u).strip()
+                sub_id = (sub_id2 or "").strip()
+
+            item_id = (item_id or cid_u).strip()
+
+            item_map.setdefault(item_id, {"questions": [], "subitems": {}})
+            item_map[item_id]["questions"].append(q)
+
+            if sub_id:
+                item_map[item_id]["subitems"].setdefault(sub_id, [])
+                item_map[item_id]["subitems"][sub_id].append(q)
+
+        items_out = {}
+        for item_id, pack in item_map.items():
+            item_kpi = compute_kpis_for_bucket(item_id, pack["questions"])
+
+            subs_out = {}
+            for sub_id, qlist in (pack.get("subitems") or {}).items():
+                subs_out[sub_id] = {"subitem_kpi": compute_kpis_for_bucket(sub_id, qlist)}
+
+            items_out[item_id] = {"item_kpi": item_kpi, "subitems": subs_out}
+
+        out[cid_u] = {"control_kpi": control_kpi, "items": items_out}
+
     return out
 
 
-def _gdpr_ai_prompt_dominio(dominio: str, pct: float, items: list[dict]):
-    bullets = []
-
-    for it in items[:100]:
-        pregunta = (it.get("pregunta") or "")[:280].replace("\n", " ")
-        comentario = (it.get("comentario") or "")[:220].replace("\n", " ")
-        codigo = (it.get("codigo") or "").strip()
-        estado = (it.get("estado") or "").strip().upper()
-
-        linea = f"- [{estado}] "
-        if codigo:
-            linea += f"{codigo}: "
-        linea += pregunta
-        if comentario:
-            linea += f" | Evidencia: {comentario}"
-
-        bullets.append(linea)
-
-    joined = "\n".join(bullets) if bullets else "- Sin evidencias registradas."
-
-    return f"""
-Eres un consultor experto en privacidad, protección de datos personales, GDPR y programas PIMS.
-Debes producir un análisis accionable y concreto por dominio.
-
-CONTEXTO
-- Dominio: {dominio}
-- Cumplimiento actual: {pct:.2f}%
-
-EVIDENCIAS (preguntas, estado y comentarios)
-{joined}
-
-INSTRUCCIONES OBLIGATORIAS
-1) Devuelve SOLAMENTE JSON válido.
-2) No devuelvas markdown.
-3) No devuelvas texto antes ni después del JSON.
-4) Debes devolver SIEMPRE estas tres llaves:
-   - "estado_actual"
-   - "estado_requerido"
-   - "plan_accion"
-5) "estado_actual" y "estado_requerido" deben ser textos obligatorios, no vacíos.
-6) "plan_accion" debe ser un arreglo, aunque sea con 1 elemento.
-7) Si falta evidencia, igual debes llenar "estado_actual" y "estado_requerido" explicándolo claramente.
-
-FORMATO EXACTO DE SALIDA
-{{
-  "estado_actual": "texto obligatorio",
-  "estado_requerido": "texto obligatorio",
-  "plan_accion": [
-    {{
-      "accion": "texto",
-      "prioridad": "Alta",
-      "responsable_sugerido": "texto",
-      "plazo": "texto",
-      "evidencia_esperada": "texto"
-    }}
-  ]
-}}
-
-REGLAS
-- Usa lenguaje ejecutivo, claro y accionable.
-- Prioriza brechas reales derivadas de SI / PARCIAL / NO.
-- No inventes herramientas específicas si no aparecen en la evidencia.
-- Si la evidencia es insuficiente, debes decirlo claramente en "estado_actual" y aun así proponer un "estado_requerido".
-""".strip()
-
-# =====================================================================
-# VELOCÍMETROS POR DOMINIO — PROTECCIÓN DE DATOS PERSONALES
-# =====================================================================
-
-def _gdpr_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: str):
-    try:
-        pct = max(0.0, min(100.0, float(pct or 0)))
-
-        def _nivel_corto(txt: str) -> str:
-            txt = (txt or "").strip()
-            if txt.startswith("Nivel 1"):
-                return "Nivel 1"
-            if txt.startswith("Nivel 2"):
-                return "Nivel 2"
-            if txt.startswith("Nivel 3"):
-                return "Nivel 3"
-            if txt.startswith("Nivel 4"):
-                return "Nivel 4"
-            if txt.startswith("Nivel 5"):
-                return "Nivel 5"
-            return txt or "Sin nivel"
-
-        def _label_corto(txt: str, max_len: int = 34) -> str:
-            txt = (txt or "").strip()
-            txt = re.sub(r"\s+", " ", txt)
-            if len(txt) <= max_len:
-                return txt
-            return txt[:max_len - 3] + "..."
-
-        fig = plt.figure(figsize=(4.8, 3.2), dpi=150)
-        ax = fig.add_subplot(111, polar=True)
-
-        ax.set_theta_direction(-1)
-        ax.set_theta_offset(np.pi)
-        ax.set_ylim(0, 10)
-        ax.set_facecolor("white")
-
-        # =========================
-        # Fondo base del dial
-        # =========================
-        theta_full = np.linspace(0, np.pi, 500)
-        ax.plot(
-            theta_full,
-            [8.0] * len(theta_full),
-            linewidth=20,
-            color="#edf2f7",
-            solid_capstyle="round",
-            zorder=1
-        )
-
-        # =========================
-        # Tramos visuales del dial
-        # =========================
-        rangos = [
-            (0, 20,  "#dc3545"),
-            (20, 40, "#fd7e14"),
-            (40, 60, "#ffc107"),
-            (60, 80, "#0d6efd"),
-            (80, 100, "#198754"),
-        ]
-
-        for ini, fin, col in rangos:
-            th = np.linspace(np.pi * (ini / 100.0), np.pi * (fin / 100.0), 80)
-            ax.plot(
-                th,
-                [8.0] * len(th),
-                linewidth=8,
-                color=col,
-                alpha=0.28,
-                solid_capstyle="butt",
-                zorder=2
-            )
-
-        # =========================
-        # Arco de avance real
-        # =========================
-        frac = pct / 100.0
-        if frac > 0:
-            theta_val = np.linspace(0, np.pi * frac, 300)
-            ax.plot(
-                theta_val,
-                [8.0] * len(theta_val),
-                linewidth=20,
-                color=color,
-                solid_capstyle="round",
-                zorder=4
-            )
-
-        # =========================
-        # Marcas del dial
-        # =========================
-        for tick in [0, 20, 40, 60, 80, 100]:
-            ang = np.pi * (tick / 100.0)
-            ax.plot([ang, ang], [6.9, 8.9], color="#64748b", linewidth=1.2, zorder=3)
-
-        # Etiquetas de escala
-        escala = [
-            (0, "0"),
-            (25, "25"),
-            (50, "50"),
-            (75, "75"),
-            (100, "100"),
-        ]
-        for val, txt in escala:
-            ang = np.pi * (val / 100.0)
-            ax.text(
-                ang, 9.65, txt,
-                ha="center", va="center",
-                fontsize=7.5,
-                color="#475569",
-                fontweight="bold"
-            )
-
-        # =========================
-        # Aguja
-        # =========================
-        needle_angle = np.pi * frac
-        ax.plot(
-            [needle_angle, needle_angle],
-            [0, 6.6],
-            color="#0f172a",
-            linewidth=2.2,
-            zorder=6
-        )
-
-        # Centro
-        ax.scatter([0], [0], s=95, color="#0f172a", zorder=7)
-        ax.scatter([0], [0], s=28, color="white", zorder=8)
-
-        # Limpieza
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.grid(False)
-        ax.spines["polar"].set_visible(False)
-
-        # =========================
-        # Textos
-        # =========================
-        ax.text(
-            0.5, 1.16, _label_corto(label),
-            transform=ax.transAxes,
-            ha="center", va="center",
-            fontsize=10,
-            fontweight="bold",
-            color="#101827"
-        )
-
-        ax.text(
-            0.5, 0.48, f"{pct:.1f}%",
-            transform=ax.transAxes,
-            ha="center", va="center",
-            fontsize=20,
-            fontweight="bold",
-            color="#0b1220"
-        )
-
-        ax.text(
-            0.5, 0.31, _nivel_corto(nivel),
-            transform=ax.transAxes,
-            ha="center", va="center",
-            fontsize=9,
-            fontweight="bold",
-            color=color
-        )
-
-        ax.text(
-            0.5, 0.18, "cumplimiento",
-            transform=ax.transAxes,
-            ha="center", va="center",
-            fontsize=8,
-            color="#4b5563"
-        )
-
-        fig.subplots_adjust(top=0.88, bottom=0.06, left=0.06, right=0.94)
-        return fig
-
-    except Exception as e:
-        print(f"[GDPR Velocímetro] Error: {e}")
-        return None
-
-def generar_gdpr_velocimetro_png_bytes(label: str, pct: float, nivel: str, color: str):
-    fig = _gdpr_construir_velocimetro_fig(label, pct, nivel, color)
-    if fig is None:
-        return None
-
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white", pad_inches=0.20)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.read()
-
-
-def generar_gdpr_velocimetro_base64(label: str, pct: float, nivel: str, color: str):
-    b = generar_gdpr_velocimetro_png_bytes(label, pct, nivel, color)
-    if not b:
-        return None
-    return base64.b64encode(b).decode("utf-8")
-
-def _gdpr_build_pdf_run(run: "DatosMadurezRun") -> io.BytesIO:
-    try:
-        resumen = json.loads(run.resumen_json or "{}")
-    except Exception:
-        resumen = {}
-
-    radar_png = generar_radar_datos_png_bytes(resumen)
-
-    buf = io.BytesIO()
-
-    doc = SimpleDocTemplate(
-        buf,
-        pagesize=landscape(A4),
-        leftMargin=1.2 * cm,
-        rightMargin=1.2 * cm,
-        topMargin=1.0 * cm,
-        bottomMargin=1.0 * cm,
-        title="Protección de Datos Personales - Informe Ejecutivo"
-    )
-
-    styles = getSampleStyleSheet()
-
-    styles.add(ParagraphStyle(
-        name="GDPR_Title",
-        parent=styles["Title"],
-        fontName="Helvetica-Bold",
-        fontSize=18,
-        textColor=colors.white,
-        alignment=TA_CENTER,
-        spaceAfter=8
-    ))
-
-    styles.add(ParagraphStyle(
-        name="GDPR_Section",
-        parent=styles["Heading2"],
-        fontName="Helvetica-Bold",
-        fontSize=12,
-        textColor=colors.HexColor("#1d4f8f"),
-        spaceBefore=10,
-        spaceAfter=8
-    ))
-
-    styles.add(ParagraphStyle(
-        name="GDPR_Normal",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=8.5,
-        leading=11,
-        textColor=colors.HexColor("#101827"),
-        spaceAfter=5
-    ))
-
-    styles.add(ParagraphStyle(
-        name="GDPR_Small",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=7.5,
-        leading=9,
-        textColor=colors.HexColor("#374151"),
-        spaceAfter=4
-    ))
-
-    def pdf_escape(v):
-        return html.escape(str(v or ""))
-
-    def nivel_color(pct):
-        try:
-            pct = float(pct or 0)
-        except Exception:
-            pct = 0
-
-        if pct >= 81:
-            return colors.HexColor("#198754")
-        if pct >= 61:
-            return colors.HexColor("#0d6efd")
-        if pct >= 41:
-            return colors.HexColor("#ffc107")
-        if pct >= 21:
-            return colors.HexColor("#fd7e14")
-        return colors.HexColor("#dc3545")
-
-    def nivel_nombre_corto(nivel_txt):
-        txt = str(nivel_txt or "")
-        if ":" in txt:
-            txt = txt.split(":", 1)[1].strip()
-        if "(" in txt:
-            txt = txt.split("(", 1)[0].strip()
-        return txt or "No definido"
-
-    def nivel_badge_pdf(pct, nivel_data):
-        c = nivel_color(pct)
-        score = nivel_data.get("score", 0)
-        nombre = nivel_nombre_corto(nivel_data.get("nivel", ""))
-
-        badge = Table(
-            [[
-                "",
-                Paragraph(
-                    f"<b>Nivel {score}</b> - {pdf_escape(nombre)}",
-                    styles["GDPR_Small"]
-                )
-            ]],
-            colWidths=[0.28 * cm, 4.25 * cm]
-        )
-
-        badge.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (0, 0), c),
-            ("BOX", (0, 0), (0, 0), 0.25, c),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 2),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-            ("TOPPADDING", (0, 0), (-1, -1), 2),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-        ]))
-
-        return badge
-
-    def add_section(title):
-        table = Table(
-            [[Paragraph(pdf_escape(title), styles["GDPR_Title"])]],
-            colWidths=[26.8 * cm]
-        )
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#3f86d6")),
-            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#1d4f8f")),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, -1), 8),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-        ]))
-        story.append(table)
-        story.append(Spacer(1, 8))
-
-    def add_text_block(texto):
-        texto = _gdpr_normalizar_texto_plano_guardado(texto or "")
-        if not texto:
-            story.append(Paragraph("No hay información registrada.", styles["GDPR_Normal"]))
-            return
-
-        for parrafo in re.split(r"\n\s*\n", texto):
-            parrafo = parrafo.strip()
-            if parrafo:
-                story.append(Paragraph(pdf_escape(parrafo), styles["GDPR_Normal"]))
-
-    def normalizar_plan_dominio(texto_raw):
-        txt = (texto_raw or "").strip()
-        if not txt:
-            return ""
-
-        txt = txt.replace("```json", "").replace("```", "").strip()
-
-        try:
-            obj = json.loads(txt)
-        except Exception:
-            obj = _extraer_json_objeto(txt)
-
-        if isinstance(obj, dict):
-            plan = obj.get("plan_accion") or obj.get("plan") or obj.get("acciones")
-            if isinstance(plan, list):
-                return _gdpr_plan_accion_a_texto(plan)
-
-        return _gdpr_normalizar_texto_plano_guardado(txt)
-
-    story = []
-
-    # =========================
-    # ENCABEZADO
-    # =========================
-    add_section("Protección de Datos Personales - Informe de Madurez")
-
-    nivel_general = gdpr_nivel_visual_por_pct(run.pct_general)
-    nivel_nombre = nivel_nombre_corto(nivel_general.get("nivel", ""))
-
-    resumen_tbl = Table([
-        ["Consecutivo", pdf_escape(run.consecutivo)],
-        ["Fecha", run.created_at.strftime("%Y-%m-%d %H:%M")],
-        [
-            "Cumplimiento general",
-            f"{run.pct_general:.2f}% - Nivel {nivel_general.get('score', 0)} ({pdf_escape(nivel_nombre)})"
-        ],
-        ["Nivel de madurez", pdf_escape(nivel_general.get("nivel", ""))]
-    ], colWidths=[5.2 * cm, 21.6 * cm])
-
-    resumen_tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f1fb")),
-        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")),
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-    ]))
-
-    story.append(resumen_tbl)
-    story.append(Spacer(1, 12))
-
-    # =========================
-    # INFORME EJECUTIVO
-    # =========================
-    story.append(Paragraph("Informe Ejecutivo", styles["GDPR_Section"]))
-
-    informe_exec = (
-        run.informe_ejecutivo_editado
-        or run.informe_ejecutivo_ai
-        or ""
-    ).strip()
-
-    add_text_block(informe_exec)
-    story.append(Spacer(1, 10))
-
-    # =========================
-    # RADAR / ARAÑA
-    # =========================
-    story.append(Paragraph("Radar por Dominio", styles["GDPR_Section"]))
-
-    if radar_png:
-        try:
-            img_buf = io.BytesIO(radar_png)
-            img = RLImage(img_buf, width=12.5 * cm, height=10.5 * cm)
-            story.append(img)
-            story.append(Spacer(1, 10))
-        except Exception as e:
-            story.append(
-                Paragraph(
-                    f"No se pudo renderizar el radar: {pdf_escape(e)}",
-                    styles["GDPR_Normal"]
-                )
-            )
-
-    # =========================
-    # TABLA GENERAL CON COLORIMETRÍA TIPO ISO
-    # =========================
-    story.append(Paragraph("Detalle por Dominio", styles["GDPR_Section"]))
-
-    data = [[
-        "Dominio",
-        "% Cumplimiento",
-        "Nivel de madurez",
-        "Items",
-        "Brecha"
-    ]]
-
-    for dominio, d in (resumen or {}).items():
-        try:
-            pct = float(d.get("pct", 0) or 0)
-        except Exception:
-            pct = 0.0
-
-        total = int(d.get("total", 0) or 0)
-        brecha = max(0.0, 100.0 - pct)
-        nivel_data = gdpr_nivel_visual_por_pct(pct)
-
-        data.append([
-            Paragraph(pdf_escape(dominio), styles["GDPR_Small"]),
-            Paragraph(f"{pct:.2f}%", styles["GDPR_Small"]),
-            nivel_badge_pdf(pct, nivel_data),
-            Paragraph(str(total), styles["GDPR_Small"]),
-            Paragraph(f"{brecha:.2f}%", styles["GDPR_Small"])
-        ])
-
-    tbl = Table(
-        data,
-        colWidths=[12.0 * cm, 3.2 * cm, 5.4 * cm, 2.2 * cm, 3.0 * cm],
-        repeatRows=1
-    )
-
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3f86d6")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 8),
-        ("FONTSIZE", (0, 1), (-1, -1), 7.2),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("ALIGN", (1, 1), (1, -1), "CENTER"),
-        ("ALIGN", (3, 1), (4, -1), "CENTER"),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-    ]))
-
-    story.append(tbl)
-
-    # =========================
-    # ANÁLISIS POR DOMINIO
-    # =========================
-    analisis_rows = DatosMadurezDominioAnalisis.query.filter_by(
-        run_id=run.id
-    ).order_by(
-        DatosMadurezDominioAnalisis.dominio.asc()
-    ).all()
-
-    if analisis_rows:
-        story.append(PageBreak())
-        add_section("Análisis Ejecutivo por Dominio")
-
-        for a in analisis_rows:
-            story.append(Paragraph(pdf_escape(a.dominio), styles["GDPR_Section"]))
-
-            estado_actual = _gdpr_normalizar_texto_plano_guardado(a.estado_actual or "")
-            estado_requerido = _gdpr_normalizar_texto_plano_guardado(a.estado_requerido or "")
-            plan_accion = normalizar_plan_dominio(
-                a.plan_accion_editado or a.plan_accion_ai or ""
-            )
-
-            bloque = Table([
-                [
-                    Paragraph("<b>Estado actual</b>", styles["GDPR_Small"]),
-                    Paragraph(pdf_escape(estado_actual or "No registrado."), styles["GDPR_Small"])
-                ],
-                [
-                    Paragraph("<b>Estado requerido</b>", styles["GDPR_Small"]),
-                    Paragraph(pdf_escape(estado_requerido or "No registrado."), styles["GDPR_Small"])
-                ],
-                [
-                    Paragraph("<b>Plan de acción</b>", styles["GDPR_Small"]),
-                    Paragraph(pdf_escape(plan_accion or "No registrado."), styles["GDPR_Small"])
-                ],
-            ], colWidths=[4.2 * cm, 22.6 * cm])
-
-            bloque.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f1fb")),
-                ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")),
-                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-            ]))
-
-            story.append(bloque)
-            story.append(Spacer(1, 10))
-
-    doc.build(story)
-    buf.seek(0)
-    return buf
-
-
-@madurez_datos_bp.route("/detalle/<int:run_id>/pdf", methods=["GET"])
-@login_required
-def detalle_pdf(run_id: int):
-    run = DatosMadurezRun.query.get_or_404(run_id)
-
-    filename = f"Proteccion_Datos_{(run.consecutivo or 'revision').replace(' ', '_')}.pdf"
-
-    return send_file(
-        _gdpr_build_pdf_run(run),
-        mimetype="application/pdf",
-        as_attachment=True,
-        download_name=filename
-    )
-
-# =====================================================================
-# IMPORTACIÓN DEL INSTRUMENTO DESDE EXCEL
-# =====================================================================
-
-@madurez_datos_bp.route("/admin/importar_instrumento", methods=["POST"])
-@login_required
-def importar_instrumento_admin():
-    user = User.query.get(session.get("user_id"))
-
-    if user.role == "auditor":
-        flash("El rol Auditor no puede importar instrumentos.", "danger")
-        return redirect(url_for("madurez_datos.inicio"))
-
-    force = (request.args.get("force") == "1") or (request.form.get("force") == "1")
-
-    if (DatosMadurezPregunta.query.count() > 0) and not force:
-        flash("⚠️ El instrumento de protección de datos ya fue importado. Usa force=1 si deseas reiniciarlo.", "warning")
-        return redirect(url_for("madurez_datos.inicio"))
-
-    if force:
-        try:
-            DatosMadurezRespuesta.query.delete()
-            DatosMadurezRun.query.delete()
-            DatosMadurezPregunta.query.delete()
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-
-    if not os.path.exists(GDPR_INSTRUMENTO_TEMPLATE_XLSX):
-        flash(f"❌ No se encontró el Excel GDPR en: {GDPR_INSTRUMENTO_TEMPLATE_XLSX}", "danger")
-        return redirect(url_for("madurez_datos.inicio"))
-
-    try:
-        wb = load_workbook(GDPR_INSTRUMENTO_TEMPLATE_XLSX, data_only=True)
-    except Exception as e:
-        flash(f"❌ No se pudo abrir el Excel GDPR: {e}", "danger")
-        return redirect(url_for("madurez_datos.inicio"))
-
-    if not wb.sheetnames:
-        flash("❌ El archivo Excel GDPR no tiene hojas.", "danger")
-        return redirect(url_for("madurez_datos.inicio"))
-
-    ws = wb[wb.sheetnames[0]]
-
-    created = 0
-    orden = 0
-    dominio_actual = None
-    codigo_actual = 0
-
-    # Formato real del Excel:
-    # Columna B = pregunta / dominio
-    # Columnas C..G = N/A, Si, Parcialmente, No, Comentarios
-    for r in range(1, ws.max_row + 1):
-        val = ws.cell(r, 2).value   # <-- COLUMNA B
-        txt = "" if val is None else str(val).strip()
-
-        if not txt:
-            continue
-
-        # Saltar encabezado
-        if txt.lower() == "pregunta":
-            continue
-
-        # Detectar si la fila es dominio:
-        # si tiene texto en B y las columnas C..G están vacías
-        cols_c_g_vacias = True
-        for c in range(3, 8):   # C..G
-            vv = ws.cell(r, c).value
-            if vv is not None and str(vv).strip() != "":
-                cols_c_g_vacias = False
-                break
-
-        es_posible_dominio = (
-            cols_c_g_vacias
-            and len(txt) <= 80
-            and not txt.endswith("?")
-            and not txt.startswith("¿")
-        )
-
-        if es_posible_dominio:
-            dominio_actual = txt
-            continue
-
-        # Lo demás se toma como pregunta
-        orden += 1
-        codigo_actual += 1
-
-        db.session.add(DatosMadurezPregunta(
-            dominio=dominio_actual or "General",
-            codigo=str(codigo_actual),
-            titulo=dominio_actual or f"Control {codigo_actual}",
-            orden=orden,
-            pregunta=txt,
-            activo=True
-        ))
-        created += 1
-
-    db.session.commit()
-    flash(f"✅ Instrumento de protección de datos importado correctamente. Preguntas creadas: {created}", "success")
-    return redirect(url_for("madurez_datos.inicio"))
-
-# =====================================================================
-# PANTALLA PRINCIPAL
-# =====================================================================
-
-@madurez_datos_bp.route("/", methods=["GET"], endpoint="inicio")
-@login_required
-def madurez_datos_inicio():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de madurez protección de datos personales"):
-        flash("No tiene permiso para acceder al módulo de nivel de madurez de protección de datos personales.", "danger")
-        return redirect(url_for('menu'))
-
-    read_only = (user.role == 'auditor')
-
-    if read_only:
-        ingreso_btn = """
-          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled
-                  title="El rol Auditor no puede ingresar información">
-            <i class="bi bi-pencil-square me-2"></i>Ingresar la información
-          </button>
-        """
-    else:
-        ingreso_btn = f"""
-          <a href="{url_for('madurez_datos.ingreso')}" class="btn btn-primary rounded-pill px-4 fw-bold">
-            <i class="bi bi-pencil-square me-2"></i>Ingresar la información
-          </a>
-        """
-
-    if read_only:
-        parametros_btn = """
-          <button class="btn btn-outline-secondary rounded-pill px-3" disabled
-                  title="El rol Auditor no tiene acceso a Parámetros">
-            <i class="bi bi-gear me-2"></i>Parámetros
-          </button>
-        """
-    else:
-        parametros_btn = f"""
-          <a href="{url_for('madurez_datos.parametros')}" class="btn btn-outline-secondary rounded-pill px-3">
-            <i class="bi bi-gear me-2"></i>Parámetros
-          </a>
-        """
-
-    total = DatosMadurezPregunta.query.count()
-
-    if total == 0:
-        badge = '<span class="badge bg-danger ms-2">Instrumento NO cargado</span>'
-        hint = "Primero entra a Parámetros y realiza la importación del instrumento (1 vez)."
-    else:
-        badge = '<span class="badge bg-success ms-2">Instrumento cargado</span>'
-        hint = "Puedes ingresar la información o consultar el historial de revisiones."
-
-    content = f"""
-    <div class="datamad-shell">
-      <div class="datamad-header-card">
-        <div class="datamad-header-overlay">
-          <div class="datamad-header-text">
-            <h3 class="datamad-title m-0">Nivel de Madurez — Protección de Datos Personales</h3>
-            <div class="datamad-subtitle">
-              Evaluación del programa de protección de datos personales con enfoque GDPR / PIMS.
-            </div>
+def fallback_ai_para_optimo(kpi: dict) -> str:
+    pct = float((kpi or {}).get("pct", 0) or 0)
+
+    if pct >= 80:
+        return "" # ✅ no mostrar texto por defecto cuando está Óptimo
+    if pct >= 60:
+        return "" # ✅ no mostrar texto por defecto cuando está Óptimo
+    if pct >= 40:
+        return "" # ✅ no mostrar texto por defecto cuando está Óptimo
+    return "" # ✅ no mostrar texto por defecto cuando está Óptimo
+
+
+def render_items_ui_only(cid: str, item_block: dict, ai_block: dict) -> str:
+    """
+    UI SOLO ITEMS. No renderiza subitems.
+    """
+    items = (item_block.get("items") or {})
+    ai_items = (ai_block.get("items") or {})
+
+    if not items:
+        return "<div class='text-muted small'>Este control no tiene Ítems identificables.</div>"
+
+    def _title_from_questions(qlist: list, fallback: str = "") -> str:
+        for q in (qlist or []):
+            t = (q.get("requisito") or "").strip()
+            if t and not t.lower().startswith(("promedio", "nota")):
+                return t[:160] + ("…" if len(t) > 160 else "")
+        return fallback
+
+    html = ""
+    for item_id, pack in items.items():
+        ikpi = (pack.get("item_kpi") or {})
+        ibadge = score_badge(float(ikpi.get("pct", 0) or 0))
+        imad = (ikpi.get("madurez") or "").strip()
+
+        item_questions = (pack.get("questions") or [])
+        item_title = _title_from_questions(item_questions, fallback="(Sin título de Ítem)")
+
+        ai_i = ai_items.get(item_id, {}) if isinstance(ai_items, dict) else {}
+        analisis = (ai_i.get("analisis_item") or "").strip()
+
+        if not analisis:
+            analisis = "<span class='text-muted'>Aún no se ha generado IA para este ítem.</span>"
+        else:
+            analisis = xml_escape(analisis).replace("\\n", "<br/>")
+
+        html += f"""
+        <div class="border rounded-3 p-3 mb-3" style="background: rgba(255,255,255,.10);">
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            <div class="fw-bold">Ítem: {xml_escape(item_id)}</div>
+            <span class="badge {ibadge}">{ikpi.get("pct",0)}%</span>
+            {"<span class='text-muted small'>(" + xml_escape(imad) + ")</span>" if imad else ""}
+          </div>
+
+          <div class="small text-muted mt-1">{xml_escape(item_title)}</div>
+
+          <div class="mt-2">
+            <div class="small fw-semibold">🧠 Análisis IA (Ítem)</div>
+            <div class="small wrap text-muted">{analisis}</div>
           </div>
         </div>
-      </div>
+        """
 
-      <div class="datamad-header-actions">
-        {ingreso_btn}
-        <a href="{url_for('madurez_datos.historial')}" class="btn datamad-btn-soft rounded-pill px-4">
-          <i class="bi bi-clock-history me-2"></i>Historial de Revisiones
-        </a>
-      </div>
+    return html
 
-      <div class="row g-3 mt-2">
-        <div class="col-12 col-lg-8">
-          <div class="datamad-card p-4 h-100">
-            <div class="datamad-section-title">Estado del instrumento</div>
-            <div class="fw-bold">Estado del instrumento {badge}</div>
-            <div class="text-muted small mt-1">Preguntas cargadas: <b>{total}</b></div>
-            <div class="mt-2 small">{hint}</div>
-            <div class="mt-3">{parametros_btn}</div>
-            <div class="alert alert-info mt-3 mb-0 small">
-              <b>Sugerencia:</b> En <b>Parámetros</b> se visualiza la misma escala 1–5 del módulo NIST CSF 2.0.
-            </div>
-          </div>
+# ==========================
+# UI (Bootstrap + Modal progreso IA)
+# ==========================
+BASE_HTML = """
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>{{ title }}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      background: radial-gradient(1200px 700px at 20% -10%, rgba(13,110,253,.25), transparent 55%),
+                  radial-gradient(900px 600px at 90% 0%, rgba(25,135,84,.20), transparent 55%),
+                  #0b1b2b;
+      color: #e9f1fb;
+    }
+    .card { border-radius: 18px; border: 0; }
+    .card-soft { background: rgba(255,255,255,.92); color:#0b1b2b; }
+    .muted { color: rgba(233,241,251,.80); }
+    .wrap { white-space: normal; word-break: break-word; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .pill { border-radius: 999px; }
+    .shadow-soft { box-shadow: 0 12px 40px rgba(0,0,0,.18); }
+    .progress-h { height: 10px; }
+    .sticky-top2 { position: sticky; top: 12px; z-index: 10; }
+    .kpi { font-size: 28px; font-weight: 800; line-height: 1; }
+    table td, table th { vertical-align: top !important; }
+    .table thead th { position: sticky; top: 0; z-index: 2; background: rgba(255,255,255,.97); }
+    .table-tight td { padding-top: .45rem; padding-bottom: .45rem; }
+    .cell-small { font-size: 12px; }
+    .btn-purple{
+      background-color:#6f42c1 !important;
+      border-color:#6f42c1 !important;
+      color:#fff !important;
+    }
+    .btn-purple:hover{
+      background-color:#5a35a8 !important;
+      border-color:#5a35a8 !important;
+      color:#fff !important;
+
+  </style>
+</head>
+<body>
+<div class="container py-4">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for cat, msg in messages %}
+        <div class="alert alert-{{ cat }} shadow-soft">{{ msg }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+  {{ content|safe }}
+</div>
+
+<div class="modal fade" id="progressModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="border-radius:18px;">
+      <div class="modal-header">
+        <h5 class="modal-title">Procesando análisis IA…</h5>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex justify-content-between small text-muted">
+          <div id="pmMsg">Generando…</div>
+          <div id="pmPct">0%</div>
         </div>
-
-        <div class="col-12 col-lg-4">
-          <div class="datamad-card p-4 h-100">
-            <div class="datamad-section-title">¿Qué puedes hacer aquí?</div>
-            <ul class="small mb-0 text-black ps-3">
-              <li><b>Ingresar la información:</b> diligenciar respuestas (Sí/Parcial/No/N/A) con evidencia.</li>
-              <li><b>Historial:</b> revisar evaluaciones previas y porcentaje general.</li>
-              <li><b>Parámetros:</b> ver niveles de madurez e importar el instrumento.</li>
-            </ul>
-          </div>
+        <div class="progress mt-2" style="height:12px;">
+          <div id="pmBar" class="progress-bar progress-bar-striped progress-bar-animated bg-purple" style="width:0%;"></div>
+        </div>
+        <div class="mt-3 small text-muted">
+          Esto puede tardar unos segundos (dependiendo del tamaño del instrumento y del modelo).
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+  function attachProgress(formId, boxId, barId, pctId, msgId, msgText) {
+    const form = document.getElementById(formId);
+    const box  = document.getElementById(boxId);
+    const bar  = document.getElementById(barId);
+    const pct  = document.getElementById(pctId);
+    const msg  = document.getElementById(msgId);
+    if (!form || !box || !bar || !pct || !msg) return;
+
+    let timer = null;
+    let p = 0;
+
+    function setP(v) {
+      p = Math.max(0, Math.min(95, v));
+      bar.style.width = p + '%';
+      pct.textContent = p + '%';
+    }
+
+    form.addEventListener('submit', function() {
+      box.style.display = 'block';
+      msg.textContent = msgText;
+      setP(5);
+
+      timer = setInterval(() => {
+        if (p < 70) setP(p + 6);
+        else if (p < 88) setP(p + 2);
+        else setP(90);
+      }, 220);
+    });
+
+    window.addEventListener('pageshow', () => {
+      if (timer) clearInterval(timer);
+      box.style.display = 'none';
+      bar.style.width = '0%';
+      pct.textContent = '0%';
+    });
+  }
+
+  function attachProgressModal(formId, modalId, barId, pctId, msgId, msgText) {
+    const form = document.getElementById(formId);
+    const modalEl = document.getElementById(modalId);
+    const bar  = document.getElementById(barId);
+    const pct  = document.getElementById(pctId);
+    const msg  = document.getElementById(msgId);
+    if (!form || !modalEl || !bar || !pct || !msg) return;
+
+    let timer = null;
+    let p = 0;
+
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl, {
+      backdrop: 'static',
+      keyboard: false
+    });
+
+    function setP(v) {
+      p = Math.max(0, Math.min(95, v));
+      bar.style.width = p + '%';
+      pct.textContent = p + '%';
+    }
+
+    function reset() {
+      if (timer) clearInterval(timer);
+      timer = null;
+      p = 0;
+      bar.style.width = '0%';
+      pct.textContent = '0%';
+      msg.textContent = 'Generando…';
+    }
+
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+
+      const btn = form.querySelector('button[type="submit"]');
+      if (btn) btn.disabled = true;
+
+      reset();
+      msg.textContent = msgText;
+      setP(8);
+      modal.show();
+
+      timer = setInterval(() => {
+        if (p < 65) setP(p + 7);
+        else if (p < 85) setP(p + 3);
+        else setP(90);
+      }, 240);
+
+      setTimeout(() => { form.submit(); }, 80);
+    });
+
+    window.addEventListener('pageshow', () => {
+      reset();
+      try { modal.hide(); } catch(e) {}
+      const btn = form.querySelector('button[type="submit"]');
+      if (btn) btn.disabled = false;
+    });
+  }
+</script>
+</body>
+</html>
+"""
+
+
+# ==========================
+# ROUTES - PARÁMETROS
+# ==========================
+@madurez_bp.route("/report/<int:run_id>/nist", methods=["GET"])
+@login_required
+def report_nist(run_id: int):
+    run = AnalysisRun.query.get_or_404(run_id)
+
+    nist = calcular_nist_desde_iso(run.id) or {}
+    detalle = nist.get("detalle") or {}
+    nivel_general = nist.get("nivel_general", 0)
+    error = (nist.get("error") or "").strip()
+
+    # Orden recomendado NIST (ajusta si tu mapeo usa otros nombres)
+    orden_funciones = ["GOVERN", "IDENTIFY", "PROTECT", "DETECT", "RESPOND", "RECOVER"]
+
+    # normaliza llaves a mayúscula para ordenar sin perder el texto original
+    funcs = list(detalle.keys())
+    def sort_func(f):
+        fu = (f or "").strip().upper()
+        return (orden_funciones.index(fu) if fu in orden_funciones else 999, fu)
+
+    funcs_sorted = sorted(funcs, key=sort_func)
+
+    def badge_by_score(x):
+        try:
+            v = float(x)
+        except Exception:
+            v = 0
+        # escala simple (si manejas 0-5 o 0-100, ajusta aquí)
+        if v >= 4:
+            return "bg-success"
+        if v >= 3:
+            return "bg-primary"
+        if v >= 2:
+            return "bg-warning text-dark"
+        return "bg-danger"
+
+    # ==========================
+    # Construye HTML por función (PRESENTABLE)
+    # ==========================
+    blocks = ""
+
+    def _to_float(x, default=0.0):
+        try:
+            return float(x)
+        except Exception:
+            return default
+
+    def badge_by_score_0_5(score):
+        v = _to_float(score, 0.0)
+        if v >= 4.0:
+            return "bg-success"
+        if v >= 3.0:
+            return "bg-primary"
+        if v >= 2.0:
+            return "bg-warning text-dark"
+        return "bg-danger"
+
+    def badge_by_pct(pct):
+        p = _to_float(pct, 0.0)
+        if p >= 85: return "bg-success"
+        if p >= 70: return "bg-primary"
+        if p >= 50: return "bg-warning text-dark"
+        return "bg-danger"
+
+    for f in funcs_sorted:
+        cats = detalle.get(f, {}) or {}
+
+        # Promedio de la función usando score (0..5)
+        vals = []
+        for _, cat_obj in cats.items():
+            if isinstance(cat_obj, dict):
+                vals.append(_to_float(cat_obj.get("score"), 0.0))
+            else:
+                vals.append(_to_float(cat_obj, 0.0))
+        avg_f = round(sum(vals) / len(vals), 2) if vals else 0.0
+        avg_f_pct = round(avg_f * 20.0, 2)  # 0..100
+
+        # Acordeón por categorías
+        cat_acc = ""
+        safe_f = re.sub(r"[^a-zA-Z0-9_]+", "_", f"nist_{f}")
+
+        for cat, cat_obj in sorted(cats.items(), key=lambda t: (t[0] or "").upper()):
+            # Soporta tanto dict nuevo como float viejo
+            if isinstance(cat_obj, dict):
+                score = _to_float(cat_obj.get("score"), 0.0)
+                items = cat_obj.get("items") or []
+                faltantes = cat_obj.get("faltantes") or []
+                no_eval = cat_obj.get("no_evaluadas") or []
+            else:
+                score = _to_float(cat_obj, 0.0)
+                items, faltantes, no_eval = [], [], []
+
+            score_pct = round(score * 20.0, 2)
+
+            safe_cat = re.sub(r"[^a-zA-Z0-9_]+", "_", f"{safe_f}_{cat}")
+
+            # Tabla items (refs mapeadas con % y brecha)
+            rows_items = ""
+            for it in (items or []):
+                ref = (it.get("ref") or "").strip()
+                tipo = (it.get("tipo") or "").strip()
+                pct = _to_float(it.get("pct"), 0.0)
+                gap = _to_float(it.get("gap"), 0.0)
+                is_fail = pct < 100.0
+
+                rows_items += f"""
+                <tr class="{'table-warning' if is_fail else ''}">
+                  <td class="fw-semibold">{xml_escape(ref)}</td>
+                  <td class="text-muted">{xml_escape(tipo)}</td>
+                  <td style="width:160px">
+                    <span class="badge {badge_by_pct(pct)}">{pct:.2f}%</span>
+                  </td>
+                  <td style="width:140px">
+                    <span class="badge bg-dark">{gap:.2f}%</span>
+                  </td>
+                </tr>
+                """
+
+            if not rows_items:
+                rows_items = "<tr><td colspan='4' class='text-muted'>Sin referencias ISO mapeadas/evaluadas para esta categoría.</td></tr>"
+
+            # Resumen faltantes (solo <100)
+            falt_txt = ""
+            if faltantes:
+                falt_txt = f"""
+                <div class="mt-2 small">
+                  <span class="badge bg-danger">Faltantes</span>
+                  <span class="text-muted">Elementos por debajo de 100%</span>
+                </div>
+                """
+
+            # No evaluadas (refs que están en el Excel pero no existen en el run ISO)
+            noeval_txt = ""
+            if no_eval:
+                li = "".join([f"<li class='small text-muted'>{xml_escape(str(x))}</li>" for x in no_eval[:200]])
+                noeval_txt = f"""
+                <div class="mt-3">
+                  <div class="small fw-semibold">No evaluadas (no existen en el run ISO)</div>
+                  <ul class="mb-0">{li}</ul>
+                </div>
+                """
+
+            cat_acc += f"""
+            <div class="accordion-item">
+              <h2 class="accordion-header" id="h_{safe_cat}">
+                <button class="accordion-button collapsed" type="button"
+                        data-bs-toggle="collapse" data-bs-target="#c_{safe_cat}">
+                  <div class="d-flex flex-wrap gap-2 align-items-center w-100">
+                    <div class="fw-bold">{xml_escape(str(cat))}</div>
+                    <div class="ms-auto d-flex align-items-center gap-2">
+                      <span class="badge {badge_by_score_0_5(score)}">{score:.2f}/5</span>
+                      <span class="badge {badge_by_pct(score_pct)}">{score_pct:.2f}%</span>
+                    </div>
+                  </div>
+                </button>
+              </h2>
+
+              <div id="c_{safe_cat}" class="accordion-collapse collapse">
+                <div class="accordion-body">
+
+                  <div class="row g-2">
+                    <div class="col-md-4">
+                      <div class="card card-soft p-3">
+                        <div class="fw-semibold small text-muted">Puntaje categoría</div>
+                        <div class="display-6 mb-0">{score:.2f}/5</div>
+                        <div class="text-muted small">Equivale a {score_pct:.2f}%</div>
+                      </div>
+                    </div>
+                    <div class="col-md-8">
+                      <div class="card card-soft p-3">
+                        <div class="fw-semibold small text-muted">Detalle por referencia ISO (lo que baja el %)</div>
+                        {falt_txt}
+                        <div class="table-responsive mt-2">
+                          <table class="table table-sm table-hover align-middle mb-0">
+                            <thead class="table-dark">
+                              <tr>
+                                <th>Referencia</th>
+                                <th>Tipo</th>
+                                <th>% actual</th>
+                                <th>Brecha</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rows_items}
+                            </tbody>
+                          </table>
+                        </div>
+                        {noeval_txt}
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+            """
+
+        blocks += f"""
+        <div class="card card-soft p-3 mb-3">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div class="fw-bold">Función: {xml_escape(str(f))}</div>
+            <div class="small text-muted">Promedio función</div>
+            <span class="badge {badge_by_score_0_5(avg_f)}">{avg_f:.2f}/5</span>
+            <span class="badge {badge_by_pct(avg_f_pct)}">{avg_f_pct:.2f}%</span>
+          </div>
+
+          <div class="accordion mt-3" id="acc_{safe_f}">
+            {cat_acc if cat_acc else "<div class='text-muted'>Sin categorías mapeadas.</div>"}
+          </div>
+        </div>
+        """
+
+    content = render_template_string("""
+    <div class="menu-wrap">
+
+      <div class="plan-hero">
+        <div class="plan-hero-overlay">
+          <div class="plan-hero-centered">
+            <h2 class="plan-title">Nivel de Madurez acorde con NIST</h2>
+            <div class="plan-subtitle">
+              Run ISO #{{ run.id }} • {{ run.company_name }} • {{ run.created_at.strftime('%Y-%m-%d %H:%M') }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="volver-center">
+        <a class="btn btn-light rounded-pill plan-btn-main"
+           href="{{ url_for('madurez.view_report', run_id=run.id) }}">
+          ⬅ Volver al reporte ISO
+        </a>
+      </div>
+
+      {% if error %}
+        <div class="alert alert-danger shadow-sm">
+          <b>No se pudo calcular NIST</b><br/>
+          {{ error }}
+        </div>
+      {% endif %}
+
+      <div class="row g-3">
+        <div class="col-md-4">
+          <div class="card card-soft p-3">
+            <div class="fw-bold mb-1">📊 Nivel general NIST</div>
+            <div class="display-6">{{ nivel_general }}</div>
+            <div class="text-muted small">Promedio de categorías mapeadas</div>
+          </div>
+        </div>
+
+        <div class="col-md-8">
+          <div class="card card-soft p-3">
+            <div class="fw-bold mb-2">ℹ️ ¿Cómo se calcula?</div>
+            <div class="small text-muted">
+              Se toma el nivel alcanzado en ISO 27001 (por cláusula/control) guardado en este run,
+              se cruza con el archivo de mapeo CSF→ISO y se promedia por <b>Función</b> y <b>Categoría</b>.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4">
+        {{ blocks|safe }}
+      </div>
+
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .menu-wrap{
+        width:96%;
+        max-width:1200px;
+        margin:26px auto 24px auto;
+      }
+
+      .plan-hero{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .plan-hero::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }
+
+      .plan-hero-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }
+
+      .plan-hero-overlay::before{
+        content:"📋";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .plan-hero-centered{
+        max-width:1000px;
+        width:100%;
+        display:block !important;
+        transform:none !important;
+      }
+
+      .plan-hero-centered::before{
+        content:"SGSI · Gestión";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }
+
+      .plan-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-align:left;
+        margin:0 !important;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+      }
+
+      .plan-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+        text-align:left;
+        line-height:1.25;
+      }
+
+      .volver-center{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px 0;
+      }
+
+      .volver-center .btn,
+      .plan-btn-main{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .plan-btn-main{
+        background:#ffffff;
+        color:#0f172a !important;
+        border:1px solid #cfd8e3 !important;
+      }
+
+      .plan-btn-main:hover{
+        background:#edf5ff;
+        color:#0b65d8 !important;
+        border-color:#9ec5fe !important;
+      }
+
+      .card,
+      .card-soft{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
+      }
+
+      .card-body{
+        padding:18px;
+      }
+
+      .table-responsive{
+        max-height:72vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#ffffff;
+      }
+
+      .table{
+        margin-bottom:0;
+      }
+
+      .table thead th{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-size:.78rem;
+        font-weight:900;
+        border:none !important;
+        white-space:nowrap;
+        vertical-align:middle;
+        text-align:center;
+        padding:9px 8px;
+      }
+
+      .table tbody td{
+        vertical-align:top;
+        font-size:.82rem;
+        padding:9px 8px;
+        border-bottom:1px solid #e5edf7;
+        color:#101827;
+      }
+
+      .table tbody tr:nth-child(even){
+        background:#f8fbff;
+      }
+
+      .table tbody tr:hover{
+        background:#eef6ff;
+      }
+
+      .form-label{
+        font-size:.72rem;
+        font-weight:900;
+        color:#0b4a8f;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
+      }
+
+      .form-control,
+      .form-select{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        box-shadow:none !important;
+      }
+
+      .form-control:focus,
+      .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#ffffff;
+      }
+
+      .btn{
+        border-radius:10px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }
+
+      .badge{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }
+
+      @media (max-width:991.98px){
+        .menu-wrap{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .plan-hero{
+          min-height:88px;
+        }
+
+        .plan-title{
+          font-size:1.20rem;
+        }
+
+        .card-body{
+          padding:8px 7px;
+        }
+      }
+
+      @media (max-width:768px){
+        .plan-hero-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .plan-hero-overlay::before{
+          margin:0;
+        }
+
+        .plan-hero-centered::before{
+          margin-left:auto;
+          margin-right:auto;
+        }
+
+        .plan-title,
+        .plan-subtitle{
+          text-align:center;
+        }
+
+        .volver-center .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """, run=run, nivel_general=nivel_general, blocks=blocks, error=error)
+
+    return render_template_string(BASE, content=content)
+
+
+# ==========================
+# Parametro de Madurez
+# ==========================
+
+@madurez_bp.route("/parametros/madurez", methods=["GET", "POST"])
+@login_required
+def param_maturity_levels():
+    if request.method == "POST":
+        nivel = request.form.get("nivel")
+        madurez = (request.form.get("madurez") or "").strip()
+        descripcion = (request.form.get("descripcion") or "").strip()
+
+        try:
+            nivel_i = int(nivel)
+        except Exception:
+            flash("Nivel debe ser numérico.", "danger")
+            return redirect(url_for("madurez.param_maturity_levels"))
+
+        if not madurez:
+            flash("Madurez (texto) es requerida.", "danger")
+            return redirect(url_for("madurez.param_maturity_levels"))
+
+        exists = MaturityLevel.query.filter(
+            (MaturityLevel.nivel == nivel_i) | (MaturityLevel.madurez.ilike(madurez))
+        ).first()
+        if exists:
+            flash("Ya existe un nivel o nombre de madurez igual.", "warning")
+            return redirect(url_for("madurez.param_maturity_levels"))
+
+        db.session.add(MaturityLevel(nivel=nivel_i, madurez=madurez, descripcion=descripcion))
+        db.session.commit()
+        flash("✅ Nivel de madurez creado.", "success")
+        return redirect(url_for("madurez.param_maturity_levels"))
+
+    rows = MaturityLevel.query.order_by(MaturityLevel.nivel.asc()).all()
+    tr = ""
+    for r in rows:
+        tr += f"""
+        <tr>
+          <td class="text-muted">{r.nivel}</td>
+          <td class="fw-semibold">{xml_escape(r.madurez)}</td>
+          <td class="wrap">{xml_escape(r.descripcion or "")}</td>
+          <td class="text-end">
+            <form method="POST" action="{url_for("madurez.param_maturity_delete", mid=r.id)}" style="display:inline;"
+              onsubmit="return confirm('¿Eliminar {xml_escape(r.madurez)}?');">
+              <button class="btn btn-sm btn-outline-danger pill" type="submit">Eliminar</button>
+            </form>
+          </td>
+        </tr>
+        """
+
+    content = f"""
+    <div class="madlvl-shell">
+
+      <!-- CABECERA -->
+      <div class="madlvl-header-card">
+        <div class="madlvl-header-overlay">
+          <div class="madlvl-header-text">
+            <h3 class="madlvl-title m-0">Modelo Nivel de Madurez</h3>
+            <div class="madlvl-subtitle">
+              Catálogo de niveles de madurez utilizados para clasificar el estado del SGSI
+              según el porcentaje de cumplimiento del instrumento.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BOTÓN VOLVER -->
+      <div class="madlvl-header-actions">
+          <a href="{url_for("madurez.parametros_menu")}"
+             class="btn madlvl-btn-main rounded-pill px-4 fw-bold">
+            ⬅ Parámetros
+          </a>
+      </div>
+
+      <div class="row g-3">
+
+        <!-- FORMULARIO -->
+        <div class="col-lg-4">
+          <div class="madlvl-card p-4">
+
+            <div class="madlvl-section-title">
+              Agregar nivel
+            </div>
+
+            <form method="POST">
+
+              <div class="mb-3">
+                <label class="form-label fw-semibold">
+                  Nivel (numérico)
+                </label>
+
+                <input class="form-control"
+                       name="nivel"
+                       type="number"
+                       min="0"
+                       required>
+              </div>
+
+              <div class="mb-3">
+                <label class="form-label fw-semibold">
+                  Madurez (texto)
+                </label>
+
+                <input class="form-control"
+                       name="madurez"
+                       required
+                       placeholder="Ej: Inicial, Gestionado, Óptimo">
+              </div>
+
+              <div class="mb-3">
+                <label class="form-label fw-semibold">
+                  Descripción
+                </label>
+
+                <textarea class="form-control"
+                          name="descripcion"
+                          rows="3"></textarea>
+              </div>
+
+              <div class="text-center">
+                <button class="btn btn-primary rounded-pill px-4 fw-semibold"
+                        type="submit">
+                  Guardar
+                </button>
+              </div>
+
+            </form>
+
+          </div>
+        </div>
+
+
+        <!-- TABLA -->
+        <div class="col-lg-8">
+          <div class="madlvl-card p-4">
+
+            <div class="madlvl-section-title">
+              Listado de niveles
+            </div>
+
+            <div class="table-responsive madlvl-table-wrap">
+
+              <table class="table table-sm align-middle table-hover mb-0">
+
+                <thead class="madlvl-table-head">
+                  <tr>
+                    <th>Nivel</th>
+                    <th>Madurez</th>
+                    <th>Descripción</th>
+                    <th></th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {tr if tr else "<tr><td colspan='4' class='text-muted'>Sin registros.</td></tr>"}
+                </tbody>
+
+              </table>
+
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </div>
+
 
     <style>
       body{{
@@ -1705,13 +2385,13 @@ def madurez_datos_inicio():
         background-repeat:no-repeat;
       }}
 
-      .datamad-shell{{
+      .madlvl-shell{{
         width:96%;
-        max-width:1600px;
+        max-width:1350px;
         margin:26px auto 24px auto;
       }}
 
-      .datamad-header-card{{
+      .madlvl-header-card{{
         background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
@@ -1725,7 +2405,7 @@ def madurez_datos_inicio():
         margin-bottom:14px;
       }}
 
-      .datamad-header-card::before{{
+      .madlvl-header-card::before{{
         content:"";
         position:absolute;
         inset:0;
@@ -1735,7 +2415,7 @@ def madurez_datos_inicio():
         pointer-events:none;
       }}
 
-      .datamad-header-overlay{{
+      .madlvl-header-overlay{{
         width:100%;
         display:flex;
         align-items:center;
@@ -1747,8 +2427,8 @@ def madurez_datos_inicio():
         z-index:1;
       }}
 
-      .datamad-header-overlay::before{{
-        content:"🛡️";
+      .madlvl-header-overlay::before{{
+        content:"📊";
         width:54px;
         height:54px;
         min-width:54px;
@@ -1763,15 +2443,15 @@ def madurez_datos_inicio():
         margin-right:14px;
       }}
 
-      .datamad-header-text{{
+      .madlvl-header-text{{
         max-width:1100px;
         width:100%;
         display:block !important;
         transform:none !important;
       }}
 
-      .datamad-header-text::before{{
-        content:"SGSI · Protección de Datos Personales";
+      .madlvl-header-text::before{{
+        content:"SGSI · Niveles de Madurez";
         display:inline-block;
         background:rgba(255,255,255,.18);
         border-radius:999px;
@@ -1782,23 +2462,23 @@ def madurez_datos_inicio():
         color:#ffffff;
       }}
 
-      .datamad-title{{
+      .madlvl-title{{
         color:#ffffff !important;
         font-weight:950;
         font-size:1.32rem;
         line-height:1.1;
-        margin:0 !important;
         text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
       }}
 
-      .datamad-subtitle{{
+      .madlvl-subtitle{{
         color:rgba(255,255,255,.95);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
       }}
 
-      .datamad-header-actions{{
+      .madlvl-header-actions{{
         display:flex;
         justify-content:center;
         gap:10px;
@@ -1806,39 +2486,30 @@ def madurez_datos_inicio():
         margin:10px 0 14px;
       }}
 
-      .datamad-header-actions .btn,
+      .madlvl-header-actions .btn,
+      .madlvl-btn-main,
       .btn{{
         border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
         font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
       }}
 
-      .datamad-btn-main,
-      .btn-outline-light{{
+      .madlvl-btn-main{{
         background:#ffffff;
         color:#0f172a !important;
         border:1px solid #cfd8e3 !important;
       }}
 
-      .datamad-btn-main:hover,
-      .btn-outline-light:hover{{
+      .madlvl-btn-main:hover{{
         background:#edf5ff;
         color:#0b65d8 !important;
+        border-color:#9ec5fe !important;
       }}
 
-      .datamad-btn-soft{{
-        background:rgba(255,255,255,.88);
-        color:#111 !important;
-        border:1px solid rgba(108,117,125,.35);
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
-
-      .datamad-btn-soft:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-      }}
-
-      .datamad-card,
+      .madlvl-card,
       .card{{
         background:rgba(255,255,255,.96) !important;
         border-radius:18px !important;
@@ -1848,49 +2519,75 @@ def madurez_datos_inicio():
         overflow:hidden;
       }}
 
-      .datamad-card.p-4{{
-        padding:1.5rem !important;
+      .madlvl-card .card-body{{
+        padding:20px;
       }}
 
-      .datamad-section-title,
+      .madlvl-section-title,
       .card h5,
       .card h6{{
         font-weight:950;
         font-size:.95rem;
         color:#0b4a8f;
-        margin-bottom:0;
+        margin-bottom:16px;
       }}
 
-      .datamad-section-title{{
+      .madlvl-section-title{{
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
-        margin-bottom:14px;
       }}
 
-      .datamad-card .small{{
-        line-height:1.45;
+      .madlvl-table-wrap,
+      .table-responsive{{
+        max-height:72vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#ffffff;
       }}
 
-      .datamad-card ul li{{
-        margin-bottom:6px;
-      }}
-
-      .datamad-card ul li:last-child{{
+      .madlvl-table-wrap .table,
+      .table{{
         margin-bottom:0;
       }}
 
-      .datamad-card .alert-info{{
-        border-radius:14px;
-        border:1px solid rgba(13,110,253,.16);
-        box-shadow:0 6px 16px rgba(0,0,0,.06);
+      .madlvl-table-wrap thead th,
+      .madlvl-table-head th,
+      .table thead th{{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-size:.78rem;
+        font-weight:900 !important;
+        border:none !important;
+        white-space:nowrap;
+        vertical-align:middle !important;
+        text-align:center;
+        padding:9px 8px;
       }}
 
-      .badge,
-      .datamad-card .badge{{
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        border-radius:999px;
-        font-weight:900;
+      .madlvl-table-wrap tbody td,
+      .table tbody td{{
+        vertical-align:middle;
+        font-size:.82rem;
+        padding:9px 8px;
+        border-bottom:1px solid #e5edf7;
+        color:#101827;
+      }}
+
+      .madlvl-table-wrap tbody tr:last-child td{{
+        border-bottom:none;
+      }}
+
+      .table tbody tr:nth-child(even){{
+        background:#f8fbff;
+      }}
+
+      .table tbody tr:hover{{
+        background:#eef6ff;
       }}
 
       .form-label{{
@@ -1917,10 +2614,6 @@ def madurez_datos_inicio():
         box-shadow:none !important;
       }}
 
-      textarea.form-control{{
-        min-height:90px;
-      }}
-
       .form-control:focus,
       .form-select:focus{{
         border-color:#3f86d6;
@@ -1928,152 +2621,262 @@ def madurez_datos_inicio():
         background:#ffffff;
       }}
 
-      .btn.rounded-pill,
-      .btn.pill,
-      .pill{{
-        border-radius:999px !important;
-      }}
-
-      .datamad-card .btn-primary,
-      .datamad-card .btn-outline-secondary,
-      .datamad-card .btn-outline-primary{{
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      .input-group-text{{
+        border-radius:0 10px 10px 0;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        color:#0b4a8f;
         font-weight:900;
       }}
 
-      @media (max-width:991.98px){{
-        .datamad-shell{{
+      .badge{{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }}
+
+      @media (max-width:992px){{
+        .madlvl-shell{{
           width:98%;
           margin:8px auto 22px auto;
         }}
 
-        .datamad-header-card{{
+        .madlvl-header-card{{
           min-height:88px;
         }}
 
-        .datamad-title{{
+        .madlvl-title{{
           font-size:1.20rem;
         }}
 
-        .datamad-subtitle{{
+        .madlvl-subtitle{{
           font-size:.68rem;
         }}
 
-        .datamad-header-actions{{
-          gap:6px;
+        .madlvl-card .card-body{{
+          padding:16px;
         }}
       }}
 
       @media (max-width:768px){{
-        .datamad-header-overlay{{
+        .madlvl-header-overlay{{
           flex-direction:column;
           text-align:center;
           gap:10px;
         }}
 
-        .datamad-header-overlay::before{{
+        .madlvl-header-overlay::before{{
           margin:0;
         }}
 
-        .datamad-header-text::before{{
+        .madlvl-header-text::before{{
           margin-left:auto;
           margin-right:auto;
         }}
 
-        .datamad-title,
-        .datamad-subtitle{{
+        .madlvl-title,
+        .madlvl-subtitle{{
           text-align:center;
         }}
 
-        .datamad-header-actions .btn{{
+        .madlvl-header-actions .btn{{
           width:100%;
         }}
       }}
     </style>
     """
-    return render_template_string(BASE, title="Madurez Datos Personales", content=content)
+    return render_template_string(BASE, title="Parámetro: Madurez", content=content)
 
 
-# =====================================================================
-# PARÁMETROS
-# =====================================================================
-
-@madurez_datos_bp.route("/parametros", methods=["GET"])
+@madurez_bp.route("/parametros/madurez/<int:mid>/delete", methods=["POST"])
 @login_required
-def parametros():
-    user = User.query.get(session.get("user_id"))
+def param_maturity_delete(mid: int):
+    r = MaturityLevel.query.get_or_404(mid)
 
-    if user.role == "auditor":
-        flash("El rol Auditor no tiene acceso a Parámetros.", "danger")
-        return redirect(url_for("madurez_datos.inicio"))
+    used = ComplianceMaturityMap.query.filter_by(maturity_id=r.id).first()
+    if used:
+        flash("No se puede eliminar: este nivel está asignado en la relación Cumplimiento→Madurez.", "danger")
+        return redirect(url_for("madurez.param_maturity_levels"))
 
-    total = DatosMadurezPregunta.query.count()
-    badge = '<span class="badge bg-success ms-2">Instrumento cargado</span>' if total > 0 else '<span class="badge bg-danger ms-2">Instrumento NO cargado</span>'
+    db.session.delete(r)
+    db.session.commit()
+    flash("🗑️ Eliminado.", "success")
+    return redirect(url_for("madurez.param_maturity_levels"))
 
-    rows = []
-    for lvl in GDPR_MADUREZ_LEVELS:
-        rows.append(f"""
+# =================================
+# Parametro Cumplimiento de Madurez
+# =================================
+
+@madurez_bp.route("/parametros/cumplimiento-madurez", methods=["GET", "POST"])
+@login_required
+def param_compliance_map():
+    levels = MaturityLevel.query.order_by(MaturityLevel.nivel.asc()).all()
+    if not levels:
+        flash("Primero crea los niveles de madurez (punto 1).", "warning")
+        return redirect(url_for("madurez.param_maturity_levels"))
+
+    if request.method == "POST":
+        pct_min = _to_float(request.form.get("pct_min"), None)
+        pct_max = _to_float(request.form.get("pct_max"), None)
+        maturity_id = request.form.get("maturity_id")
+
+        if pct_min is None or pct_max is None:
+            flash("Rangos % inválidos.", "danger")
+            return redirect(url_for("madurez.param_compliance_map"))
+
+        if pct_min < 0 or pct_max > 100 or pct_min > pct_max:
+            flash("El rango debe estar entre 0 y 100 y min <= max.", "danger")
+            return redirect(url_for("madurez.param_compliance_map"))
+
+        try:
+            maturity_id = int(maturity_id)
+        except Exception:
+            flash("Selecciona un nivel de madurez válido.", "danger")
+            return redirect(url_for("madurez.param_compliance_map"))
+
+        for e in ComplianceMaturityMap.query.all():
+            if _ranges_overlap(pct_min, pct_max, e.pct_min, e.pct_max):
+                flash(f"El rango {pct_min}-{pct_max} se solapa con {e.pct_min}-{e.pct_max}. Ajusta rangos.", "danger")
+                return redirect(url_for("madurez.param_compliance_map"))
+
+        db.session.add(ComplianceMaturityMap(pct_min=pct_min, pct_max=pct_max, maturity_id=maturity_id))
+        db.session.commit()
+        flash("✅ Relación creada.", "success")
+        return redirect(url_for("madurez.param_compliance_map"))
+
+    rows = (ComplianceMaturityMap.query
+            .join(MaturityLevel)
+            .order_by(ComplianceMaturityMap.pct_min.asc())
+            .all())
+
+    tr = ""
+    for r in rows:
+        tr += f"""
         <tr>
-          <td class="fw-semibold">{escape(lvl['nivel'])}</td>
-          <td class="text-muted">{escape(lvl['descripcion'])}</td>
-          <td class="text-center fw-bold">{lvl['score']}</td>
-          <td class="text-center">{escape(lvl.get('rango_pct',''))}</td>
-          <td class="text-muted">{escape(lvl.get('logica',''))}</td>
+          <td class="text-muted">{r.pct_min:.0f}%</td>
+          <td class="text-muted">{r.pct_max:.0f}%</td>
+          <td class="fw-semibold">{xml_escape(r.maturity.madurez if r.maturity else "")}</td>
+          <td class="text-end">
+            <form method="POST" action="{url_for("madurez.param_compliance_delete", rid=r.id)}" style="display:inline;"
+              onsubmit="return confirm('¿Eliminar rango {r.pct_min}-{r.pct_max}?');">
+              <button class="btn btn-sm btn-outline-danger pill" type="submit">Eliminar</button>
+            </form>
+          </td>
         </tr>
-        """)
+        """
+
+    opts = "".join([f"<option value='{lv.id}'>{xml_escape(lv.madurez)} (nivel {lv.nivel})</option>" for lv in levels])
 
     content = f"""
-    <div class="datapar-shell">
-      <div class="datapar-header-card">
-        <div class="datapar-header-overlay">
-          <div class="datapar-header-text">
-            <h3 class="datapar-title m-0">Parámetros — Protección de Datos Personales</h3>
-            <div class="datapar-subtitle">
-              El nivel de evaluación de madurez es exactamente el mismo del módulo NIST CSF 2.0.
+    <div class="madmap-shell">
+
+      <!-- CABECERA -->
+      <div class="madmap-header-card">
+        <div class="madmap-header-overlay">
+          <div class="madmap-header-text">
+            <h3 class="madmap-title m-0">Relación Cumplimiento → Madurez</h3>
+            <div class="madmap-subtitle">
+              Define los rangos porcentuales de cumplimiento y el nivel de madurez
+              que representan dentro del modelo de evaluación del SGSI.
             </div>
           </div>
         </div>
       </div>
 
-      <div class="datapar-header-actions">
-        <a href="{url_for('madurez_datos.inicio')}" class="btn datapar-btn-main rounded-pill px-4 fw-bold">⬅ Inicio</a>
+      <!-- BOTÓN VOLVER -->
+      <div class="madmap-header-actions">
+        <a href="{url_for("madurez.parametros_menu")}"
+           class="btn madmap-btn-main rounded-pill px-4 fw-bold">
+          ⬅ Parámetros
+        </a>
       </div>
 
-      <div class="datapar-card p-4 mb-3">
-        <div class="datapar-section-title">Estado del instrumento {badge}</div>
-        <div class="text-muted small">Preguntas cargadas: <b>{total}</b></div>
-      </div>
+      <div class="row g-3">
 
-      <div class="datapar-card p-4 mb-3">
-        <div class="datapar-section-title">Modelo de niveles de madurez (igual a NIST)</div>
-        <div class="table-responsive">
-          <table class="table table-sm table-hover align-middle mb-0">
-            <thead class="table-light">
-              <tr>
-                <th>Nivel</th>
-                <th>Descripción</th>
-                <th class="text-center">Score</th>
-                <th class="text-center">Rango %</th>
-                <th>Lógica</th>
-              </tr>
-            </thead>
-            <tbody>
-              {''.join(rows)}
-            </tbody>
-          </table>
+        <!-- FORMULARIO -->
+        <div class="col-lg-4">
+          <div class="madmap-card p-4">
+
+            <div class="madmap-section-title">
+              Agregar rango
+            </div>
+
+            <form method="POST">
+
+              <div class="mb-3">
+                <label class="form-label fw-semibold">% mínimo</label>
+                <input class="form-control"
+                       name="pct_min"
+                       type="number"
+                       min="0"
+                       max="100"
+                       step="1"
+                       required>
+              </div>
+
+              <div class="mb-3">
+                <label class="form-label fw-semibold">% máximo</label>
+                <input class="form-control"
+                       name="pct_max"
+                       type="number"
+                       min="0"
+                       max="100"
+                       step="1"
+                       required>
+              </div>
+
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Nivel de madurez</label>
+                <select class="form-select" name="maturity_id" required>
+                  {opts}
+                </select>
+              </div>
+
+              <div class="text-center">
+                <button class="btn btn-primary rounded-pill px-4 fw-semibold" type="submit">
+                  Guardar
+                </button>
+              </div>
+
+            </form>
+
+            <div class="madmap-note mt-4">
+              <strong>Recomendación:</strong>
+              usa rangos contiguos y sin solapamientos, por ejemplo:
+              0-39, 40-59, 60-79, 80-100.
+            </div>
+
+          </div>
         </div>
-      </div>
 
-      <div class="datapar-card p-4 text-center">
-        <div class="datapar-section-title">Importar instrumento de evaluación</div>
-        <div class="text-muted small mb-3">
-          Este proceso importa el instrumento oficial de protección de datos personales desde el Excel.
+        <!-- TABLA -->
+        <div class="col-lg-8">
+          <div class="madmap-card p-4">
+
+            <div class="madmap-section-title">
+              Rangos configurados
+            </div>
+
+            <div class="table-responsive madmap-table-wrap">
+              <table class="table table-sm align-middle table-hover mb-0">
+                <thead class="madmap-table-head">
+                  <tr>
+                    <th>% Min</th>
+                    <th>% Max</th>
+                    <th>Madurez</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tr if tr else "<tr><td colspan='4' class='text-muted'>Sin rangos. Agrega al menos uno.</td></tr>"}
+                </tbody>
+              </table>
+            </div>
+
+          </div>
         </div>
-        <form method="POST" action="{url_for('madurez_datos.importar_instrumento_admin', force=1)}">
-          <button class="btn btn-danger rounded-pill px-4 fw-semibold">
-            <i class="bi bi-database-add me-2"></i>Importar instrumento
-          </button>
-        </form>
+
       </div>
     </div>
 
@@ -2086,13 +2889,13 @@ def parametros():
         background-repeat:no-repeat;
       }}
 
-      .datapar-shell{{
+      .madmap-shell{{
         width:96%;
-        max-width:1500px;
+        max-width:1350px;
         margin:26px auto 24px auto;
       }}
 
-      .datapar-header-card{{
+      .madmap-header-card{{
         background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
@@ -2106,7 +2909,7 @@ def parametros():
         margin-bottom:14px;
       }}
 
-      .datapar-header-card::before{{
+      .madmap-header-card::before{{
         content:"";
         position:absolute;
         inset:0;
@@ -2116,7 +2919,7 @@ def parametros():
         pointer-events:none;
       }}
 
-      .datapar-header-overlay{{
+      .madmap-header-overlay{{
         width:100%;
         display:flex;
         align-items:center;
@@ -2128,7 +2931,1844 @@ def parametros():
         z-index:1;
       }}
 
-      .datapar-header-overlay::before{{
+      .madmap-header-overlay::before{{
+        content:"🧩";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }}
+
+      .madmap-header-text{{
+        max-width:1100px;
+        width:100%;
+        display:block !important;
+        transform:none !important;
+      }}
+
+      .madmap-header-text::before{{
+        content:"SGSI · Mapeo de Madurez";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }}
+
+      .madmap-title{{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }}
+
+      .madmap-subtitle{{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+        line-height:1.25;
+      }}
+
+      .madmap-header-actions{{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }}
+
+      .madmap-header-actions .btn,
+      .madmap-btn-main,
+      .btn{{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }}
+
+      .madmap-btn-main{{
+        background:#ffffff;
+        color:#0f172a !important;
+        border:1px solid #cfd8e3 !important;
+      }}
+
+      .madmap-btn-main:hover{{
+        background:#edf5ff;
+        color:#0b65d8 !important;
+        border-color:#9ec5fe !important;
+      }}
+
+      .madmap-card,
+      .card{{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
+      }}
+
+      .madmap-card .card-body{{
+        padding:20px;
+      }}
+
+      .madmap-section-title,
+      .card h5,
+      .card h6{{
+        font-weight:950;
+        font-size:.95rem;
+        color:#0b4a8f;
+        margin-bottom:16px;
+      }}
+
+      .madmap-section-title{{
+        padding-bottom:8px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+      }}
+
+      .madmap-note{{
+        background:#f8fafc;
+        border:1px solid #dbeafe;
+        color:#334155;
+        border-radius:12px;
+        padding:12px 14px;
+        font-size:.78rem;
+        line-height:1.45;
+      }}
+
+      .madmap-table-wrap,
+      .table-responsive{{
+        max-height:72vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#ffffff;
+      }}
+
+      .madmap-table-wrap .table,
+      .table{{
+        margin-bottom:0;
+      }}
+
+      .madmap-table-wrap thead th,
+      .madmap-table-head th,
+      .table thead th{{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-size:.78rem;
+        font-weight:900 !important;
+        border:none !important;
+        white-space:nowrap;
+        vertical-align:middle !important;
+        text-align:center;
+        padding:9px 8px;
+      }}
+
+      .madmap-table-wrap tbody td,
+      .table tbody td{{
+        vertical-align:middle;
+        font-size:.82rem;
+        padding:9px 8px;
+        border-bottom:1px solid #e5edf7;
+        color:#101827;
+      }}
+
+      .madmap-table-wrap tbody tr:last-child td{{
+        border-bottom:none;
+      }}
+
+      .table tbody tr:nth-child(even){{
+        background:#f8fbff;
+      }}
+
+      .table tbody tr:hover{{
+        background:#eef6ff;
+      }}
+
+      .form-label{{
+        font-size:.72rem;
+        font-weight:900;
+        color:#0b4a8f;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
+      }}
+
+      .form-control,
+      .form-select{{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        box-shadow:none !important;
+      }}
+
+      .form-control:focus,
+      .form-select:focus{{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#ffffff;
+      }}
+
+      .input-group-text{{
+        border-radius:0 10px 10px 0;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        color:#0b4a8f;
+        font-weight:900;
+      }}
+
+      .badge{{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }}
+
+      @media (max-width:992px){{
+        .madmap-shell{{
+          width:98%;
+          margin:8px auto 22px auto;
+        }}
+
+        .madmap-header-card{{
+          min-height:88px;
+        }}
+
+        .madmap-title{{
+          font-size:1.20rem;
+        }}
+
+        .madmap-subtitle{{
+          font-size:.68rem;
+        }}
+
+        .madmap-card .card-body{{
+          padding:16px;
+        }}
+      }}
+
+      @media (max-width:768px){{
+        .madmap-header-overlay{{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }}
+
+        .madmap-header-overlay::before{{
+          margin:0;
+        }}
+
+        .madmap-header-text::before{{
+          margin-left:auto;
+          margin-right:auto;
+        }}
+
+        .madmap-title,
+        .madmap-subtitle{{
+          text-align:center;
+        }}
+
+        .madmap-header-actions .btn{{
+          width:100%;
+        }}
+      }}
+    </style>
+    """
+    return render_template_string(BASE, title="Parámetro: Cumplimiento→Madurez", content=content)
+
+
+@madurez_bp.route("/parametros/cumplimiento-madurez/<int:rid>/delete", methods=["POST"])
+@login_required
+def param_compliance_delete(rid: int):
+    r = ComplianceMaturityMap.query.get_or_404(rid)
+    db.session.delete(r)
+    db.session.commit()
+    flash("🗑️ Rango eliminado.", "success")
+    return redirect(url_for("madurez.param_compliance_map"))
+
+# =================
+# Parametro Brechas
+# =================
+
+@madurez_bp.route("/parametros/brechas", methods=["GET", "POST"])
+@login_required
+def param_gap_levels():
+    if request.method == "POST":
+        pct_min = _to_float(request.form.get("pct_min"), None)
+        pct_max = _to_float(request.form.get("pct_max"), None)
+        nivel_brecha = (request.form.get("nivel_brecha") or "").strip()
+        interpretacion = (request.form.get("interpretacion") or "").strip()
+
+        if pct_min is None or pct_max is None:
+            flash("Rangos % inválidos.", "danger")
+            return redirect(url_for("madurez.param_gap_levels"))
+        if pct_min < 0 or pct_max > 100 or pct_min > pct_max:
+            flash("El rango debe estar entre 0 y 100 y min <= max.", "danger")
+            return redirect(url_for("madurez.param_gap_levels"))
+
+        allowed = {"Bajo", "Medio", "Alto", "Critico"}
+        if nivel_brecha not in allowed:
+            flash("Nivel de brecha inválido. Use Bajo/Medio/Alto/Critico.", "danger")
+            return redirect(url_for("madurez.param_gap_levels"))
+
+        for e in GapLevelConfig.query.all():
+            if _ranges_overlap(pct_min, pct_max, e.pct_min, e.pct_max):
+                flash(f"El rango {pct_min}-{pct_max} se solapa con {e.pct_min}-{e.pct_max}.", "danger")
+                return redirect(url_for("madurez.param_gap_levels"))
+
+        db.session.add(GapLevelConfig(
+            pct_min=pct_min, pct_max=pct_max, nivel_brecha=nivel_brecha, interpretacion=interpretacion
+        ))
+        db.session.commit()
+        flash("✅ Nivel de brecha creado.", "success")
+        return redirect(url_for("madurez.param_gap_levels"))
+
+    rows = GapLevelConfig.query.order_by(GapLevelConfig.pct_min.asc()).all()
+    tr = ""
+    for r in rows:
+        tr += f"""
+        <tr>
+          <td class="text-muted">{r.pct_min:.0f}%</td>
+          <td class="text-muted">{r.pct_max:.0f}%</td>
+          <td class="fw-semibold">{xml_escape(r.nivel_brecha)}</td>
+          <td class="wrap">{xml_escape(r.interpretacion or "")}</td>
+          <td class="text-end">
+            <form method="POST" action="{url_for("madurez.param_gap_delete", gid=r.id)}" style="display:inline;"
+              onsubmit="return confirm('¿Eliminar rango {r.pct_min}-{r.pct_max}?');">
+              <button class="btn btn-sm btn-outline-danger pill" type="submit">Eliminar</button>
+            </form>
+          </td>
+        </tr>
+        """
+
+    content = f"""
+    <div class="madgap-shell">
+
+      <!-- CABECERA -->
+      <div class="madgap-header-card">
+        <div class="madgap-header-overlay">
+          <div class="madgap-header-text">
+            <h3 class="madgap-title m-0">Calificación nivel de brecha</h3>
+            <div class="madgap-subtitle">
+              Define los rangos porcentuales de brecha y su clasificación
+              en Bajo, Medio, Alto o Crítico junto con su interpretación.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BOTÓN VOLVER -->
+      <div class="madgap-header-actions">
+        <a href="{url_for("madurez.parametros_menu")}"
+           class="btn madgap-btn-main rounded-pill px-4 fw-bold">
+          ⬅ Parámetros
+        </a>
+      </div>
+
+      <div class="row g-3">
+
+        <!-- FORMULARIO -->
+        <div class="col-lg-4">
+          <div class="madgap-card p-4">
+
+            <div class="madgap-section-title">
+              Agregar rango
+            </div>
+
+            <form method="POST">
+
+              <div class="mb-3">
+                <label class="form-label fw-semibold">% brecha mínimo</label>
+                <input class="form-control"
+                       name="pct_min"
+                       type="number"
+                       min="0"
+                       max="100"
+                       step="1"
+                       required>
+              </div>
+
+              <div class="mb-3">
+                <label class="form-label fw-semibold">% brecha máximo</label>
+                <input class="form-control"
+                       name="pct_max"
+                       type="number"
+                       min="0"
+                       max="100"
+                       step="1"
+                       required>
+              </div>
+
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Nivel de brecha</label>
+                <select class="form-select" name="nivel_brecha" required>
+                  <option>Bajo</option>
+                  <option>Medio</option>
+                  <option>Alto</option>
+                  <option>Critico</option>
+                </select>
+              </div>
+
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Interpretación</label>
+                <textarea class="form-control"
+                          name="interpretacion"
+                          rows="3"></textarea>
+              </div>
+
+              <div class="text-center">
+                <button class="btn btn-primary rounded-pill px-4 fw-semibold"
+                        type="submit">
+                  Guardar
+                </button>
+              </div>
+
+            </form>
+
+          </div>
+        </div>
+
+        <!-- TABLA -->
+        <div class="col-lg-8">
+          <div class="madgap-card p-4">
+
+            <div class="madgap-section-title">
+              Rangos configurados
+            </div>
+
+            <div class="table-responsive madgap-table-wrap">
+
+              <table class="table table-sm align-middle table-hover mb-0">
+
+                <thead class="madgap-table-head">
+                  <tr>
+                    <th>% Min</th>
+                    <th>% Max</th>
+                    <th>Nivel</th>
+                    <th>Interpretación</th>
+                    <th></th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {tr if tr else "<tr><td colspan='5' class='text-muted'>Sin rangos.</td></tr>"}
+                </tbody>
+
+              </table>
+
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <style>
+      body{{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }}
+
+      .madgap-shell{{
+        width:96%;
+        max-width:1350px;
+        margin:26px auto 24px auto;
+      }}
+
+      .madgap-header-card{{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }}
+
+      .madgap-header-card::before{{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }}
+
+      .madgap-header-overlay{{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }}
+
+      .madgap-header-overlay::before{{
+        content:"📉";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }}
+
+      .madgap-header-text{{
+        max-width:1100px;
+        width:100%;
+        display:block !important;
+        transform:none !important;
+      }}
+
+      .madgap-header-text::before{{
+        content:"SGSI · Brechas de Madurez";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }}
+
+      .madgap-title{{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }}
+
+      .madgap-subtitle{{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+        line-height:1.25;
+      }}
+
+      .madgap-header-actions{{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }}
+
+      .madgap-header-actions .btn,
+      .madgap-btn-main,
+      .btn{{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }}
+
+      .madgap-btn-main{{
+        background:#ffffff;
+        color:#0f172a !important;
+        border:1px solid #cfd8e3 !important;
+      }}
+
+      .madgap-btn-main:hover{{
+        background:#edf5ff;
+        color:#0b65d8 !important;
+        border-color:#9ec5fe !important;
+      }}
+
+      .madgap-card,
+      .card{{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
+      }}
+
+      .madgap-section-title,
+      .card h5,
+      .card h6{{
+        font-weight:950;
+        font-size:.95rem;
+        color:#0b4a8f;
+        margin-bottom:16px;
+      }}
+
+      .madgap-section-title{{
+        padding-bottom:8px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+      }}
+
+      .madgap-table-wrap,
+      .table-responsive{{
+        max-height:72vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#ffffff;
+      }}
+
+      .madgap-table-wrap .table,
+      .table{{
+        margin-bottom:0;
+      }}
+
+      .madgap-table-wrap thead th,
+      .madgap-table-head th,
+      .table thead th{{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-size:.78rem;
+        font-weight:900 !important;
+        border:none !important;
+        white-space:nowrap;
+        vertical-align:middle !important;
+        text-align:center;
+        padding:9px 8px;
+      }}
+
+      .madgap-table-wrap tbody td,
+      .table tbody td{{
+        vertical-align:middle;
+        font-size:.82rem;
+        padding:9px 8px;
+        border-bottom:1px solid #e5edf7;
+        color:#101827;
+      }}
+
+      .madgap-table-wrap tbody tr:last-child td{{
+        border-bottom:none;
+      }}
+
+      .table tbody tr:nth-child(even){{
+        background:#f8fbff;
+      }}
+
+      .table tbody tr:hover{{
+        background:#eef6ff;
+      }}
+
+      .form-label{{
+        font-size:.72rem;
+        font-weight:900;
+        color:#0b4a8f;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
+      }}
+
+      .form-control,
+      .form-select{{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        box-shadow:none !important;
+      }}
+
+      .form-control:focus,
+      .form-select:focus{{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#ffffff;
+      }}
+
+      .input-group-text{{
+        border-radius:0 10px 10px 0;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        color:#0b4a8f;
+        font-weight:900;
+      }}
+
+      .badge{{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }}
+
+      @media (max-width:992px){{
+        .madgap-shell{{
+          width:98%;
+          margin:8px auto 22px auto;
+        }}
+
+        .madgap-header-card{{
+          min-height:88px;
+        }}
+
+        .madgap-title{{
+          font-size:1.20rem;
+        }}
+
+        .madgap-subtitle{{
+          font-size:.68rem;
+        }}
+      }}
+
+      @media (max-width:768px){{
+        .madgap-header-overlay{{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }}
+
+        .madgap-header-overlay::before{{
+          margin:0;
+        }}
+
+        .madgap-header-text::before{{
+          margin-left:auto;
+          margin-right:auto;
+        }}
+
+        .madgap-title,
+        .madgap-subtitle{{
+          text-align:center;
+        }}
+
+        .madgap-header-actions .btn{{
+          width:100%;
+        }}
+      }}
+    </style>
+    """
+    return render_template_string(BASE, title="Parámetro: Brechas", content=content)
+
+def safe_str(x):
+    """Convierte NaN/None a '' y todo lo demás a string limpio."""
+    try:
+        import pandas as pd
+        if x is None:
+            return ""
+        # pandas NaN
+        if isinstance(x, float) and x != x:
+            return ""
+        if "pd" in globals() and pd.isna(x):
+            return ""
+    except Exception:
+        pass
+    return str(x).replace("\ufeff", "").strip()
+
+@madurez_bp.route("/parametros/brechas/<int:gid>/delete", methods=["POST"])
+@login_required
+def param_gap_delete(gid: int):
+    r = GapLevelConfig.query.get_or_404(gid)
+    db.session.delete(r)
+    db.session.commit()
+    flash("🗑️ Rango eliminado.", "success")
+    return redirect(url_for("madurez.param_gap_levels"))
+
+def safe_str(x):
+    try:
+        if x is None:
+            return ""
+        s = str(x)
+        return s.replace("\ufeff", "").strip()
+    except Exception:
+        return ""
+
+def normalize_anexo_control(raw_control: str, tema: str = "") -> str:
+    c = (raw_control or "").strip()
+
+    # 1) Normal "5.1"
+    m = re.match(r"^(\d+)\.(\d+)$", c)
+    c_norm = f"{int(m.group(1))}.{int(m.group(2))}" if m else ""
+
+    # 2) Si Excel lo trae como fecha "YYYY-MM-DD ..." -> dd.mm  (ej 2026-06-05 => 5.6)
+    if not c_norm and re.match(r"^\d{4}-\d{2}-\d{2}", c):
+        try:
+            date_part = c.split(" ", 1)[0]
+            _, mm, dd = date_part.split("-")
+            c_norm = f"{int(dd)}.{int(mm)}"
+        except Exception:
+            c_norm = ""
+
+    # 3) Fix 5.10 mal digitado como 5.1 (tema Uso aceptable)
+    tema_l = (tema or "").strip().lower()
+    if c_norm == "5.1" and ("uso aceptable" in tema_l):
+        c_norm = "5.10"
+
+    return c_norm
+
+
+
+@madurez_bp.route("/admin/importar_instrumento", methods=["POST"])
+@login_required
+def importar_instrumento_admin():
+    force = (request.args.get("force") == "1") or (request.form.get("force") == "1")
+
+    if force:
+        MadurezRespuesta.query.delete()
+        MadurezPregunta.query.delete()
+        db.session.commit()
+        flash("🧹 Instrumento anterior borrado. Reimportando…", "info")
+
+    if MadurezPregunta.query.first() and not force:
+        flash("El instrumento ya está cargado en la base de datos.", "warning")
+        return redirect(url_for("madurez.parametros_menu"))
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # ✅ Usa el nombre REAL (con fallback bien indentado)
+    xlsx_path = os.path.join(base_dir, "static/templates/Instrumento de Evaluación-ISO-27001 2022.xlsx")
+    if not os.path.exists(xlsx_path):
+        xlsx_path2 = os.path.join(base_dir, "static/templates/Instrumento de Evaluación-ISO-27001 2022.xlsx")
+        if os.path.exists(xlsx_path2):
+            xlsx_path = xlsx_path2
+
+    if not os.path.exists(xlsx_path):
+        flash(f"No se encontró el archivo para importar: {xlsx_path}", "danger")
+        return redirect(url_for("madurez.parametros_menu"))
+
+    xls = pd.ExcelFile(xlsx_path)
+    orden_global = 0
+
+    for sheet in xls.sheet_names:
+        df = xls.parse(sheet, header=None)
+        sheet_name = str(sheet).strip()
+
+        # -------------------------
+        # ANEXO A
+        # -------------------------
+        if sheet_name.upper() == "ANEXO A":
+            # Header del anexo
+            db.session.add(MadurezPregunta(
+                sheet="ANEXO A",
+                orden=orden_global,
+                tipo="h",
+                seccion=None,
+                pregunta="ANEXO A — CONTROLES ISO/IEC 27001:2022"
+            ))
+            orden_global += 1
+
+            # ✅ En TU Excel real: todo está en la columna A (índice 0)
+            # Fila 0 tiene "ANEXO A - 27002" y encabezados "No Aplica / Si / Parcialmente / No / Comentarios"
+            # Empezamos desde la fila 1
+            last_control = None
+
+            for r in range(1, len(df)):
+                t = safe_str(df.iloc[r, 0]).replace("\ufeff", "").strip()  # <- columna A
+                if not t:
+                    continue
+
+                # 1) Encabezados de familia: "5. CONTROLES ORGANIZACIONALES"
+                #    (nota: lleva punto después del número)
+                if re.match(r"^\d+\.\s", t) and not t.startswith("¿"):
+                    db.session.add(MadurezPregunta(
+                        sheet="ANEXO A",
+                        orden=orden_global,
+                        tipo="h",
+                        seccion=None,
+                        pregunta=t
+                    ))
+                    orden_global += 1
+                    last_control = None
+                    continue
+
+                # 2) Encabezados de control: "5.1 Políticas..."  (NO es pregunta)
+                m_ctrl = re.match(r"^(\d+)\.(\d+)\s+", t)
+                if m_ctrl and not t.startswith("¿"):
+                    last_control = f"{int(m_ctrl.group(1))}.{int(m_ctrl.group(2))}"
+                    db.session.add(MadurezPregunta(
+                        sheet="ANEXO A",
+                        orden=orden_global,
+                        tipo="h",
+                        seccion=last_control,
+                        control=last_control,   # ✅ consistente
+                        tema="",                # ✅ opcional
+                        pregunta=t
+                    ))
+                    orden_global += 1
+                    continue
+
+                # 3) Preguntas: empiezan con ¿
+                if t.startswith("¿"):
+                    # si no hay control detectado, igual guarda la pregunta, pero el análisis necesita control cuando exista
+                    db.session.add(MadurezPregunta(
+                        sheet="ANEXO A",
+                        orden=orden_global,
+                        tipo="q",
+                        seccion=last_control,          # UI
+                        control=last_control or "",    # ✅ CLAVE para el análisis (A.5.1 ...)
+                        tema="",                       # ✅ puedes dejarlo vacío o llenarlo luego
+                        pregunta=t
+                    ))
+                    orden_global += 1
+                    continue
+
+            continue
+
+        # -------------------------
+        # CAPÍTULOS 4–10
+        # -------------------------
+        seccion_actual = None
+
+        # Guardar título del capítulo (fila 0, col 1)
+        titulo = safe_str(df.iloc[0, 1]) if df.shape[1] > 1 else ""
+        if titulo:
+            db.session.add(MadurezPregunta(
+                sheet=sheet_name,
+                orden=orden_global,
+                tipo="h",
+                seccion=None,
+                pregunta=titulo
+            ))
+            orden_global += 1
+
+        for r in range(1, len(df)):
+            txt = df.iloc[r, 1] if df.shape[1] > 1 else None
+            t = safe_str(txt)
+            if not t:
+                continue
+
+            # Subtítulos/secciones: 4.1 / 6.1.1 / 10.2 etc
+            if (len(t) < 250) and re.match(r"^(4|5|6|7|8|9|10)\.\d", t):
+                seccion_actual = t
+                db.session.add(MadurezPregunta(
+                    sheet=sheet_name,
+                    orden=orden_global,
+                    tipo="h",
+                    seccion=seccion_actual,
+                    pregunta=t
+                ))
+                orden_global += 1
+                continue
+
+            # Preguntas
+            if t.startswith("¿"):
+                db.session.add(MadurezPregunta(
+                    sheet=sheet_name,
+                    orden=orden_global,
+                    tipo="q",
+                    seccion=seccion_actual,
+                    pregunta=t
+                ))
+                orden_global += 1
+                
+    flash("ANEXO A: " + str(MadurezPregunta.query.filter_by(sheet="ANEXO A", tipo="q").count()) + " preguntas tipo q", "info")
+    db.session.commit()
+    flash("✅ Instrumento importado y guardado en la base de datos.", "success")
+    return redirect(url_for("madurez.ingreso"))
+
+def _nist_parse_heading_funcion(txt: str):
+    """
+    Ej: "GOVERN (GV)" -> ("GOVERN", "GV")
+    """
+    t = (txt or "").strip()
+    m = re.match(r"^([A-Za-z ]+)\s*\(([A-Z]{1,4})\)\s*$", t)
+    if not m:
+        return None
+    return (m.group(1).strip().upper(), m.group(2).strip().upper())
+
+def _nist_parse_heading_categoria(txt: str):
+    """
+    Ej: "Organizational Context (GV.OC)" -> ("Organizational Context", "GV.OC")
+    """
+    t = (txt or "").strip()
+    m = re.match(r"^(.+?)\s*\(([A-Z]{1,4}\.[A-Z0-9]{1,6})\)\s*$", t)
+    if not m:
+        return None
+    return (m.group(1).strip(), m.group(2).strip().upper())
+
+def _translate_to_es_cached(text: str) -> str:
+    """
+    Traduce EN->ES usando tu cliente OpenRouter ya existente.
+    Si falla, devuelve el texto original.
+    """
+    t = (text or "").strip()
+    if not t:
+        return t
+
+    # caching simple (en memoria) para no repetir en la misma ejecución
+    if not hasattr(_translate_to_es_cached, "_cache"):
+        _translate_to_es_cached._cache = {}
+    cache = _translate_to_es_cached._cache
+    if t in cache:
+        return cache[t]
+
+    try:
+        # Traducción directa, sin adornos
+        client = get_openai_client()
+        resp = client.chat.completions.create(
+            model=OPENROUTER_MODEL_SGSI,
+            messages=[
+                {"role": "system", "content": "Eres un traductor profesional EN->ES para ciberseguridad. Traduce fielmente, sin agregar texto extra."},
+                {"role": "user", "content": t}
+            ],
+            max_tokens=1200
+        )
+        out = (resp.choices[0].message.content or "").strip()
+        if out:
+            cache[t] = out
+            return out
+    except Exception:
+        pass
+
+    cache[t] = t
+    return t
+
+
+@nist_madurez_bp.route("/admin/importar_instrumento", methods=["POST"])
+@login_required
+def nist_importar_instrumento_admin():
+    force = (request.args.get("force") == "1") or (request.form.get("force") == "1")
+
+    if (NistMadurezPregunta.query.count() > 0) and not force:
+        flash("⚠️ El instrumento NIST ya fue importado. (Usa force=1 si deseas reiniciar).", "warning")
+        return redirect(url_for("madurez_nist.home"))
+
+    if force:
+        # borra todo para reimportar limpio
+        try:
+            NistMadurezRespuesta.query.delete()
+            NistMadurezRun.query.delete()
+            NistMadurezPregunta.query.delete()
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    if not os.path.exists(NIST_INSTRUMENTO_TEMPLATE_XLSX):
+        flash(f"❌ No se encontró el Excel NIST en: {NIST_INSTRUMENTO_TEMPLATE_XLSX}", "danger")
+        return redirect(url_for("madurez_nist.home"))
+
+    try:
+        wb = load_workbook(NIST_INSTRUMENTO_TEMPLATE_XLSX)
+    except Exception as e:
+        flash(f"❌ No se pudo abrir el Excel NIST: {e}", "danger")
+        return redirect(url_for("madurez_nist.home"))
+
+    if "NIST CSF 2.0" not in wb.sheetnames:
+        flash(f"❌ La hoja 'NIST CSF 2.0' no existe. Hojas: {wb.sheetnames}", "danger")
+        return redirect(url_for("madurez_nist.home"))
+
+    ws = wb["NIST CSF 2.0"]
+
+    funcion = None
+    funcion_cod = None
+    cat = None
+    cat_cod = None
+    orden = 0
+    created = 0
+
+    # Columna A trae todo el texto (encabezados + preguntas)
+    for r in range(1, ws.max_row + 1):
+        val = ws.cell(r, 1).value
+        txt = ("" if val is None else str(val)).strip()
+        if not txt:
+            continue
+
+        # Ignora título general
+        if r == 1 and "NIST" in txt.upper():
+            continue
+
+        fx = _nist_parse_heading_funcion(txt)
+        if fx:
+            funcion, funcion_cod = fx
+            cat, cat_cod = None, None
+            continue
+
+        cx = _nist_parse_heading_categoria(txt)
+        if cx:
+            cat, cat_cod = cx
+            continue
+
+        # Si llegamos aquí, es pregunta
+        if not funcion:
+            continue  # defensivo
+
+        orden += 1
+        pregunta_en = txt
+        # ====== Lee texto EN (col A) y opcionalmente ES (col B) sin IA ======
+        pregunta_en = txt  # txt viene de la columna A (NIST_COL_EN)
+
+        # intenta leer español desde la columna configurada (por defecto B)
+        val_es = ws.cell(r, NIST_COL_ES).value if NIST_COL_ES else None
+        pregunta_es_excel = ("" if val_es is None else str(val_es)).strip()
+
+        if NIST_TRADUCIR_EN_IMPORTACION:
+            # (solo si algún día decides volver a traducir con IA)
+            pregunta_es = _translate_to_es_cached(pregunta_en)
+        else:
+            # ✅ NO IA: toma español del Excel si existe; si no, deja None
+            pregunta_es = pregunta_es_excel if pregunta_es_excel else None
+
+        db.session.add(NistMadurezPregunta(
+            funcion=funcion,
+            funcion_codigo=funcion_cod,
+            categoria=cat,
+            categoria_codigo=cat_cod,
+            orden=orden,
+            pregunta_en=pregunta_en,
+            pregunta_es=pregunta_es,
+            activo=True
+        ))
+        created += 1
+
+    db.session.commit()
+    flash(f"✅ Instrumento NIST importado correctamente. Preguntas creadas: {created}", "success")
+    return redirect(url_for("madurez_nist.home"))
+
+# ==========================
+# Pantalla Principal ISO 27001
+# ==========================
+@madurez_bp.route("/", methods=["GET"])
+@login_required
+def home():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role not in ('admin', 'auditor') and not verificar_permiso(user, "Nivel de madurez ISO 27001:2022"):
+        flash("No tiene permiso para acceder al módulo de nivel de madurez ISO 27001:2022.", "danger")
+        return redirect(url_for('menu'))
+
+    read_only = (user.role == 'auditor')
+
+    if read_only:
+        ingreso_btn = """
+          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled
+                  title="El rol Auditor no puede ingresar información">
+            <i class="bi bi-pencil-square me-2"></i>Ingresar la información
+          </button>
+        """
+    else:
+        ingreso_btn = f"""
+          <a href="{url_for('madurez.ingreso')}" class="btn btn-primary rounded-pill px-4 fw-bold grac-nav-blue-btn">
+            <i class="bi bi-pencil-square me-2"></i>Ingresar la información
+          </a>
+        """
+
+    if read_only:
+        parametros_btn = """
+          <button class="btn btn-outline-secondary rounded-pill px-3" disabled
+                  title="El rol Auditor no tiene acceso a Parámetros">
+            <i class="bi bi-gear me-2"></i>Parámetros
+          </button>
+        """
+    else:
+        parametros_btn = f"""
+          <a href="{url_for('madurez.parametros_menu')}"
+             class="btn btn-outline-secondary rounded-pill px-3">
+            <i class="bi bi-gear me-2"></i>Parámetros
+          </a>
+        """
+
+    total = MadurezPregunta.query.count()
+
+    if total == 0:
+        badge = '<span class="badge bg-danger ms-2">Instrumento NO cargado</span>'
+        hint = "Primero entra a Parámetros y realiza la importación del instrumento (1 vez)."
+    else:
+        badge = '<span class="badge bg-success ms-2">Instrumento cargado</span>'
+        hint = "Puedes ingresar la información o consultar el historial de revisiones."
+
+    company = (request.args.get("company") or "").strip()
+
+    q = AnalysisRun.query
+    if company:
+        q = q.filter(AnalysisRun.company_name.ilike(f"%{company}%"))
+    last = q.order_by(AnalysisRun.id.desc()).limit(20).all()
+
+    rows = ""
+    for a in last:
+        if read_only:
+            delete_btn = """
+            <button class="btn btn-sm btn-outline-secondary rounded-pill" type="button" disabled
+                    title="El rol Auditor no puede eliminar informes">
+              Eliminar
+            </button>
+            """
+        else:
+            delete_btn = f"""
+            <form method="POST"
+                  action="{url_for('madurez.delete_report', run_id=a.id)}"
+                  style="display:inline;"
+                  onsubmit="return confirm('¿Eliminar el informe #{a.id} de {xml_escape(a.company_name or "")}?');">
+              <button class="btn btn-sm btn-outline-danger rounded-pill" type="submit">Eliminar</button>
+            </form>
+            """
+
+        rows += f"""
+        <tr>
+          <td class="text-muted">{a.id}</td>
+          <td>{xml_escape(a.company_name or "")}</td>
+          <td class="wrap">{xml_escape(a.filename or "")}</td>
+          <td class="text-muted">{a.created_at.strftime('%Y-%m-%d %H:%M') if a.created_at else ''}</td>
+          <td class="text-end">
+            <a class="btn btn-sm btn-outline-info rounded-pill"
+               href="{url_for('madurez.view_report', run_id=a.id)}">Ver</a>
+            <a class="btn btn-sm btn-outline-warning rounded-pill"
+               href="{url_for('madurez.report_pdf', run_id=a.id)}">PDF</a>
+            {delete_btn}
+          </td>
+        </tr>
+        """
+
+    content = f"""
+    <div class="nistmad-shell">
+
+      <div class="nistmad-header-card">
+        <div class="nistmad-header-overlay">
+          <div class="nistmad-header-text">
+            <h3 class="nistmad-title m-0">Nivel de Madurez Estandar ISO 27001:2022</h3>
+            <div class="nistmad-subtitle">
+              Evaluación del nivel de madurez del SGSI con base en los capítulos
+              de ISO 27001:2022 y el Anexo A.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="nistmad-header-actions">
+        
+
+        {ingreso_btn}
+      </div>
+
+      {"<div class='alert alert-info mt-3'>🔒 El perfil Auditor está en modo solo lectura. En Historial de Revisiones no puede eliminar informes.</div>" if read_only else ""}
+
+      <div class="row g-3 mt-2">
+
+        <div class="col-12 col-lg-8">
+          <div class="nistmad-card p-4 h-100">
+
+            <div class="nistmad-section-title">
+              Estado del instrumento
+            </div>
+
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+              <div>
+                <div class="fw-bold">
+                  Estado del instrumento {badge}
+                </div>
+
+                <div class="text-muted small mt-1">
+                  Preguntas cargadas: <b>{total}</b>
+                </div>
+
+                <div class="mt-2 small">
+                  {hint}
+                </div>
+              </div>
+
+              <div class="text-end">
+                <div class="text-muted small">Acceso rápido</div>
+                <div class="d-flex gap-2 flex-wrap justify-content-end mt-2">
+                  {parametros_btn}
+                </div>
+              </div>
+            </div>
+
+            <div class="alert alert-info mt-3 mb-0 small">
+              <b>Sugerencia:</b> Usa <b>Parámetros</b> para importar el instrumento,
+              administrar configuraciones y preparar la evaluación de madurez.
+            </div>
+
+          </div>
+        </div>
+
+        <div class="col-12 col-lg-4">
+          <div class="nistmad-card p-4 h-100">
+
+            <div class="nistmad-section-title">
+              ¿Qué puedes hacer aquí?
+            </div>
+
+            <ul class="small mb-0 text-black ps-3">
+              <li><b>Ingresar la información:</b> diligenciar respuestas (Sí/Parcial/No/N/A) con evidencia.</li>
+              <li><b>Historial:</b> revisar evaluaciones previas y consultar informes generados.</li>
+              <li><b>Parámetros:</b> gestionar el instrumento y configuraciones del módulo.</li>
+            </ul>
+
+          </div>
+        </div>
+
+      </div>
+
+      <div class="row g-3 mt-3" id="historialRevisiones">
+        <div class="col-12">
+          <div class="nistmad-card p-4 h-100">
+
+            <div class="nistmad-section-title">
+              📚 Historial de Revisiones
+            </div>
+
+            <form class="row g-2 mb-3" method="GET" action="{url_for('madurez.home')}">
+              <div class="col">
+                <input class="form-control form-control-sm"
+                       name="company"
+                       value="{xml_escape(company)}"
+                       placeholder="Filtrar por consecutivo...">
+              </div>
+
+              <div class="col-auto">
+                <button class="btn btn-sm btn-outline-dark rounded-pill" type="submit">
+                  Buscar
+                </button>
+              </div>
+            </form>
+
+            <div class="table-responsive nistmad-table-wrap" style="max-height:560px;overflow:auto;">
+              <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="nistmad-table-head">
+                  <tr>
+                    <th>ID</th>
+                    <th>Consecutivo</th>
+                    <th>Archivo</th>
+                    <th>Fecha</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows if rows else "<tr><td colspan='5' class='text-muted'>Aún no hay análisis guardados.</td></tr>"}
+                </tbody>
+              </table>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <style>
+  html {{
+    scroll-behavior:smooth;
+  }}
+
+      body {{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }}
+
+      .nistmad-shell {{
+        width:96%;
+        max-width:1600px;
+        margin:26px auto 24px auto;
+      }}
+
+      .nistmad-header-card {{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }}
+
+      .nistmad-header-card::before {{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }}
+
+      .nistmad-header-overlay {{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }}
+
+      .nistmad-header-overlay::before {{
+        content:"📊️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }}
+
+      .nistmad-header-text {{
+        max-width:1200px;
+        width:100%;
+        display:block !important;
+        transform:none !important;
+      }}
+
+      .nistmad-header-text::before {{
+        content:"SGSI · Madurez NIST CSF";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }}
+
+      .nistmad-title {{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }}
+
+      .nistmad-subtitle {{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+        line-height:1.25;
+      }}
+
+      .nistmad-header-actions {{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }}
+
+      .nistmad-header-actions .btn,
+      .nistmad-btn-main {{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }}
+
+      .nistmad-btn-main {{
+        background:#ffffff;
+        color:#0f172a !important;
+        border:1px solid #cfd8e3 !important;
+      }}
+
+      .nistmad-btn-main:hover {{
+        background:#edf5ff;
+        color:#0b65d8 !important;
+        border-color:#9ec5fe !important;
+      }}
+
+      .nistmad-card {{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
+      }}
+
+      .nistmad-card .card-body {{
+        padding:18px;
+      }}
+
+      .nistmad-section-title {{
+        font-weight:950;
+        font-size:.78rem;
+        color:#0b4a8f;
+        padding:9px 12px;
+        border-radius:12px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        margin:10px 0 12px;
+      }}
+
+      .nistmad-table-wrap {{
+        max-height:72vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#ffffff;
+      }}
+
+      .nistmad-table-wrap .table {{
+        margin-bottom:0;
+      }}
+
+      .nistmad-table-wrap thead th,
+      .nistmad-table-head th {{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-weight:900;
+        border:none !important;
+        vertical-align:middle;
+        white-space:nowrap;
+        text-align:center;
+        font-size:.78rem;
+        padding:9px 8px;
+      }}
+
+      .nistmad-table-wrap tbody td {{
+        vertical-align:middle;
+        font-size:.82rem;
+        padding:9px 8px;
+        border-bottom:1px solid #e5edf7;
+        color:#101827;
+      }}
+
+      .nistmad-table-wrap tbody tr:nth-child(even) {{
+        background:#f8fbff;
+      }}
+
+      .nistmad-table-wrap tbody tr:hover {{
+        background:#eef6ff;
+      }}
+
+      .wrap {{
+        white-space:normal !important;
+        word-break:break-word;
+        overflow-wrap:anywhere;
+      }}
+
+      .form-label {{
+        font-size:.72rem;
+        font-weight:900;
+        color:#0b4a8f;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
+      }}
+
+      .form-control,
+      .form-select {{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        box-shadow:none !important;
+      }}
+
+      .form-control:focus,
+      .form-select:focus {{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#ffffff;
+      }}
+
+      .btn {{
+        border-radius:10px !important;
+        font-weight:900;
+      }}
+
+      .badge {{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }}
+
+      @media (max-width:992px) {{
+        .nistmad-shell {{
+          width:98%;
+          margin:8px auto 22px auto;
+        }}
+
+        .nistmad-header-card {{
+          min-height:88px;
+        }}
+
+        .nistmad-title {{
+          font-size:1.20rem;
+        }}
+
+        .nistmad-card .card-body {{
+          padding:8px 7px;
+        }}
+      }}
+
+      @media (max-width:768px) {{
+        .nistmad-header-overlay {{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }}
+
+        .nistmad-header-overlay::before {{
+          margin:0;
+        }}
+
+        .nistmad-header-text::before {{
+          margin-left:auto;
+          margin-right:auto;
+        }}
+
+        .nistmad-header-actions .btn {{
+          width:100%;
+        }}
+      }}
+    </style>
+    """
+
+    return render_template_string(BASE, title="Nivel de Madurez ISO 27001:2022", content=content)
+
+# ==========================
+# ROUTES - PARÁMETROS
+# ==========================
+@madurez_bp.route("/parametros", methods=["GET"])
+@login_required
+def parametros_menu():
+    content = f"""
+    <div class="madpar-shell">
+
+      <!-- CABECERA -->
+      <div class="madpar-header-card">
+        <div class="madpar-header-overlay">
+          <div class="madpar-header-text">
+            <h3 class="madpar-title m-0">Parámetros de Madurez – ISO 27001</h3>
+            <div class="madpar-subtitle">
+              Configuración del modelo de niveles de madurez, relación entre cumplimiento y madurez,
+              y clasificación de niveles de brecha para el análisis del SGSI
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BOTÓN VOLVER -->
+      <div class="madpar-header-actions">
+          <a href="{url_for("madurez.home")}"
+             class="btn madpar-btn-main rounded-pill px-5 fw-bold">
+            ⬅ Inicio
+          </a>
+      </div>
+
+      <div class="row g-3">
+
+        <!-- MODELO MADUREZ -->
+        <div class="col-lg-4">
+          <div class="madpar-card p-4 h-100">
+            <div class="madpar-section-title">Modelo nivel de madurez</div>
+
+            <div class="text-muted small mb-3">
+              Define el catálogo de niveles utilizados para clasificar la madurez
+              del sistema de gestión de seguridad de la información.
+            </div>
+
+            <div class="text-center">
+              <a class="btn btn-primary rounded-pill px-4 fw-semibold"
+                 href="{url_for("madurez.param_maturity_levels")}">
+                Gestionar
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- RELACIÓN CUMPLIMIENTO -->
+        <div class="col-lg-4">
+          <div class="madpar-card p-4 h-100">
+            <div class="madpar-section-title">2) Relación cumplimiento - Madurez</div>
+
+            <div class="text-muted small mb-3">
+              Define los rangos porcentuales que determinan el nivel de madurez
+              según el porcentaje de cumplimiento obtenido en la evaluación.
+            </div>
+
+            <div class="text-center">
+              <a class="btn btn-primary rounded-pill px-4 fw-semibold"
+                 href="{url_for("madurez.param_compliance_map")}">
+                Gestionar
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- BRECHAS -->
+        <div class="col-lg-4">
+          <div class="madpar-card p-4 h-100">
+            <div class="madpar-section-title">Calificación nivel de brecha</div>
+
+            <div class="text-muted small mb-3">
+              Define los rangos porcentuales de brecha que determinan el nivel
+              de criticidad (Bajo, Medio, Alto o Crítico).
+            </div>
+
+            <div class="text-center">
+              <a class="btn btn-primary rounded-pill px-4 fw-semibold"
+                 href="{url_for("madurez.param_gap_levels")}">
+                Gestionar
+              </a>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- SEED -->
+      <div class="madpar-card p-4 mt-3">
+        <div class="madpar-section-title">🚀 Seed (carga rápida de parámetros base)</div>
+
+        <div class="text-muted small mb-3">
+          Si estás empezando, puedes cargar automáticamente los parámetros base del modelo:
+          niveles de madurez, rangos de cumplimiento y clasificación de brechas.
+        </div>
+
+        <div class="d-flex justify-content-center">
+          <a class="btn btn-outline-primary rounded-pill px-4 fw-semibold"
+             href="{url_for("madurez.param_seed")}">
+            Cargar parámetros base
+          </a>
+        </div>
+      </div>
+
+      <!-- IMPORTAR INSTRUMENTO -->
+      <div class="madpar-card p-4 mt-3 text-center">
+        <div class="madpar-section-title">Importar instrumento de evaluación</div>
+
+        <div class="text-muted small mb-3">
+          Este proceso importa el instrumento oficial de evaluación de madurez.
+          Debe ejecutarse solo una vez durante la configuración inicial.
+        </div>
+
+        <form method="POST"
+              action="{url_for('madurez.importar_instrumento_admin', force=1)}">
+
+          <button class="btn btn-danger rounded-pill px-4 fw-semibold">
+            <i class="bi bi-database-add me-2"></i>
+            Importar instrumento
+          </button>
+
+        </form>
+      </div>
+
+    </div>
+
+   <style>
+      body{{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }}
+
+      .madpar-shell{{
+        width:96%;
+        max-width:1350px;
+        margin:26px auto 24px auto;
+      }}
+
+      .madpar-header-card{{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }}
+
+      .madpar-header-card::before{{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }}
+
+      .madpar-header-overlay{{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }}
+
+      .madpar-header-overlay::before{{
         content:"⚙️";
         width:54px;
         height:54px;
@@ -2144,15 +4784,15 @@ def parametros():
         margin-right:14px;
       }}
 
-      .datapar-header-text{{
+      .madpar-header-text{{
         max-width:1100px;
         width:100%;
         display:block !important;
         transform:none !important;
       }}
 
-      .datapar-header-text::before{{
-        content:"SGSI · Parámetros de Datos Personales";
+      .madpar-header-text::before{{
+        content:"SGSI · Parámetros de Madurez";
         display:inline-block;
         background:rgba(255,255,255,.18);
         border-radius:999px;
@@ -2163,23 +4803,23 @@ def parametros():
         color:#ffffff;
       }}
 
-      .datapar-title{{
+      .madpar-title{{
         color:#ffffff !important;
         font-weight:950;
         font-size:1.32rem;
         line-height:1.1;
-        margin:0 !important;
         text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
       }}
 
-      .datapar-subtitle{{
+      .madpar-subtitle{{
         color:rgba(255,255,255,.95);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
       }}
 
-      .datapar-header-actions{{
+      .madpar-header-actions{{
         display:flex;
         justify-content:center;
         gap:10px;
@@ -2187,29 +4827,30 @@ def parametros():
         margin:10px 0 14px;
       }}
 
-      .datapar-header-actions .btn,
-      .btn{{
+      .madpar-header-actions .btn,
+      .madpar-btn-main{{
         border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
         font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
       }}
 
-      .datapar-btn-main,
-      .btn-outline-light{{
+      .madpar-btn-main{{
         background:#ffffff;
         color:#0f172a !important;
         border:1px solid #cfd8e3 !important;
       }}
 
-      .datapar-btn-main:hover,
-      .btn-outline-light:hover{{
+      .madpar-btn-main:hover{{
         background:#edf5ff;
         color:#0b65d8 !important;
+        border-color:#9ec5fe !important;
       }}
 
-      .datapar-card,
-      .card{{
-        background:rgba(255,255,255,.96) !important;
+      .madpar-card{{
+        background:rgba(255,255,255,.96)!important;
         border-radius:18px !important;
         backdrop-filter:blur(8px);
         box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
@@ -2217,23 +4858,19 @@ def parametros():
         overflow:hidden;
       }}
 
-      .datapar-card.p-4{{
-        padding:1.5rem !important;
+      .madpar-card .card-body{{
+        padding:18px;
       }}
 
-      .datapar-section-title,
-      .card h5,
-      .card h6{{
+      .madpar-section-title{{
         font-weight:950;
-        font-size:.95rem;
+        font-size:.78rem;
         color:#0b4a8f;
-        margin-bottom:0;
-      }}
-
-      .datapar-section-title{{
-        padding-bottom:8px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-        margin-bottom:16px;
+        padding:9px 12px;
+        border-radius:12px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        margin:10px 0 12px;
       }}
 
       .form-label{{
@@ -2267,321 +4904,454 @@ def parametros():
         background:#ffffff;
       }}
 
-      .btn.rounded-pill,
-      .btn.pill,
-      .pill{{
-        border-radius:999px !important;
-      }}
-
-      .datapar-card .btn-primary,
-      .datapar-card .btn-outline-primary,
-      .datapar-card .btn-outline-danger{{
+      .input-group-text{{
+        border-radius:0 10px 10px 0;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        color:#0b4a8f;
         font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
       }}
 
-      @media (max-width:991.98px){{
-        .datapar-shell{{
+      .badge{{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }}
+
+      .btn{{
+        border-radius:10px !important;
+        font-weight:900;
+      }}
+
+      @media (max-width:992px){{
+        .madpar-shell{{
           width:98%;
           margin:8px auto 22px auto;
         }}
 
-        .datapar-header-card{{
+        .madpar-header-card{{
           min-height:88px;
         }}
 
-        .datapar-title{{
+        .madpar-title{{
           font-size:1.20rem;
         }}
 
-        .datapar-subtitle{{
-          font-size:.68rem;
+        .madpar-card .card-body{{
+          padding:8px 7px;
         }}
       }}
 
       @media (max-width:768px){{
-        .datapar-header-overlay{{
+        .madpar-header-overlay{{
           flex-direction:column;
           text-align:center;
           gap:10px;
         }}
 
-        .datapar-header-overlay::before{{
+        .madpar-header-overlay::before{{
           margin:0;
         }}
 
-        .datapar-header-text::before{{
+        .madpar-header-text::before{{
           margin-left:auto;
           margin-right:auto;
         }}
 
-        .datapar-title,
-        .datapar-subtitle{{
-          text-align:center;
-        }}
-
-        .datapar-header-actions .btn{{
+        .madpar-header-actions .btn{{
           width:100%;
         }}
       }}
     </style>
     """
-    return render_template_string(BASE, title="Parámetros Datos Personales", content=content)
+    return render_template_string(BASE, title="Parámetros", content=content)
 
 
-# =====================================================================
-# INGRESO DE INFORMACIÓN
-# =====================================================================
+@madurez_bp.route("/parametros/seed", methods=["GET"])
+@login_required
+def param_seed():
+    # No duplica si ya hay datos
+    if MaturityLevel.query.count() == 0:
+        db.session.add_all([
+            MaturityLevel(nivel=1, madurez="Inicial", descripcion="Prácticas ad-hoc o inexistentes; evidencia limitada."),
+            MaturityLevel(nivel=2, madurez="En desarrollo", descripcion="Implementación parcial; evidencia inconsistente."),
+            MaturityLevel(nivel=3, madurez="Gestionado", descripcion="Proceso definido y repetible; evidencia consistente."),
+            MaturityLevel(nivel=4, madurez="Óptimo", descripcion="Mejora continua; medición y control maduros."),
+        ])
+        db.session.commit()
 
-@madurez_datos_bp.route("/ingreso", methods=["GET"])
+    if ComplianceMaturityMap.query.count() == 0:
+        lv = {x.madurez: x.id for x in MaturityLevel.query.all()}
+        # Rangos recomendados (contiguos)
+        db.session.add_all([
+            ComplianceMaturityMap(pct_min=0,  pct_max=39, maturity_id=lv.get("Inicial")),
+            ComplianceMaturityMap(pct_min=40, pct_max=59, maturity_id=lv.get("En desarrollo")),
+            ComplianceMaturityMap(pct_min=60, pct_max=79, maturity_id=lv.get("Gestionado")),
+            ComplianceMaturityMap(pct_min=80, pct_max=100, maturity_id=lv.get("Óptimo")),
+        ])
+        db.session.commit()
+
+    if GapLevelConfig.query.count() == 0:
+        db.session.add_all([
+            GapLevelConfig(pct_min=0,  pct_max=24, nivel_brecha="Bajo",    interpretacion="Brecha menor; mantener y asegurar vigencia."),
+            GapLevelConfig(pct_min=25, pct_max=49, nivel_brecha="Medio",   interpretacion="Brecha moderada; requiere acciones planificadas."),
+            GapLevelConfig(pct_min=50, pct_max=79, nivel_brecha="Alto",    interpretacion="Brecha alta; priorizar cierre y evidencias."),
+            GapLevelConfig(pct_min=80, pct_max=100, nivel_brecha="Critico", interpretacion="Brecha crítica; alto riesgo de incumplimiento/impacto."),
+        ])
+        db.session.commit()
+
+    flash("✅ Parámetros base cargados (si estaban vacíos).", "success")
+    return redirect(url_for("madurez.parametros_menu"))
+
+# ===============================
+# Pantalla Ingreso de información
+# ===============================
+
+@madurez_bp.route("/ingreso", methods=["GET"])
 @login_required
 def ingreso():
     user = User.query.get(session.get("user_id"))
 
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de madurez protección de datos personales"):
-        flash("No tiene permiso para acceder al módulo de nivel de madurez de protección de datos personales.", "danger")
-        return redirect(url_for('menu'))
+    # =========================
+    # PERMISOS
+    # =========================
+    if user and user.role not in ("admin", "auditor") and not verificar_permiso(user, "Nivel de Madurez ISO 27001:2022"):
+        flash("No tiene permiso para acceder al módulo de nivel de madurez ISO 27001:2022.", "danger")
+        return redirect(url_for("menu"))
 
-    if user.role == "auditor":
+    if user and user.role == "auditor":
         flash("El rol Auditor no puede ingresar la información en este módulo.", "warning")
-        return redirect(url_for("madurez_datos.inicio"))
+        return redirect(url_for("madurez.home"))
 
-    if DatosMadurezPregunta.query.count() == 0:
-        flash("⚠️ Primero debes importar el instrumento de protección de datos personales (1 vez).", "warning")
-        return redirect(url_for("madurez_datos.inicio"))
+    preguntas = MadurezPregunta.query.order_by(
+        MadurezPregunta.orden.asc()
+    ).all()
 
-    preguntas = (
-        DatosMadurezPregunta.query
-        .filter_by(activo=True)
-        .order_by(
-            DatosMadurezPregunta.dominio.asc(),
-            DatosMadurezPregunta.orden.asc(),
-            DatosMadurezPregunta.id.asc()
-        )
-        .all()
+    if not preguntas:
+        content = """
+        <div class="alert alert-warning">
+          No hay instrumento cargado en la base de datos.
+          (Admin) Importa el instrumento para habilitar el formulario.
+        </div>
+        """
+        return render_template_string(BASE, title=APP_TITLE, content=content)
+
+    # =========================
+    # CARGAR BORRADOR ACTIVO
+    # =========================
+    draft = obtener_borrador_madurez(user.id if user else None)
+    respuestas_guardadas = cargar_respuestas_run(draft.id) if draft else {}
+
+    company_name_value = (draft.company_name if draft else "") or ""
+
+    _, _, progreso_inicial = calcular_progreso_formulario(
+        preguntas,
+        respuestas_db=respuestas_guardadas
     )
 
-    draft = obtener_borrador_datos(user.id if user else None)
-    respuestas_db = cargar_respuestas_datos(draft.id if draft else None)
-    _, _, progreso_inicial = calcular_progreso_datos(preguntas, respuestas_db=respuestas_db)
+    # =========================
+    # AGRUPAR POR HOJA
+    # =========================
+    by_sheet = {}
+    for p in preguntas:
+        by_sheet.setdefault((p.sheet or "Sin categoría"), []).append(p)
 
-    consecutivo = draft.consecutivo if draft else ""
-    draft_id = draft.id if draft else ""
+    acc_html = []
+    acc_id = 0
 
-    dominios = {}
-    for q in preguntas:
-        dom = (q.dominio or "Sin dominio").strip()
-        dominios.setdefault(dom, [])
-        dominios[dom].append(q)
+    def esc(x):
+        return escape(x or "")
 
-    bloques_dominios = []
+    for sheet, items in by_sheet.items():
+        acc_id += 1
+        sheet_key = f"sheet{acc_id}"
+        inner_blocks = []
 
-    for idx, (dominio, items) in enumerate(dominios.items()):
-        collapse_id = f"datosDominioCollapse_{idx}"
-        show_cls = "show" if idx == 0 else ""
+        items = sorted(items, key=lambda x: (x.orden or 0))
 
-        preguntas_html = []
+        current_header = ""
+        rows = []
 
-        for q in items:
-            resp = respuestas_db.get(q.id, {})
-            est = (resp.get("estado") or "").strip().upper()
-            cm = (resp.get("comentario") or "").strip()
+        def flush_block():
+            nonlocal rows, current_header, inner_blocks
 
-            def checked(val):
-                return "checked" if est == val else ""
+            if not rows:
+                return
 
-            preguntas_html.append(f"""
+            inner_blocks.append(f"""
+            <div class="isoform-cat-block">
+              <div class="isoform-cat-title">
+                <div>
+                  <div class="isoform-cat-code">{esc(sheet)}</div>
+                  <div class="isoform-cat-name">{esc(current_header)}</div>
+                </div>
+                <div>
+                  <span class="badge rounded-pill text-bg-secondary">{len(rows)} preguntas</span>
+                </div>
+              </div>
+
+              <div class="row g-3">
+                {''.join(rows)}
+              </div>
+            </div>
+            """)
+
+            rows = []
+
+        for p in items:
+            if p.tipo == "h":
+                flush_block()
+                current_header = p.pregunta or ""
+                continue
+
+            if p.tipo != "q":
+                continue
+
+            saved = respuestas_guardadas.get(p.id, {})
+            saved_opt = (saved.get("opcion") or "").strip().upper()
+            saved_com = esc(saved.get("comentario") or "")
+
+            chk_na = "checked" if saved_opt == "NA" else ""
+            chk_si = "checked" if saved_opt == "SI" else ""
+            chk_pa = "checked" if saved_opt == "PAR" else ""
+            chk_no = "checked" if saved_opt == "NO" else ""
+
+            question_badge = f"Orden {p.orden or 0}"
+            question_text = p.pregunta or ""
+
+            rows.append(f"""
             <div class="col-12 col-xl-6">
-              <div class="dataform-qcard h-100">
+              <div class="isoform-qcard h-100">
 
-                <div class="dataform-qhead">
+                <div class="isoform-qhead">
                   <div class="d-flex align-items-center gap-2 flex-wrap">
                     <span class="badge rounded-pill text-bg-light border fw-semibold">
-                      {escape(q.codigo or '')}
+                      {esc(sheet)}
                     </span>
                     <span class="badge rounded-pill text-bg-primary">
-                      Orden {q.orden or 0}
+                      {esc(question_badge)}
                     </span>
                   </div>
                 </div>
 
-                <div class="dataform-qtitle">
-                  {escape(q.titulo or '')}
+                <div class="isoform-qtext">
+                  {esc(question_text)}
                 </div>
 
-                <div class="dataform-qtext">
-                  {escape(q.pregunta or '')}
-                </div>
-
-                <div class="dataform-radio-row">
-                  <label class="dataform-radio-card">
-                    <input type="radio" name="st_{q.id}" value="NA" {checked('NA')}>
+                <div class="isoform-radio-row">
+                  <label class="isoform-radio-card">
+                    <input class="form-check-input" type="radio" name="r_{p.id}" value="NA" {chk_na}>
                     <span>N/A</span>
                   </label>
 
-                  <label class="dataform-radio-card">
-                    <input type="radio" name="st_{q.id}" value="SI" {checked('SI')}>
+                  <label class="isoform-radio-card">
+                    <input class="form-check-input" type="radio" name="r_{p.id}" value="SI" {chk_si}>
                     <span>Sí</span>
                   </label>
 
-                  <label class="dataform-radio-card">
-                    <input type="radio" name="st_{q.id}" value="PARCIAL" {checked('PARCIAL')}>
+                  <label class="isoform-radio-card">
+                    <input class="form-check-input" type="radio" name="r_{p.id}" value="PAR" {chk_pa}>
                     <span>Parcial</span>
                   </label>
 
-                  <label class="dataform-radio-card">
-                    <input type="radio" name="st_{q.id}" value="NO" {checked('NO')}>
+                  <label class="isoform-radio-card">
+                    <input class="form-check-input" type="radio" name="r_{p.id}" value="NO" {chk_no}>
                     <span>No</span>
                   </label>
                 </div>
 
                 <div class="mt-3">
-                  <label class="form-label small fw-bold text-black mb-1">Comentario / evidencia</label>
-                  <textarea class="form-control"
-                            name="cm_{q.id}"
+                  <label class="form-label small fw-bold text-black mb-1">
+                    Comentarios / evidencia
+                  </label>
+
+                  <textarea class="form-control form-control-sm"
+                            name="c_{p.id}"
                             rows="3"
-                            placeholder="Describe la evidencia, observaciones o hallazgos...">{escape(cm)}</textarea>
+                            placeholder="Comentarios / evidencia">{saved_com}</textarea>
                 </div>
 
               </div>
             </div>
             """)
 
-        bloques_dominios.append(f"""
-        <div class="accordion-item dataform-acc-item">
-          <h2 class="accordion-header" id="headingDom_{idx}">
-            <button class="accordion-button {'collapsed' if idx != 0 else ''} dataform-acc-btn"
+        flush_block()
+
+        if not inner_blocks:
+            inner_blocks.append("""
+            <div class="alert alert-light border rounded-4 mb-0">
+              No hay preguntas disponibles en esta sección.
+            </div>
+            """)
+
+        acc_html.append(f"""
+        <div class="accordion-item isoform-acc-item">
+          <h2 class="accordion-header" id="h{sheet_key}">
+            <button class="accordion-button {'collapsed' if acc_id != 1 else ''} isoform-acc-btn"
                     type="button"
                     data-bs-toggle="collapse"
-                    data-bs-target="#{collapse_id}"
-                    aria-expanded="{str(idx == 0).lower()}"
-                    aria-controls="{collapse_id}">
-              <div class="dataform-acc-inner">
-                <div class="dataform-acc-title-wrap">
+                    data-bs-target="#c{sheet_key}"
+                    aria-expanded="{str(acc_id == 1).lower()}"
+                    aria-controls="c{sheet_key}">
+              <div class="isoform-acc-inner">
+                <div class="isoform-acc-title-wrap">
                   <i class="bi bi-folder2-open me-2"></i>
-                  <span class="dataform-acc-title">{escape(dominio)}</span>
+                  <span class="isoform-acc-title">{esc(sheet)}</span>
                 </div>
+
                 <span class="badge rounded-pill text-bg-light border">
-                  {len(items)} preguntas
+                  {sum(1 for x in items if x.tipo == 'q')} preguntas
                 </span>
               </div>
             </button>
           </h2>
 
-          <div id="{collapse_id}"
-               class="accordion-collapse collapse {show_cls}"
-               aria-labelledby="headingDom_{idx}">
-            <div class="accordion-body dataform-acc-body">
-              <div class="row g-3">
-                {''.join(preguntas_html)}
-              </div>
+          <div id="c{sheet_key}"
+               class="accordion-collapse collapse {'show' if acc_id == 1 else ''}">
+            <div class="accordion-body isoform-acc-body">
+              {''.join(inner_blocks)}
             </div>
           </div>
         </div>
         """)
 
-    disabled_analizar = "disabled" if progreso_inicial < 100 else ""
+    alerta_borrador = ""
+    if draft:
+        alerta_borrador = f"""
+        <div class="alert alert-info rounded-4 border-0 shadow-sm">
+          <i class="bi bi-info-circle-fill me-2"></i>
+          Tienes un borrador cargado automáticamente.
+          <strong>Progreso actual:</strong> {progreso_inicial}%.
+        </div>
+        """
+
+    disabled_analizar = "" if progreso_inicial == 100 else "disabled"
 
     content = f"""
-    <div class="dataform-shell">
-      <div class="dataform-header-card">
-        <div class="dataform-header-overlay">
-          <div class="dataform-header-text">
-            <h3 class="dataform-title m-0">Ingreso de información — Protección de Datos Personales</h3>
-            <div class="dataform-subtitle">
-              Diligencia el instrumento por capítulo, guarda el borrador y analiza cuando el progreso sea 100%.
+    <div class="isoform-shell">
+
+      <div class="isoform-header-card">
+        <div class="isoform-header-overlay">
+          <div class="isoform-header-text">
+            <h3 class="isoform-title m-0">Nivel de Madurez — ISO 27001:2022</h3>
+            <div class="isoform-subtitle">
+              Registro de respuestas del instrumento de evaluación del SGSI
+              basado en ISO 27001:2022 para su posterior análisis y generación de resultados.
             </div>
           </div>
         </div>
       </div>
 
-      <div class="dataform-header-actions">
-        <a href="{url_for('madurez_datos.inicio')}" class="btn dataform-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left me-2"></i>Volver al Inicio
+      <div class="isoform-header-actions">
+        <a href="{url_for('madurez.home')}"
+           class="btn isoform-btn-main rounded-pill px-4 fw-bold">
+          <i class="bi bi-arrow-left me-2"></i>Volver a Madurez ISO
         </a>
       </div>
 
-      <div class="dataform-card p-4">
-        <form id="datosIngresoForm"
+      <div class="isoform-card p-4">
+
+        {alerta_borrador}
+
+        <form id="isoIngresoForm"
               method="POST"
-              action="{url_for('madurez_datos.ingreso_guardar')}"
+              action="{url_for('madurez.ingreso_guardar')}"
               novalidate
               autocomplete="off">
 
-          <input type="hidden" name="draft_id" value="{draft_id}">
+          <input type="hidden" name="draft_id" value="{draft.id if draft else ''}">
 
-          <div class="row g-3 align-items-end mb-4">
-            <div class="col-md-5">
-              <label class="text-black form-label fw-bold" for="datosConsecutivoRevision">
-                Consecutivo <span class="text-danger">*</span>
-              </label>
+          <div class="isoform-section-title">
+            Información de la revisión
+          </div>
 
-              <input type="text"
-                     class="form-control"
-                     name="consecutivo"
-                     id="datosConsecutivoRevision"
-                     value="{escape(consecutivo)}"
-                     autocomplete="off"
-                     required>
+          <div class="mb-4">
+            <label class="text-black form-label fw-semibold" for="isoConsecutivoRevision">
+              Consecutivo de la Revisión <span class="text-danger">*</span>
+            </label>
 
-              <div id="datosConsecutivoRevisionError"
-                   class="invalid-feedback d-none fw-bold mt-2">
-                Debes ingresar el consecutivo de la Revisión.
-              </div>
-            </div>
+            <input type="text"
+                   class="form-control"
+                   name="company_name"
+                   id="isoConsecutivoRevision"
+                   value="{esc(company_name_value)}"
+                   autocomplete="off"
+                   required>
 
-            <div class="col-md-7">
-              <label class="form-label fw-bold">Progreso del diligenciamiento</label>
-              <div class="progress dataform-progress">
-                <div id="dataProgressBar"
-                     class="progress-bar bg-success"
-                     role="progressbar"
-                     style="width:{progreso_inicial}%"
-                     aria-valuenow="{progreso_inicial}"
-                     aria-valuemin="0"
-                     aria-valuemax="100">
-                  {progreso_inicial}%
-                </div>
-              </div>
-              <div class="small text-muted mt-1">
-                Progreso actual: <span id="dataProgressText">{progreso_inicial}%</span>
-              </div>
+            <div id="isoConsecutivoRevisionError"
+                 class="invalid-feedback d-none fw-bold mt-2">
+              Debes ingresar el consecutivo de la Revisión.
             </div>
           </div>
 
-          <div class="accordion dataform-accordion" id="accordionIngresoDatos">
-            {''.join(bloques_dominios)}
+          <div class="isoform-section-title">
+            📊 Progreso del instrumento
+          </div>
+
+          <div class="mb-4">
+            <div class="progress isoform-progress">
+              <div id="instrumentProgressBar"
+                   class="progress-bar progress-bar-striped progress-bar-animated"
+                   role="progressbar"
+                   style="width:{progreso_inicial}%"
+                   aria-valuemin="0"
+                   aria-valuemax="100"
+                   aria-valuenow="{progreso_inicial}">
+                {progreso_inicial}%
+              </div>
+            </div>
+
+            <div class="text-center small text-muted mt-2">
+              <span id="instrumentProgressText">{progreso_inicial}%</span> del instrumento completado
+            </div>
+          </div>
+
+          <div class="isoform-section-title">
+            Instrumento de evaluación
+          </div>
+
+          <div class="accordion isoform-accordion" id="accInstrumentoIso">
+            {''.join(acc_html)}
           </div>
 
           <div class="d-flex justify-content-center gap-3 flex-wrap mt-4">
-            <button class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold datos-submit-btn"
+
+            <button id="btnGuardar"
+                    class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold iso-submit-btn"
                     type="submit"
                     name="accion"
                     value="guardar"
                     data-accion="guardar">
-              <i class="bi bi-save2 me-2"></i>Guardar
+              <i class="bi bi-save2 me-2"></i>
+              Guardar
             </button>
 
-            <button id="btnAnalizarDatos"
-                    class="btn btn-primary btn-lg rounded-pill px-5 shadow fw-semibold datos-submit-btn"
+            <button id="btnAnalizar"
+                    class="btn btn-primary btn-lg rounded-pill px-5 shadow fw-semibold iso-submit-btn"
                     type="submit"
                     name="accion"
                     value="analizar"
                     data-accion="analizar"
                     {disabled_analizar}>
-              <i class="bi bi-bar-chart-line-fill me-2"></i>Analizar
+              <i class="bi bi-bar-chart-line-fill me-2"></i>
+              Analizar
             </button>
+
           </div>
+
         </form>
+
       </div>
+
     </div>
 
     <script>
     (function() {{
 
-        let DATOS_BLOQUEAR_LOADER = false;
+        let ISO_BLOQUEAR_LOADER = false;
 
-        function datosOcultarLoaderGlobal() {{
+        function isoOcultarLoaderGlobal() {{
             const ids = [
                 "SGSI_PROGRESS_GLOBAL",
                 "globalLoader",
@@ -2629,15 +5399,15 @@ def ingreso():
             document.body.style.paddingRight = "";
         }}
 
-        function datosValidarConsecutivoRevision() {{
-            const input = document.getElementById("datosConsecutivoRevision");
-            const error = document.getElementById("datosConsecutivoRevisionError");
+        function isoValidarConsecutivoRevision() {{
+            const input = document.getElementById("isoConsecutivoRevision");
+            const error = document.getElementById("isoConsecutivoRevisionError");
 
             const valor = input ? input.value.trim() : "";
 
             if (!valor) {{
-                DATOS_BLOQUEAR_LOADER = true;
-                datosOcultarLoaderGlobal();
+                ISO_BLOQUEAR_LOADER = true;
+                isoOcultarLoaderGlobal();
 
                 if (input) {{
                     input.classList.add("is-invalid");
@@ -2653,7 +5423,7 @@ def ingreso():
                 return false;
             }}
 
-            DATOS_BLOQUEAR_LOADER = false;
+            ISO_BLOQUEAR_LOADER = false;
 
             if (input) {{
                 input.classList.remove("is-invalid");
@@ -2668,21 +5438,25 @@ def ingreso():
             return true;
         }}
 
-        function actualizarProgresoDatos() {{
-            const radios = document.querySelectorAll('input[type="radio"][name^="st_"]');
+        function actualizarProgresoInstrumento() {{
+            const radios = document.querySelectorAll('input[type="radio"][name^="r_"]');
             const nombres = [...new Set(Array.from(radios).map(r => r.name))];
             const total = nombres.length;
+
             let respondidas = 0;
 
             nombres.forEach(function(nombre) {{
                 const marcado = document.querySelector('input[name="' + nombre + '"]:checked');
-                if (marcado) respondidas++;
+                if (marcado) {{
+                    respondidas++;
+                }}
             }});
 
             const porcentaje = total > 0 ? Math.round((respondidas / total) * 100) : 0;
-            const bar = document.getElementById("dataProgressBar");
-            const text = document.getElementById("dataProgressText");
-            const btnAnalizar = document.getElementById("btnAnalizarDatos");
+
+            const bar = document.getElementById("instrumentProgressBar");
+            const text = document.getElementById("instrumentProgressText");
+            const btnAnalizar = document.getElementById("btnAnalizar");
 
             if (bar) {{
                 bar.style.width = porcentaje + "%";
@@ -2700,6 +5474,11 @@ def ingreso():
             }}
         }}
 
+        /*
+          BLOQUEO DE LOADERS EXTERNOS:
+          Si en BASE existe showLoader(), showGlobalLoader(), mostrarLoader(), etc.,
+          se interceptan para que NO aparezcan cuando el consecutivo está vacío.
+        */
         const posiblesLoaders = [
             "showLoader",
             "mostrarLoader",
@@ -2714,88 +5493,88 @@ def ingreso():
         posiblesLoaders.forEach(function(nombreFuncion) {{
             const original = window[nombreFuncion];
 
-            if (typeof original === "function" && !original.__datosInterceptado) {{
+            if (typeof original === "function" && !original.__isoInterceptado) {{
                 const wrapper = function() {{
-                    if (DATOS_BLOQUEAR_LOADER || !datosValidarConsecutivoRevision()) {{
-                        datosOcultarLoaderGlobal();
+                    if (ISO_BLOQUEAR_LOADER || !isoValidarConsecutivoRevision()) {{
+                        isoOcultarLoaderGlobal();
                         return false;
                     }}
 
                     return original.apply(this, arguments);
                 }};
 
-                wrapper.__datosInterceptado = true;
+                wrapper.__isoInterceptado = true;
                 window[nombreFuncion] = wrapper;
             }}
         }});
 
         document.addEventListener("change", function(e) {{
-            if (e.target.matches('input[type="radio"][name^="st_"]')) {{
-                actualizarProgresoDatos();
+            if (e.target.matches('input[type="radio"][name^="r_"]')) {{
+                actualizarProgresoInstrumento();
             }}
         }});
 
         document.addEventListener("click", function(e) {{
-            const btn = e.target.closest(".datos-submit-btn");
+            const btn = e.target.closest(".iso-submit-btn");
 
             if (!btn) {{
                 return;
             }}
 
-            if (!datosValidarConsecutivoRevision()) {{
+            if (!isoValidarConsecutivoRevision()) {{
                 e.preventDefault();
                 e.stopPropagation();
                 e.stopImmediatePropagation();
 
-                DATOS_BLOQUEAR_LOADER = true;
-                datosOcultarLoaderGlobal();
+                ISO_BLOQUEAR_LOADER = true;
+                isoOcultarLoaderGlobal();
 
                 return false;
             }}
         }}, true);
 
         window.addEventListener("DOMContentLoaded", function() {{
-            const form = document.getElementById("datosIngresoForm");
-            const input = document.getElementById("datosConsecutivoRevision");
+            const form = document.getElementById("isoIngresoForm");
+            const input = document.getElementById("isoConsecutivoRevision");
 
             if (input) {{
                 input.addEventListener("input", function() {{
-                    datosValidarConsecutivoRevision();
+                    isoValidarConsecutivoRevision();
                 }});
 
                 input.addEventListener("blur", function() {{
-                    datosValidarConsecutivoRevision();
+                    isoValidarConsecutivoRevision();
                 }});
             }}
 
             if (form) {{
                 form.addEventListener("submit", function(e) {{
-                    if (!datosValidarConsecutivoRevision()) {{
+                    if (!isoValidarConsecutivoRevision()) {{
                         e.preventDefault();
                         e.stopPropagation();
                         e.stopImmediatePropagation();
 
-                        DATOS_BLOQUEAR_LOADER = true;
-                        datosOcultarLoaderGlobal();
+                        ISO_BLOQUEAR_LOADER = true;
+                        isoOcultarLoaderGlobal();
 
                         return false;
                     }}
                 }}, true);
             }}
 
-            actualizarProgresoDatos();
-            datosOcultarLoaderGlobal();
+            actualizarProgresoInstrumento();
+            isoOcultarLoaderGlobal();
         }});
 
         window.addEventListener("pageshow", function() {{
-            datosOcultarLoaderGlobal();
+            isoOcultarLoaderGlobal();
         }});
 
     }})();
     </script>
 
     <style>
-      body{{
+      body {{
         background-image:url('/static/img/ccsgsi.jpg');
         background-size:cover;
         background-position:center;
@@ -2803,13 +5582,13 @@ def ingreso():
         background-repeat:no-repeat;
       }}
 
-      .dataform-shell{{
+      .isoform-shell {{
         width:96%;
-        max-width:1700px;
+        max-width:1600px;
         margin:26px auto 24px auto;
       }}
 
-      .dataform-header-card{{
+      .isoform-header-card {{
         background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
@@ -2823,53 +5602,41 @@ def ingreso():
         margin-bottom:14px;
       }}
 
-      .dataform-header-card::before{{
+      .isoform-header-card::before {{
         content:"";
         position:absolute;
         inset:0;
         background:
           radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
           repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
       }}
 
-      .dataform-header-overlay{{
+      .isoform-header-overlay {{
         width:100%;
         display:flex;
         align-items:center;
         justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
         position:relative;
         z-index:1;
       }}
 
-      .dataform-header-overlay::before{{
-        content:"📝";
+      .isoform-header-overlay::before {{
+        content:"📌";
         width:54px;
         height:54px;
-        min-width:54px;
         border-radius:14px;
-        background:#ffffff;
+        background:#fff;
         color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
-        font-size:1.45rem;
+        font-size:1.4rem;
         box-shadow:0 8px 18px rgba(0,0,0,.25);
         margin-right:14px;
       }}
 
-      .dataform-header-text{{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }}
-
-      .dataform-header-text::before{{
-        content:"SGSI · Evaluación Protección de Datos Personales";
+      .isoform-header-text::before {{
+        content:"SGSI · Evaluación ISO";
         display:inline-block;
         background:rgba(255,255,255,.18);
         border-radius:999px;
@@ -2877,26 +5644,22 @@ def ingreso():
         font-size:.65rem;
         font-weight:800;
         margin-bottom:4px;
-        color:#ffffff;
+        color:#fff;
       }}
 
-      .dataform-title{{
-        color:#ffffff !important;
+      .isoform-title {{
+        color:#fff;
         font-weight:950;
         font-size:1.32rem;
-        line-height:1.1;
-        margin:0 !important;
         text-shadow:0 3px 10px rgba(0,0,0,.35);
       }}
 
-      .dataform-subtitle{{
+      .isoform-subtitle {{
         color:rgba(255,255,255,.95);
         font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
       }}
 
-      .dataform-header-actions{{
+      .isoform-header-actions {{
         display:flex;
         justify-content:center;
         gap:10px;
@@ -2904,101 +5667,87 @@ def ingreso():
         margin:10px 0 14px;
       }}
 
-      .dataform-header-actions .btn,
-      .btn{{
-        border-radius:10px !important;
+      .isoform-btn-main {{
+        background:#fff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+        border-radius:10px;
+        padding:8px 22px;
         font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
-
-      .dataform-header-actions .btn{{
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
         box-shadow:0 8px 16px rgba(15,23,42,.15);
       }}
 
-      .dataform-btn-main,
-      .btn-outline-light{{
-        background:#ffffff;
-        color:#0f172a !important;
-        border:1px solid #cfd8e3 !important;
-      }}
-
-      .dataform-btn-main:hover,
-      .btn-outline-light:hover{{
+      .isoform-btn-main:hover {{
         background:#edf5ff;
-        color:#0b65d8 !important;
+        color:#0b65d8;
       }}
 
-      .dataform-card,
-      .card{{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
+      .isoform-card {{
+        background:rgba(255,255,255,.96);
+        border-radius:18px;
         backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
-        overflow:hidden;
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
       }}
 
-      .dataform-card{{
-        padding:1.5rem !important;
+      .isoform-card.p-4 {{
+        padding:18px !important;
       }}
 
-      .dataform-progress{{
+      .isoform-section-title {{
+        font-weight:950;
+        font-size:.78rem;
+        color:#0b4a8f;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:9px 12px;
+        border-radius:12px;
+        margin-bottom:12px;
+      }}
+
+      .isoform-progress {{
         height:22px;
         border-radius:999px;
         overflow:hidden;
         background:#e5edf7;
-        box-shadow:inset 0 1px 3px rgba(15,23,42,.12);
       }}
 
-      .progress-bar{{
+      .progress-bar {{
         font-weight:900;
       }}
 
-      .form-label{{
+      .form-label {{
         font-size:.72rem;
         font-weight:900;
         color:#0b4a8f;
-        text-transform:uppercase;
-        letter-spacing:.35px;
         background:#eef5ff;
         border:1px solid #d9eaff;
         padding:6px 10px;
         border-radius:10px;
-        display:inline-block;
-        margin-bottom:6px;
       }}
 
       .form-control,
-      .form-select{{
+      .form-select {{
         border-radius:10px;
         border:1px solid #d9e3f0;
         min-height:40px;
-        font-size:.86rem;
         background:#f8fafc;
-        box-shadow:none !important;
-      }}
-
-      textarea.form-control{{
-        min-height:92px;
       }}
 
       .form-control:focus,
-      .form-select:focus{{
+      .form-select:focus {{
         border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
+        background:#fff;
       }}
 
-      .form-control.is-invalid{{
+      .form-control.is-invalid {{
         border-color:#dc3545 !important;
         background:#fff5f5 !important;
         box-shadow:0 0 0 .15rem rgba(220,53,69,.15) !important;
       }}
 
-      .invalid-feedback{{
+      .invalid-feedback {{
         color:#b42318;
         background:#fff1f1;
         border:1px solid #ffd4d4;
@@ -3006,4432 +5755,172 @@ def ingreso():
         padding:8px 12px;
       }}
 
-      .dataform-accordion{{
-        --bs-accordion-border-color:transparent;
-        --bs-accordion-btn-focus-box-shadow:0 0 0 .2rem rgba(63,134,214,.12);
-      }}
-
-      .dataform-acc-item,
-      .accordion-item{{
-        border:1px solid #dbe6f4 !important;
-        background:#ffffff !important;
+      .isoform-acc-item {{
+        border:1px solid #dbe6f4;
+        background:#fff;
+        border-radius:16px;
         margin-bottom:14px;
-        border-radius:18px !important;
+        box-shadow:0 6px 14px rgba(0,0,0,.06);
         overflow:hidden;
-        box-shadow:0 6px 14px rgba(15,23,42,.06);
       }}
 
-      .dataform-acc-btn,
-      .accordion-button{{
-        background:#eef5ff !important;
-        color:#0f172a !important;
+      .isoform-acc-btn {{
+        background:#eef5ff;
         font-weight:900;
-        padding:18px 22px !important;
+        padding:16px 18px;
         border-bottom:1px solid #dbe6f4;
-        box-shadow:none !important;
       }}
 
-      .dataform-acc-btn:not(.collapsed),
-      .accordion-button:not(.collapsed){{
-        background:#dbeafe !important;
-        color:#0b4a8f !important;
-        box-shadow:none !important;
+      .isoform-acc-btn:not(.collapsed) {{
+        background:#dbeafe;
       }}
 
-      .dataform-acc-btn::after{{
-        filter:none;
-      }}
-
-      .dataform-acc-inner{{
+      .isoform-acc-inner {{
         width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+      }}
+
+      .isoform-acc-title-wrap {{
+        display:flex;
+        align-items:center;
+        gap:4px;
+      }}
+
+      .isoform-acc-title {{
+        font-weight:950;
+        color:#0f172a;
+      }}
+
+      .isoform-acc-body {{
+        padding:16px;
+      }}
+
+      .isoform-cat-block {{
+        background:#f8fbff;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        padding:8px 7px;
+        margin-bottom:14px;
+      }}
+
+      .isoform-cat-title {{
         display:flex;
         justify-content:space-between;
         align-items:center;
         gap:12px;
+        margin-bottom:14px;
+        border-bottom:1px solid #e5edf7;
+        padding-bottom:10px;
       }}
 
-      .dataform-acc-title{{
-        font-size:1rem;
-        font-weight:950;
-        color:#1e293b;
-      }}
-
-      .dataform-acc-body,
-      .accordion-body{{
-        background:rgba(255,255,255,.96) !important;
-        padding:18px !important;
-      }}
-
-      .dataform-qcard{{
-        background:#ffffff;
-        border:1px solid #dbe6f4;
-        border-radius:16px;
-        padding:8px 7px;
-        box-shadow:0 4px 10px rgba(15,23,42,.05);
-        transition:.2s;
-        height:100%;
-      }}
-
-      .dataform-qcard:hover{{
-        transform:translateY(-2px);
-        box-shadow:0 8px 20px rgba(15,23,42,.10);
-      }}
-
-      .dataform-qtitle{{
-        font-size:.92rem;
+      .isoform-cat-code {{
+        font-size:.72rem;
         font-weight:950;
         color:#0b4a8f;
-        margin-bottom:5px;
       }}
 
-      .dataform-qtext{{
-        font-size:.92rem;
+      .isoform-cat-name {{
+        font-size:.95rem;
+        font-weight:950;
         color:#0f172a;
-        font-weight:700;
+      }}
+
+      .isoform-qcard {{
+        background:#fff;
+        border:1px solid #e5edf7;
+        border-radius:14px;
+        padding:8px 7px;
+        transition:.2s;
+      }}
+
+      .isoform-qcard:hover {{
+        transform:translateY(-2px);
+        box-shadow:0 8px 18px rgba(0,0,0,.08);
+      }}
+
+      .isoform-qhead {{
+        margin-bottom:10px;
+      }}
+
+      .isoform-qtext {{
+        color:#0f172a;
+        font-weight:800;
+        font-size:.86rem;
         line-height:1.45;
       }}
 
-      .dataform-radio-row{{
+      .isoform-radio-row {{
         display:grid;
         grid-template-columns:repeat(4,1fr);
         gap:10px;
         margin-top:14px;
       }}
 
-      .dataform-radio-card{{
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        gap:6px;
+      .isoform-radio-card {{
         background:#f8fafc;
         border:1px solid #dbe4ee;
         border-radius:12px;
-        min-height:46px;
-        font-weight:900;
-        color:#101827;
+        display:flex;
+        justify-content:center;
+        align-items:center;
+        gap:6px;
+        padding:10px;
+        font-weight:800;
         cursor:pointer;
         transition:.2s;
-        padding:8px 10px;
       }}
 
-      .dataform-radio-card:hover{{
+      .isoform-radio-card:hover {{
         background:#eef6ff;
         border-color:#93c5fd;
       }}
 
-      .dataform-radio-card input[type="radio"]{{
-        transform:scale(1.08);
+      .isoform-radio-card input:checked + span {{
+        color:#0b4a8f;
+        font-weight:950;
       }}
 
-      .btn.rounded-pill,
-      .btn.pill,
-      .pill{{
-        border-radius:999px !important;
-      }}
-
-      .dataform-card .btn-primary,
-      .dataform-card .btn-outline-primary,
-      .dataform-card .btn-outline-secondary{{
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-        font-weight:900;
-      }}
-
-      .badge{{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }}
-
-      @media (max-width:1200px){{
-        .dataform-radio-row{{
+      @media (max-width:1200px) {{
+        .isoform-radio-row {{
           grid-template-columns:repeat(2,1fr);
         }}
       }}
 
-      @media (max-width:991.98px){{
-        .dataform-shell{{
-          width:98%;
-          margin:8px auto 22px auto;
+      @media (max-width:768px) {{
+        .isoform-radio-row {{
+          grid-template-columns:1fr;
         }}
 
-        .dataform-header-card{{
-          min-height:88px;
-        }}
-
-        .dataform-title{{
-          font-size:1.20rem;
-        }}
-
-        .dataform-subtitle{{
-          font-size:.68rem;
-        }}
-      }}
-
-      @media (max-width:768px){{
-        .dataform-header-overlay{{
+        .isoform-header-overlay {{
           flex-direction:column;
           text-align:center;
           gap:10px;
         }}
 
-        .dataform-header-overlay::before{{
-          margin:0;
+        .isoform-header-overlay::before {{
+          margin-right:0;
         }}
 
-        .dataform-header-text::before{{
-          margin-left:auto;
-          margin-right:auto;
-        }}
-
-        .dataform-title,
-        .dataform-subtitle{{
-          text-align:center;
-        }}
-
-        .dataform-header-actions .btn{{
-          width:100%;
-        }}
-
-        .dataform-radio-row{{
-          grid-template-columns:1fr;
-        }}
-
-        .dataform-acc-inner{{
+        .isoform-acc-inner {{
           flex-direction:column;
           align-items:flex-start;
         }}
       }}
     </style>
     """
-    return render_template_string(BASE, title="Ingreso Protección de Datos", content=content)
 
-# =====================================================================
-# GUARDAR / ANALIZAR
-# =====================================================================
+    return render_template_string(BASE, title=APP_TITLE, content=content)
 
-@madurez_datos_bp.route("/ingreso/guardar", methods=["POST"])
+# ===============================
+# Pantalla Ingreso Guardar / Analizar
+# ===============================
+
+@madurez_bp.route("/ingreso/guardar", methods=["POST"])
 @login_required
 def ingreso_guardar():
-    user = User.query.get(session.get("user_id"))
-
-    if user.role == "auditor":
-        flash("El rol Auditor no puede ingresar la información en este módulo.", "danger")
-        return redirect(url_for("madurez_datos.inicio"))
-
-    consecutivo = (request.form.get("consecutivo") or "").strip()
-    accion = (request.form.get("accion") or "guardar").strip().lower()
-    draft_id = (request.form.get("draft_id") or "").strip()
-
-    if not consecutivo:
-        flash("Debes ingresar el consecutivo de la revisión.", "warning")
-        return redirect(url_for("madurez_datos.inicio"))
-
-    preguntas = (
-        DatosMadurezPregunta.query
-        .filter_by(activo=True)
-        .order_by(DatosMadurezPregunta.orden.asc())
-        .all()
-    )
-
-    respondidas, total, progreso_pct = calcular_progreso_datos(preguntas, form_data=request.form)
-
-    try:
-        run = None
-
-        if draft_id:
-            run = DatosMadurezRun.query.filter_by(id=int(draft_id)).first()
-            if run and user and run.user_id != user.id:
-                flash("No tienes permiso para modificar este borrador.", "danger")
-                return redirect(url_for("madurez_datos.ingreso"))
-
-        if not run:
-            run = obtener_borrador_datos(user.id if user else None)
-
-        if not run:
-            run = DatosMadurezRun(
-                consecutivo=consecutivo,
-                user_id=user.id if user else None,
-                estado="BORRADOR",
-                progreso_pct=0,
-                resumen_json="{}",
-                pct_general=0.0
-            )
-            db.session.add(run)
-            db.session.flush()
-
-        run.consecutivo = consecutivo
-        run.progreso_pct = progreso_pct
-        run.updated_at = datetime.now(timezone.utc)
-
-        DatosMadurezRespuesta.query.filter_by(run_id=run.id).delete()
-
-        for q in preguntas:
-            st = (request.form.get(f"st_{q.id}") or "").strip().upper()
-            cm = (request.form.get(f"cm_{q.id}") or "").strip()
-
-            if st in ("SI", "PARCIAL", "NO", "NA"):
-                db.session.add(DatosMadurezRespuesta(
-                    run_id=run.id,
-                    pregunta_id=q.id,
-                    estado=st,
-                    comentario=cm
-                ))
-
-        db.session.flush()
-
-        if accion == "guardar":
-            run.estado = "BORRADOR"
-            db.session.commit()
-            flash(f"✅ Borrador de protección de datos guardado correctamente. Progreso actual: {progreso_pct}%.", "success")
-            return redirect(url_for("madurez_datos.ingreso"))
-
-        if accion == "analizar":
-            if progreso_pct < 100 or respondidas < total:
-                db.session.commit()
-                flash(
-                    f"⚠️ El análisis solo se habilita cuando el instrumento esté al 100%. Actualmente llevas {progreso_pct}%.",
-                    "warning"
-                )
-                return redirect(url_for("madurez_datos.ingreso"))
-
-            acc = {}
-            sum_all = 0.0
-            cnt_all = 0
-
-            respuestas = (
-                db.session.query(DatosMadurezRespuesta, DatosMadurezPregunta)
-                .join(DatosMadurezPregunta, DatosMadurezPregunta.id == DatosMadurezRespuesta.pregunta_id)
-                .filter(DatosMadurezRespuesta.run_id == run.id)
-                .order_by(DatosMadurezPregunta.orden.asc())
-                .all()
-            )
-
-            for r, q in respuestas:
-                st = (r.estado or "").strip().upper()
-                score = GDPR_STATUS_SCORE.get(st)
-                if score is None:
-                    continue
-
-                dom = (q.dominio or "SIN_DOMINIO").strip()
-                acc.setdefault(dom, {
-                    "sum": 0.0,
-                    "count": 0,
-                    "items": []
-                })
-
-                acc[dom]["sum"] += float(score)
-                acc[dom]["count"] += 1
-                acc[dom]["items"].append({
-                    "codigo": q.codigo,
-                    "titulo": q.titulo,
-                    "pregunta": q.pregunta,
-                    "estado": st,
-                    "comentario": r.comentario or "",
-                    "score": float(score)
-                })
-
-                sum_all += float(score)
-                cnt_all += 1
-
-            out = {}
-            for dom, d in acc.items():
-                pct = round((d["sum"] / d["count"]) if d["count"] else 0.0, 2)
-                out[dom] = {
-                    "pct": pct,
-                    "total": d["count"],
-                    "items": d["items"]
-                }
-
-            pct_general = round((sum_all / cnt_all) if cnt_all else 0.0, 2)
-            run.resumen_json = json.dumps(out, ensure_ascii=False)
-            run.pct_general = pct_general
-            run.estado = "FINALIZADO"
-            run.progreso_pct = 100
-
-            db.session.commit()
-
-            niv = gdpr_nivel_visual_por_pct(pct_general)
-            flash(
-                f"✅ Revisión de protección de datos guardada y analizada. Nivel general: {pct_general:.2f}% · Madurez: {niv['nivel']}",
-                "success"
-            )
-            return redirect(url_for("madurez_datos.detalle", run_id=run.id))
-
-        db.session.commit()
-        flash("✅ Información procesada correctamente.", "success")
-        return redirect(url_for("madurez_datos.ingreso"))
-
-    except Exception as e:
-        db.session.rollback()
-        flash(f"⚠️ Error en el proceso: {e}", "danger")
-        return redirect(url_for("madurez_datos.ingreso"))
-
-
-# =====================================================================
-# HISTORIAL
-# =====================================================================
-
-@madurez_datos_bp.route("/historial", methods=["GET"])
-@login_required
-def historial():
-    user = User.query.get(session.get("user_id"))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de madurez protección de datos personales"):
-        flash("No tiene permiso para acceder al módulo de nivel de madurez de protección de datos personales.", "danger")
-        return redirect(url_for('menu'))
-
-    read_only = (user.role == "auditor")
-
-    runs = DatosMadurezRun.query.order_by(
-        DatosMadurezRun.created_at.desc(),
-        DatosMadurezRun.id.desc()
-    ).limit(200).all()
-
-    rows = []
-    for r in runs:
-        nivel = gdpr_nivel_visual_por_pct(r.pct_general)
-
-        if read_only:
-            delete_btn = """
-            <button type="button"
-                    class="btn btn-sm btn-outline-secondary rounded-pill"
-                    disabled
-                    title="El perfil Auditor no puede eliminar registros">
-              Eliminar
-            </button>
-            """
-        else:
-            delete_btn = f"""
-            <form method="post"
-                  action="{url_for('madurez_datos.eliminar_run', run_id=r.id)}"
-                  onsubmit="return confirm('¿Desea eliminar este registro?');"
-                  style="margin:0; display:inline;">
-              <button type="submit"
-                      class="btn btn-sm btn-outline-danger rounded-pill">
-                Eliminar
-              </button>
-            </form>
-            """
-
-        rows.append(f"""
-        <tr>
-          <td>{r.id}</td>
-          <td>{escape(r.consecutivo or '')}</td>
-          <td>{escape(r.estado or '')}</td>
-          <td>{r.pct_general:.2f}%</td>
-          <td>
-            <span class="badge rounded-pill px-3 py-2"
-                  style="background:{nivel['color']}; color:#fff;">
-              {escape(nivel['nivel'])}
-            </span>
-          </td>
-          <td>{r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else ''}</td>
-          <td class="text-end">
-            <div class="d-flex justify-content-end gap-2 flex-wrap">
-              <a class="btn btn-sm btn-outline-primary rounded-pill"
-                   href="{url_for('madurez_datos.detalle', run_id=r.id)}">
-                  Ver detalle
-              </a>
-
-              <a class="btn btn-sm btn-outline-danger rounded-pill"
-                   href="{url_for('madurez_datos.detalle_pdf_datos', run_id=r.id)}"
-                   data-no-progress="true">
-                  📄 PDF
-              </a>
-
-                {delete_btn}
-            </div>
-          </td>
-        </tr>
-        """)
-
-    content = f"""
-    <div class="datstd-shell">
-
-      <div class="datstd-header-card">
-        <div class="datstd-header-overlay">
-          <div class="datstd-header-text">
-            <h3 class="datstd-title m-0">Historial — Protección de Datos Personales</h3>
-            <div class="datstd-subtitle">
-              Consulta revisiones guardadas, porcentaje general, nivel de madurez y acceso al detalle.
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="datstd-header-actions">
-        <a href="{url_for('madurez_datos.inicio')}"
-           class="btn datstd-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left me-2"></i>Volver al Inicio
-        </a>
-      </div>
-
-      {"<div class='alert alert-info'>🔒 El perfil Auditor puede consultar el historial, pero no puede eliminar ni generar/editar contenido con IA.</div>" if read_only else ""}
-
-      <div class="datstd-card p-4">
-        <div class="datstd-section-title">Revisiones guardadas</div>
-
-        <div class="table-responsive datstd-table-wrap">
-          <table class="table table-sm align-middle table-hover mb-0">
-            <thead class="datstd-table-head">
-              <tr>
-                <th>ID</th>
-                <th>Consecutivo</th>
-                <th>Estado</th>
-                <th>% General</th>
-                <th>Nivel</th>
-                <th>Fecha</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {''.join(rows) if rows else "<tr><td colspan='7' class='text-muted text-center py-4'>Sin registros.</td></tr>"}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-      body{{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .datstd-shell{{
-        width:96%;
-        max-width:1500px;
-        margin:26px auto 24px auto;
-      }}
-
-      .datstd-header-card{{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }}
-
-      .datstd-header-card::before{{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }}
-
-      .datstd-header-overlay{{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }}
-
-      .datstd-header-overlay::before{{
-        content:"📚";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }}
-
-      .datstd-header-text{{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }}
-
-      .datstd-header-text::before{{
-        content:"SGSI · Estándares de Datos Personales";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }}
-
-      .datstd-title{{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        margin:0 !important;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-      }}
-
-      .datstd-subtitle{{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }}
-
-      .datstd-header-actions{{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }}
-
-      .datstd-header-actions .btn,
-      .btn{{
-        border-radius:999px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
-
-      .datstd-btn-main,
-      .btn-outline-light{{
-        background:#ffffff;
-        color:#0f172a !important;
-        border:1px solid #cfd8e3 !important;
-      }}
-
-      .datstd-btn-main:hover,
-      .btn-outline-light:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-      }}
-
-      .datstd-card,
-      .card{{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
-        overflow:hidden;
-      }}
-
-      .datstd-card.p-4{{
-        padding:1.5rem !important;
-      }}
-
-      .datstd-section-title,
-      .card h5,
-      .card h6{{
-        font-weight:950;
-        font-size:.95rem;
-        color:#0b4a8f;
-        margin-bottom:12px;
-      }}
-
-      .datstd-section-title{{
-        padding-bottom:8px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-      }}
-
-      .datstd-table-wrap,
-      .table-responsive{{
-        max-height:72vh;
-        overflow-y:auto;
-        overflow-x:auto;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:#ffffff;
-      }}
-
-      .table{{
-        margin-bottom:0;
-      }}
-
-      .datstd-table-head th,
-      .table thead th{{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#ffffff !important;
-        font-size:.78rem;
-        font-weight:900 !important;
-        border:none !important;
-        white-space:nowrap;
-        vertical-align:middle !important;
-        text-align:center;
-        padding:9px 8px;
-      }}
-
-      .table tbody td{{
-        vertical-align:middle;
-        font-size:.82rem;
-        padding:9px 8px;
-        border-bottom:1px solid #e5edf7;
-        color:#101827;
-      }}
-
-      .table tbody tr:nth-child(even){{
-        background:#f8fbff;
-      }}
-
-      .table-hover tbody tr:hover,
-      .table tbody tr:hover{{
-        background:#eef6ff;
-      }}
-
-      .badge{{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }}
-
-      @media (max-width:991.98px){{
-        .datstd-shell{{
-          width:98%;
-          margin:8px auto 22px auto;
-        }}
-
-        .datstd-header-card{{
-          min-height:88px;
-        }}
-
-        .datstd-title{{
-          font-size:1.20rem;
-        }}
-
-        .datstd-subtitle{{
-          font-size:.68rem;
-        }}
-      }}
-
-      @media (max-width:768px){{
-        .datstd-header-overlay{{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }}
-
-        .datstd-header-overlay::before{{
-          margin:0;
-        }}
-
-        .datstd-header-text::before{{
-          margin-left:auto;
-          margin-right:auto;
-        }}
-
-        .datstd-title,
-        .datstd-subtitle{{
-          text-align:center;
-        }}
-
-        .datstd-header-actions .btn{{
-          width:100%;
-        }}
-      }}
-    </style>
-    """
-
-    return render_template_string(BASE, title="Historial Protección de Datos", content=content)
-
-@madurez_datos_bp.route("/detalle/<int:run_id>/pdf", methods=["GET"], endpoint="detalle_pdf_datos")
-@login_required
-def detalle_pdf_datos(run_id: int):
-    run = DatosMadurezRun.query.get_or_404(run_id)
-
-    filename = f"Proteccion_Datos_{(run.consecutivo or 'revision').replace(' ', '_')}.pdf"
-
-    return send_file(
-        _gdpr_build_pdf_run(run),
-        mimetype="application/pdf",
-        as_attachment=True,
-        download_name=filename
-    )
-
-
-# =========================
-# ELIMINAR RUN
-# =========================
-@madurez_datos_bp.route("/eliminar/<int:run_id>", methods=["POST"])
-@login_required
-def eliminar_run(run_id):
-    user = User.query.get(session.get("user_id"))
-
-    # 🔒 Solo admin
-    if user.role != 'admin':
-        flash("No tiene permiso para eliminar registros.", "danger")
-        return redirect(url_for('madurez_datos.historial'))
-
-    run = DatosMadurezRun.query.get_or_404(run_id)
-
-    try:
-        db.session.delete(run)
-        db.session.commit()
-        flash("Registro eliminado correctamente.", "success")
-    except Exception as e:
-        db.session.rollback()
-        flash(f"Error al eliminar: {str(e)}", "danger")
-
-    return redirect(url_for('madurez_datos.historial'))
-
-@madurez_datos_bp.route("/detalle/<int:run_id>/dominio/<path:dominio>/preguntas", methods=["GET"])
-@login_required
-def detalle_dominio_preguntas(run_id: int, dominio: str):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de madurez protección de datos personales"):
-        flash("No tiene permiso para acceder al detalle del dominio.", "danger")
-        return redirect(url_for('menu'))
-
-    run = DatosMadurezRun.query.get_or_404(run_id)
-    dominio_txt = (dominio or "").strip()
-
-    items = _gdpr_get_items_dominio(run.id, dominio_txt)
-
-    rows = []
-    for it in items:
-        estado = it.get("estado", "")
-        badge_map = {
-            "SI": "success",
-            "PARCIAL": "warning text-dark",
-            "NO": "danger",
-            "NA": "secondary"
-        }
-        badge_cls = badge_map.get(estado, "secondary")
-
-        rows.append(f"""
-        <tr>
-          <td class="datadom-pregunta">
-            <div class="fw-bold">{escape(it.get('codigo') or '')}</div>
-            <div>{escape(it.get('pregunta') or '')}</div>
-          </td>
-          <td class="col-estado text-center">
-            <span class="badge bg-{badge_cls}">{escape(estado)}</span>
-          </td>
-          <td class="datadom-comentario">
-            {escape(it.get('comentario') or '')}
-          </td>
-        </tr>
-        """)
-
-    content = f"""
-    <div class="datadom-shell">
-      <div class="datadom-header-card">
-        <div class="datadom-header-overlay">
-          <div class="datadom-header-text">
-            <h3 class="datadom-title m-0">Preguntas por Dominio</h3>
-            <div class="datadom-subtitle">
-              Consecutivo: <b>{escape(run.consecutivo or '')}</b> · Dominio: <b>{escape(dominio_txt)}</b>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="datadom-header-actions">
-        <a href="{url_for('madurez_datos.detalle', run_id=run.id)}"
-           class="btn datadom-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left me-2"></i>Volver al detalle
-        </a>
-      </div>
-
-      <div class="datadom-card p-4">
-        <div class="datadom-section-title">Detalle de preguntas y evidencias</div>
-
-        <div class="datadom-table-wrap">
-          <table class="table table-hover align-middle datadom-table">
-            <thead class="datadom-table-head">
-              <tr>
-                <th>Pregunta</th>
-                <th class="col-estado text-center">Estado</th>
-                <th>Comentario / Evidencia</th>
-              </tr>
-            </thead>
-            <tbody>
-              {''.join(rows) if rows else '<tr><td colspan="3" class="text-center text-muted py-4">No hay preguntas para este dominio.</td></tr>'}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .datadom-shell{{
-        width:96%;
-        max-width:1500px;
-        margin:26px auto 24px auto;
-      }}
-
-      .datadom-header-card{{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }}
-
-      .datadom-header-card::before{{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }}
-
-      .datadom-header-overlay{{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }}
-
-      .datadom-header-overlay::before{{
-        content:"📂";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }}
-
-      .datadom-header-text{{
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }}
-
-      .datadom-header-text::before{{
-        content:"SGSI · Detalle de Dominio Datos Personales";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }}
-
-      .datadom-title{{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        margin:0 !important;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-      }}
-
-      .datadom-subtitle{{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }}
-
-      .datadom-header-actions{{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }}
-
-      .datadom-header-actions .btn,
-      .btn{{
-        border-radius:10px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
-
-      .datadom-btn-main,
-      .btn-outline-light{{
-        background:#ffffff;
-        color:#0f172a !important;
-        border:1px solid #cfd8e3 !important;
-      }}
-
-      .datadom-btn-main:hover,
-      .btn-outline-light:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-      }}
-
-      .datadom-card,
-      .card{{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
-        overflow:hidden;
-      }}
-
-      .datadom-section-title,
-      .card h5,
-      .card h6{{
-        font-weight:950;
-        font-size:.95rem;
-        color:#0b4a8f;
-        margin-bottom:16px;
-        padding-bottom:8px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-      }}
-
-      .datadom-table-wrap,
-      .table-responsive{{
-        max-height:72vh;
-        overflow-y:auto;
-        overflow-x:auto;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:#ffffff;
-      }}
-
-      .datadom-table,
-      .table{{
-        width:100%;
-        margin-bottom:0 !important;
-        table-layout:fixed;
-      }}
-
-      .datadom-table-head th,
-      .table thead th{{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#ffffff !important;
-        font-size:.78rem;
-        font-weight:900 !important;
-        border:none !important;
-        white-space:nowrap;
-        vertical-align:middle !important;
-        text-align:center;
-        padding:9px 8px;
-      }}
-
-      .datadom-table th,
-      .datadom-table td,
-      .table tbody td{{
-        vertical-align:middle !important;
-        font-size:.82rem;
-        padding:9px 8px;
-        border-bottom:1px solid #e5edf7;
-        color:#101827;
-      }}
-
-      .datadom-table .col-estado{{
-        width:140px;
-      }}
-
-      .datadom-pregunta,
-      .datadom-comentario,
-      .wrap{{
-        white-space:normal !important;
-        word-break:break-word;
-        overflow-wrap:anywhere;
-      }}
-
-      .table tbody tr:nth-child(even){{
-        background:#f8fbff;
-      }}
-
-      .table-hover tbody tr:hover,
-      .table tbody tr:hover{{
-        background:#eef6ff;
-      }}
-
-      .badge{{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }}
-
-      @media (max-width:991.98px){{
-        .datadom-shell{{
-          width:98%;
-          margin:8px auto 22px auto;
-        }}
-
-        .datadom-header-card{{
-          min-height:88px;
-        }}
-
-        .datadom-title{{
-          font-size:1.20rem;
-        }}
-
-        .datadom-subtitle{{
-          font-size:.68rem;
-        }}
-
-        .datadom-table{{
-          table-layout:auto;
-        }}
-      }}
-
-      @media (max-width:768px){{
-        .datadom-header-overlay{{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }}
-
-        .datadom-header-overlay::before{{
-          margin:0;
-        }}
-
-        .datadom-header-text::before{{
-          margin-left:auto;
-          margin-right:auto;
-        }}
-
-        .datadom-title,
-        .datadom-subtitle{{
-          text-align:center;
-        }}
-
-        .datadom-header-actions .btn{{
-          width:100%;
-        }}
-      }}
-    </style>
-    """
-
-    return render_template_string(BASE, title="Preguntas por Dominio", content=content)
-
-@madurez_datos_bp.route("/detalle/<int:run_id>/plan-trabajo/editar", methods=["GET", "POST"])
-@login_required
-def plan_trabajo_editar(run_id: int):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role == "auditor":
-        flash("El perfil Auditor no puede editar el plan de trabajo.", "danger")
-        return redirect(url_for("madurez_datos.detalle", run_id=run_id))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de madurez protección de datos personales"):
-        flash("No tiene permiso para editar el plan de trabajo.", "danger")
-        return redirect(url_for('menu'))
-
-    run = DatosMadurezRun.query.get_or_404(run_id)
-    texto_actual = _gdpr_normalizar_texto_plano_guardado(
-        run.plan_trabajo_editado or run.plan_trabajo_ai or ""
-    )
-
-    if request.method == "POST":
-        texto = _gdpr_normalizar_texto_plano_guardado(
-            (request.form.get("plan_trabajo") or "").strip()
-        )
-        run.plan_trabajo_editado = texto
-        db.session.commit()
-        flash("✅ Plan de trabajo actualizado.", "success")
-        return redirect(url_for("madurez_datos.detalle", run_id=run.id))
-
-    content = f"""
-    <div class="datstd-shell">
-
-      <div class="datstd-header-card">
-        <div class="datstd-header-overlay">
-          <div class="datstd-header-text">
-            <h3 class="datstd-title m-0">Editar Plan de Trabajo — Protección de Datos Personales</h3>
-            <div class="datstd-subtitle">
-              Consecutivo: <b>{escape(run.consecutivo or '')}</b>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="datstd-header-actions">
-        <a href="{url_for('madurez_datos.detalle', run_id=run.id)}"
-           class="btn datstd-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left me-2"></i>Volver al detalle
-        </a>
-      </div>
-
-      <div class="datstd-card p-4">
-        <form method="POST">
-          <div class="datstd-section-title">Plan de trabajo editable</div>
-
-          <div class="text-muted small mb-3">
-            Ajusta el contenido del plan de trabajo y guarda los cambios.
-          </div>
-
-          <textarea name="plan_trabajo"
-                    class="form-control datstd-textarea"
-                    rows="20"
-                    placeholder="Escribe o ajusta aquí el plan de trabajo...">{escape(texto_actual)}</textarea>
-
-          <div class="d-flex justify-content-center mt-4">
-            <button type="submit" class="btn btn-primary rounded-pill px-5 fw-bold">
-              <i class="bi bi-save2 me-2"></i>Guardar cambios
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <style>
-      body{{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .datstd-shell{{
-        width:96%;
-        max-width:1500px;
-        margin:26px auto 24px auto;
-      }}
-
-      .datstd-header-card{{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }}
-
-      .datstd-header-card::before{{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }}
-
-      .datstd-header-overlay{{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }}
-
-      .datstd-header-overlay::before{{
-        content:"📄";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }}
-
-      .datstd-header-text{{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }}
-
-      .datstd-header-text::before{{
-        content:"SGSI · Estándar Datos Personales";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }}
-
-      .datstd-title{{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }}
-
-      .datstd-subtitle{{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }}
-
-      .datstd-header-actions{{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }}
-
-      .datstd-header-actions .btn,
-      .datstd-btn-main,
-      .btn{{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }}
-
-      .datstd-btn-main{{
-        background:#ffffff;
-        color:#0f172a !important;
-        border:1px solid #cfd8e3 !important;
-      }}
-
-      .datstd-btn-main:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-        border-color:#9ec5fe !important;
-      }}
-
-      .datstd-card,
-      .card{{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
-        overflow:hidden;
-      }}
-
-      .datstd-card.p-4{{
-        padding:1.5rem !important;
-      }}
-
-      .datstd-section-title,
-      .card h5,
-      .card h6{{
-        font-weight:950;
-        font-size:.95rem;
-        color:#0b4a8f;
-        margin-bottom:16px;
-      }}
-
-      .datstd-section-title{{
-        padding-bottom:8px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-      }}
-
-      .datstd-textarea{{
-        min-height:420px;
-        border-radius:14px;
-        border:1px solid #d9e3f0;
-        resize:vertical;
-        background:#f8fafc;
-        font-size:.86rem;
-        padding:14px 16px;
-        box-shadow:none !important;
-      }}
-
-      .datstd-textarea:focus{{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
-      }}
-
-      .form-label{{
-        font-size:.72rem;
-        font-weight:900;
-        color:#0b4a8f;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        padding:6px 10px;
-        border-radius:10px;
-        display:inline-block;
-        margin-bottom:6px;
-      }}
-
-      .form-control,
-      .form-select{{
-        border-radius:10px;
-        border:1px solid #d9e3f0;
-        min-height:40px;
-        font-size:.86rem;
-        background:#f8fafc;
-        box-shadow:none !important;
-      }}
-
-      .form-control:focus,
-      .form-select:focus{{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
-      }}
-
-      .badge{{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }}
-
-      @media (max-width:992px){{
-        .datstd-shell{{
-          width:98%;
-          margin:8px auto 22px auto;
-        }}
-
-        .datstd-header-card{{
-          min-height:88px;
-        }}
-
-        .datstd-title{{
-          font-size:1.20rem;
-        }}
-
-        .datstd-subtitle{{
-          font-size:.68rem;
-        }}
-
-        .datstd-card.p-4{{
-          padding:1rem !important;
-        }}
-
-        .datstd-textarea{{
-          min-height:320px;
-        }}
-      }}
-
-      @media (max-width:768px){{
-        .datstd-header-overlay{{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }}
-
-        .datstd-header-overlay::before{{
-          margin:0;
-        }}
-
-        .datstd-header-text::before{{
-          margin-left:auto;
-          margin-right:auto;
-        }}
-
-        .datstd-title,
-        .datstd-subtitle{{
-          text-align:center;
-        }}
-
-        .datstd-header-actions .btn{{
-          width:100%;
-        }}
-      }}
-    </style>
-    """
-    return render_template_string(BASE, title="Editar Plan de Trabajo Datos Personales", content=content)
-
-@madurez_datos_bp.route("/detalle/<int:run_id>/plan-trabajo/generar", methods=["POST"])
-@login_required
-def plan_trabajo_generar(run_id: int):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role == "auditor":
-        flash("El perfil Auditor no puede generar el plan de trabajo con IA.", "danger")
-        return redirect(url_for("madurez_datos.detalle", run_id=run_id))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de madurez protección de datos personales"):
-        flash("No tiene permiso para generar el plan de trabajo.", "danger")
-        return redirect(url_for('menu'))
-
-    run = DatosMadurezRun.query.get_or_404(run_id)
-
-    if user.role not in ("admin", "auditor"):
-        if run.user_id and run.user_id != user.id:
-            flash("No tiene permiso para generar IA sobre esta revisión.", "danger")
-            return redirect(url_for("madurez_datos.historial"))
-
-    try:
-        resumen = json.loads(run.resumen_json or "{}")
-    except Exception:
-        resumen = {}
-
-    if not resumen:
-        flash("⚠️ No hay resultados consolidados para generar el plan de trabajo.", "warning")
-        return redirect(url_for("madurez_datos.detalle", run_id=run.id))
-
-    prompt = _gdpr_prompt_plan_trabajo(run, resumen)
-
-    try:
-        raw = _ai_text(prompt, max_tokens=1800)
-    except Exception as e:
-        flash(f"❌ Error llamando IA para el plan de trabajo: {e}", "danger")
-        return redirect(url_for("madurez_datos.detalle", run_id=run.id))
-
-    plan_texto = ""
-
-    try:
-        obj = _gdpr_extraer_json_objeto(raw)
-        if isinstance(obj, dict):
-            plan_texto = _gdpr_plan_trabajo_a_texto(obj.get("plan_trabajo", []))
-    except Exception:
-        plan_texto = ""
-
-    if not plan_texto:
-        plan_texto = (raw or "").strip()
-
-    # LIMPIAR HTML/TAGS ANTES DE GUARDAR
-    plan_texto = _gdpr_normalizar_texto_plano_guardado(plan_texto)
-
-    if not plan_texto:
-        flash("⚠️ La IA no devolvió contenido para el plan de trabajo.", "warning")
-        return redirect(url_for("madurez_datos.detalle", run_id=run.id))
-
-    # sincronizar ambos campos para que se vea limpio de inmediato
-    run.plan_trabajo_ai = plan_texto
-    run.plan_trabajo_editado = plan_texto
-
-    db.session.commit()
-    flash("✅ Plan de trabajo generado con IA.", "success")
-    return redirect(url_for("madurez_datos.detalle", run_id=run.id))
-
-@madurez_datos_bp.route("/detalle/<int:run_id>/dominio/<path:dominio>/analisis", methods=["GET", "POST"])
-@login_required
-def analisis_dominio(run_id: int, dominio: str):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de madurez protección de datos personales"):
-        flash("No tiene permiso para acceder al análisis del dominio.", "danger")
-        return redirect(url_for('menu'))
-
-    run = DatosMadurezRun.query.get_or_404(run_id)
-    dominio_txt = (dominio or "").strip()
-    read_only = (user.role == "auditor")
-    modo_edicion = request.args.get("editar", "0") == "1"
-
-    if read_only and modo_edicion:
-        return redirect(url_for("madurez_datos.analisis_dominio", run_id=run.id, dominio=dominio_txt))
-
-    try:
-        resumen = json.loads(run.resumen_json or "{}")
-    except Exception:
-        resumen = {}
-
-    d = (resumen or {}).get(dominio_txt, {}) or {}
-    pct = float(d.get("pct", 0) or 0)
-
-    ana = (
-        DatosMadurezDominioAnalisis.query
-        .filter_by(run_id=run.id, dominio=dominio_txt)
-        .first()
-    )
-
-    if request.method == "POST":
-        if read_only:
-            flash("El perfil Auditor no puede guardar cambios en el análisis del dominio.", "danger")
-            return redirect(url_for("madurez_datos.analisis_dominio", run_id=run.id, dominio=dominio_txt))
-
-        estado_actual = (request.form.get("estado_actual") or "").strip()
-        estado_requerido = (request.form.get("estado_requerido") or "").strip()
-        plan_editado = (request.form.get("plan_accion_editado") or "").strip()
-
-        if not ana:
-            ana = DatosMadurezDominioAnalisis(run_id=run.id, dominio=dominio_txt)
-            db.session.add(ana)
-
-        ana.estado_actual = estado_actual
-        ana.estado_requerido = estado_requerido
-        ana.plan_accion_editado = plan_editado
-
-        db.session.commit()
-        flash("✅ Análisis guardado.", "success")
-        return redirect(url_for("madurez_datos.analisis_dominio", run_id=run.id, dominio=dominio_txt))
-
-    estado_actual = (ana.estado_actual if ana else "") or ""
-    estado_requerido = (ana.estado_requerido if ana else "") or ""
-    plan_ai = (ana.plan_accion_ai if ana else "") or ""
-    plan_editado = (ana.plan_accion_editado if ana else "") or ""
-    plan_mostrar = plan_editado or plan_ai
-
-    if read_only:
-        toggle_btn = """
-        <button class="btn btn-outline-secondary rounded-pill px-4 fw-bold"
-                type="button"
-                disabled
-                title="El perfil Auditor no puede editar el análisis del dominio">
-          <i class="bi bi-pencil-square me-2"></i>Editar
-        </button>
-        """
-    else:
-        toggle_btn = (
-            f"""
-            <a href="{url_for('madurez_datos.analisis_dominio', run_id=run.id, dominio=dominio_txt)}"
-               class="btn datstd-btn-main rounded-pill px-4 fw-bold">
-              <i class="bi bi-eye me-2"></i>Ver modo lectura
-            </a>
-            """
-            if modo_edicion else
-            f"""
-            <a href="{url_for('madurez_datos.analisis_dominio', run_id=run.id, dominio=dominio_txt, editar=1)}"
-               class="btn btn-primary rounded-pill px-4 fw-bold">
-              <i class="bi bi-pencil-square me-2"></i>Editar
-            </a>
-            """
-        )
-
-    if modo_edicion and not read_only:
-        panel_izq = f"""
-        <div class="col-12 col-lg-6">
-          <div class="datstd-card p-4 h-100">
-            <div class="datstd-section-title">✏️ Edición manual del análisis</div>
-            <div class="text-muted small mb-3">
-              Ajusta los textos generados y guarda los cambios.
-            </div>
-
-            <form method="POST">
-              <div class="datstd-section-title">📌 Estado actual</div>
-              <textarea class="form-control datstd-textarea"
-                        name="estado_actual"
-                        rows="8">{escape(estado_actual)}</textarea>
-
-              <div class="datstd-section-title mt-3">🎯 Estado requerido</div>
-              <textarea class="form-control datstd-textarea"
-                        name="estado_requerido"
-                        rows="7">{escape(estado_requerido)}</textarea>
-
-              <div class="datstd-section-title mt-3">🛠 Plan de acción (editable)</div>
-              <textarea class="form-control datstd-textarea"
-                        name="plan_accion_editado"
-                        rows="12">{escape(plan_editado)}</textarea>
-
-              <div class="d-flex justify-content-center mt-3">
-                <button class="btn btn-primary rounded-pill px-5 fw-bold" type="submit">
-                  <i class="bi bi-save2 me-2"></i>Guardar cambios
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-        """
-
-        panel_der = f"""
-        <div class="col-12 col-lg-6">
-          <div class="datstd-card p-4 h-100">
-            <div class="datstd-section-title">🤖 Generación con IA</div>
-            <div class="text-muted small mt-1">
-              Genera o regenera automáticamente el análisis del dominio.
-            </div>
-
-            <div class="text-center mt-4">
-              <form method="POST"
-                    action="{url_for('madurez_datos.analisis_dominio_generar', run_id=run.id, dominio=dominio_txt)}"
-                    class="m-0 mt-4">
-                <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
-                  <i class="bi bi-magic me-2"></i>Generar análisis (IA)
-                </button>
-              </form>
-            </div>
-          </div>
-        </div>
-        """
-    else:
-        panel_izq = f"""
-        <div class="col-12 col-lg-6">
-          <div class="datstd-card p-4 h-100">
-            <div class="datstd-section-title">📄 Análisis del dominio</div>
-
-            <div class="datstd-read-box mt-2">
-              <b>📌 Estado actual</b><br>
-              {escape(estado_actual) if estado_actual else "<span class='text-muted'>Pendiente por generar con IA.</span>"}
-            </div>
-
-            <div class="datstd-read-box mt-3">
-              <b>🎯 Estado requerido</b><br>
-              {escape(estado_requerido) if estado_requerido else "<span class='text-muted'>Pendiente por generar con IA.</span>"}
-            </div>
-
-            <div class="datstd-read-box mt-3">
-              <b>🛠 Plan de acción</b><br>
-              {escape(plan_mostrar) if plan_mostrar else "<span class='text-muted'>Pendiente por generar con IA.</span>"}
-            </div>
-          </div>
-        </div>
-        """
-
-        if read_only:
-            panel_der = """
-            <div class="col-12 col-lg-6">
-              <div class="datstd-card p-4 h-100">
-                <div class="datstd-section-title">🤖 Generación con IA</div>
-                <div class="text-muted small mt-1">
-                  El perfil Auditor puede consultar el análisis, pero no puede editarlo ni generarlo con IA.
-                </div>
-
-                <div class="text-center mt-4">
-                  <button class="btn btn-outline-secondary rounded-pill px-4 fw-bold" type="button" disabled
-                          title="El perfil Auditor no puede generar análisis con IA">
-                    <i class="bi bi-magic me-2"></i>Generar análisis (IA)
-                  </button>
-                </div>
-              </div>
-            </div>
-            """
-        else:
-            panel_der = f"""
-            <div class="col-12 col-lg-6">
-              <div class="datstd-card p-4 h-100">
-                <div class="datstd-section-title">🤖 Generación con IA</div>
-                <div class="text-muted small mt-1">
-                  Usa este botón para generar o regenerar el análisis del dominio.
-                </div>
-
-                <div class="text-center mt-4">
-                  <form method="POST"
-                        action="{url_for('madurez_datos.analisis_dominio_generar', run_id=run.id, dominio=dominio_txt)}"
-                        class="m-0">
-                    <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
-                      <i class="bi bi-magic me-2"></i>Generar análisis (IA)
-                    </button>
-                  </form>
-                </div>
-              </div>
-            </div>
-            """
-
-    content = f"""
-    <div class="datstd-shell">
-
-      <div class="datstd-header-card">
-        <div class="datstd-header-overlay">
-          <div class="datstd-header-text">
-            <h3 class="datstd-title m-0">Análisis por Dominio</h3>
-            <div class="datstd-subtitle">
-              Consecutivo: <b>{escape(run.consecutivo or '')}</b> · Dominio: <b>{escape(dominio_txt)}</b> · Cumplimiento: <b>{pct:.2f}%</b>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="datstd-header-actions">
-        <a href="{url_for('madurez_datos.detalle', run_id=run.id)}"
-           class="btn datstd-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left me-2"></i>Volver al detalle
-        </a>
-        {toggle_btn}
-      </div>
-
-      {"<div class='alert alert-info'>🔒 El perfil Auditor puede ver el análisis del dominio, pero no puede usar Editar ni Generar análisis (IA).</div>" if read_only else ""}
-
-      <div class="row g-3">
-        {panel_izq}
-        {panel_der}
-      </div>
-
-    </div>
-
-    <style>
-      body{{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .datstd-shell{{
-        width:96%;
-        max-width:1500px;
-        margin:26px auto 24px auto;
-      }}
-
-      .datstd-header-card{{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }}
-
-      .datstd-header-card::before{{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }}
-
-      .datstd-header-overlay{{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }}
-
-      .datstd-header-overlay::before{{
-        content:"🤖";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }}
-
-      .datstd-header-text{{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }}
-
-      .datstd-header-text::before{{
-        content:"SGSI · Análisis Datos Personales";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }}
-
-      .datstd-title{{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        margin:0 !important;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-      }}
-
-      .datstd-subtitle{{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }}
-
-      .datstd-header-actions{{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }}
-
-      .datstd-header-actions .btn,
-      .btn{{
-        border-radius:999px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
-
-      .datstd-btn-main,
-      .btn-outline-light{{
-        background:#ffffff;
-        color:#0f172a !important;
-        border:1px solid #cfd8e3 !important;
-      }}
-
-      .datstd-btn-main:hover,
-      .btn-outline-light:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-      }}
-
-      .datstd-card,
-      .card{{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
-        overflow:hidden;
-      }}
-
-      .datstd-card.p-4{{
-        padding:1.5rem !important;
-      }}
-
-      .datstd-section-title,
-      .card h5,
-      .card h6{{
-        font-weight:950;
-        font-size:.95rem;
-        color:#0b4a8f;
-        margin-bottom:10px;
-      }}
-
-      .datstd-textarea{{
-        border-radius:14px !important;
-        border:1px solid #d9e3f0 !important;
-        box-shadow:none !important;
-        resize:vertical;
-        background:#f8fafc;
-      }}
-
-      .datstd-textarea:focus{{
-        border-color:#3f86d6 !important;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
-      }}
-
-      .datstd-read-box{{
-        min-height:110px;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
-        padding:14px 16px;
-        color:#243443;
-        white-space:pre-wrap;
-        word-break:break-word;
-        overflow-wrap:anywhere;
-      }}
-
-      .form-label{{
-        font-size:.72rem;
-        font-weight:900;
-        color:#0b4a8f;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        padding:6px 10px;
-        border-radius:10px;
-        display:inline-block;
-        margin-bottom:6px;
-      }}
-
-      .form-control,
-      .form-select{{
-        border-radius:10px;
-        border:1px solid #d9e3f0;
-        min-height:40px;
-        font-size:.86rem;
-        background:#f8fafc;
-        box-shadow:none !important;
-      }}
-
-      .form-control:focus,
-      .form-select:focus{{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
-      }}
-
-      .badge{{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }}
-
-      @media (max-width:991.98px){{
-        .datstd-shell{{
-          width:98%;
-          margin:8px auto 22px auto;
-        }}
-
-        .datstd-header-card{{
-          min-height:88px;
-        }}
-
-        .datstd-title{{
-          font-size:1.20rem;
-        }}
-
-        .datstd-subtitle{{
-          font-size:.68rem;
-        }}
-
-        .datstd-read-box{{
-          min-height:90px;
-        }}
-      }}
-
-      @media (max-width:768px){{
-        .datstd-header-overlay{{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }}
-
-        .datstd-header-overlay::before{{
-          margin:0;
-        }}
-
-        .datstd-header-text::before{{
-          margin-left:auto;
-          margin-right:auto;
-        }}
-
-        .datstd-title,
-        .datstd-subtitle{{
-          text-align:center;
-        }}
-
-        .datstd-header-actions .btn{{
-          width:100%;
-        }}
-      }}
-    </style>
-    """
-
-    return render_template_string(BASE, title="Análisis de Dominio Datos Personales", content=content)
-
-@madurez_datos_bp.route("/detalle/<int:run_id>/dominio/<path:dominio>/analisis/generar", methods=["POST"])
-@login_required
-def analisis_dominio_generar(run_id: int, dominio: str):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role == "auditor":
-        flash("El perfil Auditor no puede generar análisis del dominio con IA.", "danger")
-        return redirect(url_for("madurez_datos.analisis_dominio", run_id=run_id, dominio=(dominio or "").strip()))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de madurez protección de datos personales"):
-        flash("No tiene permiso para generar análisis del dominio.", "danger")
-        return redirect(url_for('menu'))
-
-    run = DatosMadurezRun.query.get_or_404(run_id)
-    dominio_txt = (dominio or "").strip()
-
-    if user.role not in ("admin", "auditor"):
-        if run.user_id and run.user_id != user.id:
-            flash("No tiene permiso para generar IA sobre esta revisión.", "danger")
-            return redirect(url_for("madurez_datos.historial"))
-
-    try:
-        resumen = json.loads(run.resumen_json or "{}")
-    except Exception:
-        resumen = {}
-
-    d = (resumen or {}).get(dominio_txt, {}) or {}
-    pct = float(d.get("pct", 0) or 0)
-
-    items = _gdpr_get_items_dominio(run.id, dominio_txt)
-    if not items:
-        flash("⚠️ No hay preguntas/respuestas para este dominio en esta revisión.", "warning")
-        return redirect(url_for("madurez_datos.analisis_dominio", run_id=run.id, dominio=dominio_txt))
-
-    prompt = _gdpr_ai_prompt_dominio(dominio_txt, pct, items)
-
-    try:
-        raw = _ai_text(prompt, max_tokens=1800)
-    except Exception as e:
-        flash(f"❌ Error llamando IA: {e}", "danger")
-        return redirect(url_for("madurez_datos.analisis_dominio", run_id=run.id, dominio=dominio_txt))
-
-    obj = _gdpr_extraer_json_objeto(raw)
-
-    estado_actual = (obj.get("estado_actual") or "").strip() if isinstance(obj, dict) else ""
-    estado_requerido = (obj.get("estado_requerido") or "").strip() if isinstance(obj, dict) else ""
-    plan_ai = _gdpr_plan_accion_a_texto(obj.get("plan_accion", [])) if isinstance(obj, dict) else ""
-
-    if not estado_actual:
-        estado_actual = "No se pudo interpretar correctamente el estado actual generado por la IA. Se recomienda regenerar el análisis."
-
-    if not estado_requerido:
-        estado_requerido = "No se pudo interpretar correctamente el estado requerido generado por la IA. Se recomienda regenerar el análisis."
-
-    if not plan_ai or plan_ai.strip().startswith("{"):
-        plan_ai = "No se pudo generar correctamente el plan de acción. Regenera el análisis."
-
-    ana = (
-        DatosMadurezDominioAnalisis.query
-        .filter_by(run_id=run.id, dominio=dominio_txt)
-        .first()
-    )
-
-    if not ana:
-        ana = DatosMadurezDominioAnalisis(run_id=run.id, dominio=dominio_txt)
-        db.session.add(ana)
-
-    ana.estado_actual = estado_actual
-    ana.estado_requerido = estado_requerido
-    ana.plan_accion_ai = plan_ai
-    ana.plan_accion_editado = plan_ai
-
-    db.session.commit()
-
-    flash("✅ Análisis generado por IA y guardado.", "success")
-    return redirect(url_for("madurez_datos.analisis_dominio", run_id=run.id, dominio=dominio_txt))
-
-# ==========
-# DETALLE / RESULTADO
-# ==========
-
-@madurez_datos_bp.route("/detalle/<int:run_id>", methods=["GET"])
-@login_required
-def detalle(run_id):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de madurez protección de datos personales"):
-        flash("No tiene permiso para acceder al módulo de nivel de madurez de protección de datos personales.", "danger")
-        return redirect(url_for('menu'))
-
-    run = DatosMadurezRun.query.get_or_404(run_id)
-
-    try:
-        resumen = json.loads(run.resumen_json or "{}")
-    except Exception:
-        resumen = {}
-
-    def esc(x):
-        return escape(x or "")
-
-    def _nl2br(s: str) -> str:
-        txt = _gdpr_normalizar_texto_plano_guardado(s or "")
-        return txt.replace("\n", "<br>")
-
-    nivel_general = gdpr_nivel_visual_por_pct(run.pct_general)
-    nivel_general_texto = (nivel_general.get("nivel") or "").strip()
-    nivel_general_nombre = nivel_general_texto.split(":", 1)[1].strip() if ":" in nivel_general_texto else nivel_general_texto
-
-    radar_b64 = generar_radar_datos_base64(resumen)
-
-    informe_ai = _gdpr_normalizar_texto_plano_guardado(run.informe_ejecutivo_ai or "")
-    informe_editado = _gdpr_normalizar_texto_plano_guardado(run.informe_ejecutivo_editado or "")
-    informe_mostrar = informe_editado if informe_editado else informe_ai
-
-    plan_ai = _gdpr_normalizar_texto_plano_guardado(run.plan_trabajo_ai or "")
-    plan_editado = _gdpr_normalizar_texto_plano_guardado(run.plan_trabajo_editado or "")
-    plan_mostrar = plan_editado if plan_editado else plan_ai
-
-    pdf_btn = ""
-    try:
-        pdf_btn = f"""
-        <a href="{url_for('madurez_datos.exportar_pdf', run_id=run.id)}"
-           class="btn btn-danger rounded-pill px-4 fw-bold"
-           target="_blank">
-          <i class="bi bi-file-earmark-pdf me-2"></i>Exportar PDF
-        </a>
-        """
-    except Exception:
-        pdf_btn = ""
-
-    top_html = f"""
-    <div class="row g-3 mb-4">
-
-      <div class="col-12 col-xl-5">
-        <div class="datares-card p-4 h-100">
-          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
-            <div>
-              <div class="datares-card-title">📊 Radar por dominios</div>
-              <div class="text-muted small">
-                Resultado consolidado del programa de protección de datos personales.
-              </div>
-            </div>
-
-            <div class="text-end">
-              <div class="badge rounded-pill px-3 py-2"
-                   style="background:{nivel_general.get('color','#6c757d')}; color:#fff; font-size:.82rem;">
-                Nivel {nivel_general.get('score', 0)}
-              </div>
-              <div class="small text-muted mt-1">{esc(nivel_general_nombre)}</div>
-            </div>
-          </div>
-
-          <div class="text-center mt-3 datares-radar-wrap">
-            <div class="datares-radar-pct-box">
-              <div class="datares-radar-pct-label">Cumplimiento general</div>
-              <div class="datares-radar-pct-value">{float(run.pct_general or 0):.2f}%</div>
-              <div class="datares-radar-pct-subtitle">
-                Nivel {nivel_general.get('score', 0)} · {esc(nivel_general_nombre)}
-              </div>
-            </div>
-
-            {f'<img class="img-fluid datares-radar-small" src="data:image/png;base64,{radar_b64}">' if radar_b64 else '<div class="alert alert-warning mb-0">No fue posible generar el radar.</div>'}
-          </div>
-        </div>
-      </div>
-
-      <div class="col-12 col-xl-7">
-        <div class="datares-card p-4 h-100">
-          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <div>
-              <div class="datares-card-title">🧾 Informe ejecutivo</div>
-              <div class="text-muted small">
-                Síntesis ejecutiva generada con IA a partir de los resultados por dominio.
-              </div>
-            </div>
-
-            <div class="d-flex gap-2 flex-wrap">
-              <form method="POST"
-                    action="{url_for('madurez_datos.informe_ejecutivo_generar', run_id=run.id)}"
-                    class="m-0">
-                <button type="submit" class="btn datares-btn-success rounded-pill px-4 fw-bold">
-                  <i class="bi bi-magic me-2"></i>Generar con IA
-                </button>
-              </form>
-
-              <a href="{url_for('madurez_datos.informe_ejecutivo_editar', run_id=run.id)}"
-                 class="btn btn-primary rounded-pill px-4 fw-bold">
-                <i class="bi bi-pencil-square me-2"></i>Editar
-              </a>
-            </div>
-          </div>
-
-          <div class="datares-exec-box mt-3">
-            {f'<div class="datares-exec-text">{_nl2br(esc(informe_mostrar))}</div>' if informe_mostrar else '''
-              <div class="text-center py-4">
-                <div class="mb-2" style="font-size:2rem;">&#129302;</div>
-                <div class="fw-bold text-black">Aún no hay informe ejecutivo</div>
-                <div class="text-muted small mt-1">
-                  Presiona <b>Generar con IA</b> para construir el informe con base en el resultado de los dominios.
-                </div>
-              </div>
-            '''}
-          </div>
-        </div>
-      </div>
-
-    </div>
-
-    <div class="row g-3 mb-4">
-
-      <div class="col-12">
-        <div class="datares-card p-4">
-          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <div>
-              <div class="datares-card-title">🗂️ Plan de trabajo</div>
-              <div class="text-muted small">
-                Plan general de cierre de brechas derivado del resultado.
-              </div>
-            </div>
-
-            <div class="d-flex gap-2 flex-wrap">
-              <form method="POST"
-                    action="{url_for('madurez_datos.plan_trabajo_generar', run_id=run.id)}"
-                    class="m-0">
-                <button type="submit" class="btn datares-btn-success rounded-pill px-4 fw-bold">
-                  <i class="bi bi-magic me-2"></i>Generar con IA
-                </button>
-              </form>
-
-              <a href="{url_for('madurez_datos.plan_trabajo_editar', run_id=run.id)}"
-                 class="btn btn-primary rounded-pill px-4 fw-bold">
-                <i class="bi bi-pencil-square me-2"></i>Editar
-              </a>
-            </div>
-          </div>
-
-          <div class="datares-exec-box datares-plan-box mt-3">
-            {f'<div class="datares-exec-text">{_nl2br(plan_mostrar)}</div>' if plan_mostrar else '''
-              <div class="text-center py-4">
-                <div class="mb-2" style="font-size:2rem;">&#128450;</div>
-                <div class="fw-bold text-black">Aún no hay plan de trabajo</div>
-                <div class="text-muted small mt-1">
-                  Presiona <b>Generar con IA</b> para construir el plan general.
-                </div>
-              </div>
-            '''}
-          </div>
-        </div>
-      </div>
-
-    </div>
-    """
-
-    tarjetas = []
-    for dominio, data in resumen.items():
-        try:
-            pct = float(data.get("pct", 0) or 0)
-        except Exception:
-            pct = 0.0
-
-        total = int(data.get("total", 0) or 0)
-        items = data.get("items", []) or []
-        niv = gdpr_nivel_visual_por_pct(pct)
-
-        counts = {"SI": 0, "PARCIAL": 0, "NO": 0, "NA": 0}
-        for it in items:
-            st = (it.get("estado") or "").strip().upper()
-            if st in counts:
-                counts[st] += 1
-
-        gauge_b64 = generar_gdpr_velocimetro_base64(
-            dominio,
-            pct,
-            niv.get("nivel", ""),
-            niv.get("color", "#6c757d")
-        )
-
-        nivel_texto = (niv.get("nivel") or "").strip()
-        nivel_nombre = nivel_texto.split(":", 1)[1].strip() if ":" in nivel_texto else nivel_texto
-
-        tarjetas.append(f"""
-        <div class="col-12 col-lg-6">
-          <div class="datares-card p-4 h-100">
-            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
-              <div>
-                <div class="datares-domain-title">{esc(dominio)}</div>
-                <div class="small text-muted">Ítems evaluados: <b>{total}</b></div>
-              </div>
-
-              <div class="text-end">
-                <span class="badge rounded-pill px-3 py-2"
-                      style="background:{niv.get('color','#6c757d')}; color:#fff;">
-                  Nivel {niv.get('score', 0)}
-                </span>
-                <div class="small text-muted mt-1">{esc(nivel_nombre)}</div>
-              </div>
-            </div>
-
-            <div class="text-center datares-gauge-wrap">
-              {f'<img class="img-fluid datares-gauge" src="data:image/png;base64,{gauge_b64}">' if gauge_b64 else ''}
-            </div>
-
-            <div class="row g-2 mt-1">
-              <div class="col-6 col-md-3">
-                <div class="mini-stat bg-success-subtle text-success-emphasis">Sí<br><b>{counts['SI']}</b></div>
-              </div>
-              <div class="col-6 col-md-3">
-                <div class="mini-stat bg-warning-subtle text-dark">Parcial<br><b>{counts['PARCIAL']}</b></div>
-              </div>
-              <div class="col-6 col-md-3">
-                <div class="mini-stat bg-danger-subtle text-danger-emphasis">No<br><b>{counts['NO']}</b></div>
-              </div>
-              <div class="col-6 col-md-3">
-                <div class="mini-stat bg-secondary-subtle text-secondary-emphasis">N/A<br><b>{counts['NA']}</b></div>
-              </div>
-            </div>
-
-            <div class="d-flex flex-wrap gap-2 justify-content-center mt-3">
-              <a href="{url_for('madurez_datos.detalle_dominio_preguntas', run_id=run.id, dominio=dominio)}"
-                 class="btn btn-outline-primary rounded-pill px-3">
-                <i class="bi bi-list-check me-2"></i>Ver preguntas
-              </a>
-
-              <a href="{url_for('madurez_datos.analisis_dominio', run_id=run.id, dominio=dominio)}"
-                 class="btn btn-outline-dark rounded-pill px-3">
-                <i class="bi bi-cpu me-2"></i>Análisis
-              </a>
-            </div>
-          </div>
-        </div>
-        """)
-
-    content = f"""
-    <div class="datares-shell">
-
-      <div class="datares-header-card">
-        <div class="datares-header-overlay">
-          <div class="datares-header-text">
-            <h3 class="datares-title m-0">️Resultado — Protección de Datos Personales</h3>
-            <div class="datares-subtitle">
-              Consecutivo: <b>{esc(run.consecutivo or '')}</b>
-              · Cumplimiento general: <b>{float(run.pct_general or 0):.2f}%</b>
-              · Nivel general: <b>{esc(nivel_general_nombre)}</b>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="datares-header-actions">
-        <a href="{url_for('madurez_datos.historial')}"
-           class="btn datares-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left me-2"></i>Volver al historial
-        </a>
-
-        <a href="{url_for('madurez_datos.inicio')}"
-           class="btn datares-btn-soft rounded-pill px-4 fw-bold">
-          <i class="bi bi-house-door-fill me-2"></i>Volver al módulo
-        </a>
-      </div>
-
-      {top_html}
-
-      <div class="row g-3">
-        {''.join(tarjetas)}
-      </div>
-
-    </div>
-
-    <style>
-      body{{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .datares-shell{{
-        width:96%;
-        max-width:1650px;
-        margin:26px auto 30px auto;
-      }}
-
-      .datares-header-card{{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:20px;
-        padding:16px 24px;
-        min-height:96px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 14px 28px rgba(15,23,42,.28);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }}
-
-      .datares-header-card::before{{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.18),transparent 24%),
-          repeating-linear-gradient(
-            135deg,
-            rgba(255,255,255,.05) 0px,
-            rgba(255,255,255,.05) 1px,
-            transparent 1px,
-            transparent 14px
-          );
-        pointer-events:none;
-      }}
-
-      .datares-header-overlay{{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        position:relative;
-        z-index:1;
-      }}
-
-      .datares-header-overlay::before{{
-        content:"🛡";
-        width:56px;
-        height:42px;
-        min-width:56px;
-        border-radius:16px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.5rem;
-        box-shadow:0 10px 20px rgba(0,0,0,.22);
-        margin-right:14px;
-      }}
-
-      .datares-header-text{{
-        width:100%;
-      }}
-
-      .datares-header-text::before{{
-        content:"SGSI · Resultado Protección de Datos Personales";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:4px 10px;
-        font-size:.66rem;
-        font-weight:900;
-        margin-bottom:5px;
-        color:#ffffff;
-      }}
-
-      .datares-title{{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.34rem;
-        line-height:1.1;
-        margin:0 !important;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-      }}
-
-      .datares-subtitle{{
-        color:rgba(255,255,255,.95);
-        font-size:.79rem;
-        margin-top:4px;
-        line-height:1.25;
-      }}
-
-      .datares-header-actions{{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 16px;
-      }}
-
-      .datares-header-actions .btn,
-      .btn{{
-        border-radius:12px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
-
-      .datares-btn-main,
-      .btn-outline-light{{
-        background:#ffffff;
-        color:#0f172a !important;
-        border:1px solid #d7e0ea !important;
-      }}
-
-      .datares-btn-main:hover,
-      .btn-outline-light:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-      }}
-
-      .datares-btn-soft{{
-        background:rgba(255,255,255,.88);
-        color:#111 !important;
-        border:1px solid rgba(108,117,125,.30);
-      }}
-
-      .datares-btn-soft:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-      }}
-
-      .datares-btn-success{{
-        background:#198754;
-        color:#ffffff !important;
-        border:1px solid #198754;
-      }}
-
-      .datares-btn-success:hover{{
-        background:#157347;
-        color:#ffffff !important;
-      }}
-
-      .datares-card,
-      .card{{
-        background:rgba(255,255,255,.97) !important;
-        border-radius:20px !important;
-        backdrop-filter:blur(8px);
-        box-shadow:0 14px 28px rgba(15,23,42,.16) !important;
-        border:1px solid rgba(219,230,244,.95) !important;
-        overflow:hidden;
-      }}
-
-      .datares-card-title,
-      .card h5,
-      .card h6{{
-        font-weight:950;
-        font-size:1rem;
-        color:#0b4a8f;
-      }}
-
-      .datares-radar-wrap{{
-        min-height:420px;
-        display:flex;
-        flex-direction:column;
-        align-items:center;
-        justify-content:flex-start;
-      }}
-
-      .datares-radar-pct-box{{
-        width:100%;
-        max-width:320px;
-        margin:4px auto 14px auto;
-        padding:14px 15px;
-        border-radius:18px;
-        background:linear-gradient(135deg,#eef5ff,#ffffff);
-        border:1px solid rgba(63,134,214,.22);
-        box-shadow:0 8px 18px rgba(15,23,42,.08);
-      }}
-
-      .datares-radar-pct-label{{
-        font-size:.72rem;
-        font-weight:950;
-        color:#0b4a8f;
-        text-transform:uppercase;
-        letter-spacing:.45px;
-      }}
-
-      .datares-radar-pct-value{{
-        font-size:2.45rem;
-        line-height:1;
-        font-weight:950;
-        color:#0f172a;
-        margin:5px 0;
-      }}
-
-      .datares-radar-pct-subtitle{{
-        font-size:.80rem;
-        color:#475569;
-        font-weight:800;
-      }}
-
-      .datares-radar-small{{
-        max-width:370px;
-        width:100%;
-        height:auto;
-      }}
-
-      .datares-exec-box{{
-        min-height:350px;
-        background:linear-gradient(
-          180deg,
-          rgba(248,250,252,.94),
-          rgba(255,255,255,.98)
-        );
-        border:1px solid rgba(63,134,214,.16);
-        border-radius:16px;
-        padding:20px;
-        box-shadow:inset 0 1px 0 rgba(255,255,255,.60);
-      }}
-
-      .datares-plan-box{{
-        min-height:260px;
-        max-height:580px;
-        overflow:auto;
-      }}
-
-      .datares-exec-text{{
-        font-size:.96rem;
-        line-height:1.72;
-        color:#101827;
-        white-space:normal;
-      }}
-
-      .datares-domain-title{{
-        font-size:1rem;
-        font-weight:950;
-        color:#0b4a8f;
-        line-height:1.2;
-      }}
-
-      .datares-gauge-wrap{{
-        min-height:200px;
-        padding:8px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-      }}
-
-      .datares-gauge{{
-        max-width:220px;
-        max-height:160px;
-      }}
-
-      .mini-stat{{
-        border-radius:14px;
-        padding:11px 8px;
-        text-align:center;
-        font-size:.84rem;
-        line-height:1.2;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(15,23,42,.08);
-      }}
-
-      .badge{{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.38rem .68rem;
-        font-weight:900;
-      }}
-
-      @media (max-width:991.98px){{
-        .datares-shell{{
-          width:98%;
-          margin:10px auto 24px auto;
-        }}
-
-        .datares-header-card{{
-          min-height:88px;
-        }}
-
-        .datares-title{{
-          font-size:1.18rem;
-        }}
-
-        .datares-subtitle{{
-          font-size:.68rem;
-        }}
-
-        .datares-radar-wrap{{
-          min-height:350px;
-        }}
-
-        .datares-radar-small{{
-          max-width:280px;
-        }}
-
-        .datares-exec-box{{
-          min-height:260px;
-        }}
-
-        .datares-radar-pct-value{{
-          font-size:2rem;
-        }}
-      }}
-
-      @media (max-width:768px){{
-        .datares-header-overlay{{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }}
-
-        .datares-header-overlay::before{{
-          margin:0;
-        }}
-
-        .datares-header-text::before{{
-          margin-left:auto;
-          margin-right:auto;
-        }}
-
-        .datares-title,
-        .datares-subtitle{{
-          text-align:center;
-        }}
-
-        .datares-header-actions .btn{{
-          width:100%;
-        }}
-
-        .datares-radar-pct-box{{
-          max-width:100%;
-        }}
-
-        .datares-radar-small{{
-          max-width:100%;
-        }}
-
-        .datares-exec-box{{
-          min-height:220px;
-          padding:16px;
-        }}
-      }}
-    </style>
-    """
-
-    return render_template_string(BASE, title="Resultado Protección de Datos", content=content)
-
-# ==================================
-# Generar y editar informe ejecutivo
-# ==================================
-
-@madurez_datos_bp.route("/detalle/<int:run_id>/informe-ejecutivo/generar", methods=["POST"])
-@login_required
-def informe_ejecutivo_generar(run_id: int):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role == "auditor":
-        flash("El perfil Auditor no puede generar el informe ejecutivo con IA.", "danger")
-        return redirect(url_for("madurez_datos.detalle", run_id=run_id))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de madurez protección de datos personales"):
-        flash("No tiene permiso para generar el informe ejecutivo.", "danger")
-        return redirect(url_for('menu'))
-
-    run = DatosMadurezRun.query.get_or_404(run_id)
-
-    if user.role not in ("admin", "auditor"):
-        if run.user_id and run.user_id != user.id:
-            flash("No tiene permiso para generar IA sobre esta revisión.", "danger")
-            return redirect(url_for("madurez_datos.historial"))
-
-    try:
-        resumen = json.loads(run.resumen_json or "{}")
-    except Exception:
-        resumen = {}
-
-    if not resumen:
-        flash("⚠️ No hay resultados consolidados para generar el informe ejecutivo.", "warning")
-        return redirect(url_for("madurez_datos.detalle", run_id=run.id))
-
-    prompt = _gdpr_prompt_informe_ejecutivo(run, resumen)
-
-    try:
-        raw = _ai_text(prompt, max_tokens=1400)
-    except Exception as e:
-        flash(f"❌ Error llamando IA para el informe ejecutivo: {e}", "danger")
-        return redirect(url_for("madurez_datos.detalle", run_id=run.id))
-
-    informe_ai = ""
-    try:
-        obj = _gdpr_extraer_json_objeto(raw)
-        if isinstance(obj, dict):
-            informe_ai = (obj.get("informe_ejecutivo") or "").strip()
-    except Exception:
-        informe_ai = ""
-
-    if not informe_ai:
-        informe_ai = (raw or "").strip()
-
-    if not informe_ai:
-        flash("⚠️ La IA no devolvió contenido para el informe ejecutivo.", "warning")
-        return redirect(url_for("madurez_datos.detalle", run_id=run.id))
-
-    # IMPORTANTE: sincronizar SIEMPRE ambos campos
-    run.informe_ejecutivo_ai = informe_ai
-    run.informe_ejecutivo_editado = informe_ai
-
-    db.session.commit()
-
-    flash("✅ Informe ejecutivo generado con IA.", "success")
-    return redirect(url_for("madurez_datos.detalle", run_id=run.id))
-
-@madurez_datos_bp.route("/detalle/<int:run_id>/informe-ejecutivo/editar", methods=["GET", "POST"])
-@login_required
-def informe_ejecutivo_editar(run_id: int):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role == "auditor":
-        flash("El perfil Auditor no puede editar el informe ejecutivo.", "danger")
-        return redirect(url_for("madurez_datos.detalle", run_id=run_id))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de madurez protección de datos personales"):
-        flash("No tiene permiso para editar el informe ejecutivo.", "danger")
-        return redirect(url_for('menu'))
-
-    run = DatosMadurezRun.query.get_or_404(run_id)
-
-    texto_actual = (run.informe_ejecutivo_editado or run.informe_ejecutivo_ai or "").strip()
-
-    if request.method == "POST":
-        texto = (request.form.get("informe_ejecutivo") or "").strip()
-        run.informe_ejecutivo_editado = texto
-        db.session.commit()
-        flash("✅ Informe ejecutivo actualizado.", "success")
-        return redirect(url_for("madurez_datos.detalle", run_id=run.id))
-
-    content = f"""
-    <div class="datstd-shell">
-
-      <div class="datstd-header-card">
-        <div class="datstd-header-overlay">
-          <div class="datstd-header-text">
-            <h3 class="datstd-title m-0">Editar Informe Ejecutivo — Protección de Datos Personales</h3>
-            <div class="datstd-subtitle">
-              Consecutivo: <b>{escape(run.consecutivo or '')}</b>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="datstd-header-actions">
-        <a href="{url_for('madurez_datos.detalle', run_id=run.id)}"
-           class="btn datstd-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left me-2"></i>Volver al detalle
-        </a>
-      </div>
-
-      <div class="datstd-card p-4">
-        <form method="POST">
-          <div class="datstd-section-title">Informe ejecutivo editable</div>
-
-          <div class="text-muted small mb-3">
-            Ajusta el contenido del informe ejecutivo y guarda los cambios.
-          </div>
-
-          <textarea name="informe_ejecutivo"
-                    class="form-control datstd-textarea"
-                    rows="20"
-                    placeholder="Escribe o ajusta aquí el informe ejecutivo...">{escape(texto_actual)}</textarea>
-
-          <div class="d-flex justify-content-center mt-4">
-            <button type="submit" class="btn btn-primary rounded-pill px-5 fw-bold">
-              <i class="bi bi-save2 me-2"></i>Guardar cambios
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-        <style>
-      body{{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .datstd-shell{{
-        width:96%;
-        max-width:1500px;
-        margin:26px auto 24px auto;
-      }}
-
-      .datstd-header-card{{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }}
-
-      .datstd-header-card::before{{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }}
-
-      .datstd-header-overlay{{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }}
-
-      .datstd-header-overlay::before{{
-        content:"📄";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }}
-
-      .datstd-header-text{{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }}
-
-      .datstd-header-text::before{{
-        content:"SGSI · Estándar Datos Personales";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }}
-
-      .datstd-title{{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }}
-
-      .datstd-subtitle{{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }}
-
-      .datstd-header-actions{{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }}
-
-      .datstd-header-actions .btn,
-      .datstd-btn-main,
-      .btn{{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }}
-
-      .datstd-btn-main{{
-        background:#ffffff;
-        color:#0f172a !important;
-        border:1px solid #cfd8e3 !important;
-      }}
-
-      .datstd-btn-main:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-        border-color:#9ec5fe !important;
-      }}
-
-      .datstd-card,
-      .card{{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
-        overflow:hidden;
-      }}
-
-      .datstd-card.p-4{{
-        padding:1.5rem !important;
-      }}
-
-      .datstd-section-title,
-      .card h5,
-      .card h6{{
-        font-weight:950;
-        font-size:.95rem;
-        color:#0b4a8f;
-        margin-bottom:16px;
-      }}
-
-      .datstd-section-title{{
-        padding-bottom:8px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-      }}
-
-      .datstd-textarea{{
-        min-height:420px;
-        border-radius:14px;
-        border:1px solid #d9e3f0;
-        resize:vertical;
-        background:#f8fafc;
-        font-size:.86rem;
-        padding:14px 16px;
-        box-shadow:none !important;
-      }}
-
-      .datstd-textarea:focus{{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
-      }}
-
-      .form-label{{
-        font-size:.72rem;
-        font-weight:900;
-        color:#0b4a8f;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        padding:6px 10px;
-        border-radius:10px;
-        display:inline-block;
-        margin-bottom:6px;
-      }}
-
-      .form-control,
-      .form-select{{
-        border-radius:10px;
-        border:1px solid #d9e3f0;
-        min-height:40px;
-        font-size:.86rem;
-        background:#f8fafc;
-        box-shadow:none !important;
-      }}
-
-      .form-control:focus,
-      .form-select:focus{{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
-      }}
-
-      .badge{{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }}
-
-      @media (max-width:992px){{
-        .datstd-shell{{
-          width:98%;
-          margin:8px auto 22px auto;
-        }}
-
-        .datstd-header-card{{
-          min-height:88px;
-        }}
-
-        .datstd-title{{
-          font-size:1.20rem;
-        }}
-
-        .datstd-subtitle{{
-          font-size:.68rem;
-        }}
-
-        .datstd-card.p-4{{
-          padding:1rem !important;
-        }}
-
-        .datstd-textarea{{
-          min-height:320px;
-        }}
-      }}
-
-      @media (max-width:768px){{
-        .datstd-header-overlay{{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }}
-
-        .datstd-header-overlay::before{{
-          margin:0;
-        }}
-
-        .datstd-header-text::before{{
-          margin-left:auto;
-          margin-right:auto;
-        }}
-
-        .datstd-title,
-        .datstd-subtitle{{
-          text-align:center;
-        }}
-
-        .datstd-header-actions .btn{{
-          width:100%;
-        }}
-      }}
-    </style>
-    """
-    return render_template_string(BASE, title="Editar Informe Ejecutivo Datos Personales", content=content)
-
-
-# =========================
-# Exportación PDF — Protección de Datos Personales
-# =========================
-
-@madurez_datos_bp.route("/exportar_pdf/<int:run_id>")
-@login_required
-def exportar_pdf(run_id):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de madurez protección de datos personales"):
-        flash("No tiene permiso para exportar el reporte PDF de protección de datos personales.", "danger")
-        return redirect(url_for('menu'))
-
-    run = DatosMadurezRun.query.get_or_404(run_id)
-
-    informe_exec = (run.informe_ejecutivo_editado or run.informe_ejecutivo_ai or "").strip()
-    if informe_exec:
-        story.append(Paragraph("Informe Ejecutivo", styles["Heading2"]))
-        story.append(Spacer(1, 4))
-        for par in informe_exec.split("\n"):
-            par = par.strip()
-            if par:
-                story.append(Paragraph(xml_escape(par), styles["Normal"]))
-                story.append(Spacer(1, 4))
-        story.append(Spacer(1, 8))
-
-    try:
-        resumen = json.loads(run.resumen_json or "{}")
-    except Exception:
-        resumen = {}
-
-    logo_path = get_company_logo_path(run.consecutivo if hasattr(run, "consecutivo") else "")
-    buf = io.BytesIO()
-
-    doc = SimpleDocTemplate(
-        buf,
-        pagesize=A4,
-        rightMargin=30,
-        leftMargin=30,
-        topMargin=30,
-        bottomMargin=30
-    )
-
-    styles = getSampleStyleSheet()
-    story = []
-
-    title_style = ParagraphStyle(
-        "DatosTitle",
-        parent=styles["Title"],
-        fontName="Helvetica-Bold",
-        fontSize=16,
-        textColor=colors.HexColor("#0b1b2b"),
-        alignment=TA_CENTER,
-        spaceAfter=12,
-    )
-
-    small_style = ParagraphStyle(
-        "DatosSmall",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=8,
-        leading=10,
-        spaceAfter=4
-    )
-
-    if logo_path and os.path.exists(logo_path):
-        try:
-            story.append(RLImage(logo_path, width=4*cm, height=2*cm))
-            story.append(Spacer(1, 8))
-        except Exception:
-            pass
-
-    story.append(Paragraph("Reporte de Nivel de Madurez — Protección de Datos Personales", title_style))
-    story.append(Paragraph(f"Consecutivo: {xml_escape(run.consecutivo or '')}", styles["Normal"]))
-    story.append(Paragraph(
-        f"Fecha: {xml_escape(run.created_at.strftime('%Y-%m-%d %H:%M') if run.created_at else '')}",
-        styles["Normal"]
-    ))
-    story.append(Paragraph(f"Promedio general: {float(run.pct_general or 0):.2f}%", styles["Normal"]))
-    story.append(Spacer(1, 12))
-
-    # Resumen por dominio
-    table_data = [["Dominio", "Nivel", "% Cumplimiento", "Brecha"]]
-
-    for dominio, data in resumen.items():
-        try:
-            pct = float(data.get("pct", 0) or 0)
-        except Exception:
-            pct = 0.0
-
-        niv = gdpr_nivel_visual_por_pct(pct)
-        brecha = max(0.0, 100.0 - pct)
-
-        table_data.append([
-            dominio,
-            niv.get("nivel", ""),
-            f"{pct:.2f}%",
-            f"{brecha:.2f}%"
-        ])
-
-    tbl = Table(table_data, colWidths=[6.0*cm, 5.0*cm, 3.0*cm, 3.0*cm])
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0b1b2b")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("FONTSIZE", (0, 0), (-1, 0), 9),
-        ("FONTSIZE", (0, 1), (-1, -1), 8),
-    ]))
-    story.append(tbl)
-    story.append(Spacer(1, 12))
-
-    # Radar
-    radar_png = generar_radar_datos_png_bytes(resumen)
-    if radar_png:
-        story.append(Paragraph("Radar de dominios", styles["Heading2"]))
-        story.append(Spacer(1, 6))
-        story.append(RLImage(BytesIO(radar_png), width=15*cm, height=10*cm))
-        story.append(Spacer(1, 12))
-
-    # Velocímetros por dominio
-    story.append(Paragraph("Tablero por dominio", styles["Heading2"]))
-    story.append(Spacer(1, 8))
-
-    for dominio, data in resumen.items():
-        try:
-            pct = float(data.get("pct", 0) or 0)
-        except Exception:
-            pct = 0.0
-
-        niv = gdpr_nivel_visual_por_pct(pct)
-        png = generar_gdpr_velocimetro_png_bytes(
-            dominio,
-            pct,
-            niv["nivel"],
-            niv["color"]
-        )
-
-        story.append(Paragraph(xml_escape(dominio), styles["Heading3"]))
-
-        if png:
-            story.append(RLImage(BytesIO(png), width=8.5*cm, height=5.0*cm))
-
-        story.append(Paragraph(
-            f"Cumplimiento: {pct:.2f}% | Nivel: {xml_escape(niv['nivel'])} | Brecha: {max(0.0, 100.0 - pct):.2f}%",
-            styles["Normal"]
-        ))
-        story.append(Spacer(1, 10))
-
-    # Detalle de preguntas por dominio
-    for dominio, data in resumen.items():
-        items = data.get("items", []) or []
-        if not items:
-            continue
-
-        story.append(PageBreak())
-        story.append(Paragraph(f"Detalle — {xml_escape(dominio)}", styles["Heading2"]))
-        story.append(Spacer(1, 8))
-
-        detalle_table = [["Pregunta", "Estado", "Comentario / evidencia"]]
-
-        for it in items:
-            codigo = (it.get("codigo") or "").strip()
-            titulo = (it.get("titulo") or "").strip()
-            pregunta = (it.get("pregunta") or "").strip()
-            estado = (it.get("estado") or "").strip().upper()
-            comentario = (it.get("comentario") or "").strip() or "—"
-
-            encabezado = " ".join([x for x in [codigo, titulo] if x]).strip()
-            pregunta_full = f"{encabezado}\n{pregunta}" if encabezado else pregunta
-
-            detalle_table.append([
-                Paragraph(xml_escape(pregunta_full).replace("\n", "<br/>"), small_style),
-                Paragraph(xml_escape(estado or "—"), small_style),
-                Paragraph(xml_escape(comentario), small_style),
-            ])
-
-        detalle_tbl = Table(detalle_table, colWidths=[9.5*cm, 2.5*cm, 6.0*cm])
-        detalle_tbl.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1d4ed8")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ]))
-        story.append(detalle_tbl)
-        story.append(Spacer(1, 10))
-
-    doc.build(story)
-    buf.seek(0)
-
-    return send_file(
-        buf,
-        as_attachment=True,
-        download_name=f"Reporte_Madurez_Proteccion_Datos_{run.id}.pdf",
-        mimetype="application/pdf"
-    )
-
-
-# ==========================================================================================================================================
-#                                           Fin Módulo de Madurez Protección de Datos Personales
-# ==========================================================================================================================================
-
-# ==========================================================================================================================================
-#                                                   Módulo de Madurez PCI-DSS
-# ==========================================================================================================================================
-
-
-pci_madurez_bp = Blueprint("madurez_pci", __name__, url_prefix="/madurez_pci")
-
-PCI_INSTRUMENTO_TEMPLATE_XLSX = os.path.join(
-    BASE_DIR, "static", "templates", "PCI requerimientos.xlsx"
-)
-
-PCI_TRADUCIR_EN_IMPORTACION = False  # ✅ NO traducir, usar texto tal cual venga en el Excel
-
-PCI_STATUS_SCORE = {
-    "SI": 100,
-    "PARCIAL": 50,
-    "NO": 0,
-    "NA": None,
-}
-
-PCI_BLOCK_ORDER = [
-    "REQ-1", "REQ-2", "REQ-3", "REQ-4", "REQ-5", "REQ-6",
-    "REQ-7", "REQ-8", "REQ-9", "REQ-10", "REQ-11", "REQ-12",
-    "A1", "A2"
-]
-
-PCI_BLOCK_TITLES = {
-    "REQ-1": "Requerimiento 1 — Instalar y mantener controles de seguridad de red",
-    "REQ-2": "Requerimiento 2 — Aplicar configuraciones seguras a todos los componentes del sistema",
-    "REQ-3": "Requerimiento 3 — Proteger los datos de cuenta almacenados",
-    "REQ-4": "Requerimiento 4 — Proteger los datos de titulares de tarjeta mediante criptografía robusta durante la transmisión",
-    "REQ-5": "Requerimiento 5 — Proteger todos los sistemas y redes contra software malicioso",
-    "REQ-6": "Requerimiento 6 — Desarrollar y mantener sistemas y software seguros",
-    "REQ-7": "Requerimiento 7 — Restringir el acceso a datos de cuenta según la necesidad de conocer",
-    "REQ-8": "Requerimiento 8 — Identificar usuarios y autenticar el acceso a componentes del sistema",
-    "REQ-9": "Requerimiento 9 — Restringir el acceso físico a los datos de titulares de tarjeta",
-    "REQ-10": "Requerimiento 10 — Registrar y monitorear todo acceso a componentes del sistema y datos de titulares de tarjeta",
-    "REQ-11": "Requerimiento 11 — Probar regularmente la seguridad de sistemas y redes",
-    "REQ-12": "Requerimiento 12 — Mantener una política de seguridad de la información",
-    "A1": "Apéndice A1 — Requisitos adicionales para proveedores de servicios multi-tenant",
-    "A2": "Apéndice A2 — Requisitos adicionales para entidades que usan SSL/TLS temprano"
-}
-
-def pci_block_title(code: str) -> str:
-    return PCI_BLOCK_TITLES.get((code or "").strip().upper(), code or "")
-
-class PciMadurezParametro(db.Model):
-    __tablename__ = "pci_madurez_parametros"
-
-    id = db.Column(db.Integer, primary_key=True)
-    nivel = db.Column(db.String(80), nullable=False)
-    rango_desde = db.Column(db.Float, nullable=False)
-    rango_hasta = db.Column(db.Float, nullable=False)
-    color = db.Column(db.String(20), nullable=True)
-    descripcion = db.Column(db.Text, nullable=True)
-    orden = db.Column(db.Integer, default=0)
-
-class PciMadurezPregunta(db.Model):
-    __tablename__ = "pci_madurez_preguntas"
-
-    id = db.Column(db.Integer, primary_key=True)
-    bloque_codigo = db.Column(db.String(20), index=True, nullable=True)   # REQ-1 ... REQ-12, A1, A2
-    bloque_nombre = db.Column(db.String(255), nullable=True)              # título del bloque
-    seccion_codigo = db.Column(db.String(30), index=True, nullable=True)  # 1.1 / 1.2 / A1.1 / A2.1 ...
-    seccion_nombre = db.Column(db.Text, nullable=True)                    # línea descriptiva de la sección
-    pregunta_codigo = db.Column(db.String(30), index=True, nullable=True) # 1.1.1 / A1.1.1 / etc
-    pregunta = db.Column(db.Text, nullable=False)
-    tipo = db.Column(db.String(5), nullable=False, default="q")           # h / q
-    orden = db.Column(db.Integer, default=0)
-    activo = db.Column(db.Boolean, default=True)
-
-class PciMadurezRun(db.Model):
-    __tablename__ = "pci_madurez_runs"
-
-    id = db.Column(db.Integer, primary_key=True)
-    company_name = db.Column(db.String(255), nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
-    estado = db.Column(db.String(20), default="BORRADOR")  # BORRADOR / FINALIZADO
-    progreso_pct = db.Column(db.Integer, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-class PciMadurezRespuesta(db.Model):
-    __tablename__ = "pci_madurez_respuestas"
-
-    id = db.Column(db.Integer, primary_key=True)
-    run_id = db.Column(db.Integer, db.ForeignKey("pci_madurez_runs.id", ondelete="CASCADE"), nullable=False)
-    pregunta_id = db.Column(db.Integer, db.ForeignKey("pci_madurez_preguntas.id", ondelete="CASCADE"), nullable=False)
-    estado = db.Column(db.String(20), nullable=False)  # SI / PARCIAL / NO / NA
-    comentario = db.Column(db.Text, nullable=True)
-
-class PciAnalysisRun(db.Model):
-    __tablename__ = "pci_analysis_runs"
-
-    id = db.Column(db.Integer, primary_key=True)
-    pci_run_id = db.Column(db.Integer, db.ForeignKey("pci_madurez_runs.id", ondelete="CASCADE"), nullable=False)
-    fecha_calculo = db.Column(db.DateTime, default=datetime.utcnow)
-    company_name = db.Column(db.String(255), nullable=False)
-
-    nivel_promedio_general = db.Column(db.Float, default=0)
-    resultados_json = db.Column(db.Text)
-    preguntas_json = db.Column(db.Text)
-    velocimetros_json = db.Column(db.Text)
-
-    # NUEVOS
-    informe_ejecutivo_ai = db.Column(db.Text, nullable=True)
-    informe_ejecutivo_editado = db.Column(db.Text, nullable=True)
-    plan_trabajo_ai = db.Column(db.Text, nullable=True)
-    plan_trabajo_editado = db.Column(db.Text, nullable=True)
-
-# =========================
-# Parametros
-# =========================
-
-def seed_pci_parametros():
-    if PciMadurezParametro.query.first():
-        return
-
-    params = [
-        {
-            "nivel": "Inicial",
-            "rango_desde": 0,
-            "rango_hasta": 20.99,
-            "color": "#dc3545",
-            "descripcion": "No existe implementación formal o es mínima.",
-            "orden": 1
-        },
-        {
-            "nivel": "Repetible",
-            "rango_desde": 21,
-            "rango_hasta": 40.99,
-            "color": "#fd7e14",
-            "descripcion": "Existen prácticas parciales y repetibles.",
-            "orden": 2
-        },
-        {
-            "nivel": "Definido",
-            "rango_desde": 41,
-            "rango_hasta": 60.99,
-            "color": "#ffc107",
-            "descripcion": "El proceso está definido y documentado.",
-            "orden": 3
-        },
-        {
-            "nivel": "Gestionado",
-            "rango_desde": 61,
-            "rango_hasta": 80.99,
-            "color": "#0d6efd",
-            "descripcion": "El proceso se mide, gestiona y controla.",
-            "orden": 4
-        },
-        {
-            "nivel": "Óptimo",
-            "rango_desde": 81,
-            "rango_hasta": 100,
-            "color": "#198754",
-            "descripcion": "El proceso es eficaz, sostenido y mejorado continuamente.",
-            "orden": 5
-        },
-    ]
-
-    for p in params:
-        db.session.add(PciMadurezParametro(**p))
-    db.session.commit()
-
-def pci_resolver_nivel(pct: float):
-    pct = max(0.0, min(100.0, float(pct or 0)))
-    rows = PciMadurezParametro.query.order_by(PciMadurezParametro.orden.asc()).all()
-    for r in rows:
-        if float(r.rango_desde) <= pct <= float(r.rango_hasta):
-            return {
-                "nivel": r.nivel,
-                "color": r.color or "#6c757d",
-                "descripcion": r.descripcion or ""
-            }
-    return {
-        "nivel": "Sin nivel",
-        "color": "#6c757d",
-        "descripcion": ""
-    }
-
-# =========================
-# Helpers de importación PCI
-# =========================
-
-def pci_safe_str(x):
-    if x is None:
-        return ""
-    try:
-        if pd.isna(x):
-            return ""
-    except Exception:
-        pass
-    return str(x).strip()
-
-def pci_estado_normalizado(v):
-    estado = pci_safe_str(v).upper()
-    estado = estado.replace(" ", "")
-    estado = estado.replace(".", "")
-    estado = estado.replace("-", "")
-    estado = estado.replace("/", "")
-
-    if estado in ("SI", "SÍ", "YES"):
-        return "SI"
-
-    if estado in ("PARCIAL", "PARCIALMENTE", "PARTIAL"):
-        return "PARCIAL"
-
-    if estado in ("NO", "N"):
-        return "NO"
-
-    if estado in ("NA", "N/A", "NOAPLICA", "NOAPLICABLE", "NOTAPPLICABLE"):
-        return "NA"
-
-    return ""
-
-def _pci_norm(s: str) -> str:
-    s = pci_safe_str(s)
-    s = "".join(
-        c for c in unicodedata.normalize("NFKD", s)
-        if not unicodedata.combining(c)
-    )
-    s = s.upper()
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
-
-
-def pci_normalizar_texto_excel(texto: str) -> str:
-    t = pci_safe_str(texto)
-    if not t:
-        return ""
-
-    t = t.replace("\ufeff", " ").replace("\xa0", " ")
-    t = t.replace("•\t", "• ").replace("•", "• ")
-    t = t.replace("\r\n", "\n").replace("\r", "\n")
-    t = re.sub(r"[ \t]+", " ", t).strip()
-
-    # Arregla espacios malos en prefijos tipo A1. 1 / A2. 1
-    t = re.sub(r"^(A[12])\s*\.\s*(\d+)", r"\1.\2", t, flags=re.IGNORECASE)
-
-    # Arregla 8. 1 / 3.3. 1 / 12.4.2. 1
-    t = re.sub(r"^(\d+)\s*\.\s*(\d+)", r"\1.\2", t)
-    t = re.sub(r"^(\d+\.\d+)\s*\.\s*(\d+)", r"\1.\2", t)
-    t = re.sub(r"^(\d+\.\d+\.\d+)\s*\.\s*(\d+)", r"\1.\2", t)
-    t = re.sub(r"^(A[12]\.\d+)\s*\.\s*(\d+)", r"\1.\2", t, flags=re.IGNORECASE)
-
-    # Si el código quedó pegado al texto
-    t = re.sub(
-        r"^((?:A[12]\.\d+(?:\.\d+)*)|\d+(?:\.\d+){1,3})(?=[A-Za-zÁÉÍÓÚáéíóú])",
-        r"\1 ",
-        t,
-        flags=re.IGNORECASE
-    )
-
-    return t.strip()
-
-
-def pci_detectar_bloque(texto: str):
-    """
-    Detecta bloques usando texto normalizado, para no fallar con acentos raros.
-    """
-    t = pci_normalizar_texto_excel(texto)
-    n = _pci_norm(t)
-
-    m = re.match(r"^(REQUERIMIENTO|REQUISITO)\s+(\d+)\b", n)
-    if m:
-        num = int(m.group(2))
-        return f"REQ-{num}", t
-
-    if n.startswith("APENDICE A1"):
-        return "A1", t
-
-    if n.startswith("APENDICE A2"):
-        return "A2", t
-
-    return None, None
-
-
-def pci_extraer_codigo_inicial(texto: str):
-    t = pci_normalizar_texto_excel(texto)
-
-    m = re.match(r"^(A[12]\.\d+(?:\.\d+)*)\b", t, flags=re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
-
-    m = re.match(r"^(\d+(?:\.\d+){1,3})\b", t)
-    if m:
-        return m.group(1)
-
-    return None
-
-
-def pci_detectar_seccion(texto: str):
-    t = pci_normalizar_texto_excel(texto)
-    codigo = pci_extraer_codigo_inicial(t)
-    if not codigo:
-        return None, None
-
-    if re.match(r"^\d+\.\d+$", codigo):
-        return codigo, t
-
-    if re.match(r"^A[12]\.\d+$", codigo, flags=re.IGNORECASE):
-        return codigo.upper(), t
-
-    return None, None
-
-
-def pci_detectar_pregunta_codigo(texto: str):
-    t = pci_normalizar_texto_excel(texto)
-    codigo = pci_extraer_codigo_inicial(t)
-    if not codigo:
-        return None
-
-    if re.match(r"^\d+\.\d+\.\d+(?:\.\d+)?$", codigo):
-        return codigo
-
-    if re.match(r"^A[12]\.\d+\.\d+$", codigo, flags=re.IGNORECASE):
-        return codigo.upper()
-
-    return None
-
-
-def pci_resumen_instrumento():
-    total_q = PciMadurezPregunta.query.filter_by(tipo="q").count()
-    total_h = PciMadurezPregunta.query.filter_by(tipo="h").count()
-
-    por_bloque = (
-        db.session.query(
-            PciMadurezPregunta.bloque_codigo,
-            func.count(PciMadurezPregunta.id)
-        )
-        .filter(PciMadurezPregunta.tipo == "q")
-        .group_by(PciMadurezPregunta.bloque_codigo)
-        .all()
-    )
-
-    return {
-        "total_preguntas": total_q,
-        "total_headers": total_h,
-        "por_bloque": {k: v for k, v in por_bloque}
-    }
-
-
-def cargar_respuestas_pci(run_id):
-    out = {}
-
-    if not run_id:
-        return out
-
-    rows = PciMadurezRespuesta.query.filter_by(run_id=run_id).all()
-
-    for r in rows:
-        out[r.pregunta_id] = {
-            "estado": pci_estado_normalizado(r.estado),
-            "comentario": (r.comentario or "").strip()
-        }
-
-    return out
-
-
-def calcular_progreso_pci(preguntas, form_data=None, respuestas_db=None):
-    total = len(preguntas)
-    respondidas = 0
-
-    for q in preguntas:
-        estado = ""
-
-        if form_data is not None:
-            estado = pci_estado_normalizado(form_data.get(f"st_{q.id}"))
-        elif respuestas_db is not None:
-            estado = pci_estado_normalizado(respuestas_db.get(q.id, {}).get("estado"))
-
-        if estado in ("SI", "PARCIAL", "NO", "NA"):
-            respondidas += 1
-
-    pct = int(round((respondidas / total) * 100)) if total > 0 else 0
-    return respondidas, total, pct
-
-def _pci_prompt_plan_trabajo(run: "PciAnalysisRun", resultados: dict) -> str:
-    partes = []
-
-    for bloque in PCI_BLOCK_ORDER:
-        item = (resultados or {}).get(bloque)
-        if not item:
-            continue
-
-        pct = float(item.get("pct", 0) or 0)
-        nombre = item.get("nombre") or pci_block_title(bloque)
-        counts = item.get("counts", {}) or {}
-
-        partes.append(
-            f"- {bloque} - {nombre}: {pct:.2f}% | "
-            f"SI={counts.get('SI',0)} PARCIAL={counts.get('PARCIAL',0)} NO={counts.get('NO',0)} NA={counts.get('NA',0)}"
-        )
-
-    detalle = "\n".join(partes)
-
-    return f"""
-Eres un consultor senior en cumplimiento PCI-DSS. Debes construir un PLAN DE TRABAJO GENERAL para cerrar brechas de cumplimiento.
-
-CONTEXTO
-- Revisión: {run.company_name}
-- Cumplimiento general: {float(run.nivel_promedio_general or 0):.2f}%
-
-RESULTADOS RESUMIDOS
-{detalle}
-
-INSTRUCCIONES
-1. Devuelve solamente JSON válido.
-2. Debes devolver exactamente esta estructura:
-{{
-  "plan_trabajo": [
-    {{
-      "frente": "string",
-      "actividad": "string",
-      "prioridad": "Alta|Media|Baja",
-      "responsable_sugerido": "string",
-      "plazo": "string",
-      "entregable": "string"
-    }}
-  ]
-}}
-
-REGLAS
-- Genera entre 8 y 15 actividades.
-- Prioriza primero requerimientos con menor cumplimiento.
-- Usa lenguaje ejecutivo y accionable.
-- No inventes herramientas específicas.
-""".strip()
-
-# ==========================================
-# INFORME EJECUTIVO AI — PCI-DSS
-# ==========================================
-
-def _pci_prompt_informe_ejecutivo(ar: "PciAnalysisRun", resultados: dict) -> str:
-    partes = []
-
-    for code in PCI_BLOCK_ORDER:
-        item = (resultados or {}).get(code)
-        if not item:
-            partes.append(f"- {pci_block_title(code)}: sin información.")
-            continue
-
-        pct = float(item.get("pct", 0) or 0)
-        total = int(item.get("total", 0) or 0)
-        madurez = (item.get("madurez") or "").strip()
-        brecha = float(item.get("brecha_pct", 0) or 0)
-        counts = item.get("counts", {}) or {}
-
-        partes.append(
-            f"- {pci_block_title(code)}:\n"
-            f"  * Cumplimiento: {pct:.2f}%\n"
-            f"  * Madurez: {madurez}\n"
-            f"  * Brecha: {brecha:.2f}%\n"
-            f"  * Total ítems: {total}\n"
-            f"  * SI: {counts.get('SI',0)} | PARCIAL: {counts.get('PARCIAL',0)} | NO: {counts.get('NO',0)} | NA: {counts.get('NA',0)}"
-        )
-
-    detalle = "\n".join(partes)
-
-    return f"""
-Eres un consultor senior en PCI-DSS, gobierno de seguridad y cumplimiento. Debes redactar un INFORME EJECUTIVO para alta dirección, claro, breve, profesional y accionable, basado en una evaluación de madurez PCI-DSS.
-
-DATOS GENERALES
-- Compañía / consecutivo: {ar.company_name}
-- Cumplimiento general: {float(ar.nivel_promedio_general or 0):.2f}%
-
-RESULTADOS POR REQUERIMIENTO / APÉNDICE
-{detalle}
-
-INSTRUCCIONES
-1. Devuelve solamente JSON válido.
-2. Debes devolver exactamente esta estructura:
-{{
-  "informe_ejecutivo": "texto"
-}}
-
-REGLAS DEL TEXTO:
-- Escribe en español.
-- Extensión aproximada: 4 a 7 párrafos cortos.
-- Incluye:
-  a) resumen general del nivel de madurez,
-  b) fortalezas principales,
-  c) brechas principales,
-  d) requerimientos/apéndices más débiles,
-  e) riesgos ejecutivos si no se actúa,
-  f) prioridades recomendadas para los próximos 90 días.
-- No inventes herramientas específicas.
-- Usa un tono ejecutivo, no técnico en exceso.
-- No uses markdown ni viñetas; redacta como informe.
-""".strip()
-
-
-def _extraer_json_objeto(raw: str) -> dict:
-    raw = (raw or "").strip()
-    if not raw:
-        return {}
-
-    raw = raw.replace("```json", "").replace("```", "").strip()
-
-    try:
-        return json.loads(raw)
-    except Exception:
-        pass
-
-    try:
-        start = raw.find("{")
-        end = raw.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return json.loads(raw[start:end+1])
-    except Exception:
-        pass
-
-    return {}
-
-# =========================
-# AI helper PCI (OpenRouter / Ollama)
-# =========================
-
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-OPENROUTER_MODEL = "deepseek/deepseek-chat"
-
-def _ai_text(prompt: str, max_tokens: int = 900) -> str:
-    """
-    Helper central de IA para PCI-DSS.
-    Soporta OpenRouter y Ollama.
-    """
-    provider = (get_ai_provider() or "openrouter").strip().lower()
-
-
-    # =====================================================
-    # OLLAMA
-    # =====================================================
-    if provider == "ollama":
-        base_url = (get_ollama_base_url() or "http://localhost:11434").strip().rstrip("/")
-        model = (get_ollama_model() or "llama3.1").strip()
-
-        if not base_url:
-            raise RuntimeError("No hay OLLAMA_BASE_URL configurada en Administración.")
-        if not model:
-            raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
-
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.2
-            }
-        }
-
-
-        resp = requests.post(
-            f"{base_url}/api/generate",
-            json=payload,
-            timeout=300
-        )
-        resp.raise_for_status()
-
-        data = resp.json() or {}
-
-        texto = (data.get("response") or "").strip()
-
-        # Fallback adicional
-        if not texto:
-            texto = (data.get("message") or "").strip()
-
-        if not texto:
-            raise RuntimeError(
-                "Ollama respondió sin contenido. "
-                f"Respuesta recibida: {str(data)[:500]}"
-            )
-
-        return texto
-
-    # =====================================================
-    # OPENROUTER
-    # =====================================================
-    api_key = get_openrouter_api_key()
-    if not api_key:
-        raise RuntimeError("No hay OpenRouter API Key configurada. Ve a Administración → OpenRouter API Key.")
-
-    client = OpenAI(
-        base_url=OPENROUTER_BASE_URL,
-        api_key=api_key
-    )
-
-    max_tokens_safe = max(700, min(int(max_tokens or 1200), 2200))
-
-    resp = client.chat.completions.create(
-        model=OPENROUTER_MODEL,
-        temperature=0.2,
-        max_tokens=max_tokens_safe,
-        response_format={"type": "json_object"},
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "Eres un consultor experto en PCI-DSS. "
-                    "Debes responder únicamente con JSON válido, sin markdown, "
-                    "sin ```json, sin HTML, sin <br>, sin <b>, y sin texto adicional."
-                )
-            },
-            {"role": "user", "content": prompt},
-        ],
-    )
-
-    texto = (resp.choices[0].message.content or "").strip()
-    if not texto:
-        raise RuntimeError("OpenRouter respondió sin contenido.")
-    return texto
-
-# =========================
-# Importación instrumento PCI-DSS
-# =========================
-
-@pci_madurez_bp.route("/admin/importar_instrumento", methods=["POST"])
-@login_required
-def importar_instrumento_pci():
-    user = User.query.get(session.get("user_id"))
-
-    if user.role == "auditor":
-        flash("El rol Auditor no puede importar instrumentos.", "danger")
-        return redirect(url_for("madurez_pci.parametros"))
-
-    force = (request.args.get("force") == "1") or (request.form.get("force") == "1")
-
-    try:
-        if force:
-            PciAnalysisRun.query.delete()
-            PciMadurezRespuesta.query.delete()
-            PciMadurezRun.query.delete()
-            PciMadurezPregunta.query.delete()
-            db.session.commit()
-            flash("🧹 Instrumento PCI-DSS anterior borrado. Reimportando…", "info")
-
-        if PciMadurezPregunta.query.first() and not force:
-            flash("El instrumento PCI-DSS ya está cargado en la base de datos.", "warning")
-            return redirect(url_for("madurez_pci.parametros"))
-
-        xlsx_path = PCI_INSTRUMENTO_TEMPLATE_XLSX
-        if not os.path.exists(xlsx_path):
-            alt = os.path.join(BASE_DIR, "static", "templates", "PCI requerimientos .xlsx")
-            if os.path.exists(alt):
-                xlsx_path = alt
-
-        if not os.path.exists(xlsx_path):
-            flash(f"No se encontró el archivo PCI para importar: {xlsx_path}", "danger")
-            return redirect(url_for("madurez_pci.parametros"))
-
-        df = pd.read_excel(xlsx_path, sheet_name=0, header=0)
-
-        col_pregunta = None
-        for c in df.columns:
-            if _pci_norm(c) == "PREGUNTA":
-                col_pregunta = c
-                break
-
-        if not col_pregunta:
-            flash("El Excel PCI no contiene la columna 'Pregunta'.", "danger")
-            return redirect(url_for("madurez_pci.parametros"))
-
-        orden = 1
-        bloque_codigo = None
-        bloque_nombre = None
-        seccion_codigo = None
-        seccion_nombre = None
-
-        creadas_q = 0
-        creadas_h = 0
-        ignoradas = 0
-
-        for _, row in df.iterrows():
-            txt = pci_normalizar_texto_excel(row.get(col_pregunta))
-
-            if not txt:
-                continue
-
-            if _pci_norm(txt) == "PREGUNTA":
-                continue
-
-            # Detectar bloque
-            bc, bn = pci_detectar_bloque(txt)
-            if bc:
-                bloque_codigo = bc
-                bloque_nombre = bn
-                seccion_codigo = None
-                seccion_nombre = None
-
-                db.session.add(PciMadurezPregunta(
-                    bloque_codigo=bloque_codigo,
-                    bloque_nombre=bloque_nombre,
-                    seccion_codigo=None,
-                    seccion_nombre=None,
-                    pregunta_codigo=None,
-                    pregunta=bn,
-                    tipo="h",
-                    orden=orden,
-                    activo=True
-                ))
-                orden += 1
-                creadas_h += 1
-                continue
-
-            if not bloque_codigo:
-                ignoradas += 1
-                continue
-
-            # Detectar sección / pregunta
-            sc, sn = pci_detectar_seccion(txt)
-            pq = pci_detectar_pregunta_codigo(txt)
-
-            if sc and not pq:
-                seccion_codigo = sc
-                seccion_nombre = sn
-
-                db.session.add(PciMadurezPregunta(
-                    bloque_codigo=bloque_codigo,
-                    bloque_nombre=bloque_nombre,
-                    seccion_codigo=seccion_codigo,
-                    seccion_nombre=seccion_nombre,
-                    pregunta_codigo=None,
-                    pregunta=sn,
-                    tipo="h",
-                    orden=orden,
-                    activo=True
-                ))
-                orden += 1
-                creadas_h += 1
-                continue
-
-            if pq:
-                db.session.add(PciMadurezPregunta(
-                    bloque_codigo=bloque_codigo,
-                    bloque_nombre=bloque_nombre,
-                    seccion_codigo=seccion_codigo,
-                    seccion_nombre=seccion_nombre,
-                    pregunta_codigo=pq,
-                    pregunta=txt,
-                    tipo="q",
-                    orden=orden,
-                    activo=True
-                ))
-                orden += 1
-                creadas_q += 1
-                continue
-
-            ignoradas += 1
-
-        db.session.commit()
-        seed_pci_parametros()
-
-        resumen = pci_resumen_instrumento()
-
-        flash(
-            f"✅ Instrumento PCI-DSS importado correctamente. "
-            f"Cabeceras: {creadas_h} | Preguntas: {creadas_q} | Ignoradas: {ignoradas}",
-            "success"
-        )
-        flash(
-            f"📌 Resumen por bloque: {resumen['por_bloque']}",
-            "info"
-        )
-
-        return redirect(url_for("madurez_pci.parametros"))
-
-    except Exception as e:
-        db.session.rollback()
-        traceback.print_exc()
-        flash(f"❌ Error importando instrumento PCI-DSS: {e}", "danger")
-        return redirect(url_for("madurez_pci.parametros"))
-
-def obtener_borrador_pci(user_id):
-    if not user_id:
-        return None
-
-    return (
-        PciMadurezRun.query
-        .filter(
-            PciMadurezRun.user_id == user_id,
-            PciMadurezRun.estado == "BORRADOR"
-        )
-        .order_by(PciMadurezRun.updated_at.desc(), PciMadurezRun.id.desc())
-        .first()
-    )
-
-# =========================
-# Informe ejecutivo
-# =========================
-
-@pci_madurez_bp.route("/resultado/<int:run_id>/informe-ejecutivo/generar", methods=["POST"])
-@login_required
-def informe_ejecutivo_generar_pci(run_id: int):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role == "auditor":
-        flash("El perfil Auditor no puede generar el informe ejecutivo con IA.", "danger")
-        return redirect(url_for("madurez_pci.resultado", run_id=run_id))
-
-    if user.role != "admin" and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
-        flash("No tiene permiso para generar el informe ejecutivo PCI-DSS.", "danger")
-        return redirect(url_for("menu"))
-
-    run = PciAnalysisRun.query.get_or_404(run_id)
-
-    try:
-        resultados = json.loads(run.resultados_json or "{}")
-    except Exception:
-        resultados = {}
-
-    if not resultados:
-        flash("⚠️ No hay resultados consolidados para generar el informe ejecutivo.", "warning")
-        return redirect(url_for("madurez_pci.resultado", run_id=run.id))
-
-    prompt = _pci_prompt_informe_ejecutivo(run, resultados)
-
-    try:
-        raw = _ai_text(prompt, max_tokens=500)
-    except Exception as e:
-        flash(f"❌ Error llamando IA para el informe ejecutivo: {e}", "danger")
-        return redirect(url_for("madurez_pci.resultado", run_id=run.id))
-
-    if not (raw or "").strip():
-        flash("⚠️ Ollama no devolvió contenido para el informe ejecutivo.", "warning")
-        return redirect(url_for("madurez_pci.resultado", run_id=run.id))
-
-    informe_ai = raw.strip()
-
-
-    obj = _extraer_json_objeto(raw)
-    if isinstance(obj, dict):
-        informe_extraido = (obj.get("informe_ejecutivo") or "").strip()
-        if informe_extraido:
-            informe_ai = informe_extraido
-
-
-
-    if not informe_ai.strip():
-        flash("⚠️ La respuesta de IA no trajo un informe ejecutivo válido.", "warning")
-        return redirect(url_for("madurez_pci.resultado", run_id=run.id))
-
-    # Normalizar antes de guardar
-    informe_ai = pci_normalizar_texto_rico_guardado(informe_ai)
-
-    run.informe_ejecutivo_ai = informe_ai
-
-    # IMPORTANTE:
-    # para que se vea inmediatamente en pantalla, sincronizamos también el editado
-    run.informe_ejecutivo_editado = informe_ai
-
-    db.session.add(run)
-    db.session.flush()
-    db.session.commit()
-    db.session.refresh(run)
-
-
-    flash("✅ Informe ejecutivo PCI-DSS generado con IA.", "success")
-    return redirect(url_for("madurez_pci.resultado", run_id=run.id))
-
-# =========================
-# Analisis y Calculos
-# =========================
-
-def build_pci_df_from_db(run_id: int) -> "pd.DataFrame":
-    q = (
-        db.session.query(PciMadurezRespuesta, PciMadurezPregunta)
-        .join(PciMadurezPregunta, PciMadurezPregunta.id == PciMadurezRespuesta.pregunta_id)
-        .filter(PciMadurezRespuesta.run_id == run_id)
-        .filter(PciMadurezPregunta.tipo == "q")
-        .order_by(PciMadurezPregunta.orden.asc())
-    )
-
-    rows = []
-
-    for r, p in q.all():
-        estado = pci_estado_normalizado(r.estado)
-
-        if estado not in ("SI", "PARCIAL", "NO", "NA"):
-            continue
-
-        rows.append({
-            "pregunta_id": p.id,
-            "bloque_codigo": p.bloque_codigo,
-            "bloque_nombre": p.bloque_nombre,
-            "seccion_codigo": p.seccion_codigo,
-            "seccion_nombre": p.seccion_nombre,
-            "pregunta_codigo": p.pregunta_codigo,
-            "pregunta": p.pregunta,
-            "estado": estado,
-            "comentario": (r.comentario or "").strip(),
-        })
-
-    return pd.DataFrame(rows)
-
-def pci_pct_from_estados(estados: list[str]) -> float:
-    vals = []
-
-    for e in estados:
-        estado = pci_estado_normalizado(e)
-
-        if estado == "NA":
-            continue
-
-        v = PCI_STATUS_SCORE.get(estado)
-
-        if v is not None:
-            vals.append(float(v))
-
-    if not vals:
-        return 0.0
-
-    return round(sum(vals) / len(vals), 2)
-
-def run_analysis_from_pci_run(pci_run_id: int):
-    run = PciMadurezRun.query.get_or_404(pci_run_id)
-    df = build_pci_df_from_db(run.id)
-
-    resultados = {}
-    preguntas_detalle = []
-
-    if df.empty:
-        ar = (
-            PciAnalysisRun.query
-            .filter_by(pci_run_id=run.id)
-            .order_by(PciAnalysisRun.id.desc())
-            .first()
-        )
-
-        if not ar:
-            ar = PciAnalysisRun(
-                pci_run_id=run.id,
-                company_name=run.company_name,
-                nivel_promedio_general=0,
-                resultados_json=json.dumps({}, ensure_ascii=False),
-                preguntas_json=json.dumps([], ensure_ascii=False),
-                velocimetros_json=json.dumps({}, ensure_ascii=False)
-            )
-            db.session.add(ar)
-        else:
-            ar.company_name = run.company_name
-            ar.nivel_promedio_general = 0
-            ar.resultados_json = json.dumps({}, ensure_ascii=False)
-            ar.preguntas_json = json.dumps([], ensure_ascii=False)
-            ar.velocimetros_json = json.dumps({}, ensure_ascii=False)
-
-        db.session.commit()
-        return ar.id
-
-    for _, row in df.iterrows():
-        estado = pci_estado_normalizado(row["estado"])
-
-        preguntas_detalle.append({
-            "bloque_codigo": row["bloque_codigo"],
-            "seccion_codigo": row["seccion_codigo"],
-            "pregunta_codigo": row["pregunta_codigo"],
-            "pregunta": row["pregunta"],
-            "estado": estado,
-            "comentario": row["comentario"],
-        })
-
-    for bloque in PCI_BLOCK_ORDER:
-        sub = df[df["bloque_codigo"] == bloque].copy()
-
-        if sub.empty:
-            continue
-
-        sub["estado"] = sub["estado"].apply(pci_estado_normalizado)
-
-        counts = {
-            "SI": int((sub["estado"] == "SI").sum()),
-            "PARCIAL": int((sub["estado"] == "PARCIAL").sum()),
-            "NO": int((sub["estado"] == "NO").sum()),
-            "NA": int((sub["estado"] == "NA").sum()),
-        }
-
-        validos = sub[sub["estado"].isin(["SI", "PARCIAL", "NO"])].copy()
-        total_validos = int(len(validos))
-        total_respondidas = int(len(sub))
-
-        pct = pci_pct_from_estados(sub["estado"].tolist())
-        nivel_info = pci_resolver_nivel(pct)
-
-        resultados[bloque] = {
-            "bloque": bloque,
-            "nombre": pci_block_title(bloque),
-            "pct": pct,
-            "madurez": nivel_info["nivel"],
-            "color": nivel_info["color"],
-            "descripcion": nivel_info["descripcion"],
-            "total": total_respondidas,
-            "total_validos": total_validos,
-            "counts": counts,
-            "brecha_pct": round(100 - pct, 2)
-        }
-
-    bloques_validos = [
-        float(v["pct"])
-        for v in resultados.values()
-        if int(v.get("total_validos", 0) or 0) > 0
-    ]
-
-    promedio_general = (
-        round(sum(bloques_validos) / len(bloques_validos), 2)
-        if bloques_validos
-        else 0
-    )
-
-    ar = (
-        PciAnalysisRun.query
-        .filter_by(pci_run_id=run.id)
-        .order_by(PciAnalysisRun.id.desc())
-        .first()
-    )
-
-    if not ar:
-        ar = PciAnalysisRun(
-            pci_run_id=run.id,
-            company_name=run.company_name
-        )
-        db.session.add(ar)
-
-    ar.company_name = run.company_name
-    ar.nivel_promedio_general = promedio_general
-    ar.resultados_json = json.dumps(resultados, ensure_ascii=False)
-    ar.preguntas_json = json.dumps(preguntas_detalle, ensure_ascii=False)
-    ar.velocimetros_json = json.dumps(resultados, ensure_ascii=False)
-
-    db.session.commit()
-    return ar.id
-
-
-# =========================
-# Analisis y Guardar
-# =========================
-
-@pci_madurez_bp.route("/ingreso/guardar", methods=["POST"])
-@login_required
-def ingreso_guardar_pci():
     user = User.query.get(session.get("user_id"))
 
     company_name = (request.form.get("company_name") or "").strip()
@@ -7440,13 +5929,13 @@ def ingreso_guardar_pci():
 
     if not company_name:
         flash("Debes ingresar el consecutivo de la Revisión.", "warning")
-        return redirect(url_for("madurez_pci.ingreso"))
+        return redirect(url_for("madurez.ingreso"))
 
-    preguntas = PciMadurezPregunta.query.order_by(PciMadurezPregunta.orden.asc()).all()
+    preguntas = MadurezPregunta.query.order_by(MadurezPregunta.orden.asc()).all()
     preguntas_q = [p for p in preguntas if p.tipo == "q"]
 
-    respondidas, total, progreso_pct = calcular_progreso_pci(
-        preguntas_q,
+    respondidas, total, progreso_pct = calcular_progreso_formulario(
+        preguntas,
         form_data=request.form
     )
 
@@ -7454,16 +5943,17 @@ def ingreso_guardar_pci():
         run_form = None
 
         if draft_id:
-            run_form = PciMadurezRun.query.filter_by(id=int(draft_id)).first()
+            run_form = MadurezRun.query.filter_by(id=int(draft_id)).first()
+
             if run_form and user and run_form.user_id != user.id:
                 flash("No tienes permiso para modificar este borrador.", "danger")
-                return redirect(url_for("madurez_pci.ingreso"))
+                return redirect(url_for("madurez.ingreso"))
 
         if not run_form:
-            run_form = obtener_borrador_pci(user.id if user else None)
+            run_form = obtener_borrador_madurez(user.id if user else None)
 
         if not run_form:
-            run_form = PciMadurezRun(
+            run_form = MadurezRun(
                 company_name=company_name,
                 user_id=user.id if user else None,
                 estado="BORRADOR",
@@ -7476,17 +5966,17 @@ def ingreso_guardar_pci():
         run_form.progreso_pct = progreso_pct
         run_form.updated_at = datetime.now(timezone.utc)
 
-        PciMadurezRespuesta.query.filter_by(run_id=run_form.id).delete()
+        MadurezRespuesta.query.filter_by(run_id=run_form.id).delete()
 
         for p in preguntas_q:
-            estado = pci_estado_normalizado(request.form.get(f"st_{p.id}"))
+            opcion = (request.form.get(f"r_{p.id}") or "").strip().upper()
             comentario = (request.form.get(f"c_{p.id}") or "").strip()
 
-            if estado in ("SI", "PARCIAL", "NO", "NA"):
-                db.session.add(PciMadurezRespuesta(
+            if opcion:
+                db.session.add(MadurezRespuesta(
                     run_id=run_form.id,
                     pregunta_id=p.id,
-                    estado=estado,
+                    opcion=opcion,
                     comentario=comentario
                 ))
 
@@ -7495,1064 +5985,1256 @@ def ingreso_guardar_pci():
         if accion == "guardar":
             run_form.estado = "BORRADOR"
             db.session.commit()
-            flash(f"✅ Borrador PCI-DSS guardado correctamente. Progreso actual: {progreso_pct}%.", "success")
-            return redirect(url_for("madurez_pci.ingreso"))
+            flash(f"✅ Borrador guardado correctamente. Progreso actual: {progreso_pct}%.", "success")
+            return redirect(url_for("madurez.ingreso"))
 
         if accion == "analizar":
-            respondidas, total, progreso_pct = calcular_progreso_pci(
-                preguntas_q,
-                form_data=request.form
-            )
-
-            print("=== PCI DEBUG ANALIZAR ===")
-            print("accion:", accion)
-            print("respondidas:", respondidas)
-            print("total:", total)
-            print("progreso_pct:", progreso_pct)
-            print("=========================")
-
-            if progreso_pct < 100:
+            if progreso_pct < 100 or respondidas < total:
                 db.session.commit()
                 flash(
                     f"⚠️ El análisis solo se habilita cuando el instrumento esté al 100%. Actualmente llevas {progreso_pct}%.",
                     "warning"
                 )
-                return redirect(url_for("madurez_pci.ingreso"))
+                return redirect(url_for("madurez.ingreso"))
 
             run_form.estado = "FINALIZADO"
             run_form.progreso_pct = 100
             db.session.commit()
 
-            analysis_run_id = run_analysis_from_pci_run(run_form.id)
+            df = build_df_from_db(run_form.id)
+            analysis_run_id = run_analysis_from_df(company_name, df)
 
-            flash("✅ Análisis PCI-DSS ejecutado correctamente.", "success")
-            return redirect(url_for("madurez_pci.resultado", run_id=analysis_run_id))
+            try:
+                resultado_nist = calcular_nist_desde_iso(analysis_run_id)
+                if resultado_nist:
+                    nuevo_nist = NistAnalysisRun(
+                        iso_analysis_id=analysis_run_id,
+                        nivel_promedio_general=resultado_nist["nivel_general"],
+                        resultados_json=json.dumps(resultado_nist["detalle"], ensure_ascii=False)
+                    )
+                    db.session.add(nuevo_nist)
+                    db.session.commit()
+            except Exception as e:
+                print("⚠️ Error generando NIST automáticamente:", e)
+
+            flash("✅ Información guardada y análisis generado correctamente.", "success")
+            return redirect(url_for("madurez.view_report", run_id=analysis_run_id))
 
         db.session.commit()
-        return redirect(url_for("madurez_pci.ingreso"))
+        flash("✅ Información procesada correctamente.", "success")
+        return redirect(url_for("madurez.ingreso"))
 
     except Exception as e:
         db.session.rollback()
-        traceback.print_exc()
-        flash(f"Error guardando/analisando PCI-DSS: {e}", "danger")
-        return redirect(url_for("madurez_pci.ingreso"))
-
-# =========================
-# Velocimetros
-# =========================
-
-def _pci_construir_velocimetro_fig(label: str, pct: float, nivel: str, color: str):
-    try:
-        pct = max(0.0, min(100.0, float(pct or 0)))
-
-        fig = plt.figure(figsize=(3.8, 2.4))
-        ax = fig.add_subplot(111, polar=True)
-        ax.set_theta_direction(-1)
-        ax.set_theta_offset(np.pi)
-        ax.set_ylim(0, 10)
-
-        # fondo semicircular
-        theta_bg = np.linspace(0, np.pi, 300)
-        ax.plot(theta_bg, [8] * len(theta_bg), linewidth=18, color="#e9ecef", solid_capstyle='round')
-
-        # avance
-        frac = pct / 100.0
-        theta_val = np.linspace(0, np.pi * frac, 300) if frac > 0 else [0]
-        ax.plot(theta_val, [8] * len(theta_val), linewidth=18, color=color, solid_capstyle='round')
-
-        # aguja
-        needle_angle = np.pi * frac
-        ax.plot([needle_angle, needle_angle], [0, 7.1], color="#0b1220", linewidth=2)
-
-        # centro
-        ax.scatter([0], [0], s=30, color="#0b1220", zorder=5)
-
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.grid(False)
-        ax.spines["polar"].set_visible(False)
-
-        ax.text(0.5, 1.10, label, transform=ax.transAxes, ha="center", va="center",
-                fontsize=9, fontweight="bold", color="#101827")
-        ax.text(0.5, 0.44, f"{pct:.0f}%", transform=ax.transAxes, ha="center", va="center",
-                fontsize=18, fontweight="bold", color="#0b1220")
-        ax.text(0.5, 0.26, nivel, transform=ax.transAxes, ha="center", va="center",
-                fontsize=8.5, color=color)
-
-        plt.tight_layout()
-        return fig
-    except Exception as e:
-        print(f"[PCI Velocímetro] Error: {e}")
-        return None
-
-def generar_pci_velocimetro_png_bytes(titulo, valor, nivel="", color="#6c757d"):
-    """
-    Genera un velocímetro limpio y legible para incrustar en PDF.
-    Retorna bytes PNG.
-    """
-    try:
-        valor = max(0, min(100, float(valor or 0)))
-
-        # Figura más grande y limpia para PDF
-        fig = plt.figure(figsize=(7.2, 4.2), dpi=220)
-        ax = plt.axes([0.04, 0.08, 0.92, 0.84])
-        ax.set_aspect("equal")
-        ax.axis("off")
-
-        # Límites controlados para dejar buen espacio al texto
-        ax.set_xlim(-1.18, 1.18)
-        ax.set_ylim(-0.28, 1.18)
-
-        # Fondo transparente/blanco limpio
-        fig.patch.set_facecolor("white")
-        ax.set_facecolor("white")
-
-        # =========================
-        # Arco base
-        # =========================
-        outer_r = 1.00
-        width = 0.18
-
-        # Tramos del arco
-        rangos = [
-            (180, 144, "#d9534f"),  # rojo
-            (144, 108, "#f0ad4e"),  # naranja
-            (108, 72,  "#f7d154"),  # amarillo
-            (72,  36,  "#5bc0de"),  # azul
-            (36,   0,  "#5cb85c"),  # verde
-        ]
-
-        for theta1, theta2, c in rangos:
-            ax.add_patch(Wedge(
-                (0, 0), outer_r, theta2, theta1,
-                width=width,
-                facecolor=c,
-                edgecolor="white",
-                linewidth=2
-            ))
-
-        # Aro exterior suave
-        ax.add_patch(Circle((0, 0), radius=outer_r, fill=False, linewidth=1.0, edgecolor="#d1d5db"))
-
-        # =========================
-        # Marcas del velocímetro
-        # =========================
-        for pct in range(0, 101, 10):
-            ang = math.radians(180 - (pct / 100.0) * 180.0)
-            x1 = math.cos(ang) * 0.78
-            y1 = math.sin(ang) * 0.78
-            x2 = math.cos(ang) * 0.88
-            y2 = math.sin(ang) * 0.88
-            ax.plot([x1, x2], [y1, y2], linewidth=1.2, color="#4b5563")
-
-        # Etiquetas principales
-        for pct in [0, 25, 50, 75, 100]:
-            ang = math.radians(180 - (pct / 100.0) * 180.0)
-            xt = math.cos(ang) * 0.63
-            yt = math.sin(ang) * 0.63
-            ax.text(
-                xt, yt, f"{pct}",
-                ha="center", va="center",
-                fontsize=10, fontweight="bold", color="#374151"
-            )
-
-        # =========================
-        # Aguja
-        # =========================
-        ang = math.radians(180 - (valor / 100.0) * 180.0)
-        xn = math.cos(ang) * 0.72
-        yn = math.sin(ang) * 0.72
-
-        aguja = FancyArrowPatch(
-            (0, 0), (xn, yn),
-            arrowstyle="-|>",
-            mutation_scale=18,
-            linewidth=2.4,
-            color="#0b1220",
-            zorder=5
-        )
-        ax.add_patch(aguja)
-
-        # Centro
-        ax.add_patch(Circle((0, 0), radius=0.065, facecolor="#0b1220", edgecolor="white", linewidth=1.0, zorder=6))
-
-        # =========================
-        # Textos
-        # =========================
-        titulo_corto = (titulo or "").strip()
-        if len(titulo_corto) > 42:
-            titulo_corto = titulo_corto[:39] + "..."
-
-        ax.text(
-            0, 1.06, titulo_corto,
-            ha="center", va="center",
-            fontsize=13, fontweight="bold", color="#0f3d68"
-        )
-
-        ax.text(
-            0, 0.30, f"{valor:.1f}%",
-            ha="center", va="center",
-            fontsize=24, fontweight="bold", color=color
-        )
-
-        if nivel:
-            nivel_txt = str(nivel).strip()
-            if len(nivel_txt) > 30:
-                nivel_txt = nivel_txt[:27] + "..."
-            ax.text(
-                0, 0.12, nivel_txt,
-                ha="center", va="center",
-                fontsize=11, fontweight="bold", color="#374151"
-            )
-
-        ax.text(
-            -0.96, -0.05, "Bajo",
-            ha="left", va="center",
-            fontsize=9, color="#4b5563"
-        )
-        ax.text(
-            0.96, -0.05, "Alto",
-            ha="right", va="center",
-            fontsize=9, color="#4b5563"
-        )
-
-        # =========================
-        # Exportar a PNG en alta calidad
-        # =========================
-        buf = io.BytesIO()
-        canvas = FigureCanvas(fig)
-        canvas.print_png(buf)
-        plt.close(fig)
-        buf.seek(0)
-        return buf.getvalue()
-
-    except Exception:
-        plt.close("all")
-        return None
-
-def generar_pci_velocimetro_base64(label: str, pct: float, nivel: str, color: str):
-    b = generar_pci_velocimetro_png_bytes(label, pct, nivel, color)
-    if not b:
-        return None
-    return base64.b64encode(b).decode("utf-8")
-
-def cargar_ai_pci_por_run(analysis_run_id: int) -> dict:
-    """
-    Carga análisis IA por requerimiento PCI si existe el modelo.
-    Si el modelo no existe, retorna vacío para que el PDF no falle.
-    """
-    try:
-        if "PciControlAiAnalysis" not in globals():
-            return {}
-
-        rows = PciControlAiAnalysis.query.filter_by(
-            analysis_run_id=analysis_run_id
-        ).all()
-
-        out = {}
-
-        for r in rows:
-            out[(r.bloque_codigo or "").strip().upper()] = {
-                "id": r.id,
-                "bloque_nombre": r.bloque_nombre or "",
-                "estado_actual": r.estado_actual or "",
-                "estado_requerido": r.estado_requerido or "",
-                "plan_accion": r.plan_accion or "",
-            }
-
-        return out
-
-    except Exception as e:
-        print("No se pudo cargar análisis IA PCI por bloque:", repr(e))
-        return {}
-
-def pci_normalizar_texto_rico_guardado(texto: str) -> str:
-    txt = (texto or "").strip()
-    if not txt:
-        return ""
-
-    txt = txt.replace("\r\n", "\n").replace("\r", "\n")
-    txt = html.unescape(txt)
-    txt = txt.replace("```json", "").replace("```", "").strip()
-
-    # Si viene como JSON, extraer campos principales
-    try:
-        obj = json.loads(txt)
-        if isinstance(obj, dict):
-            val = (
-                obj.get("informe_ejecutivo")
-                or obj.get("plan_trabajo")
-                or obj.get("texto")
-                or ""
-            )
-            if isinstance(val, list):
-                val = json.dumps(val, ensure_ascii=False)
-            if isinstance(val, str) and val.strip():
-                txt = val.strip()
-    except Exception:
-        pass
-
-    txt = html.unescape(txt)
-
-    # Convertir <br> a saltos y eliminar HTML
-    txt = re.sub(r"<\s*br\s*/?\s*>", "\n", txt, flags=re.IGNORECASE)
-    txt = re.sub(r"<[^>]+>", "", txt)
-
-    # Quitar títulos que Ollama agrega
-    patrones_titulos = [
-        r"^\s*\*{1,3}\s*INFORME\s+EJECUTIVO\s+DE\s+MADUREZ\s+PCI[-\s]?DSS\s*\*{1,3}\s*[:\-–—]?\s*",
-        r"^\s*#{1,6}\s*INFORME\s+EJECUTIVO\s+DE\s+MADUREZ\s+PCI[-\s]?DSS\s*[:\-–—]?\s*",
-        r"^\s*INFORME\s+EJECUTIVO\s+DE\s+MADUREZ\s+PCI[-\s]?DSS\s*[:\-–—]?\s*",
-        r"^\s*\*{1,3}\s*DE\s+MADUREZ\s+PCI[-\s]?DSS\s*\*{1,3}\s*[:\-–—]?\s*",
-        r"^\s*DE\s+MADUREZ\s+PCI[-\s]?DSS\s*[:\-–—]?\s*",
-        r"^\s*\*{1,3}\s*INFORME\s+EJECUTIVO\s*\*{1,3}\s*[:\-–—]?\s*",
-        r"^\s*#{1,6}\s*INFORME\s+EJECUTIVO\s*[:\-–—]?\s*",
-        r"^\s*INFORME\s+EJECUTIVO\s*[:\-–—]?\s*",
-        r"^\s*\*{1,3}\s*RESUMEN\s+EJECUTIVO\s*\*{1,3}\s*[:\-–—]?\s*",
-        r"^\s*#{1,6}\s*RESUMEN\s+EJECUTIVO\s*[:\-–—]?\s*",
-        r"^\s*RESUMEN\s+EJECUTIVO\s*[:\-–—]?\s*",
-        r"^\s*\*{1,3}\s*PLAN\s+DE\s+TRABAJO\s*\*{1,3}\s*[:\-–—]?\s*",
-        r"^\s*#{1,6}\s*PLAN\s+DE\s+TRABAJO\s*[:\-–—]?\s*",
-        r"^\s*PLAN\s+DE\s+TRABAJO\s*[:\-–—]?\s*",
-    ]
-
-    for patron in patrones_titulos:
-        txt = re.sub(patron, "", txt, flags=re.IGNORECASE).strip()
-
-    # Quitar markdown residual
-    txt = txt.replace("**", "").replace("__", "")
-
-    txt = re.sub(r"[ \t]+\n", "\n", txt)
-    txt = re.sub(r"\n[ \t]+", "\n", txt)
-    txt = re.sub(r"\n{3,}", "\n\n", txt)
-
-    return txt.strip()
-
-def generar_pci_radar_base64(resultados: dict):
-    try:
-        labels = []
-        values = []
-
-        for code in PCI_BLOCK_ORDER:
-            item = (resultados or {}).get(code)
-            if not item:
-                continue
-
-            total_validos = int(item.get("total_validos", 0) or 0)
-
-            # Si todo el bloque es N/A, NO entra al radar
-            if total_validos <= 0:
-                continue
-
-            labels.append(code)
-            values.append(float(item.get("pct", 0) or 0))
-
-        if not labels:
-            return None
-
-        N = len(labels)
-        vals = values + values[:1]
-        angles = [n / float(N) * 2 * math.pi for n in range(N)]
-        angles += angles[:1]
-
-        fig = plt.figure(figsize=(5.2, 4.2), dpi=180)
-        ax = plt.subplot(111, polar=True)
-
-        ax.set_theta_offset(math.pi / 2)
-        ax.set_theta_direction(-1)
-
-        ax.set_xticks(angles[:-1])
-        ax.set_xticklabels(labels, fontsize=8, fontweight="bold")
-
-        ax.set_ylim(0, 100)
-        ax.set_yticks([20, 40, 60, 80, 100])
-        ax.set_yticklabels(["20", "40", "60", "80", "100"], fontsize=7)
-
-        ax.plot(angles, vals, linewidth=2.2)
-        ax.fill(angles, vals, alpha=0.18)
-
-        ax.set_title("Radar de Cumplimiento PCI-DSS", fontsize=11, fontweight="bold", pad=16)
-
-        fig.tight_layout()
-
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", transparent=True, bbox_inches="tight", pad_inches=0.25)
-        plt.close(fig)
-        buf.seek(0)
-
-        return base64.b64encode(buf.getvalue()).decode("utf-8")
-
-    except Exception as e:
-        print("Error generando radar PCI:", repr(e))
-        plt.close("all")
-        return None
-
-# =========================
-# Resultado y Tablero
-# =========================
-
-@pci_madurez_bp.route("/resultado/<int:run_id>", methods=["GET"])
-@login_required
-def resultado(run_id):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role not in ("admin", "auditor") and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
-        flash("No tiene permiso para ver resultados de PCI-DSS.", "danger")
-        return redirect(url_for("menu"))
-
-    run = PciAnalysisRun.query.get_or_404(run_id)
-
-    # Recalcular automáticamente sin volver a ingresar información.
-    # Usa las respuestas ya guardadas en PciMadurezRespuesta.
-    try:
-        nuevo_analysis_id = run_analysis_from_pci_run(run.pci_run_id)
-        run = PciAnalysisRun.query.get_or_404(nuevo_analysis_id)
-    except Exception as e:
-        print("Error recalculando PCI-DSS:", repr(e))
-
-    read_only = (user.role == "auditor")
-
-    if read_only:
-        boton_informe_ai = """
-        <button class="btn btn-outline-secondary rounded-pill px-4 fw-bold" type="button" disabled>
-          <i class="bi bi-magic me-2"></i>Generar
-        </button>
-        """
-
-        boton_editar_informe = """
-        <button class="btn btn-outline-secondary rounded-pill px-4 fw-bold" type="button" disabled>
-          <i class="bi bi-pencil-square me-2"></i>Editar
-        </button>
-        """
-
-        boton_plan_ai = """
-        <button class="btn btn-outline-secondary rounded-pill px-4 fw-bold" type="button" disabled>
-          <i class="bi bi-magic me-2"></i>Generar
-        </button>
-        """
-
-        boton_editar_plan = """
-        <button class="btn btn-outline-secondary rounded-pill px-4 fw-bold" type="button" disabled>
-          <i class="bi bi-pencil-square me-2"></i>Editar
-        </button>
-        """
-    else:
-        boton_informe_ai = f"""
-        <form method="POST" action="{url_for('madurez_pci.informe_ejecutivo_generar_pci', run_id=run.id)}" class="m-0">
-          <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold">
-            <i class="bi bi-magic me-2"></i>Generar
-          </button>
-        </form>
-        """
-
-        boton_editar_informe = f"""
-        <a href="{url_for('madurez_pci.informe_ejecutivo_editar_pci', run_id=run.id)}"
-           class="btn btn-primary rounded-pill px-4 fw-bold">
-          <i class="bi bi-pencil-square me-2"></i>Editar
-        </a>
-        """
-
-        boton_plan_ai = f"""
-        <form method="POST" action="{url_for('madurez_pci.plan_trabajo_generar_pci', run_id=run.id)}" class="m-0">
-          <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold">
-            <i class="bi bi-magic me-2"></i>Generar
-          </button>
-        </form>
-        """
-
-        boton_editar_plan = f"""
-        <a href="{url_for('madurez_pci.plan_trabajo_editar_pci', run_id=run.id)}"
-           class="btn btn-primary rounded-pill px-4 fw-bold">
-          <i class="bi bi-pencil-square me-2"></i>Editar
-        </a>
-        """
-
-    try:
-        resultados = json.loads(run.resultados_json or "{}")
-    except Exception:
-        resultados = {}
-
-    radar_b64 = generar_pci_radar_base64(resultados)
-
-    informe_ai = pci_normalizar_texto_rico_guardado(run.informe_ejecutivo_ai or "")
-    informe_editado = pci_normalizar_texto_rico_guardado(run.informe_ejecutivo_editado or "")
-    informe_mostrar = informe_editado if informe_editado != "" else informe_ai
-
-    plan_ai = pci_normalizar_texto_rico_guardado(run.plan_trabajo_ai or "")
-    plan_editado = pci_normalizar_texto_rico_guardado(run.plan_trabajo_editado or "")
-    plan_mostrar = plan_editado if plan_editado != "" else plan_ai
-
-    def esc(x):
-        return escape(x or "")
-
-    def nl2br(x):
-        txt = pci_normalizar_texto_rico_guardado(x or "")
-        return txt.replace("\n", "<br>")
-
-    tarjetas = []
-
-    for code in PCI_BLOCK_ORDER:
-        item = resultados.get(code)
-        if not item:
-            continue
-
-        total_validos = int(item.get("total_validos", 0) or 0)
-
-        # Si todo el bloque es N/A, NO se muestra en el detalle
-        # Ejemplo: A2 con SI=0, PARCIAL=0, NO=0, NA=3
-        if total_validos <= 0:
-            continue
-
-        img_b64 = generar_pci_velocimetro_base64(
-            pci_block_title(code),
-            item.get("pct", 0),
-            item.get("madurez", ""),
-            item.get("color", "#6c757d")
-        )
-
-        tarjetas.append({
-            "code": code,
-            "title": pci_block_title(code),
-            "pct": float(item.get("pct", 0) or 0),
-            "madurez": item.get("madurez", ""),
-            "color": item.get("color", "#6c757d"),
-            "descripcion": item.get("descripcion", ""),
-            "brecha_pct": float(item.get("brecha_pct", 0) or 0),
-            "total": int(item.get("total", 0) or 0),
-            "total_validos": total_validos,
-            "counts": item.get("counts", {}),
-            "img_b64": img_b64,
+        flash(f"⚠️ Error en el proceso: {e}", "danger")
+        return redirect(url_for("madurez.ingreso"))
+
+def build_df_from_db(run_id: int):
+    import pandas as pd
+
+    rows = db.session.query(
+        MadurezPregunta.sheet,
+        MadurezPregunta.seccion,
+        MadurezPregunta.control,
+        MadurezPregunta.tema,
+        MadurezPregunta.pregunta,
+        MadurezRespuesta.opcion,
+        MadurezRespuesta.comentario
+    ).join(
+        MadurezRespuesta, MadurezRespuesta.pregunta_id == MadurezPregunta.id
+    ).filter(
+        MadurezRespuesta.run_id == run_id,
+        MadurezPregunta.tipo == "q"
+    ).order_by(
+        MadurezPregunta.orden.asc()
+    ).all()
+
+    data = []
+    for r in rows:
+        sheet_name = (r.sheet or "").strip()
+        control_val = (r.control or "").strip()
+
+        if sheet_name.upper() == "ANEXO A":
+            control_val = normalize_anexo_control(control_val, r.tema or "")
+            
+        data.append({
+            "Sheet": sheet_name,
+            "Seccion": r.seccion,
+            "Control": control_val,
+            "Tema": r.tema,
+            "Pregunta": r.pregunta,
+            "Respuesta": r.opcion,
+            "Comentarios": r.comentario
         })
 
-    cards_html = []
+    return pd.DataFrame(data)
 
-    for t in tarjetas:
-        counts = t["counts"] or {}
+def _status_score_from_option(opt: str):
+    """
+    Convierte opción del formulario (NA/SI/PAR/NO) a status y score.
+    Mantiene consistencia con tu motor.
+    """
+    opt = (opt or "").strip().upper()
+    if opt == "NA":
+        return "NA", 0
+    if opt == "SI":
+        return "SI", 100
+    if opt == "PAR":
+        return "PAR", 50
+    if opt == "NO":
+        return "NO", 0
+    # fallback (no debería pasar si el radio es required)
+    return "SIN_MARCAR", 0
 
-        img_html = ""
-        if t.get("img_b64"):
-            img_html = f"""
-            <img src="data:image/png;base64,{t['img_b64']}"
-                 class="img-fluid pcires-gauge mb-2"
-                 alt="{esc(t['title'])}">
+
+def parse_sheet_df(df_sheet: "pd.DataFrame", sheet_name: str):
+    """
+    Emula parse_sheet_xls pero usando DataFrame (BD/formulario).
+    Espera columnas: Sheet, Seccion, Control, Tema, Pregunta, Respuesta, Comentarios
+    Retorna: items, pct, done, total, detail_map
+    """
+    items = []
+    detail_map = {}
+
+    # normaliza columnas por seguridad
+    cols = {c.lower(): c for c in df_sheet.columns}
+    col_seccion = cols.get("seccion", "Seccion")
+    col_control = cols.get("control", "Control")
+    col_tema = cols.get("tema", "Tema")
+    col_preg = cols.get("pregunta", "Pregunta")
+    col_resp = cols.get("respuesta", "Respuesta")
+    col_comm = cols.get("comentarios", "Comentarios")
+
+    for i, row in df_sheet.iterrows():
+        pregunta = (row.get(col_preg) or "").strip()
+        if not pregunta:
+            continue
+
+        opcion = (row.get(col_resp) or "").strip().upper()
+        comentario = (row.get(col_comm) or "").strip()
+
+        status, score = _status_score_from_option(opcion)
+        applicable = (status != "NA")
+
+        seccion = (row.get(col_seccion) or "").strip()
+        control = (row.get(col_control) or "").strip()
+        tema = (row.get(col_tema) or "").strip()
+
+        # ----- control_id compatible con tu reporte -----
+        # Para ANEXO A: prefijo "A." para no mezclar con 4-10
+        control_id = "Sin control"
+        if (sheet_name or "").strip().upper() == "ANEXO A":
+            c = (control or "").strip()
+            # Solo aceptar numerales tipo 5.1, 5.16, 8.34, etc.
+            if re.match(r"^\d+\.\d+$", c):
+                control_id = f"A.{c}"
+            else:
+                control_id = "SIN CONTROL"   # 👈 sin prefijo A.
+        else:
+            m = re.match(r"^(\d+\.\d+)", seccion)
+            control_id = m.group(1) if m else (sheet_name or "Sin control")
+
+
+        item = {
+            "sheet": sheet_name,
+            "row": int(i) + 1,
+            "ref": "",                 # no hay ref de Excel aquí
+            "requisito": pregunta,     # lo que evalúas
+            "applicable": bool(applicable),
+            "status": status,
+            "score": int(score),
+            "comment": comentario,
+            "procesos": "",            # si luego lo agregas al form, lo conectas aquí
+            "brecha_pct": brecha_pct_from_status(status),
+            "brecha_nivel": "",        # se puede completar luego si quieres
+            "brecha_interp": "",
+            "control_id": control_id,
+            "item_id": "",             # opcional
+            "subitem_id": "",          # opcional
+        }
+        items.append(item)
+
+    applicable_items = [it for it in items if it["status"] != "NA"]
+    total = len(applicable_items)
+    done = sum(1 for it in applicable_items if it["status"] == "SI")
+    score_sum = sum(it["score"] for it in applicable_items)
+    pct = (score_sum / (total * 100.0) * 100.0) if total > 0 else 0.0
+
+    return items, float(round(pct, 2)), int(done), int(total), detail_map
+
+
+def run_analysis_from_df(company_name: str, df: "pd.DataFrame") -> int:
+    """
+    Ejecuta el MISMO flujo de análisis que /analyze, pero usando DF (formulario/BD).
+    Crea un AnalysisRun y retorna su ID.
+    """
+    chapter_results = {}
+    all_items = []
+
+    # IMPORTANT: df["Sheet"] puede venir con mayúsc/minúsc. Normalizamos.
+    df = df.copy()
+    if "Sheet" in df.columns:
+        df["Sheet"] = df["Sheet"].astype(str)
+
+    for sh in CHAPTER_SHEETS:
+        df_sh = df[df["Sheet"].str.strip().str.upper() == str(sh).strip().upper()]
+        items, pct, done, total, _detail_map = parse_sheet_df(df_sh, sh)
+
+        gap_info = gap_from_maturity_pct(pct)
+        chapter_results[sh] = {
+            "pct": pct,
+            "done": done,
+            "total": total,
+            "brecha_pct": gap_info["gap_pct"],
+            "brecha_nivel": gap_info["nivel_brecha"],
+            "brecha_interp": gap_info["interpretacion"],
+        }
+        all_items.extend(items)
+
+    gaps = [it for it in all_items if it.get("applicable") and it.get("status") != "SI"]
+
+    control_results = aggregate_by_control(all_items)
+
+    control_items = {}
+    for it in all_items:
+        cid = (it.get("control_id") or "").strip() or "Sin control"
+        control_items.setdefault(cid, []).append({
+            "sheet": it.get("sheet"),
+            "row": it.get("row"),
+            "ref": it.get("ref"),
+            "requisito": it.get("requisito"),
+            "applicable": bool(it.get("applicable", True)),
+            "status": it.get("status"),
+            "score": int(it.get("score", 0) or 0),
+            "comment": it.get("comment"),
+            "procesos": it.get("procesos"),
+            "brecha_pct": it.get("brecha_pct"),
+            "brecha_nivel": it.get("brecha_nivel"),
+            "brecha_interp": it.get("brecha_interp"),
+            "item_id": it.get("item_id", ""),
+            "subitem_id": it.get("subitem_id", ""),
+        })
+
+    item_results = build_item_results(control_items)
+
+    gaps_by_control = {}
+    for g in gaps:
+        cid = (g.get("control_id") or "").strip() or "Sin control"
+        gaps_by_control.setdefault(cid, []).append(g)
+
+    labels = list(chapter_results.keys())
+    values = [chapter_results[k]["pct"] for k in labels]
+
+    radar_overall_b64 = make_radar_base64(labels, values, title="Araña Consolidada – ISO 27001:2022")
+
+    bar_chapters_b64 = make_bar_chapters_plus_annexA_with_box_base64(
+        chapter_results=chapter_results,
+        control_results=control_results,
+        title="Madurez por capítulo + Anexo A (%)"
+    )
+
+    bar_controls_4_10_b64 = make_bar_controls_4_10_base64(control_results)
+
+    extra_graphs = {
+        "bar_chapters": bar_chapters_b64,
+        "bar_controls_4_10": bar_controls_4_10_b64,
+    }
+
+    run = AnalysisRun(
+        company_name=company_name,
+        filename="FORMULARIO",
+        excel_path="",
+        chapter_results_json=json.dumps(chapter_results, ensure_ascii=False),
+        gaps_json=json.dumps(gaps, ensure_ascii=False),
+        control_results_json=json.dumps(control_results, ensure_ascii=False),
+        gaps_by_control_json=json.dumps(gaps_by_control, ensure_ascii=False),
+        control_items_json=json.dumps(control_items, ensure_ascii=False),
+        item_results_json=json.dumps(item_results, ensure_ascii=False),
+        control_ai_json="{}",
+        item_ai_json="{}",
+        radar_overall_b64=radar_overall_b64,
+        radar_by_sheet_json=json.dumps(extra_graphs, ensure_ascii=False),
+        executive_summary=None,
+        ai_report_text=None,
+        action_plan_json=None,
+    )
+
+    db.session.add(run)
+    db.session.commit()
+    return int(run.id)
+
+# ===============================
+# Analysis
+# ===============================
+
+@madurez_bp.route("/analyze", methods=["POST"])
+@login_required
+def analyze():
+    company_name = (request.form.get("company_name") or "").strip()
+    if not company_name:
+        flash("Debes ingresar el nombre de la empresa.", "warning")
+        return redirect(url_for("madurez.home"))
+
+    file = request.files.get("file")
+    if not file or file.filename == "":
+        flash("Debes seleccionar un archivo .xls.", "warning")
+        return redirect(url_for("madurez.home"))
+
+    if not allowed_file(file.filename):
+        flash("Formato inválido. Solo se permite .xls.", "danger")
+        return redirect(url_for("madurez.home"))
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", file.filename)
+    safe_company = re.sub(r"[^a-zA-Z0-9._-]+", "_", company_name)[:80]
+    excel_path = os.path.join(UPLOAD_DIR, f"{ts}_{safe_company}_{safe_name}")
+    file.save(excel_path)
+
+    chapter_results = {}
+    all_items = []
+
+    for sh in CHAPTER_SHEETS:
+        try:
+            items, pct, done, total, _detail_map = parse_sheet_xls(excel_path, sh)
+        except Exception as e:
+            flash(f"Error leyendo hoja '{sh}': {e}", "danger")
+            return redirect(url_for("madurez.home"))
+
+        gap_info = gap_from_maturity_pct(pct)
+        chapter_results[sh] = {
+            "pct": pct,
+            "done": done,
+            "total": total,
+
+            # ✅ NUEVO: brecha por capítulo
+            "brecha_pct": gap_info["gap_pct"],
+            "brecha_nivel": gap_info["nivel_brecha"],
+            "brecha_interp": gap_info["interpretacion"],
+        }
+
+        all_items.extend(items)
+
+    # Brechas “aplicables no SI”
+    gaps = [it for it in all_items if it.get("applicable") and it.get("status") != "SI"]
+
+    # ✅ Resultados por Control (FIX)
+    control_results = aggregate_by_control(all_items)
+
+    # ✅ Guardar preguntas por control (FIX: guardar TODO, incluso NA; el KPI excluye NA)
+    control_items = {}
+    for it in all_items:
+        cid = (it.get("control_id") or "").strip() or "Sin control"
+        control_items.setdefault(cid, []).append({
+            "sheet": it.get("sheet"),
+            "row": it.get("row"),
+            "ref": it.get("ref"),
+            "requisito": it.get("requisito"),
+            "applicable": bool(it.get("applicable", True)),
+            "status": it.get("status"),
+            "score": int(it.get("score", 0) or 0),
+            "comment": it.get("comment"),
+            "procesos": it.get("procesos"),
+            "brecha_pct": it.get("brecha_pct"),
+            "brecha_nivel": it.get("brecha_nivel"),
+            "brecha_interp": it.get("brecha_interp"),
+            "item_id": it.get("item_id", ""),
+            "subitem_id": it.get("subitem_id", ""),
+        })
+    item_results = build_item_results(control_items)
+
+    # Brechas por Control (compat)
+    gaps_by_control = {}
+    for g in gaps:
+        cid = (g.get("control_id") or "").strip() or "Sin control"
+        gaps_by_control.setdefault(cid, []).append(g)
+
+    labels = list(chapter_results.keys())
+    values = [chapter_results[k]["pct"] for k in labels]
+
+    radar_overall_b64 = make_radar_base64(labels, values, title="Araña Consolidada – ISO 27001:2022")
+
+    bar_chapters_b64 = make_bar_chapters_plus_annexA_with_box_base64(
+        chapter_results=chapter_results,
+        control_results=control_results,
+        title="Madurez por capítulo + Anexo A (%)"
+    )
+
+    # ✅ NUEVO: barras por control (4–10) y resumen Anexo A (peores N)
+    bar_controls_4_10_b64 = make_bar_controls_4_10_base64(control_results)
+
+    extra_graphs = {
+        "bar_chapters": bar_chapters_b64,
+        "bar_controls_4_10": bar_controls_4_10_b64,
+    }
+
+    run = AnalysisRun(
+        company_name=company_name,
+        filename=file.filename,
+        excel_path=excel_path,
+        chapter_results_json=json.dumps(chapter_results, ensure_ascii=False),
+        gaps_json=json.dumps(gaps, ensure_ascii=False),
+        control_results_json=json.dumps(control_results, ensure_ascii=False),
+        gaps_by_control_json=json.dumps(gaps_by_control, ensure_ascii=False),
+        control_items_json=json.dumps(control_items, ensure_ascii=False),
+        item_results_json=json.dumps(item_results, ensure_ascii=False),
+        control_ai_json="{}",
+        item_ai_json="{}",
+        radar_overall_b64=radar_overall_b64,
+        radar_by_sheet_json=json.dumps(extra_graphs, ensure_ascii=False),
+        executive_summary=None,
+        ai_report_text=None,
+        action_plan_json=None,
+    )
+
+    db.session.add(run)
+    db.session.commit()
+
+    # ==========================
+    # ✅ AUTO-CÁLCULO NIST (DESPUÉS DE GUARDAR ISO)
+    # ==========================
+    try:
+        resultado_nist = calcular_nist_desde_iso(run.id)
+        if resultado_nist:
+            nuevo_nist = NistAnalysisRun(
+                iso_analysis_id=run.id,
+                nivel_promedio_general=resultado_nist["nivel_general"],
+                resultados_json=json.dumps(resultado_nist["detalle"], ensure_ascii=False)
+            )
+            db.session.add(nuevo_nist)
+            db.session.commit()
+    except Exception as e:
+        # No bloquea el flujo ISO si NIST falla
+        print("⚠️ Error generando NIST automáticamente:", e)
+
+    flash("✅ Análisis generado y guardado correctamente.", "success")
+    return redirect(url_for("madurez.view_report", run_id=run.id))
+
+@madurez_bp.route("/report/<int:run_id>/generate-ai-control", methods=["POST"])
+@login_required
+def generate_ai_control(run_id: int):
+    user = User.query.get(session.get("user_id"))
+
+    if user and user.role == "auditor":
+        flash("El perfil Auditor no puede generar análisis con IA por control.", "danger")
+        return redirect(url_for("madurez.view_report", run_id=run_id))
+
+    if user and user.role not in ("admin", "auditor") and not verificar_permiso(user, "Nivel de Madurez ISO 27001:2022"):
+        flash("No tiene permiso para generar análisis con IA.", "danger")
+        return redirect(url_for("menu"))
+
+    run = AnalysisRun.query.get_or_404(run_id)
+
+    control_id = (request.form.get("control_id") or request.args.get("control_id") or "").strip().upper()
+    if not control_id:
+        flash("No se recibió el control a procesar.", "warning")
+        return redirect(url_for("madurez.view_report", run_id=run.id))
+
+    try:
+        ctx = build_report_context(run)
+        control_items = ctx.get("control_items", {}) or {}
+
+        items = control_items.get(control_id, []) or []
+        kpi = compute_control_kpis(control_id, items)
+
+        ai_generate_control_analysis(run, control_id, kpi, items)
+
+        db.session.add(run)
+        db.session.commit()
+
+        flash(f"✅ Análisis IA generado para el control {control_id}.", "success")
+
+    except Exception as e:
+        db.session.rollback()
+        print("DEBUG ISO CONTROL - ERROR:", str(e))
+        traceback.print_exc()
+        flash(f"❌ Error generando IA para el control {control_id}: {e}", "danger")
+
+    return redirect(url_for("madurez.view_report", run_id=run.id))
+
+@madurez_bp.route("/report/<int:run_id>/generate-ai-informe", methods=["POST"])
+@login_required
+def generate_ai_informe(run_id: int):
+    user = User.query.get(session.get("user_id"))
+
+    if user and user.role == "auditor":
+        flash("El perfil Auditor no puede generar el resumen ejecutivo con IA.", "danger")
+        return redirect(url_for("madurez.view_report", run_id=run_id))
+
+    if user and user.role not in ("admin", "auditor") and not verificar_permiso(user, "Nivel de Madurez ISO 27001:2022"):
+        flash("No tiene permiso para generar el resumen ejecutivo con IA.", "danger")
+        return redirect(url_for("menu"))
+
+    run = AnalysisRun.query.get_or_404(run_id)
+
+    try:
+        chapter_results = json.loads(run.chapter_results_json or "{}")
+
+        data = ai_generate_executive_summary_from_domains(
+            company_name=run.company_name,
+            chapter_results=chapter_results
+        )
+
+        run.executive_summary = (data.get("executive_summary") or "").strip()
+        db.session.commit()
+
+        flash("✅ Resumen ejecutivo generado con IA.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"❌ Error generando resumen ejecutivo con IA: {e}", "danger")
+
+    return redirect(url_for("madurez.view_report", run_id=run.id))
+
+@madurez_bp.route("/report/<int:run_id>/ai/plan", methods=["POST"])
+@login_required
+def generate_ai_plan(run_id: int):
+    run = AnalysisRun.query.get_or_404(run_id)
+
+    chapter_results = json.loads(run.chapter_results_json or "{}")
+    control_results = json.loads(run.control_results_json or "{}")
+
+    try:
+        out = ai_generate_general_action_plan(
+            company_name=run.company_name,
+            chapter_results=chapter_results,
+            control_results=control_results
+        )
+
+        # ✅ Guarda SOLO plan
+        run.action_plan_json = json.dumps(out.get("action_plan", []), ensure_ascii=False)
+
+        # ✅ No tocar resumen ejecutivo aquí
+        # run.executive_summary = run.executive_summary (no hacer nada)
+
+        db.session.commit()
+        flash("✅ IA Plan generada: SOLO Plan de acción general.", "success")
+
+    except Exception as e:
+        flash(f"⚠️ No se pudo generar Plan de acción IA. Error: {e}", "danger")
+
+    return redirect(url_for("madurez.view_report", run_id=run.id))
+
+def build_report_context(run: AnalysisRun) -> dict:
+    # JSON base
+    chapter_results = json.loads(run.chapter_results_json or "{}")
+    control_results = json.loads(run.control_results_json or "{}")
+    control_items = json.loads(run.control_items_json or "{}")
+
+    # Normaliza claves control_items a UPPER (como ya haces en IA)
+    norm_control_items = {}
+    for k, v in (control_items or {}).items():
+        kk = (str(k) or "").strip().upper()
+        if kk:
+            norm_control_items[kk] = v or []
+    control_items = norm_control_items
+
+    # control_ai
+    try:
+        control_ai = json.loads(run.control_ai_json or "{}") if run.control_ai_json else {}
+    except Exception:
+        control_ai = {}
+
+    # item_results (si no existe guardado, lo reconstruye)
+    try:
+        item_results = json.loads(run.item_results_json or "{}") if run.item_results_json else {}
+    except Exception:
+        item_results = {}
+
+    if not item_results:
+        item_results = build_item_results(control_items)
+
+    # item_ai
+    try:
+        item_ai = json.loads(run.item_ai_json or "{}") if getattr(run, "item_ai_json", None) else {}
+    except Exception:
+        item_ai = {}
+
+    # gráficas extra (barras)
+    try:
+        extra_graphs = json.loads(run.radar_by_sheet_json or "{}") if run.radar_by_sheet_json else {}
+    except Exception:
+        extra_graphs = {}
+
+    bar_chapters_b64 = extra_graphs.get("bar_chapters", "")
+    bar_controls_4_10_b64 = extra_graphs.get("bar_controls_4_10", "")
+
+    # plan
+    plan = json.loads(run.action_plan_json or "[]") if run.action_plan_json else []
+
+    # textos
+    executive_text = format_executive_summary(run.executive_summary)
+    ai_text = format_ai_report(run.ai_report_text)
+    methodology_text = (getattr(run, "ai_methodology_text", "") or "").strip()
+
+    # KPIs globales
+    overall = round(sum(v.get("pct", 0) for v in chapter_results.values()) / max(1, len(chapter_results)), 2)
+    overall_maturity = get_maturity_label_for_pct(overall)
+
+    # Orden de controles para imprimir (igual que UI)
+    controls_to_process = []
+    for cid in control_items.keys():
+        if cid and cid != "SIN CONTROL":
+            controls_to_process.append(cid)
+
+    def _order_key(x: str):
+        xu = (x or "").strip().upper()
+        if xu in CONTROL_ORDER:
+            return (0, CONTROL_ORDER.index(xu), xu)
+        if xu.startswith("A."):
+            return (1, 9999, xu)
+        return (2, 9999, xu)
+
+    controls_to_process = sorted(set(controls_to_process), key=_order_key)
+
+    return {
+        "run": run,
+        "chapter_results": chapter_results,
+        "control_results": control_results,
+        "control_items": control_items,
+        "control_ai": control_ai,
+        "item_results": item_results,
+        "item_ai": item_ai,
+        "plan": plan,
+        "executive_text": executive_text,
+        "ai_text": ai_text,
+        "methodology_text": methodology_text,
+        "overall": overall,
+        "overall_maturity": overall_maturity,
+        "radar_overall_b64": (run.radar_overall_b64 or ""),
+        "bar_chapters_b64": bar_chapters_b64,
+        "bar_controls_4_10_b64": bar_controls_4_10_b64,
+        "controls_to_process": controls_to_process,
+    }
+
+# ==========================
+# VIEW REPORT (UI)
+# ==========================
+@madurez_bp.route("/report/<int:run_id>", methods=["GET"])
+@login_required
+def view_report(run_id: int):
+    run = AnalysisRun.query.get_or_404(run_id)
+    user = User.query.get(session.get("user_id"))
+
+    # =========================
+    # PERMISOS
+    # =========================
+    if user and user.role not in ("admin", "auditor") and not verificar_permiso(user, "Nivel de Madurez ISO 27001:2022"):
+        flash("No tiene permiso para acceder al informe de madurez ISO 27001:2022.", "danger")
+        return redirect(url_for("menu"))
+
+    read_only = bool(user and user.role == "auditor")
+
+    ctx = build_report_context(run)
+    nist = calcular_nist_desde_iso(run.id)
+    ctx["nist_from_iso"] = nist
+
+    chapter_results = ctx["chapter_results"]
+    control_results = ctx["control_results"]
+    control_items = ctx["control_items"]
+    control_ai = ctx["control_ai"]
+    item_results = ctx["item_results"]
+    item_ai = ctx["item_ai"]
+    plan = ctx["plan"]
+    bar_chapters_b64 = ctx["bar_chapters_b64"]
+    bar_controls_4_10_b64 = ctx["bar_controls_4_10_b64"]
+    overall = ctx["overall"]
+    overall_maturity = ctx["overall_maturity"]
+
+    rows = ""
+    for k in CHAPTER_SHEETS:
+        v = chapter_results.get(k, {"pct": 0, "done": 0, "total": 0})
+        maturity = get_maturity_label_for_pct(v.get("pct", 0))
+
+        bp = float(v.get("brecha_pct", 0) or 0)
+        bn = (v.get("brecha_nivel") or "").strip()
+        bi = (v.get("brecha_interp") or "").strip()
+
+        brecha_txt = ""
+        if bi:
+            brecha_txt = f"<div class='small text-muted mt-1 wrap'>{xml_escape(bi)}</div>"
+
+        rows += f"""
+        <tr>
+          <td class="fw-semibold">{xml_escape(k)}</td>
+          <td>
+            <span class="badge {score_badge(float(v.get("pct",0)))}">{v.get("pct",0)}%</span>
+            {"<span class='text-muted small ms-2'>(" + xml_escape(maturity) + ")</span>" if maturity else ""}
+          </td>
+          <td>
+            <span class="badge {gap_badge(bn)}">{bp:.0f}%</span>
+            {"<span class='text-muted small ms-2'>(" + xml_escape(bn) + ")</span>" if bn else ""}
+            {brecha_txt}
+          </td>
+        </tr>
+        """
+
+    control_rows = ""
+    for cid, v in control_results.items():
+        if str(cid).upper().startswith("A."):
+            continue
+
+        bp = float(v.get("brecha_pct", 0) or 0)
+        bn = (v.get("brecha_nivel") or "").strip()
+        bi = (v.get("brecha_interp") or "").strip()
+
+        brecha_txt = ""
+        if bi:
+            brecha_txt = f"<div class='small text-muted mt-1 wrap'>{xml_escape(bi)}</div>"
+
+        control_rows += f"""
+        <tr>
+          <td class="fw-semibold">
+            {xml_escape(cid)} <span class="text-muted small">({xml_escape(v.get("group",""))})</span>
+          </td>
+          <td>
+            <span class="badge {score_badge(float(v.get("pct",0)))}">{v.get("pct",0)}%</span>
+            {"<span class='text-muted small ms-2'>(" + xml_escape(v.get("madurez","")) + ")</span>" if v.get("madurez") else ""}
+          </td>
+          <td>
+            <span class="badge {gap_badge(bn)}">{bp:.0f}%</span>
+            {"<span class='text-muted small ms-2'>(" + xml_escape(bn) + ")</span>" if bn else ""}
+            {brecha_txt}
+          </td>
+        </tr>
+        """
+
+    if not control_rows:
+        control_rows = "<tr><td colspan='3' class='text-muted'>Sin datos por control.</td></tr>"
+
+    chapter_groups_ui = [
+        "Contexto",
+        "Liderazgo",
+        "Planificación",
+        "Soporte",
+        "Operación",
+        "Evaluación de desempeño",
+        "Mejora",
+        "Anexo A",
+    ]
+
+    def controls_for_group(group_name: str) -> list:
+        ids = CONTROL_GROUPS.get(group_name, [])
+
+        if group_name == "Anexo A":
+            def a_sort_key(k: str):
+                kk = (k or "").strip().upper()
+                m = re.match(r"^A\.(\d+)\.(\d+)$", kk)
+                if not m:
+                    return (999, 999)
+                return (int(m.group(1)), int(m.group(2)))
+
+            all_a = []
+            for k in control_items.keys():
+                kk = (str(k) or "").strip().upper()
+                if re.match(r"^A\.\d+\.\d+$", kk):
+                    all_a.append(kk)
+
+            return sorted(set(all_a), key=a_sort_key)
+
+        return ids
+
+    anexo_headers = MadurezPregunta.query.filter_by(sheet="ANEXO A", tipo="h") \
+        .order_by(MadurezPregunta.orden.asc()).all()
+
+    anexo_family_map = {}
+    anexo_control_map = {}
+
+    for p in anexo_headers:
+        txt = (p.pregunta or "").strip()
+        sec = (p.seccion or "").strip()
+
+        m_fam = re.match(r"^(\d+)\.\s+", txt)
+        if m_fam and not sec:
+            anexo_family_map[m_fam.group(1)] = txt
+            continue
+
+        if re.match(r"^\d+\.\d+$", sec) and txt:
+            anexo_control_map[sec] = txt
+
+    controls_by_chapter_html = ""
+    for grp in chapter_groups_ui:
+        cids = controls_for_group(grp)
+        chap_inner = ""
+        last_anexo_family = None
+
+        for cid in cids:
+            items_c = control_items.get(cid, []) or []
+            kpi = compute_control_kpis(cid, items_c)
+            badge = score_badge(float(kpi.get("pct", 0) or 0))
+            bp = float(kpi.get("brecha_pct", 0) or 0)
+            bn = (kpi.get("brecha_nivel") or "").strip()
+            bi = (kpi.get("brecha_interp") or "").strip()
+
+            cid_u = (cid or "").strip().upper()
+            is_anexo = cid_u.startswith("A.")
+            cid_disp = cid_u[2:] if is_anexo else (cid or "").strip()
+
+            if is_anexo:
+                fam = cid_disp.split(".")[0] if "." in cid_disp else None
+                if fam and fam != last_anexo_family:
+                    fam_title = anexo_family_map.get(fam, f"{fam}.")
+                    chap_inner += f"""
+                    <div class="mt-3 fw-bold">{xml_escape(fam_title)}</div>
+                    <hr class="my-2">
+                    """
+                    last_anexo_family = fam
+
+                full_title = anexo_control_map.get(cid_disp, cid_disp)
+                sub_title = re.sub(r"^\s*" + re.escape(cid_disp) + r"\s*", "", full_title).strip()
+                title = sub_title or full_title
+            else:
+                title = control_title(cid)
+
+            cai = (control_ai.get(cid) or {}) if isinstance(control_ai, dict) else {}
+
+            safe_id = re.sub(r"[^a-zA-Z0-9_]+", "_", f"{grp}_{cid}")
+
+            estado_actual = (cai.get("estado_actual") or "").strip()
+            estado_req    = (cai.get("estado_requerido") or "").strip()
+            plan_sug      = (cai.get("plan_accion_sugerido") or "").strip()
+
+            ea_safe = textarea_escape(estado_actual)
+            er_safe = textarea_escape(estado_req)
+            pa_safe = textarea_escape(plan_sug)
+
+            bloque1 = f"""
+            <div class="mt-2">
+              <div class="fw-semibold mb-1 text-dark">📍 Estado actual</div>
+              <div class="small text-dark wrap">
+                {xml_escape(estado_actual) if estado_actual else "<span class='text-muted'>Aún no se ha generado IA para este control.</span>"}
+              </div>
+            </div>
+
+            <div class="mt-3">
+              <div class="fw-semibold mb-1 text-dark">🎯 Estado requerido</div>
+              <div class="small text-dark wrap">
+                {xml_escape(estado_req) if estado_req else "<span class='text-muted'>Sin contenido.</span>"}
+              </div>
+            </div>
             """
 
-        cards_html.append(f"""
-        <div class="col-12 col-lg-6">
-          <div class="pcires-card p-4 h-100">
-            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
-              <div>
-                <div class="pcires-card-title">{esc(t["title"])}</div>
-                <div class="small text-muted">
-                  Total respondidas: <b>{t["total"]}</b> ·
-                  Válidas: <b>{t["total_validos"]}</b> ·
-                  Brecha: <b>{t["brecha_pct"]:.2f}%</b>
+            bloque2 = f"""
+            <div class="mt-3">
+              <div class="fw-semibold mb-1 text-dark">🛠 Plan de acción sugerido</div>
+              <div class="small text-dark wrap">
+                {xml_escape(plan_sug) if plan_sug else "<span class='text-muted'>Sin contenido.</span>"}
+              </div>
+            </div>
+            """
+
+            if read_only:
+                control_edit_form = """
+                <div class="mt-3">
+                  <button class="btn btn-sm btn-secondary pill" type="button" disabled
+                          title="El perfil Auditor solo tiene permisos de consulta">
+                    ✏️ Editar análisis (Control)
+                  </button>
+                </div>
+                """
+                btn_ai_control = """
+                <button class="btn btn-sm btn-secondary pill" type="button" disabled
+                        title="El perfil Auditor no puede generar IA por control">
+                  🧠 Generar IA (Control)
+                </button>
+                """
+            else:
+                control_edit_form = f"""
+                <div class="mt-3">
+                  <button type="button"
+                          class="btn btn-sm btn-outline-primary pill"
+                          id="btnEditControl_{safe_id}"
+                          onclick="toggleControlEdit('{safe_id}', true)">
+                    ✏️ Editar análisis (Control)
+                  </button>
+                </div>
+
+                <div class="card card-soft p-3 mt-3 d-none" id="editCard_{safe_id}">
+                  <div class="fw-bold mb-2">✍️ Editar análisis por control</div>
+
+                  <form method="POST" action="{url_for('madurez.save_control_ai', run_id=run.id, control_id=cid)}">
+                    <div class="mb-2">
+                      <label class="form-label fw-semibold small">Estado actual</label>
+                      <textarea class="form-control" name="estado_actual" rows="4">{ea_safe}</textarea>
+                    </div>
+
+                    <div class="mb-2">
+                      <label class="form-label fw-semibold small">Estado requerido</label>
+                      <textarea class="form-control" name="estado_requerido" rows="4">{er_safe}</textarea>
+                    </div>
+
+                    <div class="mb-3">
+                      <label class="form-label fw-semibold small">Plan de acción sugerido</label>
+                      <textarea class="form-control" name="plan_accion_sugerido" rows="6">{pa_safe}</textarea>
+                    </div>
+
+                    <div class="d-flex flex-wrap gap-2">
+                      <button class="btn btn-sm btn-success pill" type="submit">💾 Guardar edición (Control)</button>
+                      <button type="button"
+                              class="btn btn-sm btn-outline-secondary pill"
+                              onclick="toggleControlEdit('{safe_id}', false)">
+                        ↩️ Cancelar
+                      </button>
+                    </div>
+                  </form>
+                </div>
+                """
+
+                btn_ai_control = f"""
+                <form method="POST" action="{url_for('madurez.generate_ai_control', run_id=run.id)}" style="display:inline;">
+                  <input type="hidden" name="control_id" value="{xml_escape(cid_u)}">
+                  <button class="btn btn-sm btn-purple pill" type="submit">🧠 Generar IA (Control)</button>
+                </form>
+                """
+
+            control_ai_html = f"""
+            <div class="card card-soft p-3">
+              <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <div class="fw-bold">🧠 Análisis IA por control</div>
+                <span class="badge bg-dark">{xml_escape(kpi.get("madurez","") or "")}</span>
+                <span class="badge {score_badge(float(kpi.get("pct",0) or 0))}">{kpi.get("pct",0)}%</span>
+                <span class="badge {gap_badge((kpi.get("brecha_nivel") or '').strip())}">
+                  {float(kpi.get("brecha_pct",0) or 0):.0f}%
+                </span>
+                {"<div class='small text-muted mt-2 wrap'>" + xml_escape(kpi.get("brecha_interp","")) + "</div>" if (kpi.get("brecha_interp") or "").strip() else ""}
+              </div>
+              {bloque1}
+              {bloque2}
+            </div>
+            """
+
+            tabla = render_control_items_table(items_c)
+
+            chap_inner += f"""
+            <div class="accordion-item">
+              <h2 class="accordion-header" id="h_{safe_id}">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#c_{safe_id}">
+                  <div class="d-flex flex-wrap gap-2 align-items-center w-100">
+                    <div class="fw-bold">{xml_escape(cid_disp)}</div>
+                    <div class="text-muted small">{xml_escape(title)}</div>
+                    <div class="ms-auto d-flex align-items-center gap-2">
+                      <span class="badge {badge}">{kpi.get("pct",0)}%</span>
+                      {"<span class='text-muted small'>(" + xml_escape(kpi.get("madurez","")) + ")</span>" if kpi.get("madurez") else ""}
+                      <span class="badge {gap_badge(bn)}">{bp:.0f}%</span>
+                      {"<span class='text-muted small'>(" + xml_escape(bn) + ")</span>" if bn else ""}
+                    </div>
+                  </div>
+                </button>
+              </h2>
+              <div id="c_{safe_id}" class="accordion-collapse collapse">
+                <div class="accordion-body">
+
+                  <div class="d-flex justify-content-end mb-2">
+                    {btn_ai_control}
+                  </div>
+
+                  <div class="mt-2">
+                    {control_ai_html}
+                  </div>
+
+                  {control_edit_form}
+
+                  <div class="mt-3">
+                    <div class="fw-semibold mb-2">Preguntas / requisitos del control (soporte)</div>
+                    {tabla}
+                  </div>
+
                 </div>
               </div>
-              <span class="badge rounded-pill px-3 py-2"
-                    style="background:{t['color']}; color:#fff;">
-                {esc(t["madurez"])}
-              </span>
+            </div>
+            """
+
+        if not chap_inner:
+            chap_inner = "<div class='text-muted'>Sin controles disponibles en este capítulo.</div>"
+
+        soporte_chap = ""
+        for _cid in cids:
+            items_cc = control_items.get(_cid, []) or []
+            if not items_cc:
+                continue
+
+            soporte_chap += f"""
+            <div class="mt-3">
+              <div class="fw-semibold mb-2" style="color:#1e3a8a;">
+                {_cid} — {xml_escape(control_title(_cid))}
+              </div>
+              {render_control_items_table(items_cc)}
+            </div>
+            """
+
+        if not soporte_chap:
+            soporte_chap = "<div class='text-muted'>Sin preguntas registradas para este capítulo.</div>"
+
+        safe_grp = re.sub(r"[^a-zA-Z0-9_]+", "_", grp)
+
+        grp_pcts = []
+        for _cid in cids:
+            vv = control_results.get(_cid, {})
+            try:
+                grp_pcts.append(float(vv.get("pct", 0) or 0))
+            except Exception:
+                pass
+
+        grp_avg = round(sum(grp_pcts) / len(grp_pcts), 2) if grp_pcts else 0.0
+        grp_gap = gap_from_maturity_pct(grp_avg)
+        grp_bp = float(grp_gap.get("gap_pct", 0) or 0)
+        grp_bn = (grp_gap.get("nivel_brecha", "") or "").strip()
+        grp_bi = (grp_gap.get("interpretacion", "") or "").strip()
+
+        grp_brecha_txt = ""
+        if grp_bi:
+            grp_brecha_txt = f"<div class='small text-muted mt-1 wrap'>{xml_escape(grp_bi)}</div>"
+
+        controls_by_chapter_html += f"""
+        <div class="card card-soft shadow-soft p-4 mt-3">
+          <div class="d-flex flex-wrap justify-content-between align-items-center mb-2 gap-2">
+            <div>
+              <h5 class="mb-0">📌 Controles – Capítulo: {xml_escape(grp)}</h5>
+              <div class="text-muted small">Análisis por control basado en las preguntas del instrumento.</div>
             </div>
 
-            <div class="text-center">
-              {img_html}
-            </div>
-
-            <div class="row g-2 mt-1">
-              <div class="col-6 col-md-3">
-                <div class="mini-stat bg-success-subtle text-success-emphasis">Sí<br><b>{counts.get("SI",0)}</b></div>
+            <div class="text-start">
+              <div class="small fw-semibold">Brecha</div>
+              <div class="d-flex align-items-center gap-2">
+                <span class="badge {gap_badge(grp_bn)}">{grp_bp:.0f}%</span>
+                {"<span class='text-muted small'>(" + xml_escape(grp_bn) + ")</span>" if grp_bn else ""}
               </div>
-              <div class="col-6 col-md-3">
-                <div class="mini-stat bg-warning-subtle text-dark">Parcial<br><b>{counts.get("PARCIAL",0)}</b></div>
-              </div>
-              <div class="col-6 col-md-3">
-                <div class="mini-stat bg-danger-subtle text-danger-emphasis">No<br><b>{counts.get("NO",0)}</b></div>
-              </div>
-              <div class="col-6 col-md-3">
-                <div class="mini-stat bg-secondary-subtle text-secondary-emphasis">N/A<br><b>{counts.get("NA",0)}</b></div>
-              </div>
-            </div>
-
-            <div class="d-flex justify-content-center mt-3">
-              <a href="{url_for('madurez_pci.resultado_bloque_preguntas', run_id=run.id, bloque_codigo=t['code'])}"
-                 class="btn btn-outline-primary rounded-pill px-4 fw-bold">
-                <i class="bi bi-list-check me-2"></i>Ver preguntas respondidas
-              </a>
+              {grp_brecha_txt}
             </div>
           </div>
-        </div>
-        """)
 
-    radar_html = ""
-    if radar_b64:
-        radar_html = f"""
-        <div class="pcires-card p-4 h-100">
-          <div class="pcires-card-title">🕸️ Radar de cumplimiento PCI-DSS</div>
-          <div class="text-muted small mb-2">
-            Vista comparativa por requerimiento. N/A no afecta el cálculo.
+          <div class="accordion" id="acc_{safe_grp}">
+            {chap_inner}
           </div>
-          <div class="text-center">
-            <img src="data:image/png;base64,{radar_b64}"
-                 class="img-fluid pcires-radar"
-                 alt="Radar PCI-DSS">
+
+          <div class="mt-4">
+            <button class="btn btn-outline-primary rounded-pill px-4"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#sup_{safe_grp}">
+              📋 Preguntas / requisitos del control (soporte)
+            </button>
+
+            <div class="collapse mt-3" id="sup_{safe_grp}">
+              {soporte_chap}
+            </div>
           </div>
         </div>
         """
 
-    top_html = f"""
-    <div class="row g-3 mb-4">
+    plan_rows = ""
+    if plan:
+        for p in plan[:400]:
+            pri = p.get("prioridad", "")
+            pri_badge = "bg-secondary"
+            if pri == "Alta":
+                pri_badge = "bg-danger"
+            elif pri == "Media":
+                pri_badge = "bg-warning text-dark"
 
-      <div class="col-12 col-xl-4">
-        <div class="pcires-card p-4 h-100">
-          <div class="pcires-card-title">📌 Resultado General PCI-DSS</div>
-          <div class="text-muted small mb-3">
-            Cálculo recalculado desde las respuestas guardadas.
-          </div>
+            plan_rows += f"""
+            <tr class="cell-small">
+              <td><span class="badge bg-dark">{xml_escape(p.get("fase",""))}</span></td>
+              <td class="text-muted">{xml_escape(p.get("capitulo",""))}</td>
+              <td class="wrap" style="min-width: 220px;">{xml_escape(p.get("requisito",""))}</td>
+              <td class="wrap" style="min-width: 360px;">{xml_escape(p.get("accion",""))}</td>
+              <td class="wrap" style="min-width: 240px;">{xml_escape(p.get("evidencia",""))}</td>
+              <td style="min-width: 160px;">{xml_escape(p.get("responsable",""))}</td>
+              <td><span class="badge {pri_badge}">{xml_escape(pri)}</span></td>
+            </tr>
+            """
+    else:
+        plan_rows = "<tr><td colspan='7' class='text-center text-muted'>Aún no has generado el plan con IA.</td></tr>"
 
-          <div class="pcires-general-score-box">
-            <div class="pcires-general-score-label">Cumplimiento general</div>
-            <div class="pcires-general-score-value">{float(run.nivel_promedio_general or 0):.2f}%</div>
-            <div class="pcires-general-score-subtitle">
-              Revisión: <b>{esc(run.company_name or '')}</b>
-            </div>
-          </div>
+    executive_text = format_executive_summary(run.executive_summary)
+    ai_text = format_ai_report(run.ai_report_text)
 
-          <div class="alert alert-info mt-3 mb-0 small rounded-4 border-0">
-            <b>Nota:</b> las respuestas N/A cuentan como respondidas, pero se excluyen del denominador de madurez.
-          </div>
-        </div>
-      </div>
-
-      <div class="col-12 col-xl-4">
-        {radar_html}
-      </div>
-
-      <div class="col-12 col-xl-4">
-        <div class="pcires-card p-4 h-100">
-          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <div>
-              <div class="fw-bold text-black">🧾 Informe ejecutivo</div>
-              <div class="text-muted small">Síntesis ejecutiva general.</div>
-            </div>
-            <div class="d-flex gap-2 flex-wrap">
-              {boton_informe_ai}
-              {boton_editar_informe}
-            </div>
-          </div>
-
-          <div class="pcires-exec-box mt-3">
-            {f'<div class="pcires-exec-text">{nl2br(informe_mostrar)}</div>' if informe_mostrar else '<div class="text-muted">Aún no hay informe ejecutivo.</div>'}
-          </div>
-        </div>
-      </div>
-
-    </div>
-
-    <div class="row g-3 mb-4">
-      <div class="col-12">
-        <div class="pcires-card p-4 h-100">
-          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <div>
-              <div class="fw-bold text-black">🗂️ Plan de trabajo</div>
-              <div class="text-muted small">Plan general de cierre de brechas.</div>
-            </div>
-            <div class="d-flex gap-2 flex-wrap">
-              {boton_plan_ai}
-              {boton_editar_plan}
-            </div>
-          </div>
-
-          <div class="pcires-exec-box mt-3">
-            {f'<div class="pcires-exec-text">{nl2br(plan_mostrar)}</div>' if plan_mostrar else '<div class="text-muted">Aún no hay plan de trabajo.</div>'}
-          </div>
-        </div>
-      </div>
-    </div>
-    """
-
-    content = f"""
-    <div class="pcires-shell">
-
-      <div class="pcires-header-card">
-        <div class="pcires-header-overlay">
-          <div class="pcires-header-text">
-            <h3 class="pcires-title m-0">Resultado — PCI-DSS</h3>
-            <div class="pcires-subtitle">
-              Revisión: <b>{esc(run.company_name or '')}</b>
-              · Cumplimiento general: <b>{float(run.nivel_promedio_general or 0):.2f}%</b>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="pcires-header-actions">
-        <a href="{url_for('madurez_pci.historial')}"
-           class="btn pcires-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left me-2"></i>Volver al historial
-        </a>
-
-        <a href="{url_for('madurez_pci.inicio_pci')}"
-           class="btn pcires-btn-soft rounded-pill px-4 fw-bold">
-          <i class="bi bi-house-door-fill me-2"></i>Volver al módulo
-        </a>
-      </div>
-
-      {"<div class='alert alert-info'>🔒 El perfil Auditor puede consultar el resultado PCI-DSS, pero no puede generar ni editar el informe ejecutivo ni el plan de trabajo.</div>" if read_only else ""}
-
-      {top_html}
-
-      <div class="row g-3">
-        {''.join(cards_html)}
-      </div>
-
-    </div>
-
-    <style>
-      body{{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .pcires-shell{{
-        width:96%;
-        max-width:1650px;
-        margin:26px auto 24px auto;
-      }}
-
-      .pcires-header-card{{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }}
-
-      .pcires-header-card::before{{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }}
-
-      .pcires-header-overlay{{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }}
-
-      .pcires-header-overlay::before{{
-        content:"💳";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }}
-
-      .pcires-header-text::before{{
-        content:"SGSI · Resultado PCI-DSS";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }}
-
-      .pcires-title{{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        margin:0 !important;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-      }}
-
-      .pcires-subtitle{{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }}
-
-      .pcires-header-actions{{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }}
-
-      .pcires-header-actions .btn,
-      .btn{{
-        border-radius:10px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
-
-      .pcires-btn-main{{
-        background:#ffffff;
-        color:#0f172a !important;
-        border:1px solid #cfd8e3 !important;
-      }}
-
-      .pcires-btn-soft{{
-        background:rgba(255,255,255,.88);
-        color:#111;
-        border:1px solid rgba(108,117,125,.35);
-      }}
-
-      .pcires-card,
-      .card{{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
-        overflow:hidden;
-      }}
-
-      .pcires-card-title{{
-        font-weight:950;
-        font-size:1rem;
-        color:#0b4a8f;
-        margin-bottom:8px;
-      }}
-
-      .pcires-general-score-box{{
-        background:linear-gradient(135deg,#eef5ff,#ffffff);
-        border:1px solid rgba(63,134,214,.20);
-        border-radius:18px;
-        padding:22px 18px;
-        text-align:center;
-      }}
-
-      .pcires-general-score-label{{
-        font-size:.78rem;
-        font-weight:900;
-        color:#0b4a8f;
-        text-transform:uppercase;
-      }}
-
-      .pcires-general-score-value{{
-        font-size:3rem;
-        line-height:1;
-        font-weight:950;
-        color:#0f172a;
-        margin:8px 0;
-      }}
-
-      .pcires-general-score-subtitle{{
-        font-size:.82rem;
-        color:#475569;
-      }}
-
-      .pcires-radar{{
-        max-width:420px;
-        width:100%;
-        height:auto;
-      }}
-
-      .pcires-gauge{{
-        max-width:230px;
-        width:100%;
-        height:auto;
-      }}
-
-      .pcires-exec-box{{
-        min-height:220px;
-        max-height:420px;
-        overflow:auto;
-        background:linear-gradient(180deg,rgba(248,250,252,.94),rgba(255,255,255,.98));
-        border:1px solid rgba(63,134,214,.16);
-        border-radius:16px;
-        padding:18px;
-      }}
-
-      .pcires-exec-text{{
-        font-size:.95rem;
-        line-height:1.6;
-        color:#101827;
-      }}
-
-      .mini-stat{{
-        border-radius:12px;
-        padding:8px 7px;
-        text-align:center;
-        font-size:.84rem;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(15,23,42,.08);
-      }}
-
-      @media (max-width:768px){{
-        .pcires-header-overlay{{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }}
-
-        .pcires-header-overlay::before{{
-          margin:0;
-        }}
-
-        .pcires-title,
-        .pcires-subtitle{{
-          text-align:center;
-        }}
-
-        .pcires-header-actions .btn{{
-          width:100%;
-        }}
-      }}
-    </style>
-    """
-
-    return render_template_string(BASE, title="Resultado PCI-DSS", content=content)
-
-
-@pci_madurez_bp.route("/resultado/<int:run_id>/bloque/<string:bloque_codigo>/preguntas", methods=["GET"])
-@login_required
-def resultado_bloque_preguntas(run_id, bloque_codigo):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role not in ("admin", "auditor") and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
-        flash("No tiene permiso para ver el detalle de preguntas PCI-DSS.", "danger")
-        return redirect(url_for("menu"))
-
-    run = PciAnalysisRun.query.get_or_404(run_id)
+    executive_safe = textarea_escape(executive_text)
+    ai_safe = textarea_escape(ai_text)
 
     try:
-        preguntas_detalle = json.loads(run.preguntas_json or "[]")
+        nist_btn = f"""
+          <a class="btn btn-dark rounded-pill"
+             href="{url_for('madurez.report_nist', run_id=run.id)}">
+             🧩 Ver NIST (desde ISO)
+          </a>
+        """
     except Exception:
-        preguntas_detalle = []
+        nist_btn = ""
 
-    bloque_codigo = (bloque_codigo or "").strip().upper()
-    bloque_titulo = pci_block_title(bloque_codigo)
-
-    preguntas = [
-        p for p in preguntas_detalle
-        if (p.get("bloque_codigo") or "").strip().upper() == bloque_codigo
-    ]
-
-    def esc(x):
-        return escape(x or "")
-
-    rows = []
-    for p in preguntas:
-        estado = (p.get("estado") or "").strip().upper()
-        badge_cls = {
-            "SI": "bg-success",
-            "PARCIAL": "bg-warning text-dark",
-            "NO": "bg-danger",
-            "NA": "bg-secondary"
-        }.get(estado, "bg-secondary")
-
-        rows.append(f"""
-        <tr>
-          <td style="width:15%;">
-            <div class="fw-bold">{esc(p.get("pregunta_codigo") or "")}</div>
-            <div class="small text-muted">{esc(p.get("seccion_codigo") or "")}</div>
-          </td>
-          <td style="width:47%;">{esc(p.get("pregunta") or "")}</td>
-          <td style="width:13%;" class="text-center">
-            <span class="badge {badge_cls}">{esc(estado)}</span>
-          </td>
-          <td style="width:25%;">{esc(p.get("comentario") or "")}</td>
-        </tr>
-        """)
-
-    content = f"""
-    <div class="pcidet-shell">
-
-      <div class="pcidet-header-card">
-        <div class="pcidet-header-overlay">
-          <div class="pcidet-header-text">
-            <h3 class="pcidet-title m-0">Detalle de Preguntas — {esc(bloque_titulo)}</h3>
-            <div class="pcidet-subtitle">
-              Revisión: <b>{esc(run.company_name or '')}</b>
+    if read_only:
+        delete_btn = """
+        <button class="btn btn-outline-secondary pill" type="button" disabled
+                title="El perfil Auditor no puede eliminar informes">
+          🗑️ Eliminar
+        </button>
+        """
+        btn_ai_informe = """
+        <button class="btn btn-secondary pill" type="button" disabled
+                title="El perfil Auditor no puede generar resumen ejecutivo con IA">
+          🧠 Generar IA (Resumen ejecutivo)
+        </button>
+        """
+        executive_edit_block = f"""
+        <div class="card card-soft shadow-soft p-4 mt-3">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+            <div>
+              <h5 class="mb-0">🧾 Informe Ejecutivo</h5>
+              <div class="text-muted small">Resumen ejecutivo generado por IA. Solo lectura para Auditor.</div>
+            </div>
+            <div>
+              {btn_ai_informe}
             </div>
           </div>
+
+          <div class="alert alert-info small">
+            El perfil Auditor solo puede consultar el informe ejecutivo.
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Resumen ejecutivo</label>
+            <textarea
+              class="form-control report-textarea"
+              rows="8"
+              readonly
+            >{executive_safe}</textarea>
+          </div>
         </div>
-      </div>
+        """
+    else:
+        delete_btn = f"""
+        <form method="POST" action="{url_for('madurez.delete_report', run_id=run.id)}" style="display:inline;"
+              onsubmit="return confirm('¿Eliminar el informe #{run.id}?');">
+          <button class="btn btn-outline-danger pill" type="submit">🗑️ Eliminar</button>
+        </form>
+        """
+        btn_ai_informe = f"""
+        <form id="formAiInforme" method="POST" action="{url_for('madurez.generate_ai_informe', run_id=run.id)}" class="d-inline">
+          <button class="btn btn-warning pill" type="submit">🧠 Generar IA (Resumen ejecutivo)</button>
+        </form>
+        """
 
-      <div class="pcidet-header-actions">
-        <a href="{url_for('madurez_pci.resultado', run_id=run.id)}"
-           class="btn pcidet-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left me-2"></i>Volver al resultado
-        </a>
+        executive_edit_block = f"""
+        <div class="card card-soft shadow-soft p-4 mt-3">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+            <div>
+              <h5 class="mb-0">🧾 Informe Ejecutivo</h5>
+              <div class="text-muted small">Resumen ejecutivo generado por IA y editable solo al presionar “Editar”.</div>
+            </div>
+            <div>
+              {btn_ai_informe}
+            </div>
+          </div>
 
-        <a href="{url_for('madurez_pci.inicio_pci')}"
-           class="btn pcidet-btn-soft rounded-pill px-4 fw-bold">
-          <i class="bi bi-house-door-fill me-2"></i>Volver al módulo
-        </a>
-      </div>
+          <form method="POST" action="{url_for('madurez.save_edits', run_id=run.id)}" id="formExecutiveEdit">
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Resumen ejecutivo</label>
+              <textarea
+                class="form-control report-textarea"
+                id="executiveSummaryBox"
+                name="executive_summary"
+                rows="8"
+                readonly
+              >{executive_safe}</textarea>
+            </div>
 
-      <div class="pcidet-card p-4">
-        <div class="pcidet-section-title">Preguntas respondidas del bloque</div>
+            <div class="d-flex flex-wrap gap-2">
+              <button type="button" class="btn btn-outline-primary pill px-4" id="btnEditarExecutive">
+                ✏️ Editar
+              </button>
 
-        <div class="table-responsive">
-          <table class="table table-hover align-middle pcidet-table">
-            <thead>
-              <tr>
-                <th>Código</th>
-                <th>Pregunta</th>
-                <th class="text-center">Estado</th>
-                <th>Comentario</th>
-              </tr>
-            </thead>
-            <tbody>
-              {''.join(rows) if rows else '<tr><td colspan="4" class="text-center text-muted py-4">No hay preguntas registradas para este bloque.</td></tr>'}
-            </tbody>
-          </table>
+              <button type="button" class="btn btn-outline-secondary pill px-4 d-none" id="btnCancelarExecutive">
+                ↩️ Cancelar
+              </button>
+
+              <button type="submit" class="btn btn-success pill px-4 d-none" id="btnGuardarExecutive">
+                💾 Guardar edición
+              </button>
+            </div>
+          </form>
         </div>
-      </div>
 
+        <script>
+          (function() {{
+            const box = document.getElementById("executiveSummaryBox");
+            const btnEditar = document.getElementById("btnEditarExecutive");
+            const btnCancelar = document.getElementById("btnCancelarExecutive");
+            const btnGuardar = document.getElementById("btnGuardarExecutive");
+
+            if (!box || !btnEditar || !btnCancelar || !btnGuardar) return;
+
+            let originalValue = box.value;
+
+            btnEditar.addEventListener("click", function() {{
+              originalValue = box.value;
+              box.removeAttribute("readonly");
+              box.focus();
+              box.setSelectionRange(box.value.length, box.value.length);
+
+              btnEditar.classList.add("d-none");
+              btnCancelar.classList.remove("d-none");
+              btnGuardar.classList.remove("d-none");
+            }});
+
+            btnCancelar.addEventListener("click", function() {{
+              box.value = originalValue;
+              box.setAttribute("readonly", "readonly");
+
+              btnEditar.classList.remove("d-none");
+              btnCancelar.classList.add("d-none");
+              btnGuardar.classList.add("d-none");
+            }});
+          }})();
+        </script>
+
+        <script>
+          attachProgressModal(
+            "formAiInforme",
+            "progressModal",
+            "pmBar",
+            "pmPct",
+            "pmMsg",
+            "Generando SOLO Resumen Ejecutivo (por dominios)…"
+          );
+
+          attachProgressModal(
+            "formAiPlan",
+            "progressModal",
+            "pmBar",
+            "pmPct",
+            "pmMsg",
+            "Generando SOLO Plan de acción general…"
+          );
+        </script>
+        """
+
+    top_actions = f"""
+    <div class="report-header-actions">
+      <a class="btn btn-outline-light pill" href="{url_for('madurez.home')}">⬅ Inicio</a>
+      {nist_btn}
+      <a class="btn btn-outline-light pill" href="{url_for('madurez.report_pdf', run_id=run.id)}">📄 PDF</a>
+      {delete_btn}
     </div>
+    """
 
+    report_css = """
     <style>
-      body{{
+      .bg-purple{ background-color:#6f42c1 !important; }
+      .badge.bg-purple{ color:#ffffff !important; }
+
+      body{
         background-image:url('/static/img/ccsgsi.jpg');
         background-size:cover;
         background-position:center;
         background-attachment:fixed;
         background-repeat:no-repeat;
-      }}
+      }
 
-      .pcidet-shell{{
+      .report-shell{
         width:96%;
-        max-width:1650px;
+        max-width:1200px;
         margin:26px auto 24px auto;
-      }}
+      }
 
-      .pcidet-header-card{{
+      .report-hero{
         background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
@@ -8564,9 +7246,9 @@ def resultado_bloque_preguntas(run_id, bloque_codigo):
         position:relative;
         overflow:hidden;
         margin-bottom:14px;
-      }}
+      }
 
-      .pcidet-header-card::before{{
+      .report-hero::before{
         content:"";
         position:absolute;
         inset:0;
@@ -8574,9 +7256,9 @@ def resultado_bloque_preguntas(run_id, bloque_codigo):
           radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
           repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
         pointer-events:none;
-      }}
+      }
 
-      .pcidet-header-overlay{{
+      .report-hero-overlay{
         width:100%;
         display:flex;
         align-items:center;
@@ -8586,10 +7268,10 @@ def resultado_bloque_preguntas(run_id, bloque_codigo):
         padding:0 !important;
         position:relative;
         z-index:1;
-      }}
+      }
 
-      .pcidet-header-overlay::before{{
-        content:"📄";
+      .report-hero-overlay::before{
+        content:"📊";
         width:54px;
         height:54px;
         min-width:54px;
@@ -8602,17 +7284,17 @@ def resultado_bloque_preguntas(run_id, bloque_codigo):
         font-size:1.45rem;
         box-shadow:0 8px 18px rgba(0,0,0,.25);
         margin-right:14px;
-      }}
+      }
 
-      .pcidet-header-text{{
-        max-width:1100px;
+      .report-hero-centered{
+        max-width:1000px;
         width:100%;
         display:block !important;
         transform:none !important;
-      }}
+      }
 
-      .pcidet-header-text::before{{
-        content:"SGSI · Detalle PCI-DSS";
+      .report-hero-centered::before{
+        content:"SGSI · Informe Ejecutivo";
         display:inline-block;
         background:rgba(255,255,255,.18);
         border-radius:999px;
@@ -8621,790 +7303,203 @@ def resultado_bloque_preguntas(run_id, bloque_codigo):
         font-weight:800;
         margin-bottom:4px;
         color:#ffffff;
-      }}
+      }
 
-      .pcidet-title{{
+      .report-title{
         color:#ffffff !important;
         font-weight:950;
         font-size:1.32rem;
         line-height:1.1;
         margin:0 !important;
         text-shadow:0 3px 10px rgba(0,0,0,.35);
-      }}
+      }
 
-      .pcidet-subtitle{{
+      .report-subtitle{
         color:rgba(255,255,255,.95);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
-      }}
+      }
 
-      .pcidet-header-actions{{
+      .report-header-actions{
         display:flex;
         justify-content:center;
         gap:10px;
         flex-wrap:wrap;
         margin:10px 0 14px;
-      }}
+      }
 
-      .pcidet-header-actions .btn,
-      .btn{{
+      .report-header-actions .btn,
+      .btn{
         border-radius:10px !important;
         font-weight:900;
         box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
+      }
 
-      .pcidet-btn-main,
-      .btn-outline-light{{
+      .report-header-actions .btn{
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .btn-outline-light{
         background:#ffffff;
         color:#0f172a !important;
         border:1px solid #cfd8e3 !important;
-      }}
+      }
 
-      .pcidet-btn-main:hover,
-      .btn-outline-light:hover{{
+      .btn-outline-light:hover{
         background:#edf5ff;
         color:#0b65d8 !important;
-      }}
+        border-color:#9ec5fe !important;
+      }
 
-      .pcidet-btn-soft{{
-        background:rgba(255,255,255,.88);
-        color:#111 !important;
-        border:1px solid rgba(108,117,125,.35);
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
+      .btn-purple{
+        background:#6f42c1;
+        border-color:#6f42c1;
+        color:#ffffff;
+      }
 
-      .pcidet-btn-soft:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-      }}
+      .btn-purple:hover{
+        background:#5b34a4;
+        border-color:#5b34a4;
+        color:#ffffff;
+      }
 
-      .pcidet-card,
-      .card{{
+      .pill{
+        border-radius:999px !important;
+      }
+
+      .card,
+      .report-card,
+      .card-soft{
         background:rgba(255,255,255,.96) !important;
         border-radius:18px !important;
         backdrop-filter:blur(8px);
         box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
         border:1px solid rgba(219,230,244,.9) !important;
         overflow:hidden;
-      }}
+      }
 
-      .pcidet-section-title,
+      .card-body{
+        padding:18px;
+      }
+
+      .section-head{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:12px;
+        flex-wrap:wrap;
+      }
+
+      .section-head h5,
       .card h5,
-      .card h6{{
+      .card h6{
         font-weight:950;
         font-size:.95rem;
         color:#0b4a8f;
-        margin-bottom:16px;
-        padding-bottom:8px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-      }}
+        margin-bottom:0;
+      }
 
-      .table-responsive{{
+      .section-sub,
+      .muted{
+        color:#475569;
+        font-size:.82rem;
+      }
+
+      .kpi,
+      .report-kpi-value{
+        font-size:2rem;
+        line-height:1.05;
+        font-weight:950;
+        color:#0b4a8f;
+        letter-spacing:-0.5px;
+      }
+
+      .table-responsive{
         max-height:72vh;
         overflow-y:auto;
         overflow-x:auto;
         border:1px solid #dbe6f4;
         border-radius:14px;
         background:#ffffff;
-      }}
+      }
 
-      .pcidet-table,
-      .table{{
-        width:100%;
-        margin-bottom:0 !important;
-      }}
+      .table{
+        margin-bottom:0;
+      }
 
-      .pcidet-table thead th,
-      .table thead th{{
+      .table thead th{
         position:sticky;
         top:0;
         z-index:10;
         background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
         color:#ffffff !important;
         font-size:.78rem;
-        font-weight:900 !important;
+        font-weight:900;
         border:none !important;
         white-space:nowrap;
-        vertical-align:middle !important;
+        vertical-align:middle;
         text-align:center;
         padding:9px 8px;
-      }}
+      }
 
-      .pcidet-table td,
-      .pcidet-table th,
-      .table tbody td{{
-        vertical-align:middle !important;
+      .table tbody td{
+        vertical-align:top;
         font-size:.82rem;
         padding:9px 8px;
         border-bottom:1px solid #e5edf7;
         color:#101827;
-      }}
+      }
 
-      .table tbody tr:nth-child(even){{
+      .table tbody tr:nth-child(even){
         background:#f8fbff;
-      }}
+      }
 
-      .table tbody tr:hover,
-      .pcidet-table tbody tr:hover{{
+      .table tbody tr:hover{
         background:#eef6ff;
-      }}
+      }
 
-      .wrap{{
+      .table-tight th,
+      .table-tight td,
+      .cell-small{
+        font-size:.78rem !important;
+      }
+
+      .wrap{
         white-space:normal !important;
         word-break:break-word;
         overflow-wrap:anywhere;
-      }}
-
-      .badge{{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }}
-
-      @media (max-width:991.98px){{
-        .pcidet-shell{{
-          width:98%;
-          margin:8px auto 22px auto;
-        }}
-
-        .pcidet-header-card{{
-          min-height:88px;
-        }}
-
-        .pcidet-title{{
-          font-size:1.20rem;
-        }}
-
-        .pcidet-subtitle{{
-          font-size:.68rem;
-        }}
-      }}
-
-      @media (max-width:768px){{
-        .pcidet-header-overlay{{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }}
-
-        .pcidet-header-overlay::before{{
-          margin:0;
-        }}
-
-        .pcidet-header-text::before{{
-          margin-left:auto;
-          margin-right:auto;
-        }}
-
-        .pcidet-title,
-        .pcidet-subtitle{{
-          text-align:center;
-        }}
-
-        .pcidet-header-actions .btn{{
-          width:100%;
-        }}
-      }}
-    </style>
-    """
-    return render_template_string(BASE, title=f"Detalle {bloque_titulo}", content=content)
-
-# =========================
-# Exportación PDF
-# =========================
-
-@pci_madurez_bp.route("/exportar_pdf/<int:run_id>")
-@login_required
-def exportar_pdf(run_id):
-    run = PciAnalysisRun.query.get_or_404(run_id)
-
-    try:
-        resultados = json.loads(run.resultados_json or "{}")
-    except Exception:
-        resultados = {}
-
-    buf = io.BytesIO()
-
-    doc = SimpleDocTemplate(
-        buf,
-        pagesize=landscape(A4),
-        leftMargin=1.2 * cm,
-        rightMargin=1.2 * cm,
-        topMargin=1.0 * cm,
-        bottomMargin=1.0 * cm,
-        title="PCI-DSS - Informe Ejecutivo"
-    )
-
-    styles = getSampleStyleSheet()
-
-    styles.add(ParagraphStyle(
-        name="PCI_Title",
-        parent=styles["Title"],
-        fontName="Helvetica-Bold",
-        fontSize=18,
-        textColor=colors.white,
-        alignment=TA_CENTER,
-        spaceAfter=8
-    ))
-
-    styles.add(ParagraphStyle(
-        name="PCI_Section",
-        parent=styles["Heading2"],
-        fontName="Helvetica-Bold",
-        fontSize=12,
-        textColor=colors.HexColor("#1d4f8f"),
-        spaceBefore=10,
-        spaceAfter=8
-    ))
-
-    styles.add(ParagraphStyle(
-        name="PCI_Normal",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=8.5,
-        leading=11,
-        textColor=colors.HexColor("#101827"),
-        spaceAfter=5
-    ))
-
-    styles.add(ParagraphStyle(
-        name="PCI_Small",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=7.5,
-        leading=9,
-        textColor=colors.HexColor("#374151"),
-        spaceAfter=4
-    ))
-
-    story = []
-
-    def pdf_escape(v):
-        return html.escape(str(v or ""))
-
-    def nivel_color(pct):
-        try:
-            pct = float(pct or 0)
-        except Exception:
-            pct = 0
-
-        if pct >= 81:
-            return colors.HexColor("#198754")
-        if pct >= 61:
-            return colors.HexColor("#0d6efd")
-        if pct >= 41:
-            return colors.HexColor("#ffc107")
-        if pct >= 21:
-            return colors.HexColor("#fd7e14")
-        return colors.HexColor("#dc3545")
-
-    def nivel_badge_pdf(pct, nivel_txt):
-        c = nivel_color(pct)
-        nivel_txt = str(nivel_txt or "Sin nivel").strip()
-
-        badge = Table(
-            [[
-                "",
-                Paragraph(pdf_escape(nivel_txt), styles["PCI_Small"])
-            ]],
-            colWidths=[0.28 * cm, 4.25 * cm]
-        )
-
-        badge.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (0, 0), c),
-            ("BOX", (0, 0), (0, 0), 0.25, c),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 2),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-            ("TOPPADDING", (0, 0), (-1, -1), 2),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-        ]))
-
-        return badge
-
-    def add_section(title):
-        table = Table(
-            [[Paragraph(pdf_escape(title), styles["PCI_Title"])]],
-            colWidths=[26.8 * cm]
-        )
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#3f86d6")),
-            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#1d4f8f")),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, -1), 8),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-        ]))
-        story.append(table)
-        story.append(Spacer(1, 8))
-
-    def add_text_block(texto):
-        texto = pci_normalizar_texto_rico_guardado(texto or "")
-        if not texto:
-            story.append(Paragraph("No hay información registrada.", styles["PCI_Normal"]))
-            return
-
-        for parrafo in re.split(r"\n\s*\n", texto):
-            parrafo = parrafo.strip()
-            if parrafo:
-                story.append(Paragraph(pdf_escape(parrafo), styles["PCI_Normal"]))
-
-    # =========================
-    # ENCABEZADO
-    # =========================
-    add_section("PCI-DSS - Informe de Madurez")
-
-    pct_general = float(run.nivel_promedio_general or 0)
-    nivel_general = pci_resolver_nivel(pct_general)
-
-    resumen_tbl = Table([
-        ["Revisión", pdf_escape(run.company_name)],
-        ["Fecha", run.fecha_calculo.strftime("%Y-%m-%d %H:%M") if run.fecha_calculo else ""],
-        [
-            "Cumplimiento general",
-            f"{pct_general:.2f}% - {pdf_escape(nivel_general.get('nivel', 'Sin nivel'))}"
-        ],
-        ["Nivel de madurez", pdf_escape(nivel_general.get("nivel", "Sin nivel"))]
-    ], colWidths=[5.2 * cm, 21.6 * cm])
-
-    resumen_tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f1fb")),
-        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")),
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-    ]))
-
-    story.append(resumen_tbl)
-    story.append(Spacer(1, 12))
-
-    # =========================
-    # INFORME EJECUTIVO
-    # =========================
-    story.append(Paragraph("Informe Ejecutivo", styles["PCI_Section"]))
-
-    informe_exec = (
-        run.informe_ejecutivo_editado
-        or run.informe_ejecutivo_ai
-        or ""
-    ).strip()
-
-    add_text_block(informe_exec)
-    story.append(Spacer(1, 10))
-
-    # =========================
-    # TABLA GENERAL
-    # =========================
-    story.append(Paragraph("Detalle por Requerimiento / Apéndice", styles["PCI_Section"]))
-
-    data = [[
-        "Bloque",
-        "Nombre",
-        "% Cumplimiento",
-        "Nivel de madurez",
-        "Items",
-        "Brecha"
-    ]]
-
-    for code in PCI_BLOCK_ORDER:
-        item = (resultados or {}).get(code)
-        if not item:
-            continue
-
-        pct = float(item.get("pct", 0) or 0)
-        total = int(item.get("total", 0) or 0)
-        brecha = float(item.get("brecha_pct", max(0.0, 100.0 - pct)) or 0)
-        nivel_txt = item.get("madurez") or pci_resolver_nivel(pct).get("nivel", "Sin nivel")
-
-        data.append([
-            Paragraph(pdf_escape(code), styles["PCI_Small"]),
-            Paragraph(pdf_escape(pci_block_title(code)), styles["PCI_Small"]),
-            Paragraph(f"{pct:.2f}%", styles["PCI_Small"]),
-            nivel_badge_pdf(pct, nivel_txt),
-            Paragraph(str(total), styles["PCI_Small"]),
-            Paragraph(f"{brecha:.2f}%", styles["PCI_Small"])
-        ])
-
-    tbl = Table(
-        data,
-        colWidths=[2.6 * cm, 8.8 * cm, 3.0 * cm, 5.4 * cm, 2.2 * cm, 3.0 * cm],
-        repeatRows=1
-    )
-
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3f86d6")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 8),
-        ("FONTSIZE", (0, 1), (-1, -1), 7.2),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("ALIGN", (2, 1), (2, -1), "CENTER"),
-        ("ALIGN", (4, 1), (5, -1), "CENTER"),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-    ]))
-
-    story.append(tbl)
-
-    # =========================
-    # ANÁLISIS POR REQUERIMIENTO
-    # =========================
-    ai_por_bloque = cargar_ai_pci_por_run(run.id)
-
-    if ai_por_bloque:
-        story.append(PageBreak())
-        add_section("Análisis Ejecutivo por Requerimiento")
-
-        for code in PCI_BLOCK_ORDER:
-            a = ai_por_bloque.get(code)
-            if not a:
-                continue
-
-            titulo = f"{code} - {pci_block_title(code)}"
-            story.append(Paragraph(pdf_escape(titulo), styles["PCI_Section"]))
-
-            estado_actual = pci_normalizar_texto_rico_guardado(a.get("estado_actual") or "")
-            estado_requerido = pci_normalizar_texto_rico_guardado(a.get("estado_requerido") or "")
-            plan_accion = pci_normalizar_texto_rico_guardado(a.get("plan_accion") or "")
-
-            bloque = Table([
-                [
-                    Paragraph("<b>Estado actual</b>", styles["PCI_Small"]),
-                    Paragraph(pdf_escape(estado_actual or "No registrado."), styles["PCI_Small"])
-                ],
-                [
-                    Paragraph("<b>Estado requerido</b>", styles["PCI_Small"]),
-                    Paragraph(pdf_escape(estado_requerido or "No registrado."), styles["PCI_Small"])
-                ],
-                [
-                    Paragraph("<b>Plan de acción</b>", styles["PCI_Small"]),
-                    Paragraph(pdf_escape(plan_accion or "No registrado."), styles["PCI_Small"])
-                ],
-            ], colWidths=[4.2 * cm, 22.6 * cm])
-
-            bloque.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f1fb")),
-                ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")),
-                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-            ]))
-
-            story.append(bloque)
-            story.append(Spacer(1, 10))
-
-    doc.build(story)
-    buf.seek(0)
-
-    filename = f"PCI_DSS_{(run.company_name or 'revision').replace(' ', '_')}.pdf"
-
-    return send_file(
-        buf,
-        mimetype="application/pdf",
-        as_attachment=True,
-        download_name=filename
-    )
-
-# =====================================================================
-# PANTALLA PRINCIPAL PCI-DSS
-# =====================================================================
-
-@pci_madurez_bp.route("/", methods=["GET"], endpoint="inicio_pci")
-@login_required
-def inicio_pci():
-    user = User.query.get(session.get("user_id"))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
-        flash("No tiene permiso para acceder al módulo de nivel de madurez PCI-DSS.", "danger")
-        return redirect(url_for('menu'))
-
-    read_only = (user.role == 'auditor')
-
-    if read_only:
-        ingreso_btn = """
-          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled
-                  title="El rol Auditor no puede ingresar información">
-            <i class="bi bi-pencil-square me-2"></i>Ingresar la información
-          </button>
-        """
-    else:
-        ingreso_btn = f"""
-          <a href="{url_for('madurez_pci.ingreso')}" class="btn btn-primary rounded-pill px-4 fw-bold">
-            <i class="bi bi-pencil-square me-2"></i>Ingresar la información
-          </a>
-        """
-
-    if read_only:
-        parametros_btn = """
-          <button class="btn btn-outline-secondary rounded-pill px-3" disabled
-                  title="El rol Auditor no tiene acceso a Parámetros">
-            <i class="bi bi-gear me-2"></i>Parámetros
-          </button>
-        """
-    else:
-        parametros_btn = f"""
-          <a href="{url_for('madurez_pci.parametros')}" class="btn btn-outline-secondary rounded-pill px-3">
-            <i class="bi bi-gear me-2"></i>Parámetros
-          </a>
-        """
-
-    total = PciMadurezPregunta.query.filter_by(tipo="q").count()
-
-    if total == 0:
-        badge = '<span class="badge bg-danger ms-2">Instrumento NO cargado</span>'
-        hint = "Primero entra a Parámetros y realiza la importación del instrumento PCI-DSS (solo una vez)."
-    else:
-        badge = '<span class="badge bg-success ms-2">Instrumento cargado</span>'
-        hint = "Puedes ingresar la información, analizar la evaluación o consultar el historial de revisiones."
-
-    content = f"""
-    <div class="pcimad-shell">
-      <div class="pcimad-header-card">
-        <div class="pcimad-header-overlay">
-          <div class="pcimad-header-text">
-            <h3 class="pcimad-title m-0">Nivel de Madurez — PCI-DSS</h3>
-            <div class="pcimad-subtitle">
-              Evaluación del nivel de cumplimiento y madurez de los 12 requerimientos y los apéndices A1 y A2 de PCI-DSS.
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="pcimad-header-actions">
-        {ingreso_btn}
-        <a href="{url_for('madurez_pci.historial')}" class="btn pcimad-btn-soft rounded-pill px-4">
-          <i class="bi bi-clock-history me-2"></i>Historial de Revisiones
-        </a>
-      </div>
-
-      <div class="row g-3 mt-2">
-        <div class="col-12 col-lg-8">
-          <div class="pcimad-card p-4 h-100">
-            <div class="pcimad-section-title">Estado del instrumento</div>
-            <div class="fw-bold">Estado del instrumento {badge}</div>
-            <div class="text-muted small mt-1">Preguntas cargadas: <b>{total}</b></div>
-            <div class="mt-2 small">{hint}</div>
-
-            <div class="mt-3">{parametros_btn}</div>
-
-            <div class="alert alert-info mt-3 mb-0 small">
-              <b>Sugerencia:</b> importa el Excel original de PCI-DSS sin traducción, manteniendo los textos tal cual vienen en el instrumento.
-            </div>
-          </div>
-        </div>
-
-        <div class="col-12 col-lg-4">
-          <div class="pcimad-card p-4 h-100">
-            <div class="pcimad-section-title">¿Qué puedes hacer aquí?</div>
-            <ul class="small mb-0 text-black ps-3">
-              <li><b>Ingresar la información:</b> diligenciar respuestas por requisito con opciones Sí / Parcial / No / N/A.</li>
-              <li><b>Historial:</b> revisar evaluaciones previas, porcentajes y análisis ejecutados.</li>
-              <li><b>Parámetros:</b> importar el instrumento y consultar la escala de madurez.</li>
-              <li><b>Tablero:</b> visualizar velocímetros por requerimiento y apéndices en los resultados.</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .pcimad-shell{{
-        width:96%;
-        max-width:1600px;
-        margin:26px auto 24px auto;
-      }}
-
-      .pcimad-header-card{{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
+      }
+
+      .accordion-item{
+        border:1px solid #dbe6f4 !important;
+        border-radius:0 20px 20px 0 !important;
         overflow:hidden;
-        margin-bottom:14px;
-      }}
-
-      .pcimad-header-card::before{{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }}
-
-      .pcimad-header-overlay{{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }}
-
-      .pcimad-header-overlay::before{{
-        content:"💳";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
+        margin-bottom:12px;
         background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }}
+        box-shadow:0 6px 14px rgba(15,23,42,.06);
+      }
 
-      .pcimad-header-text{{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }}
-
-      .pcimad-header-text::before{{
-        content:"SGSI · PCI-DSS";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }}
-
-      .pcimad-title{{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        margin:0 !important;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-      }}
-
-      .pcimad-subtitle{{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }}
-
-      .pcimad-header-actions{{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }}
-
-      .pcimad-header-actions .btn,
-      .btn{{
-        border-radius:10px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
-
-      .pcimad-btn-main,
-      .btn-outline-light{{
-        background:#ffffff;
+      .accordion-button{
+        background:#eef5ff !important;
         color:#0f172a !important;
-        border:1px solid #cfd8e3 !important;
-      }}
-
-      .pcimad-btn-main:hover,
-      .btn-outline-light:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-      }}
-
-      .pcimad-btn-soft{{
-        background:rgba(255,255,255,.88);
-        color:#111 !important;
-        border:1px solid rgba(108,117,125,.35);
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
-
-      .pcimad-btn-soft:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-      }}
-
-      .pcimad-card,
-      .card{{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
-        overflow:hidden;
-      }}
-
-      .pcimad-card.p-4{{
-        padding:1.5rem !important;
-      }}
-
-      .pcimad-section-title,
-      .card h5,
-      .card h6{{
-        font-weight:950;
-        font-size:.95rem;
-        color:#0b4a8f;
-        margin-bottom:16px;
-      }}
-
-      .pcimad-section-title{{
-        padding-bottom:8px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-      }}
-
-      .pcimad-card ul li{{
-        margin-bottom:8px;
-      }}
-
-      .pcimad-card ul li:last-child{{
-        margin-bottom:0;
-      }}
-
-      .badge{{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
         font-weight:900;
-      }}
+        box-shadow:none !important;
+      }
 
-      .text-muted.small{{
-        font-size:.84rem;
-        line-height:1.45;
-      }}
+      .accordion-button:not(.collapsed){
+        background:#dbeafe !important;
+        color:#0b4a8f !important;
+      }
 
-      .form-label{{
+      .accordion-body{
+        background:rgba(255,255,255,.96);
+      }
+
+      .form-label{
         font-size:.72rem;
         font-weight:900;
         color:#0b4a8f;
@@ -9416,74 +7511,890 @@ def inicio_pci():
         border-radius:10px;
         display:inline-block;
         margin-bottom:6px;
-      }}
+      }
 
       .form-control,
-      .form-select{{
+      .form-select,
+      .report-textarea{
         border-radius:10px;
         border:1px solid #d9e3f0;
         min-height:40px;
         font-size:.86rem;
         background:#f8fafc;
         box-shadow:none !important;
-      }}
+      }
+
+      .report-textarea{
+        min-height:180px;
+      }
 
       .form-control:focus,
-      .form-select:focus{{
+      .form-select:focus,
+      .report-textarea:focus{
         border-color:#3f86d6;
         box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
         background:#ffffff;
-      }}
+      }
 
-      @media (max-width:991.98px){{
-        .pcimad-shell{{
+      .badge{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }
+
+      @media (max-width:991.98px){
+        .report-shell{
           width:98%;
           margin:8px auto 22px auto;
-        }}
+        }
 
-        .pcimad-header-card{{
+        .report-hero{
           min-height:88px;
-        }}
+        }
 
-        .pcimad-title{{
+        .report-title{
           font-size:1.20rem;
-        }}
+        }
 
-        .pcimad-subtitle{{
+        .report-subtitle{
           font-size:.68rem;
-        }}
-      }}
+        }
 
-      @media (max-width:768px){{
-        .pcimad-header-overlay{{
+        .kpi,
+        .report-kpi-value{
+          font-size:1.75rem;
+        }
+
+        .card-body{
+          padding:8px 7px;
+        }
+      }
+
+      @media (max-width:768px){
+        .report-hero-overlay{
           flex-direction:column;
           text-align:center;
           gap:10px;
-        }}
+        }
 
-        .pcimad-header-overlay::before{{
+        .report-hero-overlay::before{
           margin:0;
-        }}
+        }
 
-        .pcimad-header-text::before{{
+        .report-hero-centered::before{
           margin-left:auto;
           margin-right:auto;
-        }}
+        }
 
-        .pcimad-title,
-        .pcimad-subtitle{{
+        .report-title,
+        .report-subtitle{
           text-align:center;
-        }}
+        }
 
-        .pcimad-header-actions .btn{{
+        .report-header-actions .btn{
           width:100%;
-        }}
-      }}
+        }
+      }
     </style>
     """
-    return render_template_string(BASE, title="Madurez PCI-DSS", content=content)
 
-# =========================
-# Ingreso
-# =========================
+    content = f"""
+    {report_css}
 
+    <div class="report-shell">
+
+      <div class="report-hero">
+        <div class="report-hero-overlay">
+          <div class="report-hero-centered">
+            <h1 class="report-title">Informe de Madurez ISO 27001:2022</h1>
+            <div class="report-subtitle">
+              {xml_escape(run.company_name)} • ID #{run.id} • {run.created_at.strftime('%Y-%m-%d %H:%M')}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {top_actions}
+
+      {"<div class='alert alert-info'>🔒 El perfil Auditor está en modo solo lectura. No puede editar, eliminar ni generar contenido con IA.</div>" if read_only else ""}
+
+      <div class="row g-3">
+        <div class="col-lg-4">
+
+          <div class="card card-soft shadow-soft p-4">
+            <div class="text-muted small">Madurez promedio</div>
+            <div class="kpi">
+              {overall}%
+              {"<span class='fs-6 text-muted'>(" + xml_escape(overall_maturity) + ")</span>" if overall_maturity else ""}
+            </div>
+          </div>
+
+          <div class="card card-soft shadow-soft p-3 mt-3">
+            <h6 class="mb-2">📊 Resultados por dominio</h6>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0 table-tight">
+                <thead>
+                  <tr>
+                    <th>Capítulo</th>
+                    <th>% + Madurez</th>
+                    <th>Brecha</th>
+                  </tr>
+                </thead>
+                <tbody>{rows}</tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card card-soft shadow-soft p-3 mt-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h6 class="mb-0">🧩 Resultados por control</h6>
+              <span class="text-muted small">% + madurez + brecha</span>
+            </div>
+
+            <div class="table-responsive" style="max-height:360px; overflow:auto;">
+              <table class="table table-sm align-middle mb-0 table-tight">
+                <thead>
+                  <tr>
+                    <th style="min-width:180px;">Control</th>
+                    <th style="min-width:140px;">% + Madurez</th>
+                    <th style="min-width:220px;">Brecha</th>
+                  </tr>
+                </thead>
+                <tbody>{control_rows}</tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card card-soft shadow-soft p-3 mt-3">
+            <h6 class="mb-2">🕸 Araña consolidada (obligatoria)</h6>
+            <img class="img-fluid" alt="Radar consolidado" src="data:image/png;base64,{run.radar_overall_b64}">
+          </div>
+
+        </div>
+
+        <div class="col-lg-8">
+          <div class="card card-soft shadow-soft p-4">
+            <div class="d-flex justify-content-between align-items-center">
+              <h5 class="mb-0">📈 Madurez por capítulo (barras)</h5>
+              <span class="text-muted small">Comparación directa por capítulo.</span>
+            </div>
+            <div class="mt-2">
+              {"<img class='img-fluid' alt='Barras por capítulo' src='data:image/png;base64," + bar_chapters_b64 + "'>" if bar_chapters_b64 else "<div class='text-muted small'>Sin datos para graficar.</div>"}
+            </div>
+          </div>
+
+          <div class="card card-soft shadow-soft p-4 mt-3">
+            <div class="d-flex justify-content-between align-items-center">
+              <h5 class="mb-0">📊 Madurez por control (4–10)</h5>
+              <span class="text-muted small">Controles 4.1 a 10.2</span>
+            </div>
+            <div class="mt-2">
+              {"<img class='img-fluid' alt='Barras por control 4-10' src='data:image/png;base64," + bar_controls_4_10_b64 + "'>" if bar_controls_4_10_b64 else "<div class='text-muted small'>Sin datos para graficar controles 4–10.</div>"}
+            </div>
+          </div>
+
+          {controls_by_chapter_html}
+
+          {executive_edit_block}
+
+        </div>
+      </div>
+    </div>
+    """
+
+    content += """
+    <script>
+      function toggleControlEdit(safeId, show) {
+        const card = document.getElementById("editCard_" + safeId);
+        const btn = document.getElementById("btnEditControl_" + safeId);
+
+        if (!card) return;
+
+        if (show) {
+          card.classList.remove("d-none");
+          if (btn) btn.classList.add("d-none");
+        } else {
+          card.classList.add("d-none");
+          if (btn) btn.classList.remove("d-none");
+        }
+      }
+    </script>
+    """
+
+    return render_template_string(BASE, title=f"Informe – {run.company_name}", content=content)
+
+
+@madurez_bp.route("/report/<int:run_id>/control/<control_id>/save", methods=["POST"])
+@login_required
+def save_control_ai(run_id: int, control_id: str):
+    user = User.query.get(session.get("user_id"))
+
+    if user and user.role == "auditor":
+        flash("El perfil Auditor no puede editar análisis por control.", "danger")
+        return redirect(url_for("madurez.view_report", run_id=run_id))
+
+    if user and user.role not in ("admin", "auditor") and not verificar_permiso(user, "Nivel de Madurez ISO 27001:2022"):
+        flash("No tiene permiso para editar análisis por control.", "danger")
+        return redirect(url_for("menu"))
+
+    run = AnalysisRun.query.get_or_404(run_id)
+
+    cid = (control_id or "").strip().upper()
+    control_ai = json.loads(run.control_ai_json or "{}") if run.control_ai_json else {}
+
+    control_ai.setdefault(cid, {})
+    control_ai[cid]["estado_actual"] = to_text(request.form.get("estado_actual")).strip()
+    control_ai[cid]["estado_requerido"] = to_text(request.form.get("estado_requerido")).strip()
+    control_ai[cid]["plan_accion_sugerido"] = to_text(request.form.get("plan_accion_sugerido")).strip()
+
+    run.control_ai_json = json.dumps(control_ai, ensure_ascii=False)
+    db.session.commit()
+
+    flash(f"💾 Edición guardada para el control {cid}.", "success")
+    return redirect(url_for("madurez.view_report", run_id=run.id))
+
+@madurez_bp.route("/report/<int:run_id>/save", methods=["POST"])
+@login_required
+def save_edits(run_id: int):
+    user = User.query.get(session.get("user_id"))
+
+    if user and user.role == "auditor":
+        flash("El perfil Auditor no puede editar el informe ejecutivo.", "danger")
+        return redirect(url_for("madurez.view_report", run_id=run_id))
+
+    if user and user.role not in ("admin", "auditor") and not verificar_permiso(user, "Nivel de Madurez ISO 27001:2022"):
+        flash("No tiene permiso para editar el informe ejecutivo.", "danger")
+        return redirect(url_for("menu"))
+
+    run = AnalysisRun.query.get_or_404(run_id)
+
+    run.executive_summary = to_text(request.form.get("executive_summary")).strip()
+    run.ai_report_text = to_text(request.form.get("ai_report_text")).strip()
+
+    db.session.commit()
+    flash("💾 Informe ejecutivo editado y guardado correctamente.", "success")
+    return redirect(url_for("madurez.view_report", run_id=run.id))
+
+
+@madurez_bp.route("/report/<int:run_id>/delete", methods=["POST"])
+@login_required
+def delete_report(run_id: int):
+    user = User.query.get(session.get("user_id"))
+
+    if user and user.role == "auditor":
+        flash("El perfil Auditor no puede eliminar informes.", "danger")
+        return redirect(url_for("madurez.home"))
+
+    if user and user.role not in ("admin", "auditor") and not verificar_permiso(user, "Nivel de Madurez ISO 27001:2022"):
+        flash("No tiene permiso para eliminar informes.", "danger")
+        return redirect(url_for("menu"))
+
+    run = AnalysisRun.query.get_or_404(run_id)
+
+    try:
+        if getattr(run, "excel_path", None):
+            if os.path.exists(run.excel_path):
+                os.remove(run.excel_path)
+    except Exception:
+        pass
+
+    db.session.delete(run)
+    db.session.commit()
+    flash("🗑️ Informe eliminado correctamente.", "success")
+    return redirect(url_for("madurez.home"))
+
+# ==========================
+# PDF PRO
+# ==========================
+def pdf_header_footer(canvas, doc, title, subtitle, logo_path=None):
+    canvas.saveState()
+    W, H = letter
+
+    # header bar
+    canvas.setFillColor(colors.HexColor("#0b1b2b"))
+    canvas.rect(0, H - 0.65 * inch, W, 0.65 * inch, fill=1, stroke=0)
+
+    # ✅ logo (si existe)
+    if logo_path:
+        try:
+            img = ImageReader(logo_path)
+            # tamaño fijo bonito
+            logo_h = 0.40 * inch
+            logo_w = 0.40 * inch
+            canvas.drawImage(img, 0.45*inch, H - 0.55*inch, width=logo_w, height=logo_h, mask='auto')
+            x_title = 0.95 * inch
+        except Exception:
+            x_title = 0.75 * inch
+    else:
+        x_title = 0.75 * inch
+
+    # title
+    canvas.setFillColor(colors.white)
+    canvas.setFont("Helvetica-Bold", 12)
+    canvas.drawString(x_title, H - 0.40 * inch, title)
+
+    # subtitle
+    canvas.setFont("Helvetica", 9)
+    canvas.setFillColor(colors.HexColor("#d9e6ff"))
+    canvas.drawRightString(W - 0.75 * inch, H - 0.40 * inch, subtitle)
+
+    # footer
+    canvas.setFillColor(colors.HexColor("#6c757d"))
+    canvas.setFont("Helvetica", 8)
+    canvas.drawString(0.75 * inch, 0.55 * inch, "ISO 27001:2022 – Reportes SGSI")
+    canvas.drawRightString(W - 0.75 * inch, 0.55 * inch, f"Página {doc.page}")
+
+    canvas.restoreState()
+
+def table_style_no_boxes(header_bold=True):
+    """
+    Tablas sin 'cuadros':
+    - Sin GRID/BOX/INNERGRID/LINE*
+    - Sin BACKGROUND/ROWBACKGROUNDS
+    """
+    base = [
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+
+        # ✅ Esto “mata” cualquier línea/caja si alguien las agregó:
+        ("GRID", (0, 0), (-1, -1), 0, colors.transparent),
+        ("INNERGRID", (0, 0), (-1, -1), 0, colors.transparent),
+        ("BOX", (0, 0), (-1, -1), 0, colors.transparent),
+        ("LINEABOVE", (0, 0), (-1, -1), 0, colors.transparent),
+        ("LINEBELOW", (0, 0), (-1, -1), 0, colors.transparent),
+        ("LINEBEFORE", (0, 0), (-1, -1), 0, colors.transparent),
+        ("LINEAFTER", (0, 0), (-1, -1), 0, colors.transparent),
+
+        # ✅ Fondo transparente:
+        ("BACKGROUND", (0, 0), (-1, -1), colors.transparent),
+    ]
+
+    if header_bold:
+        base += [
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 9),
+        ]
+
+    return TableStyle(base)
+
+def b64_to_rl_image(b64png: str, width_inch: float, height_inch: float = None):
+    if not b64png:
+        return None
+    raw = base64.b64decode(b64png)
+    img = Image(io.BytesIO(raw))
+    img.drawWidth = width_inch * inch
+    img.drawHeight = (height_inch * inch) if height_inch else (width_inch * inch)
+    return img
+
+
+def pcell(text: str, style: ParagraphStyle, blank_if_empty=False, none_word="ninguno") -> Paragraph:
+    txt = (text or "").strip()
+    if not txt:
+        txt = "" if blank_if_empty else none_word
+    return Paragraph(xml_escape(txt).replace("\n", "<br/>"), style)
+
+def table_style_basic():
+    """
+    ✅ Estilo SIN cuadros/bordes.
+    - Sin GRID
+    - Sin BOX
+    - Sin fondos tipo 'cuadro'
+    """
+    return TableStyle([
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 9),
+
+        # ❌ Quitar cajas/fondos
+        ("BACKGROUND", (0, 0), (-1, 0), colors.white),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+
+        # ✅ Texto limpio
+        ("FONTSIZE", (0, 1), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+
+        # ✅ Espaciado
+        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 1),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+
+        # ❌ MUY IMPORTANTE: no bordes
+        # ("GRID", ... )  --> eliminado
+        # ("BOX", ... )   --> eliminado
+        # ("ROWBACKGROUNDS", ... ) --> eliminado
+    ])
+
+def rl_badge_bg_for_pct(pct: float):
+    """Pastel (suave) por %."""
+    try:
+        p = float(pct or 0)
+    except Exception:
+        p = 0.0
+
+    if p >= 85:
+        return colors.HexColor("#B7E4C7")  # verde pastel
+    elif p >= 70:
+        return colors.HexColor("#BDE0FE")  # azul pastel
+    elif p >= 50:
+        return colors.HexColor("#FFE5A3")  # amarillo pastel
+    elif p >= 30:
+        return colors.HexColor("#D9CCFF")  # morado pastel (en lugar de naranja)
+    else:
+        return colors.HexColor("#FFADAD")  # rojo pastel
+    
+def rl_badge_fg_for_pct(pct: float):
+    """Texto blanco salvo amarillo."""
+    try:
+        p = float(pct or 0)
+    except Exception:
+        p = 0.0
+    if 50 <= p < 70:
+        return colors.black
+    return colors.white
+
+
+def rl_gap_bg_for_level(level: str, fallback_gap_pct: float = 0.0):
+    """Equivalente visual a gap_badge() pero para PDF."""
+    lv = (level or "").strip().lower()
+
+    # Ajusta a tus labels reales: "Crítica/Alta/Media/Baja" etc.
+    if "crit" in lv:
+        return colors.HexColor("#dc3545")  # rojo
+    if "alt" in lv:
+        return colors.HexColor("#6f42c1")  # morado
+    if "med" in lv:
+        return colors.HexColor("#ffc107")  # amarillo
+    if "baj" in lv:
+        return colors.HexColor("#198754")  # verde
+
+    # fallback si viene vacío: color por % brecha
+    try:
+        g = float(fallback_gap_pct or 0)
+    except Exception:
+        g = 0.0
+
+    if g >= 70:
+        return colors.HexColor("#dc3545")
+    elif g >= 50:
+        return colors.HexColor("#fd7e14")
+    elif g >= 30:
+        return colors.HexColor("#ffc107")
+    else:
+        return colors.HexColor("#198754")
+
+def rl_gap_fg_for_level(level: str):
+    lv = (level or "").strip().lower()
+    if "med" in lv:
+        return colors.black
+    return colors.white
+
+def horizontal_line(width=6.8*inch, thickness=1, color=colors.HexColor("#0b1b2b")):
+    tbl = Table([[""]], colWidths=[width], rowHeights=[0.08*inch])
+    tbl.setStyle(TableStyle([
+        ("LINEBELOW", (0, 0), (-1, -1), thickness, color),
+    ]))
+    return tbl
+
+@madurez_bp.route("/report/<int:run_id>/pdf", methods=["GET"])
+@login_required
+def report_pdf(run_id: int):
+    run = AnalysisRun.query.get_or_404(run_id)
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=letter,
+        leftMargin=0.6*inch, rightMargin=0.6*inch,
+        topMargin=0.6*inch, bottomMargin=0.6*inch
+    )
+
+    styles = getSampleStyleSheet()
+    # Crear estilos "compatibles" con lo que tu código espera: H1, H2, Small
+    if "H1" not in styles.byName:
+        styles.add(ParagraphStyle(
+            name="H1",
+            parent=styles["Heading1"],
+            fontSize=16,
+            leading=20,
+            spaceAfter=10
+        ))
+
+    if "H2" not in styles.byName:
+        styles.add(ParagraphStyle(
+            name="H2",
+            parent=styles["Heading2"],
+            fontSize=13,
+            leading=16,
+            spaceBefore=8,
+            spaceAfter=6
+        ))
+
+    if "Small" not in styles.byName:
+        styles.add(ParagraphStyle(
+            name="Small",
+            parent=styles["Normal"],
+            fontSize=9,
+            leading=11,
+            textColor=colors.grey
+        ))
+    story = []
+    logo_path = get_company_logo_path(run.company_name)
+
+    # --- PORTADA ---
+    story.append(Spacer(1, 1.0*inch))
+    if logo_path:
+        try:
+            story.append(Image(logo_path, width=1.2*inch, height=1.2*inch))
+            story.append(Spacer(1, 12))
+        except Exception:
+            pass
+
+    story.append(Paragraph("REPORTE SGSI", styles["Title"]))
+    story.append(Spacer(1, 10))
+    story.append(Paragraph(xml_escape(run.company_name), styles["H1"]))
+    story.append(Spacer(1, 12))
+    story.append(_p(f"Fecha de generación: {run.created_at.strftime('%Y-%m-%d %H:%M')}", styles, "Small"))
+    story.append(Spacer(1, 18))
+    story.append(_p("Documento institucional generado por el sistema SGSI.", styles))
+    story.append(PageBreak())
+    # ✅ Fuerza actualización del texto metodológico en BD (evita que quede texto viejo guardado)
+    run.ai_methodology_text = build_ai_methodology_iso27001(run.company_name)
+    db.session.commit()
+    ctx = build_report_context(run)
+    ctx["radar_overall_b64"] = run.radar_overall_b64
+
+
+
+
+    styles.add(ParagraphStyle(
+        name="ChapterLeft",
+        parent=styles["Heading2"],
+        alignment=TA_LEFT,   # ← izquierda
+        fontSize=14,
+        spaceBefore=16,
+        spaceAfter=4,
+        fontName="Helvetica-Bold"
+    ))
+    
+    styles.add(ParagraphStyle(
+        name="ControlTitle",
+        parent=styles["Heading2"],
+        fontSize=13,
+        leading=16,
+        spaceBefore=10,
+        spaceAfter=6,
+        fontName="Helvetica-Bold"
+    ))
+
+    if "Cell8" not in styles:
+        styles.add(ParagraphStyle(
+            name="Cell8",
+            parent=styles["BodyText"],
+            fontSize=8,
+            leading=10,
+            alignment=TA_LEFT
+        ))
+
+    # =========================
+    # PORTADA / ENCABEZADO (lo visible arriba del UI)
+    # =========================
+    story.append(Paragraph(f"Informe Estado de Madurez SGSI", styles["title"]))
+    #story.append(_p(f"ID #{ctx['run'].id} • {ctx['run'].created_at.strftime('%Y-%m-%d %H:%M')}", styles, "Small"))
+    story.append(Spacer(1, 10))
+
+    # KPI global
+    story.append(Paragraph("Madurez promedio", styles["H2"]))
+    story.append(_p(f"{ctx['overall']}% ({ctx['overall_maturity']})", styles))
+    story.append(Spacer(1, 10))
+
+    # =========================
+    # METODOLOGÍA (si la UI la genera, debe ir en PDF)
+    # =========================
+    if (ctx["methodology_text"] or "").strip():
+        story.append(Paragraph("Criterio metodológico de análisis", styles["H2"]))
+        story.append(_p(ctx["methodology_text"], styles))
+        #story.append(PageBreak())
+
+    # =========================
+    # RESUMEN EJECUTIVO + INFORME DETALLADO (editable en UI)
+    # =========================
+    story.append(Paragraph("Resumen ejecutivo", styles["H2"]))
+    story.append(_p(ctx["executive_text"], styles))
+    story.append(Spacer(1, 10))
+
+    # =========================
+    # GRÁFICA: ARAÑA CONSOLIDADA (RADAR) - MANTENER
+    # =========================
+    #story.append(Paragraph("Araña consolidada – ISO 27001:2022", styles["H2"]))
+
+    radar_b64 = (ctx.get("radar_overall_b64") or "").strip()
+    radar = _b64_to_rl_image(radar_b64, width=6.5*inch)
+
+    if radar:
+        story.append(radar)
+        story.append(Spacer(1, 12))
+    else:
+        story.append(_p("Sin datos para graficar la araña consolidada.", styles, "Small"))
+        story.append(Spacer(1, 12))
+
+    story.append(Paragraph("Criterio de colorimetría – Nivel de madurez", styles["H2"]))
+
+    story.append(_p(
+        """
+        En este informe, el nivel de madurez se representa visualmente mediante una escala de colores,
+        con el fin de facilitar la interpretación ejecutiva de los resultados y priorizar acciones de mejora.<br/>
+        La colorimetría aplicada corresponde exclusivamente al <b>nivel de madurez</b> y se interpreta de la siguiente manera:<br/>
+        <b>Verde</b>: Nivel de madurez alto u óptimo, con prácticas implementadas y sostenidas.
+        <b>Azul</b>: Nivel de madurez gestionado, con controles definidos y parcialmente optimizados.
+        <b>Amarillo</b>: Nivel de madurez intermedio, requiere acciones planificadas para su fortalecimiento.
+        <b>Morado</b>: Nivel de madurez bajo, con controles incompletos o inconsistentes.
+        <b>Rojo</b>: Nivel de madurez crítico o inicial, requiere atención prioritaria.<br/>
+        Las brechas se presentan sin color y se interpretan mediante su valor porcentual, nivel asignado
+        y descripción textual, conforme a los parámetros definidos por la organización.
+        """,
+        styles
+    ))
+
+    story.append(Spacer(1, 14))
+
+
+    # =========================
+    # TABLA: Resultados por capítulo (igual UI)
+    # =========================
+    chapter_results = ctx["chapter_results"]
+    chap_data = [["Dominio", "Nivel de Madurez", "Brecha"]]
+    for cap in CHAPTER_SHEETS:
+        v = chapter_results.get(cap, {}) if isinstance(chapter_results, dict) else {}
+        pct = float(v.get("pct", 0) or 0)
+        mad = get_maturity_label_for_pct(pct)
+        bi = (v.get("brecha_interp") or "").strip()
+
+        label = f"{pct:.2f}% ({mad})" if mad else f"{pct:.2f}%"
+        mad_cell = rl_pct_chip_cell(pct, label, styles["Cell8"], chip_w=0.10*inch)
+
+        chap_data.append([cap, mad_cell, bi])
+
+    story.append(Paragraph("Resultados por dominio", styles["H2"]))
+    t = Table(chap_data, colWidths=[2.2*inch, 2.2*inch, 3.6*inch])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0b1b2b")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTSIZE", (0,0), (-1,0), 9),
+        ("FONTSIZE", (0,1), (-1,-1), 8),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("GRID", (0,0), (-1,-1), 0.25, colors.lightgrey),
+    ]))
+    
+    story.append(t)
+    story.append(Spacer(1, 12))
+
+    # =========================
+    # TABLA: Resultados por control (igual UI)
+    # =========================
+    control_results = ctx["control_results"]
+    ctrl_data = [["Control", "Dominio", "Nivel de Madurez", "Brecha"]]
+    if isinstance(control_results, dict):
+        for cid, v in control_results.items():
+
+            # ❌ Excluir Anexo A en tabla resumen
+            if str(cid).upper().startswith("A."):
+                continue
+
+            pct = float(v.get("pct", 0) or 0)
+            mad = (v.get("madurez") or "").strip()
+            grp = (v.get("group") or "").strip()
+            bi = (v.get("brecha_interp") or "").strip()
+
+            label = f"{pct:.2f}% ({mad})" if mad else f"{pct:.2f}%"
+            mad_cell = rl_pct_chip_cell(pct, label, styles["Cell8"], chip_w=0.10*inch)
+
+            ctrl_data.append([cid, grp, mad_cell, bi])
+            
+    # ✅ IMPORTANTE: define esto antes de usarlo
+    ctrl_style_cmds = []
+    story.append(Paragraph("Resultados por control", styles["H2"]))
+    t2 = Table(ctrl_data, colWidths=[1.0*inch, 1.6*inch, 2.0*inch, 3.2*inch])
+    t2.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0b1b2b")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTSIZE", (0,0), (-1,0), 9),
+        ("FONTSIZE", (0,1), (-1,-1), 8),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("ALIGN", (0,0), (-1,-1), "LEFT"),
+        ("GRID", (0,0), (-1,-1), 0.25, colors.lightgrey),
+    ] + ctrl_style_cmds))
+
+    story.append(t2)
+    story.append(PageBreak())
+
+
+    # =========================
+    # CONTROLES (igual UI: por control)
+    # Incluye: KPI+brecha + Análisis IA por control + tabla preguntas
+    # =========================
+    story.append(Paragraph("Análisis por Controles", styles["title"]))
+
+    control_items = ctx["control_items"]
+    control_ai = ctx["control_ai"]
+
+    # Orden numérico correcto
+    def control_sort_key(cid: str):
+        s = (str(cid) or "").strip().upper()
+
+        m = re.match(r"^A\.(\d+)\.(\d+)$", s)
+        if m:
+            return (2, int(m.group(1)), int(m.group(2)))
+
+        m2 = re.match(r"^(\d+)\.(\d+)$", s)
+        if m2:
+            return (1, int(m2.group(1)), int(m2.group(2)))
+
+        nums = [int(x) for x in re.findall(r"\d+", s)]
+        return (0, *nums, s)
+
+    # ✅ Define capítulos (mismos que UI)
+    chapter_groups_ui = [
+        "Contexto",
+        "Liderazgo",
+        "Planificación",
+        "Soporte",
+        "Operación",
+        "Evaluación de desempeño",
+        "Mejora",
+        "Anexo A",
+    ]
+
+    def controls_for_group(group_name: str) -> list:
+        ids = CONTROL_GROUPS.get(group_name, []) or []
+
+        if group_name == "Anexo A":
+            all_a = []
+            for k in control_items.keys():
+                kk = (str(k) or "").strip().upper()
+                if re.match(r"^A\.\d+\.\d+$", kk):
+                    all_a.append(kk)
+            return sorted(set(all_a), key=control_sort_key)
+
+        return ids
+
+    # ✅ Recorre por grupo/capítulo
+    for grp in chapter_groups_ui:
+        cids = controls_for_group(grp)
+
+        # filtra solo los que realmente existan en este run
+        cids = [c for c in cids if (control_items.get(c, []) or [])]
+
+        if not cids:
+            continue
+
+        # ✅ Título centrado del capítulo
+        story.append(Paragraph(f"Capítulo: {xml_escape(grp)}", styles["ChapterLeft"]))
+        story.append(Spacer(1, 4))
+
+        # Línea horizontal completa
+        story.append(horizontal_line())
+        story.append(Spacer(1, 10))
+        # ✅ Cache títulos Anexo A para PDF
+        anexo_headers = MadurezPregunta.query.filter_by(sheet="ANEXO A", tipo="h") \
+            .order_by(MadurezPregunta.orden.asc()).all()
+
+        anexo_family_map = {}
+        anexo_control_map = {}
+
+        for p in anexo_headers:
+            txt = (p.pregunta or "").strip()
+            sec = (p.seccion or "").strip()
+
+            m_fam = re.match(r"^(\d+)\.\s+", txt)
+            if m_fam and not sec:
+                anexo_family_map[m_fam.group(1)] = txt
+                continue
+
+            if re.match(r"^\d+\.\d+$", sec) and txt:
+                anexo_control_map[sec] = txt
+
+        last_anexo_family = None
+
+        # ✅ Controles del capítulo (en orden)
+        for cid in sorted(cids, key=control_sort_key):
+            items_c = control_items.get(cid, []) or []
+            kpi = compute_control_kpis(cid, items_c)
+
+            cid_u = (cid or "").strip().upper()
+            
+            is_anexo = cid_u.startswith("A.")
+            cid_disp = cid_u[2:] if is_anexo else (cid or "").strip()
+
+            if is_anexo:
+                fam = cid_disp.split(".")[0] if "." in cid_disp else None
+                if fam and fam != last_anexo_family:
+                    fam_title = anexo_family_map.get(fam, f"{fam}.")
+                    story.append(Spacer(1, 10))
+                    story.append(Paragraph(xml_escape(fam_title), styles["H2"]))
+                    # línea punta a punta
+                    story.append(Table([[""]], colWidths=[6.8*inch],
+                                       style=TableStyle([("LINEBELOW",(0,0),(-1,0),1,colors.black)])))
+                    story.append(Spacer(1, 6))
+                    last_anexo_family = fam
+
+                full_title = anexo_control_map.get(cid_disp, cid_disp)  # "5.1 Políticas..."
+                title = full_title
+            else:
+                title = control_title(cid)
+
+            if is_anexo:
+                story.append(Paragraph(xml_escape(title), styles["H2"]))  # "5.1 Políticas..."
+            else:
+                story.append(Paragraph(f"{cid_disp} – {xml_escape(title)}", styles["H2"]))
+    
+            story.append(Spacer(1, 6))
+
+            cai = control_ai.get(cid, {}) if isinstance(control_ai, dict) else {}
+            estado_actual = (cai.get("estado_actual") or "").strip()
+            estado_req    = (cai.get("estado_requerido") or "").strip()
+            plan_sug      = (cai.get("plan_accion_sugerido") or "").strip()
+
+            story.append(Paragraph("Análisis del control", styles["ControlTitle"]))
+            story.append(_p(f"<b>Estado actual:</b><br/>{estado_actual or 'Aún no se ha generado IA para este control.'}", styles))
+            story.append(Spacer(1, 4))
+            story.append(_p(f"<b>Estado requerido:</b><br/>{estado_req or 'Sin contenido.'}", styles))
+            story.append(Spacer(1, 4))
+            story.append(_p(f"<b>Plan de acción sugerido:</b><br/>{plan_sug or 'Sin contenido.'}", styles))
+            story.append(Spacer(1, 10))
+
+        story.append(Spacer(1, 14))
+        
+    logo_path = get_company_logo_path(run.company_name)
+    doc.build(
+        story,
+        onFirstPage=lambda c, d: pdf_header_footer(c, d, "Informe SGSI", run.company_name, logo_path=logo_path),
+        onLaterPages=lambda c, d: pdf_header_footer(c, d, "Informe SGSI", run.company_name, logo_path=logo_path),
+    )
+    buf.seek(0)
+
+    filename = f"informe_{run.company_name}_{run.id}.pdf"
+    filename = re.sub(r"[^a-zA-Z0-9._-]+", "_", filename)
+
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/pdf"
+    )
+
+# ============================================================================================================================================
+#                                                           FIN MÓDULO DE MADUREZ ISO 27001:2022
+# ============================================================================================================================================
+
+# ============================================================================================================================================
+#                                                   MÓDULO REPORTES (PDF / WORD / EXCEL)
+# ============================================================================================================================================
+
+from flask import Response, request, redirect, url_for, flash, session, render_template_string

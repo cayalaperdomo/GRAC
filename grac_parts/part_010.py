@@ -1,4967 +1,217 @@
-@app.route('/plan_remediacion/detalle/<int:id>')
-@login_required
-def plan_remediacion_detalle(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        read_only = True
-    else:
-        if user.role != 'admin' and not verificar_permiso(user, "Plan de Remediación"):
-            flash("No tiene permiso para ver el detalle del plan de remediación.", "danger")
-            return redirect(url_for('plan_remediacion_menu'))
-        read_only = False
-
-    pr = (
-        PlanRemediacion.query
-        .options(selectinload(PlanRemediacion.vulnerabilidad))
-        .get_or_404(id)
-    )
-
-    vul = pr.vulnerabilidad
-
-    html = """
-    <div class="remdet-shell">
-
-      <!-- CABECERA -->
-      <div class="remdet-header-card">
-        <div class="remdet-header-overlay">
-          <div class="remdet-header-text">
-            <h3 class="remdet-title m-0">Detalle del Plan de Remediación</h3>
-            <div class="remdet-subtitle">
-              Consulta completa del registro en modo solo lectura
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOTONES -->
-      <div class="remdet-header-actions">
-        <a href="{{ url_for('plan_remediacion_matriz') }}"
-           class="btn rounded-pill px-4 fw-bold remdet-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-
-        {% if not read_only %}
-          <a href="{{ url_for('plan_remediacion_edit', id=pr.id) }}"
-             class="btn btn-warning rounded-pill px-4 fw-bold">
-            Editar registro
-          </a>
-        {% endif %}
-      </div>
-
-      <!-- TARJETA -->
-      <div class="remdet-card">
-        <div class="remdet-card-body">
-
-          <!-- SECCIÓN 1 -->
-          <div class="remdet-section">
-            <div class="remdet-section-title">Información general</div>
-            <div class="row g-3">
-
-              <div class="col-md-3">
-                <div class="remdet-field remdet-field-compact">
-                  <div class="remdet-label">ID Vulnerabilidad</div>
-                  <div class="remdet-value remdet-value-compact">{{ vul.codigo if vul else '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-3">
-                <div class="remdet-field remdet-field-compact">
-                  <div class="remdet-label">Prioridad</div>
-                  <div class="remdet-value remdet-value-compact">
-                    {% if pr.prioridad == 'Crítica' %}
-                      <span class="badge bg-dark">Crítica</span>
-                    {% elif pr.prioridad == 'Alta' %}
-                      <span class="badge bg-danger">Alta</span>
-                    {% elif pr.prioridad == 'Media' %}
-                      <span class="badge bg-warning text-dark">Media</span>
-                    {% elif pr.prioridad == 'Baja' %}
-                      <span class="badge bg-success">Baja</span>
-                    {% else %}
-                      <span class="badge bg-secondary">{{ pr.prioridad or '—' }}</span>
-                    {% endif %}
-                  </div>
-                </div>
-              </div>
-
-              <div class="col-md-3">
-                <div class="remdet-field remdet-field-compact">
-                  <div class="remdet-label">Estado</div>
-                  <div class="remdet-value remdet-value-compact">
-                    {% if pr.estado == 'Abierto' %}
-                      <span class="badge bg-primary">Abierto</span>
-                    {% elif pr.estado == 'Cerrado' %}
-                      <span class="badge bg-success">Cerrado</span>
-                    {% else %}
-                      <span class="badge bg-secondary">{{ pr.estado or '—' }}</span>
-                    {% endif %}
-                  </div>
-                </div>
-              </div>
-
-              <div class="col-md-3">
-                <div class="remdet-field remdet-field-compact">
-                  <div class="remdet-label">Responsable</div>
-                  <div class="remdet-value remdet-value-compact">{{ pr.responsable or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-6">
-                <div class="remdet-field remdet-field-compact">
-                  <div class="remdet-label">Fecha objetivo</div>
-                  <div class="remdet-value remdet-value-compact">{{ pr.fecha_objetivo or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-6">
-                <div class="remdet-field remdet-field-compact">
-                  <div class="remdet-label">Fecha remediación</div>
-                  <div class="remdet-value remdet-value-compact">{{ pr.fecha_remediacion or '—' }}</div>
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-          <!-- SECCIÓN 2 -->
-          <div class="remdet-section">
-            <div class="remdet-section-title">Acción y recursos</div>
-            <div class="row g-3">
-
-              <div class="col-md-12">
-                <div class="remdet-field">
-                  <div class="remdet-label">Acción correctiva</div>
-                  <div class="remdet-value remdet-value-lg">{{ pr.accion_correctiva or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-12">
-                <div class="remdet-field">
-                  <div class="remdet-label">Recursos necesarios</div>
-                  <div class="remdet-value">{{ pr.recursos_necesarios or '—' }}</div>
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-          <!-- SECCIÓN 3 -->
-          <div class="remdet-section">
-            <div class="remdet-section-title">Integración con Jira</div>
-            <div class="row g-3">
-
-              <div class="col-md-4">
-                <div class="remdet-field remdet-field-compact">
-                  <div class="remdet-label">Issue Key</div>
-                  <div class="remdet-value remdet-value-compact">{{ pr.jira_issue_key or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-4">
-                <div class="remdet-field remdet-field-compact">
-                  <div class="remdet-label">Estado Jira</div>
-                  <div class="remdet-value remdet-value-compact">{{ pr.jira_status or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-4">
-                <div class="remdet-field remdet-field-compact">
-                  <div class="remdet-label">Asignado a</div>
-                  <div class="remdet-value remdet-value-compact">{{ pr.jira_assignee_name or '—' }}</div>
-                </div>
-              </div>
-
-              {% if pr.jira_issue_url %}
-              <div class="col-md-12">
-                <div class="remdet-field">
-                  <div class="remdet-label">Enlace Jira</div>
-                  <div class="remdet-value">
-                    <a href="{{ pr.jira_issue_url }}" target="_blank">Abrir ticket en Jira</a>
-                  </div>
-                </div>
-              </div>
-              {% endif %}
-
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .remdet-shell{
-        width:96%;
-        max-width:1200px;
-        margin:10px auto 24px auto;
-      }
-
-      .remdet-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .remdet-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .remdet-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        padding:0;
-        background:transparent;
-        position:relative;
-        z-index:1;
-      }
-
-      .remdet-header-overlay::before{
-        content:"🔎️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .remdet-header-text{
-        max-width:1000px;
-        width:100%;
-        display:block;
-        transform:none;
-      }
-
-      .remdet-header-text::before{
-        content:"SGSI · Detalle de Remediación";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }
-
-      .remdet-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .remdet-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }
-
-      .remdet-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .remdet-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .remdet-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .remdet-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .remdet-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .remdet-card-body{
-        padding:18px;
-      }
-
-      .remdet-section{
-        margin-bottom:14px;
-        background:#ffffff;
-        border:1px solid #dbe6f4;
-        border-radius:16px;
-        padding:8px 7px;
-        box-shadow:0 8px 18px rgba(15,23,42,.08);
-      }
-
-      .remdet-section:last-child{
-        margin-bottom:0;
-      }
-
-      .remdet-section-title{
-        font-weight:950;
-        font-size:.78rem;
-        color:#0b4a8f;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin:0 0 12px 0;
-      }
-
-      .remdet-field{
-        background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        padding:12px;
-        min-height:78px;
-        height:100%;
-        display:flex;
-        flex-direction:column;
-        justify-content:flex-start;
-      }
-
-      .remdet-field-compact{
-        min-height:78px;
-        justify-content:center;
-        align-items:center;
-        text-align:center;
-      }
-
-      .remdet-label{
-        font-size:.70rem;
-        font-weight:900;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        color:#0b4a8f;
-        margin-bottom:6px;
-      }
-
-      .remdet-value{
-        color:#101827;
-        font-size:.82rem;
-        line-height:1.38;
-        white-space:pre-wrap;
-        word-break:break-word;
-      }
-
-      .remdet-value-lg{
-        font-size:.90rem;
-        font-weight:900;
-        color:#0f172a;
-      }
-
-      .remdet-value-compact{
-        font-weight:900;
-        font-size:.80rem;
-        line-height:1.2;
-      }
-
-      .remdet-value .badge,
-      .remdet-value-compact .badge{
-        font-size:.70rem;
-        padding:5px 10px;
-        border-radius:999px;
-        white-space:nowrap;
-        display:inline-block;
-        font-weight:900;
-      }
-
-      .remdet-section .row.g-3{
-        --bs-gutter-x:.8rem;
-        --bs-gutter-y:.8rem;
-      }
-
-      .form-control,
-      .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .form-control:focus,
-      .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#ffffff;
-      }
-
-      .remdet-soft-box{
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        border-radius:14px;
-        padding:12px 14px;
-        box-shadow:0 6px 14px rgba(15,23,42,.06);
-      }
-
-      @media (max-width:992px){
-        .remdet-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .remdet-header-card{
-          min-height:88px;
-        }
-
-        .remdet-title{
-          font-size:1.20rem;
-        }
-
-        .remdet-card-body{
-          padding:8px 7px;
-        }
-
-        .remdet-section{
-          padding:12px;
-        }
-
-        .remdet-field,
-        .remdet-field-compact{
-          min-height:72px;
-        }
-      }
-
-      @media (max-width:768px){
-        .remdet-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .remdet-header-overlay::before{
-          margin:0;
-        }
-
-        .remdet-header-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-
-    inner = render_template_string(
-        html,
-        pr=pr,
-        vul=vul,
-        read_only=read_only
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-
-
-# ==========================
-# Editar Remediación
-# ==========================
-
-@app.route('/plan_remediacion/<int:id>/edit', methods=['GET', 'POST'])
-@login_required
-def plan_remediacion_edit(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede editar registros.", "danger")
-        return redirect(url_for('plan_remediacion_matriz'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Plan de Remediación"):
-        flash("No tiene permiso para editar registros.", "danger")
-        return redirect(url_for('plan_remediacion_menu'))
-
-    item = PlanRemediacion.query.get_or_404(id)
-
-    vulnerabilidades = VulnerabilidadRegistro.query.order_by(
-        VulnerabilidadRegistro.codigo.asc()
-    ).all()
-
-    jira_users = cargar_usuarios_jira_para_formulario(item.responsable or "")
-
-    if request.method == 'POST':
-        vuln_id = request.form.get('vulnerabilidad_id', type=int)
-        accion_correctiva = (request.form.get('accion_correctiva') or '').strip()
-        responsable = (request.form.get('responsable') or '').strip()
-        prioridad = (request.form.get('prioridad') or '').strip()
-        recursos_necesarios = (request.form.get('recursos_necesarios') or '').strip()
-        estado = (request.form.get('estado') or '').strip()
-        fecha_objetivo_str = (request.form.get('fecha_objetivo') or '').strip()
-        fecha_remediacion_str = (request.form.get('fecha_remediacion') or '').strip()
-        jira_account_id = (request.form.get('jira_account_id') or '').strip()
-        jira_assignee_name = (request.form.get('jira_assignee_name') or '').strip()
-
-        fecha_objetivo = None
-        if fecha_objetivo_str:
-            try:
-                fecha_objetivo = datetime.strptime(fecha_objetivo_str, '%Y-%m-%d').date()
-            except ValueError:
-                flash("Fecha objetivo inválida.", "danger")
-                return redirect(url_for('plan_remediacion_edit', id=id))
-
-        fecha_remediacion = None
-        if fecha_remediacion_str:
-            try:
-                fecha_remediacion = datetime.strptime(fecha_remediacion_str, '%Y-%m-%d').date()
-            except ValueError:
-                flash("Fecha de remediación inválida.", "danger")
-                return redirect(url_for('plan_remediacion_edit', id=id))
-
-        if not all([vuln_id, accion_correctiva, responsable, prioridad, estado]):
-            flash("Campos obligatorios: ID Vulnerabilidad, Acción Correctiva, Responsable, Prioridad y Estado.", "danger")
-            return redirect(url_for('plan_remediacion_edit', id=id))
-        
-        item.vulnerabilidad_id = vuln_id
-        item.accion_correctiva = accion_correctiva
-        item.responsable = responsable
-        item.prioridad = prioridad
-        item.fecha_objetivo = fecha_objetivo
-        item.fecha_remediacion = fecha_remediacion
-        item.recursos_necesarios = recursos_necesarios
-        item.estado = estado
-
-        asignar_usuario_jira_a_plan(
-            item,
-            jira_account_id,
-            jira_assignee_name
-        )
-
-        sincronizar_vulnerabilidad_desde_plan(item)
-
-        db.session.commit()
-        if item.jira_issue_key:
-            try:
-                jira_actualizar_issue_plan(item.id)
-                flash("Plan actualizado y sincronizado con Jira.", "success")
-            except Exception as e:
-                flash(f"Plan actualizado, pero no se pudo sincronizar Jira: {str(e)}", "warning")
-        else:
-            flash("Plan de remediación actualizado.", "success")
-
-        return redirect(url_for('plan_remediacion_matriz'))
-
-    html = """
-    <div class="remedit-shell">
-
-      <!-- CABECERA -->
-      <div class="remedit-header-card">
-        <div class="remedit-header-overlay">
-          <div class="remedit-header-text">
-            <h3 class="remedit-title m-0">Editar Plan de Remediación</h3>
-            <div class="remedit-subtitle">
-              Actualización de acciones correctivas definidas para mitigar vulnerabilidades identificadas, incluyendo responsables, prioridades, fechas y recursos necesarios
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOTÓN VOLVER -->
-      <div class="remedit-header-actions">
-        <a href="{{ url_for('plan_remediacion_matriz') }}"
-           class="btn rounded-pill px-5 fw-bold remedit-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-      </div>
-
-      <!-- TARJETA -->
-      <div class="remedit-card">
-        <div class="remedit-card-body">
-
-          <form method="post">
-            <div class="row g-3">
-
-              <div class="col-12">
-                <div class="remedit-section-title">Información del plan de remediación</div>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">ID de Vulnerabilidad</label>
-                <select name="vulnerabilidad_id" class="form-select" required>
-                  <option value="">-- Seleccione --</option>
-                  {% for v in vulnerabilidades %}
-                    <option value="{{ v.id }}" {% if item.vulnerabilidad_id == v.id %}selected{% endif %}>
-                      {{ v.codigo }} — {{ (v.descripcion_vulnerabilidad or '')[:60] }}
-                    </option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-8">
-                <label class="form-label">Acción Correctiva</label>
-                <textarea name="accion_correctiva" class="form-control" rows="2" required>{{ item.accion_correctiva or '' }}</textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Responsable</label>
-                <input name="responsable" class="form-control" value="{{ item.responsable or '' }}" required>
-              </div>
-
-              <div class="col-md-4">
-                  <label class="form-label">Prioridad</label>
-                  <select name="prioridad" class="form-select" required>
-                    <option value="">-- Seleccione --</option>
-                    <option value="Crítica" {% if item.prioridad == 'Crítica' %}selected{% endif %}>Crítica</option>
-                    <option value="Alta" {% if item.prioridad == 'Alta' %}selected{% endif %}>Alta</option>
-                    <option value="Media" {% if item.prioridad == 'Media' %}selected{% endif %}>Media</option>
-                    <option value="Baja" {% if item.prioridad == 'Baja' %}selected{% endif %}>Baja</option>
-                  </select>
-                </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Fecha Objetivo</label>
-                <input type="date"
-                       name="fecha_objetivo"
-                       class="form-control"
-                       value="{{ item.fecha_objetivo.strftime('%Y-%m-%d') if item.fecha_objetivo else '' }}">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Fecha de Remediación</label>
-                <input type="date"
-                       name="fecha_remediacion"
-                       class="form-control"
-                       value="{{ item.fecha_remediacion.strftime('%Y-%m-%d') if item.fecha_remediacion else '' }}">
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Recursos Necesarios</label>
-                <textarea name="recursos_necesarios" class="form-control" rows="2">{{ item.recursos_necesarios or '' }}</textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Estado</label>
-                <select name="estado" class="form-select" required>
-                  <option value="">-- Seleccione --</option>
-                  <option value="Abierto" {% if item.estado == 'Abierto' %}selected{% endif %}>Abierto</option>
-                  <option value="Cerrado" {% if item.estado == 'Cerrado' %}selected{% endif %}>Cerrado</option>
-                </select>
-              </div>
-
-              <div class="col-md-8">
-                <label class="form-label">Asignado en Jira para esta remediación</label>
-                <select name="jira_account_id" id="jira_account_id" class="form-select" onchange="actualizarNombreJira(this)">
-                  <option value="">-- Sin asignar en Jira --</option>
-                  {% for ju in jira_users %}
-                    <option value="{{ ju.accountId }}"
-                            data-name="{{ ju.displayName }}"
-                            {% if item.jira_account_id == ju.accountId %}selected{% endif %}>
-                      {{ ju.displayName }}
-                    </option>
-                  {% endfor %}
-                </select>
-                <input type="hidden"
-                       name="jira_assignee_name"
-                       id="jira_assignee_name"
-                       value="{{ item.jira_assignee_name or '' }}">
-                <div class="form-text">
-                  Este usuario se usará solo para el ticket Jira de esta remediación.
-                </div>
-              </div>
-
-            </div>
-
-            <div class="remedit-bottom-actions">
-              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
-                Guardar cambios
-              </button>
-
-              <a href="{{ url_for('plan_remediacion_matriz') }}"
-                 class="btn rounded-pill px-4 fw-bold remedit-cancel-btn">
-                Cancelar
-              </a>
-            </div>
-          </form>
-
-        </div>
-      </div>
-    </div>
-
-    <script>
-      function actualizarNombreJira(select){
-        const opt = select.options[select.selectedIndex];
-        const hidden = document.getElementById('jira_assignee_name');
-        if(hidden){
-          hidden.value = opt ? (opt.getAttribute('data-name') || '') : '';
-        }
-      }
-
-      document.addEventListener('DOMContentLoaded', function(){
-        const sel = document.getElementById('jira_account_id');
-        if(sel){
-          actualizarNombreJira(sel);
-        }
-      });
-    </script>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .remedit-shell{
-        width:96%;
-        max-width:1500px;
-        margin:10px auto 24px auto;
-      }
-
-      .remedit-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .remedit-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }
-
-      .remedit-header-overlay{
-        width:100%;
-        height:auto;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }
-
-      .remedit-header-overlay::before{
-        content:"🛠️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .remedit-header-text{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }
-
-      .remedit-header-text::before{
-        content:"SGSI · Edición de Plan de Remediación";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }
-
-      .remedit-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .remedit-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }
-
-      .remedit-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .remedit-header-actions .btn,
-      .remedit-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .remedit-back-btn,
-      .remedit-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .remedit-back-btn:hover,
-      .remedit-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .remedit-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .remedit-card-body{
-        padding:18px;
-      }
-
-      .remedit-section-title{
-        font-weight:950;
-        font-size:.78rem;
-        color:#0b4a8f;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin:10px 0 12px;
-      }
-
-      .remedit-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .remedit-card .form-control,
-      .remedit-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .remedit-card textarea.form-control{
-        min-height:70px;
-        resize:vertical;
-      }
-
-      .remedit-card .form-control:focus,
-      .remedit-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#ffffff;
-      }
-
-      .remedit-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:22px;
-        flex-wrap:wrap;
-        width:100%;
-      }
-
-      .remedit-card .btn{
-        font-weight:900;
-      }
-
-      @media (max-width:992px){
-        .remedit-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .remedit-header-card{
-          min-height:88px;
-        }
-
-        .remedit-title{
-          font-size:1.20rem;
-        }
-
-        .remedit-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .remedit-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .remedit-header-overlay::before{
-          margin:0;
-        }
-
-        .remedit-header-text::before{
-          margin-left:auto;
-          margin-right:auto;
-        }
-
-        .remedit-header-actions .btn,
-        .remedit-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(
-        html,
-        item=item,
-        vulnerabilidades=vulnerabilidades,
-        jira_users=jira_users
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-# ==========================
-# Eliminar
-# ==========================
-
-@app.route('/plan_remediacion/<int:id>/delete')
-@login_required
-def plan_remediacion_delete(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede eliminar registros.", "danger")
-        return redirect(url_for('plan_remediacion_matriz'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Plan de Remediación"):
-        flash("No tiene permiso para eliminar registros.", "danger")
-        return redirect(url_for('plan_remediacion_menu'))
-
-    item = PlanRemediacion.query.get_or_404(id)
-    db.session.delete(item)
-    db.session.commit()
-
-    flash("Plan de remediación eliminado.", "success")
-    return redirect(url_for('plan_remediacion_matriz'))
-
-# ==========================
-# Eliminar Remediaciones por filtros
-# ==========================
-
-@app.route('/plan_remediacion/delete_filtrados', methods=['POST'])
-@login_required
-def plan_remediacion_delete_filtrados():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede eliminar registros.", "danger")
-        return redirect(url_for('plan_remediacion_matriz'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Plan de Remediación"):
-        flash("No tiene permiso para eliminar planes de remediación.", "danger")
-        return redirect(url_for('plan_remediacion_matriz'))
-
-    filtro_prioridad = (request.form.get('prioridad') or '').strip()
-    filtro_estado = (request.form.get('estado') or '').strip()
-
-    if not filtro_prioridad and not filtro_estado:
-        flash("Debe aplicar al menos un filtro para eliminar por grupo.", "warning")
-        return redirect(url_for('plan_remediacion_matriz'))
-
-    try:
-        q = PlanRemediacion.query
-
-        if filtro_prioridad:
-            q = q.filter(PlanRemediacion.prioridad == filtro_prioridad)
-
-        if filtro_estado:
-            q = q.filter(PlanRemediacion.estado == filtro_estado)
-
-        planes = q.all()
-
-        if not planes:
-            flash("No se encontraron planes para eliminar con los filtros seleccionados.", "warning")
-            return redirect(url_for(
-                'plan_remediacion_matriz',
-                prioridad=filtro_prioridad,
-                estado=filtro_estado
-            ))
-
-        vuln_ids = list(set([p.vulnerabilidad_id for p in planes if p.vulnerabilidad_id]))
-        total = len(planes)
-
-        for p in planes:
-            db.session.delete(p)
-
-        db.session.flush()
-
-        for vuln_id in vuln_ids:
-            vuln = VulnerabilidadRegistro.query.get(vuln_id)
-            if not vuln:
-                continue
-
-            planes_restantes = PlanRemediacion.query.filter_by(
-                vulnerabilidad_id=vuln_id
-            ).all()
-
-            if not planes_restantes:
-                vuln.estado = "Abierto"
-                vuln.fecha_cierre = None
-            else:
-                cerrado = next(
-                    (x for x in planes_restantes if (x.estado or '').strip().lower() == 'cerrado'),
-                    None
-                )
-
-                if cerrado:
-                    vuln.estado = "Cerrado"
-                    vuln.fecha_cierre = cerrado.fecha_remediacion
-                else:
-                    vuln.estado = "Abierto"
-                    vuln.fecha_cierre = None
-
-        db.session.commit()
-
-        flash(f"Se eliminaron {total} planes de remediación con los filtros seleccionados.", "success")
-
-    except Exception as e:
-        db.session.rollback()
-        flash(f"No fue posible eliminar los planes filtrados: {str(e)}", "danger")
-
-    return redirect(url_for('plan_remediacion_matriz'))
-
-
-# ==========================
-# Jira - formulario modal / popup lógico
-# ==========================
-
-@app.route('/plan_remediacion/<int:id>/jira', methods=['GET', 'POST'])
-@login_required
-def plan_remediacion_jira(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede integrar con Jira.", "danger")
-        return redirect(url_for('plan_remediacion_matriz'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Plan de Remediación"):
-        flash("No tiene permiso para integrar con Jira.", "danger")
-        return redirect(url_for('plan_remediacion_matriz'))
-
-    plan = PlanRemediacion.query.get_or_404(id)
-    vuln = VulnerabilidadRegistro.query.get_or_404(plan.vulnerabilidad_id)
-
-    if request.method == 'POST':
-        jira_assignee_name = (request.form.get('jira_assignee_name') or '').strip()
-        jira_account_id = (request.form.get('jira_account_id') or '').strip()
-
-        if not jira_account_id:
-            flash("Debe seleccionar el usuario Jira asignado para esta remediación.", "danger")
-            return redirect(url_for('plan_remediacion_jira', id=id))
-
-        try:
-            asignar_usuario_jira_a_plan(
-                plan,
-                jira_account_id,
-                jira_assignee_name
-            )
-            db.session.commit()
-
-            res = jira_crear_issue_plan(plan.id)
-
-            if res.get("already_exists"):
-                flash(f"El plan ya tiene ticket Jira asociado: {res.get('issue_key')}", "info")
-            else:
-                flash(f"Ticket Jira creado correctamente: {res.get('issue_key')}", "success")
-
-            return redirect(url_for('plan_remediacion_matriz'))
-
-        except Exception as e:
-            flash(f"No se pudo crear el ticket en Jira: {str(e)}", "danger")
-            return redirect(url_for('plan_remediacion_matriz'))
-
-    # GET: mostrar TODOS los usuarios asignables del proyecto Jira.
-    # No se filtra por responsable SGSI porque dicho texto puede no existir en Jira
-    # (por ejemplo, "Administrador") y dejaría el selector vacío.
-    usuarios_jira = cargar_usuarios_jira_para_formulario()
-
-    html = """
-    <div class="jira-shell">
-
-      <!-- CABECERA -->
-      <div class="jira-header-card">
-        <div class="jira-header-overlay">
-          <div class="jira-header-text">
-            <h3 class="jira-title m-0">🎫 Enviar Plan a Jira</h3>
-            <div class="jira-subtitle">
-              Creación automática de un ticket en Jira para el seguimiento del plan de remediación asociado a una vulnerabilidad identificada
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOTÓN VOLVER -->
-      <div class="jira-header-actions">
-        <a href="{{ url_for('plan_remediacion_matriz') }}"
-           class="btn rounded-pill px-5 fw-bold jira-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-      </div>
-
-      <!-- TARJETA -->
-      <div class="jira-card">
-        <div class="jira-card-body">
-
-          <form method="post">
-            <div class="row g-3">
-
-              <div class="col-12">
-                <div class="jira-section-title">Información del plan</div>
-              </div>
-
-              <div class="col-md-12">
-                <div class="alert alert-info jira-plan-info">
-                  <b>Plan:</b> {{ plan.id }}<br>
-                  <b>Vulnerabilidad:</b> {{ vuln.codigo or '—' }}<br>
-                  <b>Responsable SGSI:</b> {{ plan.responsable or '—' }}<br>
-                  <b>Prioridad:</b> {{ plan.prioridad or '—' }}
-                </div>
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Asignar este ticket Jira a</label>
-                <select name="jira_account_id"
-                        id="jira_account_id"
-                        class="form-select"
-                        required
-                        onchange="actualizarNombreJira(this)">
-                  <option value="">-- Seleccione usuario Jira asignable --</option>
-                  {% for u in usuarios_jira %}
-                    <option value="{{ u.accountId }}"
-                            data-name="{{ u.displayName }}"
-                            {% if plan.jira_account_id == u.accountId %}selected{% endif %}>
-                      {{ u.displayName }}
-                    </option>
-                  {% endfor %}
-                </select>
-                <input type="hidden"
-                       name="jira_assignee_name"
-                       id="jira_assignee_name"
-                       value="{{ plan.jira_assignee_name or '' }}">
-                <small class="text-muted">
-                  La asignación queda guardada solo para este punto de remediación.
-                </small>
-              </div>
-
-              {% if usuarios_jira %}
-              <div class="col-12">
-                <div class="jira-section-title">Usuarios disponibles en Jira</div>
-              </div>
-
-              <div class="col-md-12">
-                <div class="table-responsive jira-table-box">
-                  <table class="table table-bordered table-sm align-middle">
-                    <thead class="jira-table-head">
-                      <tr>
-                        <th>Nombre</th>
-                        <th>Account ID</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {% for u in usuarios_jira %}
-                      <tr>
-                        <td>{{ u.displayName or '—' }}</td>
-                        <td class="small">{{ u.accountId or '—' }}</td>
-                      </tr>
-                      {% endfor %}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              {% endif %}
-
-            </div>
-
-            <div class="jira-bottom-actions">
-              <button class="btn btn-primary rounded-pill px-4 fw-bold" type="submit">
-                Crear Ticket en Jira
-              </button>
-
-              <a href="{{ url_for('plan_remediacion_matriz') }}"
-                 class="btn rounded-pill px-4 fw-bold jira-cancel-btn">
-                Cancelar
-              </a>
-            </div>
-          </form>
-
-        </div>
-      </div>
-    </div>
-
-    <script>
-      function actualizarNombreJira(select){
-        const opt = select.options[select.selectedIndex];
-        const hidden = document.getElementById('jira_assignee_name');
-        if(hidden){
-          hidden.value = opt ? (opt.getAttribute('data-name') || '') : '';
-        }
-      }
-
-      document.addEventListener('DOMContentLoaded', function(){
-        const sel = document.getElementById('jira_account_id');
-        if(sel){
-          actualizarNombreJira(sel);
-        }
-      });
-    </script>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .jira-shell{
-        width:96%;
-        max-width:1200px;
-        margin:10px auto 24px auto;
-      }
-
-      /* =========================
-         HEADER SGSI MODERNO
-      ========================= */
-      .jira-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .jira-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .jira-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        position:relative;
-        z-index:1;
-      }
-
-      .jira-header-overlay::before{
-        content:"📊";
-        width:54px;
-        height:54px;
-        border-radius:14px;
-        background:#fff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .jira-header-text::before{
-        content:"SGSI · Integración Jira";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .jira-title{
-        color:#fff;
-        font-weight:950;
-        font-size:1.32rem;
-        margin:0;
-      }
-
-      .jira-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-      }
-
-      /* =========================
-         BOTONES
-      ========================= */
-      .jira-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .jira-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .jira-back-btn{
-        background:#fff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .jira-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-      }
-
-      /* =========================
-         CARD
-      ========================= */
-      .jira-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-      }
-
-      .jira-card-body{
-        padding:18px;
-      }
-
-      .jira-section-title{
-        font-weight:950;
-        font-size:.78rem;
-        color:#0b4a8f;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin-bottom:12px;
-      }
-
-      /* =========================
-         FORMULARIOS
-      ========================= */
-      .form-label{
-        font-weight:800;
-        font-size:.78rem;
-        color:#25324a;
-      }
-
-      .form-control,
-      .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .form-control:focus,
-      .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#fff;
-      }
-
-      /* =========================
-         TABLA MODERNA
-      ========================= */
-      .jira-table-box{
-        background:#fff;
-        border-radius:16px;
-        border:1px solid #e2e8f0;
-        overflow:hidden;
-        box-shadow:0 6px 16px rgba(0,0,0,.08);
-      }
-
-      .jira-table-box table{
-        margin-bottom:0;
-      }
-
-      .jira-table-box thead th{
-        background:#3f86d6 !important;
-        color:#fff !important;
-        font-weight:900;
-        font-size:.78rem;
-        text-align:center;
-        border:none;
-      }
-
-      .jira-table-box td{
-        font-size:.82rem;
-        vertical-align:middle;
-      }
-
-      .jira-table-box tbody tr:hover{
-        background:rgba(63,134,214,.08);
-      }
-
-      /* =========================
-         ACCIONES
-      ========================= */
-      .jira-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:22px;
-        flex-wrap:wrap;
-      }
-
-      .jira-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .jira-cancel-btn{
-        background:#fff;
-        border:1px solid #cfd8e3;
-      }
-
-      .jira-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-      }
-
-      /* =========================
-         RESPONSIVE
-      ========================= */
-      @media (max-width:768px){
-        .jira-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .jira-header-actions .btn,
-        .jira-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(html, plan=plan, vuln=vuln, usuarios_jira=usuarios_jira)
-    return render_template_string(BASE, content=Markup(inner))
-
-
-@app.route('/plan_remediacion/<int:id>/jira_sync')
-@login_required
-def plan_remediacion_jira_sync(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede sincronizar Jira.", "danger")
-        return redirect(url_for('plan_remediacion_matriz'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Plan de Remediación"):
-        flash("No tiene permiso para sincronizar Jira.", "danger")
-        return redirect(url_for('plan_remediacion_matriz'))
-
-    try:
-        status_name = jira_sync_plan(id)
-        flash(f"Estado Jira sincronizado correctamente: {status_name}", "success")
-    except Exception as e:
-        flash(f"No se pudo sincronizar con Jira: {str(e)}", "danger")
-
-    return redirect(url_for('plan_remediacion_matriz'))
-
-
-@app.route('/plan_remediacion/jira/config', methods=['GET', 'POST'])
-@login_required
-def jira_config_view():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede modificar la configuración Jira.", "danger")
-        return redirect(url_for('plan_remediacion_menu'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Plan de Remediación"):
-        flash("No tiene permiso para configurar Jira.", "danger")
-        return redirect(url_for('plan_remediacion_menu'))
-
-    cfg = get_jira_config()
-
-    if request.method == 'POST':
-        cfg.enabled = bool(request.form.get('enabled'))
-        cfg.base_url = (request.form.get('base_url') or '').strip()
-        cfg.email = (request.form.get('email') or '').strip()
-        cfg.project_key = (request.form.get('project_key') or '').strip()
-        cfg.issue_type = (request.form.get('issue_type') or 'Task').strip()
-
-        nuevo_token = (request.form.get('api_token') or '').strip()
-        if nuevo_token:
-            cfg.api_token_enc = jira_encrypt_token(nuevo_token)
-
-        db.session.commit()
-        flash("Configuración Jira guardada correctamente.", "success")
-        return redirect(url_for('jira_config_view'))
-
-    html = """
-    <div class="jiracfg-shell">
-
-      <!-- CABECERA -->
-      <div class="jiracfg-header-card">
-        <div class="jiracfg-header-overlay">
-          <div class="jiracfg-header-text">
-            <h3 class="jiracfg-title m-0">Configuración Jira</h3>
-            <div class="jiracfg-subtitle">
-              Parámetros de integración entre el SGSI y Jira para la gestión automática de tickets de remediación
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOTÓN VOLVER -->
-      <div class="jiracfg-header-actions">
-        <a href="{{ url_for('plan_remediacion_menu') }}"
-           class="btn rounded-pill px-5 fw-bold jiracfg-back-btn">
-          ⬅ Volver al Menú Plan de Remediación
-        </a>
-      </div>
-
-      <!-- TARJETA -->
-      <div class="jiracfg-card">
-        <div class="jiracfg-card-body">
-
-          <form method="post">
-            <div class="row g-3">
-
-              <div class="col-12">
-                <div class="jiracfg-section-title">Configuración de conexión</div>
-              </div>
-
-              <div class="col-md-3">
-                <div class="form-check mt-4">
-                  <input class="form-check-input"
-                         type="checkbox"
-                         name="enabled"
-                         id="enabled"
-                         {% if cfg.enabled %}checked{% endif %}>
-                  <label class="form-check-label fw-bold" for="enabled">
-                    Habilitar integración Jira
-                  </label>
-                </div>
-              </div>
-
-              <div class="col-md-9">
-                <label class="form-label">Base URL Jira</label>
-                <input name="base_url"
-                       class="form-control"
-                       value="{{ cfg.base_url or '' }}"
-                       placeholder="https://tuempresa.atlassian.net"
-                       required>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Correo Jira</label>
-                <input name="email"
-                       class="form-control"
-                       value="{{ cfg.email or '' }}"
-                       placeholder="usuario@empresa.com"
-                       required>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Proyecto</label>
-                <input name="project_key"
-                       class="form-control"
-                       value="{{ cfg.project_key or 'SGSI' }}"
-                       required>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Tipo de issue</label>
-                <input name="issue_type"
-                       class="form-control"
-                       value="{{ cfg.issue_type or 'Task' }}"
-                       required>
-              </div>
-
-              <div class="col-12">
-                <div class="jiracfg-section-title">Seguridad</div>
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">API Token Jira</label>
-                <input name="api_token"
-                       type="password"
-                       class="form-control"
-                       placeholder="Ingrese nuevo token solo si desea cambiarlo">
-                <small class="text-muted">
-                  El token se almacena cifrado en la base de datos. Si deja este campo vacío, se conserva el actual.
-                </small>
-              </div>
-
-            </div>
-
-            <div class="jiracfg-bottom-actions">
-              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
-                Guardar configuración
-              </button>
-
-              <a href="{{ url_for('plan_remediacion_menu') }}"
-                 class="btn rounded-pill px-4 fw-bold jiracfg-cancel-btn">
-                Cancelar
-              </a>
-            </div>
-
-          </form>
-
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .jiracfg-shell{
-        width:96%;
-        max-width:1500px;
-        margin:10px auto 24px auto;
-      }
-
-      .jiracfg-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .jiracfg-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .jiracfg-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent;
-        padding:0;
-        position:relative;
-        z-index:1;
-      }
-
-      .jiracfg-header-overlay::before{
-        content:"🎫f";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .jiracfg-header-text{
-        max-width:1100px;
-        width:100%;
-        display:block;
-        transform:none;
-      }
-
-      .jiracfg-header-text::before{
-        content:"SGSI · Configuración Jira";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }
-
-      .jiracfg-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .jiracfg-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }
-
-      .jiracfg-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .jiracfg-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .jiracfg-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .jiracfg-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .jiracfg-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .jiracfg-card-body{
-        padding:18px;
-      }
-
-      .jiracfg-section-title{
-        font-weight:950;
-        font-size:.78rem;
-        color:#0b4a8f;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin:10px 0 12px;
-      }
-
-      .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .form-control,
-      .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      textarea.form-control{
-        min-height:70px;
-        resize:vertical;
-      }
-
-      .form-control:focus,
-      .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#ffffff;
-      }
-
-      .jiracfg-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:22px;
-        flex-wrap:wrap;
-      }
-
-      .jiracfg-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .jiracfg-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .jiracfg-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .btn.rounded-pill{
-        border-radius:10px !important;
-      }
-
-      .jiracfg-card .btn-primary,
-      .jiracfg-card .btn-success,
-      .jiracfg-card .btn-outline-secondary{
-        font-weight:900;
-      }
-
-      @media (max-width:992px){
-        .jiracfg-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .jiracfg-header-card{
-          min-height:88px;
-        }
-
-        .jiracfg-title{
-          font-size:1.20rem;
-        }
-
-        .jiracfg-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .jiracfg-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .jiracfg-header-overlay::before{
-          margin:0;
-        }
-
-        .jiracfg-header-actions .btn,
-        .jiracfg-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(html, cfg=cfg)
-    return render_template_string(BASE, content=Markup(inner))
-
-# ==========================================================================================================================================
-#                                                           Fin Módulo Plan de Remediación
-# ==========================================================================================================================================
-
-# ==========================================================================================================================================
-# MÓDULO COMPLETO — CAMPAÑAS DE CONCIENTIZACIÓN
-# ==========================================================================================================================================
-
-# ==========================================================================================================================================
-#                                      MÓDULO INDEPENDIENTE — CAMPAÑAS DE CONCIENTIZACIÓN
-#                                      GRAC / SGSI — Capítulo: Competencias y Cultura
-# ==========================================================================================================================================
-
-import os
-import re
-import json
-import sqlite3
-import requests
-from datetime import datetime
-from markupsafe import Markup, escape
-from flask import request, redirect, url_for, flash, render_template_string, jsonify
-
-# ============================================================
-# CONFIGURACIÓN DB INDEPENDIENTE
-# ============================================================
-
-CAMP_CONC_MODULE_NAME = "Campañas de Concientización"
-
-CAMP_CONC_DB_PATH = os.path.join(app.instance_path, "campanias_concientizacion.db")
-os.makedirs(app.instance_path, exist_ok=True)
-
-
-def get_camp_conc_db_connection():
-    conn = sqlite3.connect(CAMP_CONC_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_campanias_concientizacion_db():
-    conn = get_camp_conc_db_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS campanias_concientizacion (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_date TEXT,
-            participants INTEGER DEFAULT 0,
-            target_area TEXT,
-            target_division TEXT,
-            generated_options_json TEXT,
-            selected_option_index INTEGER,
-            selected_title TEXT,
-            selected_category TEXT,
-            selected_format TEXT,
-            selected_duration TEXT,
-            selected_level TEXT,
-            selected_objective TEXT,
-            selected_justification TEXT,
-            detailed_plan_json TEXT,
-            status TEXT DEFAULT 'Generada',
-            created_by TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT,
-            plan_diseno_id INTEGER,
-            registered_at TEXT
-        )
-    """)
-
-    # Migración defensiva por si el módulo ya existe y faltan columnas.
-    cur.execute("PRAGMA table_info(campanias_concientizacion)")
-    cols = {r[1] for r in cur.fetchall()}
-
-    required_cols = {
-        "session_date": "TEXT",
-        "participants": "INTEGER DEFAULT 0",
-        "target_area": "TEXT",
-        "target_division": "TEXT",
-        "generated_options_json": "TEXT",
-        "selected_option_index": "INTEGER",
-        "selected_title": "TEXT",
-        "selected_category": "TEXT",
-        "selected_format": "TEXT",
-        "selected_duration": "TEXT",
-        "selected_level": "TEXT",
-        "selected_objective": "TEXT",
-        "selected_justification": "TEXT",
-        "detailed_plan_json": "TEXT",
-        "status": "TEXT DEFAULT 'Generada'",
-        "created_by": "TEXT",
-        "created_at": "TEXT",
-        "updated_at": "TEXT",
-        "plan_diseno_id": "INTEGER",
-        "registered_at": "TEXT",
-    }
-
-    for col, ddl in required_cols.items():
-        if col not in cols:
-            cur.execute(f"ALTER TABLE campanias_concientizacion ADD COLUMN {col} {ddl}")
-
-    conn.commit()
-    conn.close()
-
-
-init_campanias_concientizacion_db()
-
-
-# ============================================================
-# SEGURIDAD / PERMISOS
-# ============================================================
-
-def camp_conc_current_user():
-    try:
-        return User.query.get(session.get("user_id"))
-    except Exception:
-        return None
-
-
-def camp_conc_can_read(user):
-    if not user:
-        return False
-    if user.role in ("admin", "auditor"):
-        return True
-    # Permiso nuevo; también acepta el permiso anterior para no romper usuarios existentes.
-    return (
-        verificar_permiso(user, CAMP_CONC_MODULE_NAME)
-        or verificar_permiso(user, "Plan de Concientización y Formación")
-        or verificar_permiso(user, "Seguimiento del Plan de Formación")
-    )
-
-
-def camp_conc_can_write(user):
-    if not user:
-        return False
-    if user.role == "auditor":
-        return False
-    if user.role == "admin":
-        return True
-    return (
-        verificar_permiso(user, CAMP_CONC_MODULE_NAME)
-        or verificar_permiso(user, "Plan de Concientización y Formación")
-    )
-
-
-def camp_conc_require_read():
-    user = camp_conc_current_user()
-    if not camp_conc_can_read(user):
-        flash("No tiene permiso para acceder al módulo de Campañas de Concientización.", "danger")
-        return None, redirect(url_for("menu"))
-    return user, None
-
-
-def camp_conc_require_write():
-    user = camp_conc_current_user()
-    if user and user.role == "auditor":
-        flash("El rol Auditor solo puede consultar este módulo.", "danger")
-        return None, redirect(url_for("campanias_concientizacion_matriz"))
-    if not camp_conc_can_write(user):
-        flash("No tiene permiso para modificar Campañas de Concientización.", "danger")
-        return None, redirect(url_for("menu"))
-    return user, None
-
-
-# ============================================================
-# UTILIDADES
-# ============================================================
-
-def camp_conc_now():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def camp_conc_parse_json(value, default=None):
-    if default is None:
-        default = {}
-    if not value:
-        return default
-    if isinstance(value, (dict, list)):
-        return value
-    try:
-        return json.loads(value)
-    except Exception:
-        return default
-
-
-def camp_conc_extract_json(text):
-    """
-    Limpia respuestas de IA con fences ```json y extrae JSON válido.
-    """
-    text = (text or "").strip()
-    if not text:
-        raise ValueError("La IA no devolvió contenido.")
-
-    text = re.sub(r"^```(?:json)?", "", text.strip(), flags=re.IGNORECASE).strip()
-    text = re.sub(r"```$", "", text.strip()).strip()
-
-    try:
-        return json.loads(text)
-    except Exception:
-        pass
-
-    # Intento: arreglo JSON dentro del texto.
-    m = re.search(r"(\[[\s\S]*\])", text)
-    if m:
-        return json.loads(m.group(1))
-
-    # Intento: objeto JSON dentro del texto.
-    m = re.search(r"(\{[\s\S]*\})", text)
-    if m:
-        return json.loads(m.group(1))
-
-    raise ValueError("No fue posible interpretar la respuesta de IA como JSON válido.")
-
-
-def camp_conc_call_ai(system_prompt, user_prompt, max_tokens=1200):
-    """
-    Helper unificado para este módulo.
-    IMPORTANTE:
-    - Para OpenRouter usa ai_text_general().
-    - Para Ollama usa llamada directa con timeout mayor y num_predict controlado.
-    - Así evitamos errores por timeout cuando se genera la campaña completa.
-    """
-    return campania_ai_text(
-        prompt=user_prompt,
-        system_prompt=system_prompt,
-        max_tokens=max_tokens
-    )
-
-def camp_conc_format_value(value, level=0):
-    """
-    Convierte dict/list/string en HTML limpio para detalle.
-    """
-    if value is None:
-        return '<span class="text-muted">—</span>'
-
-    if isinstance(value, dict):
-        parts = ['<div class="campdet-structured">']
-        for k, v in value.items():
-            key = escape(str(k).replace("_", " ").capitalize())
-            parts.append(f'<div class="campdet-struct-item level-{level}">')
-            parts.append(f'<div class="campdet-struct-key">{key}</div>')
-            parts.append(f'<div class="campdet-struct-value">{camp_conc_format_value(v, level + 1)}</div>')
-            parts.append('</div>')
-        parts.append('</div>')
-        return "".join(parts)
-
-    if isinstance(value, list):
-        parts = ['<ul class="campdet-list">']
-        for item in value:
-            parts.append(f"<li>{camp_conc_format_value(item, level + 1)}</li>")
-        parts.append("</ul>")
-        return "".join(parts)
-
-    text = str(value).strip()
-    if not text:
-        return '<span class="text-muted">—</span>'
-
-    text = escape(text)
-    text = str(text).replace("\n", "<br>")
-    return text
-
-
-def camp_conc_status_badge(status):
-    status = (status or "Generada").strip()
-    if status == "Ejecutada":
-        return '<span class="badge bg-success">Ejecutada</span>'
-    if status == "En ejecución":
-        return '<span class="badge bg-primary">En ejecución</span>'
-    if status == "Cancelada":
-        return '<span class="badge bg-danger">Cancelada</span>'
-    if status == "Planificada":
-        return '<span class="badge bg-warning text-dark">Planificada</span>'
-    return f'<span class="badge bg-secondary">{escape(status)}</span>'
-
-
-def camp_conc_user_name(user):
-    if not user:
-        return "Sistema"
-    for attr in ("nombre", "name", "username", "email"):
-        val = getattr(user, attr, None)
-        if val:
-            return str(val)
-    return "Usuario"
-
-
-def camp_conc_fetch_one(session_id):
-    conn = get_camp_conc_db_connection()
-    row = conn.execute("SELECT * FROM campanias_concientizacion WHERE id = ?", (session_id,)).fetchone()
-    conn.close()
-    return row
-
-
-def camp_conc_get_used_topics(exclude_id=None):
-    conn = get_camp_conc_db_connection()
-    if exclude_id:
-        rows = conn.execute("""
-            SELECT selected_title, selected_category
-            FROM campanias_concientizacion
-            WHERE selected_title IS NOT NULL
-              AND TRIM(selected_title) <> ''
-              AND id <> ?
-            ORDER BY id DESC
-            LIMIT 30
-        """, (exclude_id,)).fetchall()
-    else:
-        rows = conn.execute("""
-            SELECT selected_title, selected_category
-            FROM campanias_concientizacion
-            WHERE selected_title IS NOT NULL
-              AND TRIM(selected_title) <> ''
-            ORDER BY id DESC
-            LIMIT 30
-        """).fetchall()
-    conn.close()
-
-    result = []
-    for r in rows:
-        result.append({
-            "title": r["selected_title"] or "",
-            "category": r["selected_category"] or ""
-        })
-    return result
-
-
-def camp_conc_obtener_areas_y_divisiones():
-    """
-    Toma las áreas y divisiones desde el módulo Estructura Organizacional.
-    Usa:
-    - AreaEmpresa.area
-    - AreaEmpresa.divisiones
-    - DivisionEmpresa.nombre_division
-    """
-    areas = []
-    divisiones_por_area = {}
-
-    try:
-        areas_db = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
-
-        for a in areas_db:
-            nombre_area = (getattr(a, "area", "") or "").strip()
-            if not nombre_area:
-                continue
-
-            areas.append(nombre_area)
-            divisiones_por_area.setdefault(nombre_area, [])
-
-            for d in (getattr(a, "divisiones", []) or []):
-                nombre_div = (getattr(d, "nombre_division", "") or "").strip()
-                if nombre_div and nombre_div not in divisiones_por_area[nombre_area]:
-                    divisiones_por_area[nombre_area].append(nombre_div)
-
-            divisiones_por_area[nombre_area].sort(key=lambda s: s.lower())
-
-        areas = sorted(set(areas), key=lambda s: s.lower())
-
-    except Exception as e:
-        print("ERROR camp_conc_obtener_areas_y_divisiones:", repr(e))
-        areas = []
-        divisiones_por_area = {}
-
-    return areas, divisiones_por_area
-
-
-def camp_conc_area_options(areas, selected=""):
-    selected = (selected or "").strip()
-    parts = ['<option value="">-- Seleccione área --</option>']
-    parts.append('<option value="Todas las áreas" ' + ('selected' if selected == "Todas las áreas" else '') + '>Todas las áreas</option>')
-
-    for area in areas:
-        sel = "selected" if area == selected else ""
-        parts.append(f'<option value="{escape(area)}" {sel}>{escape(area)}</option>')
-
-    if selected and selected != "Todas las áreas" and selected not in areas:
-        parts.append(f'<option value="{escape(selected)}" selected>{escape(selected)}</option>')
-
-    return "".join(parts)
-
-
-def camp_conc_division_options(divisiones_por_area, area="", selected=""):
-    area = (area or "").strip()
-    selected = (selected or "").strip()
-    divisiones = divisiones_por_area.get(area, [])
-
-    parts = ['<option value="">-- Seleccione división --</option>']
-    parts.append('<option value="Todas las divisiones" ' + ('selected' if selected == "Todas las divisiones" else '') + '>Todas las divisiones</option>')
-
-    for division in divisiones:
-        sel = "selected" if division == selected else ""
-        parts.append(f'<option value="{escape(division)}" {sel}>{escape(division)}</option>')
-
-    if selected and selected != "Todas las divisiones" and selected not in divisiones:
-        parts.append(f'<option value="{escape(selected)}" selected>{escape(selected)}</option>')
-
-    return "".join(parts)
-
-
-def camp_conc_area_division_js(divisiones_por_area, area_id="target_area", division_id="target_division"):
-    data = json.dumps(divisiones_por_area or {}, ensure_ascii=False)
-
-    return f"""
-    <script>
-      (function(){{
-        const divisionesPorArea = {data};
-
-        function actualizarDivisionCampania(){{
-          const areaSelect = document.getElementById("{area_id}");
-          const divisionSelect = document.getElementById("{division_id}");
-
-          if(!areaSelect || !divisionSelect){{
-            return;
-          }}
-
-          const area = areaSelect.value || "";
-          const actual = divisionSelect.getAttribute("data-selected") || divisionSelect.value || "";
-          const divisiones = divisionesPorArea[area] || [];
-
-          divisionSelect.innerHTML = "";
-
-          const optBase = document.createElement("option");
-          optBase.value = "";
-          optBase.textContent = "-- Seleccione división --";
-          divisionSelect.appendChild(optBase);
-
-          const optTodas = document.createElement("option");
-          optTodas.value = "Todas las divisiones";
-          optTodas.textContent = "Todas las divisiones";
-          divisionSelect.appendChild(optTodas);
-
-          if(area && area !== "Todas las áreas"){{
-            divisiones.forEach(function(nombre){{
-              const opt = document.createElement("option");
-              opt.value = nombre;
-              opt.textContent = nombre;
-
-              if(nombre === actual){{
-                opt.selected = true;
-              }}
-
-              divisionSelect.appendChild(opt);
-            }});
-          }}
-
-          if(actual && actual !== "Todas las divisiones" && !divisiones.includes(actual)){{
-            const optActual = document.createElement("option");
-            optActual.value = actual;
-            optActual.textContent = actual;
-            optActual.selected = true;
-            divisionSelect.appendChild(optActual);
-          }}
-
-          if(actual === "Todas las divisiones"){{
-            optTodas.selected = true;
-          }}
-        }}
-
-        document.addEventListener("DOMContentLoaded", function(){{
-          const areaSelect = document.getElementById("{area_id}");
-          const divisionSelect = document.getElementById("{division_id}");
-
-          if(areaSelect && divisionSelect){{
-            actualizarDivisionCampania();
-
-            areaSelect.addEventListener("change", function(){{
-              divisionSelect.setAttribute("data-selected", "");
-              actualizarDivisionCampania();
-            }});
-          }}
-        }});
-      }})();
-    </script>
-    """
-
-
-def campania_ai_text(prompt: str, system_prompt: str = "", max_tokens: int = 900) -> str:
-    """
-    Llamada IA optimizada para Campañas de Concientización.
-
-    Corrige el error:
-    HTTPConnectionPool(host='localhost', port=11434): Read timed out. (read timeout=300)
-
-    Motivo:
-    El helper global ai_text_general() usa timeout 300 para Ollama y puede no alcanzar
-    cuando se pide una campaña completa en JSON.
-
-    Esta función:
-    - Usa timeout 600 para Ollama.
-    - Limita num_predict para evitar respuestas demasiado largas que bloqueen el modelo.
-    - Mantiene OpenRouter usando ai_text_general().
-    - Devuelve errores claros, sin mostrar "Acceso denegado" cuando realmente es timeout.
-    """
-    provider = "openrouter"
-    try:
-        if "get_ai_provider" in globals():
-            provider = (get_ai_provider() or "openrouter").strip().lower()
-    except Exception:
-        provider = "openrouter"
-
-    if provider == "ollama":
-        if "requests" not in globals():
-            raise RuntimeError("Falta importar requests. Agrega: import requests")
-
-        base_url = "http://localhost:11434"
-        model = "llama3.1"
-
-        try:
-            if "get_ollama_base_url" in globals():
-                base_url = (get_ollama_base_url() or base_url).strip().rstrip("/")
-            if "get_ollama_model" in globals():
-                model = (get_ollama_model() or model).strip()
-        except Exception:
-            pass
-
-        if not base_url:
-            raise RuntimeError("No hay URL de Ollama configurada.")
-        if not model:
-            raise RuntimeError("No hay modelo de Ollama configurado.")
-
-        full_prompt = (prompt or "").strip()
-        if system_prompt:
-            full_prompt = (system_prompt or "").strip() + "\n\n" + full_prompt
-
-        # Controla la longitud. Si num_predict es muy alto, Ollama se queda procesando
-        # y Flask termina mostrando timeout.
-        try:
-            requested_predict = int(max_tokens or 900)
-        except Exception:
-            requested_predict = 900
-
-        num_predict = max(500, min(requested_predict, 1600))
-
-        try:
-            resp = requests.post(
-                f"{base_url}/api/generate",
-                json={
-                    "model": model,
-                    "prompt": full_prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.12,
-                        "num_predict": num_predict,
-                        "top_p": 0.85,
-                        "num_ctx": 4096
-                    }
-                },
-                timeout=600
-            )
-            resp.raise_for_status()
-
-            data = resp.json() or {}
-            texto = (data.get("response") or "").strip()
-
-            if not texto:
-                raise RuntimeError("Ollama respondió sin contenido.")
-
-            if "limpiar_texto_ia_global" in globals():
-                return limpiar_texto_ia_global(texto)
-
-            return texto.strip()
-
-        except requests.exceptions.ReadTimeout:
-            raise RuntimeError(
-                "Ollama tardó demasiado generando la campaña. "
-                "Se recomienda usar un modelo más liviano, reducir el tamaño del prompt "
-                "o cambiar temporalmente el proveedor IA a OpenRouter."
-            )
-        except requests.exceptions.ConnectionError:
-            raise RuntimeError(
-                "No fue posible conectar con Ollama. Verifica que Ollama esté encendido "
-                "y que la URL configurada sea correcta."
-            )
-        finally:
-            try:
-                if "liberar_memoria_ollama_seguro" in globals():
-                    liberar_memoria_ollama_seguro()
-            except Exception:
-                pass
-
-    if "ai_text_general" not in globals():
-        raise RuntimeError(
-            "No existe ai_text_general() en Programasgsi2.py. "
-            "Debes pegar este módulo después de las funciones globales de IA."
-        )
-
-    return ai_text_general(
-        prompt=prompt,
-        system_prompt=system_prompt,
-        temperature=0.2,
-        max_tokens=max_tokens
-    )
-
-
-# ============================================================
-# PROMPTS IA
-# ============================================================
-
-def camp_conc_build_system_prompt_options():
-    return """
-Eres un consultor senior de ciberseguridad, awareness, cultura organizacional y SGSI.
-Debes proponer campañas o charlas de concientización en seguridad alineadas con ISO 27001,
-especialmente con competencia, toma de conciencia, formación, cultura de seguridad y mejora continua.
-
-Responde SIEMPRE en JSON válido, sin texto adicional.
-La salida debe ser un arreglo JSON de exactamente 5 objetos.
-Cada objeto debe tener estas claves exactas:
-- "titulo"
-- "categoria_tema"
-- "objetivo"
-- "justificacion"
-- "formato"
-- "duracion_sugerida"
-- "nivel_publico"
-
-Reglas:
-1. Las propuestas deben ser ejecutivas, profesionales y aptas para entorno corporativo.
-2. Deben adaptarse al área objetivo y a la cantidad de participantes.
-3. Deben ser distintas entre sí.
-4. NO deben repetir campañas o charlas ya realizadas en meses anteriores.
-5. Tampoco deben ser demasiado parecidas semánticamente a campañas ya realizadas.
-6. Si un tema previo fue phishing, no propongas spear phishing, fraude por correo o suplantación por correo.
-7. Si un tema previo fue contraseñas/MFA, no propongas otro sobre credenciales o autenticación segura.
-8. Deben ser viables para una campaña mensual empresarial.
-9. En el título no uses numeración inicial.
-10. Deben priorizar temas prácticos, medibles y alineados a riesgos reales del negocio.
-11. "categoria_tema" debe ser una categoría corta y consistente, por ejemplo:
-    phishing, ingenieria_social, autenticacion_y_contrasenas,
-    informacion_sensible_y_clasificacion, correo_y_mensajeria_segura,
-    malware_y_ransomware, control_de_acceso, teletrabajo_y_dispositivos,
-    navegacion_y_web_segura, clean_desk_y_entorno_fisico, cultura_general_seguridad.
-"""
-
-
-def camp_conc_build_user_prompt_options(session_date, participants, target_area, exclude_id=None):
-    used_topics = camp_conc_get_used_topics(exclude_id=exclude_id)
-
-    if used_topics:
-        used_topics_text = "\n".join([
-            f"- Título: {x.get('title') or ''} | Categoría: {x.get('category') or ''}"
-            for x in used_topics
-        ])
-    else:
-        used_topics_text = "- No hay campañas previas registradas."
-
-    return f"""
-Genera 5 opciones de campañas o charlas de concientización en seguridad para GRAC/SGSI.
-
-Datos de entrada:
-- Fecha de la campaña mensual: {session_date}
-- Número de participantes: {participants}
-- Área objetivo: {target_area}
-
-Campañas o charlas ya utilizadas que NO se deben repetir ni parecer demasiado:
-{used_topics_text}
-
-Criterios:
-- Enfocar las opciones al contexto corporativo y al área indicada.
-- Considerar si el grupo es pequeño, mediano o grande.
-- El tono debe ser ejecutivo y profesional.
-- Debe estar alineado con ISO 27001, cultura de seguridad y toma de conciencia.
-- Priorizar campañas con impacto práctico, recordación y posibilidad de seguimiento.
-- Evitar el mismo título y temas semánticamente muy similares.
-"""
-
-
-def camp_conc_build_system_prompt_detail():
-    return """
-Eres un consultor senior experto en ciberseguridad, cultura organizacional, awareness y SGSI.
-Debes desarrollar una campaña de concientización COMPLETA, lista para ejecutar en una empresa.
-
-Responde SIEMPRE en JSON válido, sin texto adicional.
-La salida debe ser un objeto JSON con estas claves exactas:
-- "temario_detallado"
-- "plan_de_accion"
-- "como_abordarlo"
-- "pasos_a_seguir"
-- "evaluacion_efectividad"
-
-INSTRUCCIONES OBLIGATORIAS:
-1. No entregues respuestas cortas ni genéricas.
-2. La campaña debe ser ejecutable y servir como evidencia de auditoría ISO 27001.
-3. Debe considerar el área objetivo y el número de participantes.
-4. Debe incluir acciones antes, durante y después de la campaña.
-5. Debe incluir comunicación, sensibilización, refuerzo y seguimiento.
-6. Debe incluir responsables sugeridos, materiales, canales, frecuencia y evidencias.
-7. Debe incluir métricas, indicadores, metas y acciones correctivas.
-8. Si existe charla, taller o sesión presencial, la actividad principal debe durar máximo 2 horas.
-9. Si requiere más profundidad, distribuye el esfuerzo en cápsulas, piezas, refuerzos, simulaciones y seguimiento.
-10. En evaluación de efectividad debes incluir pruebas reales controladas cuando apliquen:
-    phishing, smishing, ingeniería social, vishing, validación de identidad,
-    clasificación de información, manejo seguro de datos o respuesta ante incidentes.
-11. Las pruebas deben ser éticas, controladas, autorizadas y documentadas.
-"""
-
-
-def camp_conc_build_user_prompt_detail(row, option):
-    return f"""
-Desarrolla de forma COMPLETA una campaña de concientización de seguridad para GRAC/SGSI.
-
-DATOS DE ENTRADA:
-- Fecha de ejecución: {row['session_date']}
-- Número de participantes: {row['participants']}
-- Área objetivo: {row['target_area']}
-- División objetivo: {row['target_division'] if 'target_division' in row.keys() else ''}
-- Tema elegido: {option.get('titulo') or ''}
-- Categoría: {option.get('categoria_tema') or ''}
-- Objetivo base: {option.get('objetivo') or ''}
-- Formato sugerido: {option.get('formato') or ''}
-- Duración sugerida: {option.get('duracion_sugerida') or ''}
-- Nivel de público: {option.get('nivel_publico') or ''}
-
-NECESITO QUE NO SOLO EXPLIQUES EL TEMA.
-NECESITO QUE CONSTRUYAS LA CAMPAÑA COMO TAL.
-
-Incluye como mínimo:
-1. Temario detallado y mensajes clave.
-2. Plan de acción completo.
-3. Cómo abordarla metodológicamente.
-4. Pasos antes, durante y después.
-5. Evaluación de efectividad.
-
-Además contempla:
-- objetivo general,
-- objetivos específicos,
-- alcance,
-- público objetivo,
-- duración sugerida,
-- cronograma,
-- responsables,
-- materiales,
-- recursos,
-- piezas de comunicación,
-- canales de difusión,
-- actividades de sensibilización,
-- actividad principal,
-- actividad de refuerzo,
-- mecanismos de seguimiento,
-- evidencias para auditoría,
-- indicadores,
-- metas y acciones de mejora.
-
-El resultado debe ser muy detallado, profesional, práctico y listo para ejecutar.
-"""
-
-
-def camp_conc_generate_options(session_date, participants, target_area, exclude_id=None):
-    raw = camp_conc_call_ai(
-        camp_conc_build_system_prompt_options(),
-        camp_conc_build_user_prompt_options(session_date, participants, target_area, exclude_id=exclude_id),
-        max_tokens=1600
-    )
-    data = camp_conc_extract_json(raw)
-
-    if not isinstance(data, list):
-        raise ValueError("La IA no devolvió una lista de opciones.")
-
-    cleaned = []
-    for item in data[:5]:
-        if not isinstance(item, dict):
-            continue
-        cleaned.append({
-            "titulo": str(item.get("titulo") or "").strip(),
-            "categoria_tema": str(item.get("categoria_tema") or "").strip(),
-            "objetivo": str(item.get("objetivo") or "").strip(),
-            "justificacion": str(item.get("justificacion") or "").strip(),
-            "formato": str(item.get("formato") or "").strip(),
-            "duracion_sugerida": str(item.get("duracion_sugerida") or "").strip(),
-            "nivel_publico": str(item.get("nivel_publico") or "").strip(),
-        })
-
-    if len(cleaned) == 0:
-        raise ValueError("La IA no generó opciones válidas.")
-
-    return cleaned
-
-
-
-def camp_conc_build_fallback_detail(row, option, error_msg=""):
-    """
-    Plan base en caso de timeout de Ollama.
-    Permite que el usuario no pierda el flujo y conserve una campaña ejecutable.
-    """
-    titulo = option.get("titulo") or "Campaña de concientización en seguridad"
-    categoria = option.get("categoria_tema") or "cultura_general_seguridad"
-    objetivo = option.get("objetivo") or "Fortalecer la toma de conciencia en seguridad de la información."
-    formato = option.get("formato") or "Charla/taller práctico"
-    duracion = option.get("duracion_sugerida") or "Máximo 2 horas para actividad principal"
-    area = row["target_area"] or "Área objetivo"
-    division = ""
-    try:
-        division = row["target_division"] or ""
-    except Exception:
-        division = ""
-    participantes = row["participants"] or 0
-    fecha = row["session_date"] or "Fecha por definir"
-
-    return {
-        "temario_detallado": {
-            "tema": titulo,
-            "categoria": categoria,
-            "objetivo_general": objetivo,
-            "publico_objetivo": f"{area} / {division or 'Todas las divisiones'} - {participantes} participantes",
-            "duracion": duracion,
-            "mensajes_clave": [
-                "La seguridad de la información es responsabilidad de todos.",
-                "Las conductas seguras reducen incidentes operativos, reputacionales y regulatorios.",
-                "Todo evento sospechoso debe reportarse oportunamente por los canales definidos."
-            ],
-            "contenidos": [
-                "Contexto del riesgo asociado al tema seleccionado.",
-                "Buenas prácticas aplicables al rol del área objetivo.",
-                "Errores frecuentes y señales de alerta.",
-                "Casos prácticos o ejemplos corporativos.",
-                "Canales de reporte y responsabilidades del colaborador."
-            ]
-        },
-        "plan_de_accion": {
-            "antes": [
-                "Definir responsable de la campaña y validar alcance con el líder del área.",
-                "Preparar invitación, pieza de comunicación y material de apoyo.",
-                "Confirmar fecha, canal, lista de asistentes y evidencias requeridas."
-            ],
-            "durante": [
-                "Realizar apertura con contexto del SGSI y objetivo de la campaña.",
-                "Ejecutar actividad principal con duración máxima de 2 horas si es presencial.",
-                "Aplicar ejercicios prácticos, preguntas de validación o mini casos.",
-                "Registrar asistencia y recopilar dudas o hallazgos."
-            ],
-            "despues": [
-                "Enviar refuerzo con mensajes clave y material de consulta.",
-                "Aplicar evaluación de aprendizaje o efectividad.",
-                "Consolidar resultados, evidencias y acciones de mejora."
-            ],
-            "responsables_sugeridos": [
-                "Líder SGSI",
-                "Gestión Humana / Formación",
-                "Líder del área objetivo",
-                "Equipo de Seguridad de la Información"
-            ]
-        },
-        "como_abordarlo": {
-            "metodologia": "Enfoque práctico, participativo y orientado a comportamientos seguros observables.",
-            "canales": [
-                "Sesión presencial o virtual",
-                "Correo corporativo",
-                "Infografía o pieza visual",
-                "Intranet o canal interno de comunicaciones"
-            ],
-            "materiales": [
-                "Presentación ejecutiva",
-                "Lista de asistencia",
-                "Evaluación corta",
-                "Guía de buenas prácticas",
-                "Evidencia fotográfica o captura de sesión si aplica"
-            ],
-            "enfoque_por_area": f"Adaptar ejemplos y casos al contexto operativo de {area} y la división {division or 'Todas las divisiones'}."
-        },
-        "pasos_a_seguir": [
-            "Crear cronograma de campaña.",
-            "Aprobar contenido con el responsable SGSI.",
-            "Convocar participantes.",
-            "Ejecutar campaña.",
-            "Aplicar evaluación.",
-            "Registrar evidencias.",
-            "Definir acciones de mejora si el resultado no cumple la meta."
-        ],
-        "evaluacion_efectividad": {
-            "indicadores": [
-                "% de asistencia",
-                "% de aprobación de evaluación",
-                "% de colaboradores que identifican correctamente señales de alerta",
-                "Número de reportes oportunos posteriores a la campaña"
-            ],
-            "metas": [
-                "Asistencia mínima del 90%",
-                "Aprobación mínima del 80%",
-                "Cierre de acciones de mejora en máximo 30 días"
-            ],
-            "pruebas_controladas": [
-                "Aplicar cuestionario práctico posterior a la campaña.",
-                "Ejecutar simulación ética y autorizada si el tema lo permite.",
-                "Documentar resultados, desviaciones y lecciones aprendidas."
-            ],
-            "evidencias_a_conservar": [
-                "Lista de asistencia",
-                "Material presentado",
-                "Resultados de evaluación",
-                "Comunicaciones enviadas",
-                "Acta o registro de ejecución",
-                "Acciones correctivas o mejoras"
-            ],
-            "nota": (
-                "Este plan fue generado en modo base porque la IA/Ollama no respondió a tiempo. "
-                + (f"Detalle técnico: {error_msg}" if error_msg else "")
-            )
-        }
-    }
-
-
-def camp_conc_generate_detail(row, option):
-    """
-    Genera el plan completo.
-    Cambio clave:
-    Antes llamaba a camp_conc_call_ai() con max_tokens=2500.
-    Ahora usa el helper optimizado y, si Ollama se demora, crea un plan base ejecutable
-    para que el módulo no se bloquee.
-    """
-    try:
-        raw = camp_conc_call_ai(
-            camp_conc_build_system_prompt_detail(),
-            camp_conc_build_user_prompt_detail(row, option),
-            max_tokens=1600
-        )
-        data = camp_conc_extract_json(raw)
-
-        if not isinstance(data, dict):
-            raise ValueError("La IA no devolvió un plan detallado válido.")
-
-        return data
-
-    except Exception as e:
-        # Fallback controlado para evitar que el flujo se rompa por timeout de Ollama.
-        return camp_conc_build_fallback_detail(row, option, error_msg=str(e))
-
-
-
-def camp_conc_pretty_label(value):
-    """
-    Convierte claves técnicas o mixtas en etiquetas legibles.
-    """
-    value = str(value or "").strip()
-    if not value:
-        return ""
-
-    # Mantiene etiquetas ya escritas con mayúsculas/tildes, pero limpia guiones bajos.
-    value = value.replace("_", " ").replace("-", " ")
-    value = re.sub(r"\s+", " ", value).strip()
-
-    # Normaliza algunas etiquetas comunes.
+def badge_severidad_html(valor):
+    v = (valor or "").strip().lower()
     mapa = {
-        "titulo": "Título",
-        "objetivo": "Objetivo",
-        "contenido": "Contenido",
-        "fecha": "Fecha",
-        "actividad": "Actividad",
-        "responsable": "Responsable",
-        "materiales": "Materiales",
-        "metodologia": "Metodología",
-        "canales": "Canales",
-        "indicadores": "Indicadores",
-        "metas": "Metas",
-        "evidencias": "Evidencias",
-        "publico objetivo": "Público objetivo",
-        "objetivo general": "Objetivo general",
-        "objetivos especificos": "Objetivos específicos",
-        "objetivos específicos": "Objetivos específicos",
-        "duracion": "Duración",
-        "duración": "Duración",
-        "recursos": "Recursos",
-        "cronograma": "Cronograma",
+        "crítica": "sev-critica",
+        "critica": "sev-critica",
+        "alta": "sev-alta",
+        "media": "sev-media",
+        "baja": "sev-baja",
     }
-
-    key = value.lower()
-    return mapa.get(key, value[:1].upper() + value[1:])
-
-
-def camp_conc_format_plain_block(value, indent=0):
-    """
-    Convierte dict/list/string de la IA en texto ejecutivo legible.
-    Evita que el campo descripción del Plan de Concientización quede con JSON crudo.
-    """
-    tab = "  " * indent
-
-    if value is None:
-        return ""
-
-    if isinstance(value, str):
-        clean = re.sub(r"\s+", " ", value.strip())
-        return clean
-
-    if isinstance(value, (int, float, bool)):
-        return str(value)
-
-    if isinstance(value, list):
-        lines = []
-
-        for idx, item in enumerate(value, start=1):
-            if isinstance(item, dict):
-                titulo = (
-                    item.get("Título")
-                    or item.get("titulo")
-                    or item.get("Titulo")
-                    or item.get("actividad")
-                    or item.get("Actividad")
-                    or item.get("nombre")
-                    or item.get("Nombre")
-                    or f"Punto {idx}"
-                )
-
-                lines.append(f"{tab}{idx}. {camp_conc_format_plain_block(titulo)}")
-
-                for k, v in item.items():
-                    if str(k).lower() in ("título", "titulo", "nombre"):
-                        continue
-
-                    formatted = camp_conc_format_plain_block(v, indent + 1)
-                    if formatted:
-                        label = camp_conc_pretty_label(k)
-                        if "\n" in formatted:
-                            lines.append(f"{tab}   {label}:")
-                            for line in formatted.splitlines():
-                                if line.strip():
-                                    lines.append(f"{tab}   {line}")
-                        else:
-                            lines.append(f"{tab}   {label}: {formatted}")
-
-                lines.append("")
-
-            elif isinstance(item, list):
-                nested = camp_conc_format_plain_block(item, indent + 1)
-                if nested:
-                    lines.append(f"{tab}{idx}.")
-                    lines.append(nested)
-                    lines.append("")
-
-            else:
-                formatted = camp_conc_format_plain_block(item, indent)
-                if formatted:
-                    lines.append(f"{tab}{idx}. {formatted}")
-
-        return "\n".join(lines).strip()
-
-    if isinstance(value, dict):
-        lines = []
-
-        # Si el dict tiene un título principal, lo muestra primero.
-        titulo = (
-            value.get("Título")
-            or value.get("titulo")
-            or value.get("Titulo")
-            or value.get("tema")
-            or value.get("Tema")
-        )
-
-        if titulo:
-            lines.append(camp_conc_format_plain_block(titulo))
-            lines.append("")
-
-        for k, v in value.items():
-            if str(k).lower() in ("título", "titulo", "tema"):
-                continue
-
-            formatted = camp_conc_format_plain_block(v, indent + 1)
-            if not formatted:
-                continue
-
-            label = camp_conc_pretty_label(k)
-
-            if isinstance(v, (list, dict)):
-                lines.append(f"{tab}{label}:")
-                lines.append(formatted)
-                lines.append("")
-            else:
-                lines.append(f"{tab}{label}: {formatted}")
-
-        return "\n".join(lines).strip()
-
-    return str(value).strip()
+    cls = mapa.get(v, "sev-media")
+    return Markup(f'<span class="badge-soft {cls}">{escape(valor or "—")}</span>')
 
 
-def camp_conc_text_from_detail(detail):
-    """
-    Convierte el detalle JSON de la campaña en texto bonito para registrarlo
-    en el campo Descripción del Plan de Concientización y Formación.
+def badge_estado_scan_html(valor):
+    v = (valor or "").strip().lower()
+    mapa = {
+        "pendiente": "estado-pendiente",
+        "ejecutando": "estado-ejecutando",
+        "finalizado": "estado-finalizado",
+        "error": "estado-error",
+        "detenido": "estado-detenido",
+    }
+    cls = mapa.get(v, "estado-pendiente")
+    return Markup(f'<span class="badge-soft {cls}">{escape(valor or "—")}</span>')
 
-    Antes se guardaba como JSON crudo:
-    [
-      {"Título": "...", "Objetivo": "..."}
+# ==========================
+# Reporte del escaneo
+# ==========================
+
+def build_vulnerability_scan_pdf(run_id: int):
+    run = VulnerabilityScanRun.query.get_or_404(run_id)
+    findings = VulnerabilityScanFinding.query.filter_by(run_id=run.id).order_by(VulnerabilityScanFinding.id.asc()).all()
+
+    pdf_path = os.path.join(
+        app.config["UPLOAD_VULNERABILIDADES_DIR"],
+        f"reporte_scan_{run.id}.pdf"
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = styles["Title"]
+    h2 = styles["Heading2"]
+    normal = styles["Normal"]
+
+    doc = SimpleDocTemplate(pdf_path, pagesize=A4, rightMargin=32, leftMargin=32, topMargin=32, bottomMargin=28)
+    story = []
+
+    story.append(Paragraph("Reporte de Análisis de Vulnerabilidades", title_style))
+    story.append(Spacer(1, 10))
+    story.append(Paragraph(f"<b>ID Corrida:</b> {run.id}", normal))
+    story.append(Paragraph(f"<b>Objetivo:</b> {html_escape(run.target)}", normal))
+    story.append(Paragraph(f"<b>Tipo Objetivo:</b> {html_escape(run.target_type)}", normal))
+    story.append(Paragraph(f"<b>Modo Escáner:</b> {html_escape(run.scanner_mode)}", normal))
+    story.append(Paragraph(f"<b>Estado:</b> {html_escape(run.estado)}", normal))
+    story.append(Paragraph(f"<b>Fecha Inicio:</b> {run.fecha_inicio or '—'}", normal))
+    story.append(Paragraph(f"<b>Fecha Fin:</b> {run.fecha_fin or '—'}", normal))
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph("Resumen Ejecutivo", h2))
+    resumen_data = [
+        ["Severidad", "Cantidad"],
+        ["Crítica", str(run.criticas or 0)],
+        ["Alta", str(run.altas or 0)],
+        ["Media", str(run.medias or 0)],
+        ["Baja", str(run.bajas or 0)],
+        ["Total", str(run.total_hallazgos or 0)],
     ]
-
-    Ahora se guarda como texto ejecutivo:
-    1. Título
-       Objetivo: ...
-       Contenido: ...
-    """
-    if not detail:
-        return ""
-
-    partes = []
-
-    orden = [
-        ("TEMARIO DETALLADO", "temario_detallado"),
-        ("PLAN DE ACCIÓN", "plan_de_accion"),
-        ("CÓMO ABORDARLO", "como_abordarlo"),
-        ("PASOS A SEGUIR", "pasos_a_seguir"),
-        ("EVALUACIÓN DE EFECTIVIDAD", "evaluacion_efectividad"),
-    ]
-
-    for titulo, key in orden:
-        val = detail.get(key)
-        if not val:
-            continue
-
-        texto = camp_conc_format_plain_block(val).strip()
-
-        if texto:
-            partes.append(f"{titulo}\n{'=' * len(titulo)}\n{texto}")
-
-    return "\n\n".join(partes).strip()
-
-
-def camp_conc_duration_to_hours(value):
-    """
-    Convierte una duración textual de la campaña en horas enteras para el
-    módulo Plan de Concientización y Formación.
-    """
-    text = (value or "").lower().strip()
-
-    # Casos tipo "90 minutos"
-    if "min" in text:
-        nums = re.findall(r"\d+", text)
-        if nums:
-            try:
-                minutes = int(nums[0])
-                return max(1, min(8, round(minutes / 60) or 1))
-            except Exception:
-                pass
-
-    nums = re.findall(r"\d+", text)
-    if nums:
-        try:
-            h = int(nums[0])
-            return max(1, min(h, 8))
-        except Exception:
-            pass
-
-    return 2
-
-
-def camp_conc_normalize_plan_area(value):
-    """
-    Mantiene el área como texto para dirigida_area. Si el módulo destino maneja
-    listas cerradas, el usuario podrá ajustar el valor desde edición.
-    """
-    return (value or "").strip()
-
-
-
-# ============================================================
-# ENTRADA / MENÚ
-# ============================================================
-
-@app.route("/campanias_concientizacion_menu")
-@login_required
-def campanias_concientizacion_menu():
-    user, resp = camp_conc_require_read()
-    if resp:
-        return resp
-    return redirect(url_for("campanias_concientizacion_matriz"))
-
-
-# ============================================================
-# MATRIZ
-# ============================================================
-
-@app.route("/campanias_concientizacion")
-@app.route("/campanias_concientizacion_matriz")
-@login_required
-def campanias_concientizacion_matriz():
-    user, resp = camp_conc_require_read()
-    if resp:
-        return resp
-
-    read_only = not camp_conc_can_write(user)
-
-    filtro_estado = (request.args.get("estado") or "").strip()
-    filtro_area = (request.args.get("area") or "").strip()
-    filtro_division = (request.args.get("division") or "").strip()
-
-    conn = get_camp_conc_db_connection()
-
-    where = []
-    params = []
-
-    if filtro_estado:
-        where.append("status = ?")
-        params.append(filtro_estado)
-
-    if filtro_area:
-        where.append("LOWER(target_area) LIKE ?")
-        params.append(f"%{filtro_area.lower()}%")
-
-    if filtro_division:
-        where.append("LOWER(COALESCE(target_division, '')) LIKE ?")
-        params.append(f"%{filtro_division.lower()}%")
-
-    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
-
-    rows = conn.execute(f"""
-        SELECT *
-        FROM campanias_concientizacion
-        {where_sql}
-        ORDER BY id DESC
-    """, params).fetchall()
-
-    resumen = conn.execute("""
-        SELECT
-            COUNT(*) AS total,
-            SUM(CASE WHEN status = 'Ejecutada' THEN 1 ELSE 0 END) AS ejecutadas,
-            SUM(CASE WHEN status = 'Planificada' THEN 1 ELSE 0 END) AS planificadas,
-            SUM(CASE WHEN status = 'En ejecución' THEN 1 ELSE 0 END) AS en_ejecucion
-        FROM campanias_concientizacion
-    """).fetchone()
-
-    areas = conn.execute("""
-        SELECT DISTINCT target_area
-        FROM campanias_concientizacion
-        WHERE target_area IS NOT NULL AND TRIM(target_area) <> ''
-        ORDER BY target_area ASC
-    """).fetchall()
-
-    divisiones = conn.execute("""
-        SELECT DISTINCT target_division
-        FROM campanias_concientizacion
-        WHERE target_division IS NOT NULL AND TRIM(target_division) <> ''
-        ORDER BY target_division ASC
-    """).fetchall()
-
-    conn.close()
-
-    total = int(resumen["total"] or 0)
-    ejecutadas = int(resumen["ejecutadas"] or 0)
-    planificadas = int(resumen["planificadas"] or 0)
-    en_ejecucion = int(resumen["en_ejecucion"] or 0)
-    cumplimiento = round((ejecutadas / total) * 100, 1) if total else 0
-
-    rows_html = []
-
-    for r in rows:
-        acciones = [
-            f"""
-            <a href="{url_for('campanias_concientizacion_detalle', id=r['id'])}"
-               class="btn btn-info btn-sm rounded-pill campmat-btn-action text-white fw-bold"
-               data-no-progress="true">
-              Ver detalle
-            </a>
-            """
-        ]
-
-        if not read_only:
-            acciones.append(
-                f"""
-                <a href="{url_for('campanias_concientizacion_opciones', id=r['id'])}"
-                   class="btn btn-primary btn-sm rounded-pill campmat-btn-action fw-bold">
-                  Opciones AI
-                </a>
-                """
-            )
-            acciones.append(
-                f"""
-                <a href="{url_for('campanias_concientizacion_edit', id=r['id'])}"
-                   class="btn btn-warning btn-sm rounded-pill campmat-btn-action text-dark fw-bold"
-                   data-no-progress="true">
-                  Editar
-                </a>
-                """
-            )
-
-            if r["plan_diseno_id"]:
-                acciones.append(
-                    f"""
-                    <a href="{url_for('plan_diseno_edit', id=r['plan_diseno_id'])}"
-                       class="btn btn-success btn-sm rounded-pill campmat-btn-action fw-bold"
-                       data-no-progress="true"
-                       title="Esta campaña ya fue registrada en el Plan de Concientización y Formación">
-                      Registrado
-                    </a>
-                    """
-                )
-            elif r["selected_title"] and r["detailed_plan_json"]:
-                acciones.append(
-                    f"""
-                    <form method="post"
-                          action="{url_for('campanias_concientizacion_registrar_plan_diseno', id=r['id'])}"
-                          onsubmit="return confirm('¿Registrar esta campaña en el Plan de Concientización y Formación?');"
-                          data-no-progress="true"
-                          style="margin:0;">
-                      <button type="submit"
-                              class="btn btn-success btn-sm rounded-pill campmat-btn-action fw-bold"
-                              data-no-progress="true">
-                        Registrar
-                      </button>
-                    </form>
-                    """
-                )
-            else:
-                acciones.append(
-                    """
-                    <button type="button"
-                            class="btn btn-secondary btn-sm rounded-pill campmat-btn-action fw-bold"
-                            disabled
-                            title="Primero debes seleccionar una opción y generar la campaña completa">
-                      Registrar
-                    </button>
-                    """
-                )
-
-            acciones.append(
-                f"""
-                <form method="post"
-                      action="{url_for('campanias_concientizacion_delete', id=r['id'])}"
-                      onsubmit="return confirm('¿Eliminar esta campaña de concientización?');"
-                      style="margin:0;">
-                  <button type="submit"
-                          class="btn btn-danger btn-sm rounded-pill campmat-btn-action fw-bold"
-                          data-no-progress="true">
-                    Eliminar
-                  </button>
-                </form>
-                """
-            )
-        else:
-            acciones.append('<span class="badge bg-secondary">Solo lectura</span>')
-
-        title = r["selected_title"] or "Sin tema seleccionado"
-        category = r["selected_category"] or "—"
-        rows_html.append(f"""
-        <tr>
-          <td class="text-center fw-bold">{escape(str(r['id']))}</td>
-          <td class="text-center">{escape(r['session_date'] or '—')}</td>
-          <td>{escape(r['target_area'] or '—')}</td>
-          <td>{escape(r['target_division'] or '—')}</td>
-          <td class="text-center">{escape(str(r['participants'] or 0))}</td>
-          <td>
-            <div class="campmat-title-topic">{escape(title)}</div>
-            <div class="campmat-topic-category">{escape(category)}</div>
-          </td>
-          <td class="text-center">{Markup(camp_conc_status_badge(r['status']))}</td>
-          <td class="text-center campmat-col-acciones">
-            <div class="campmat-actions-wrap">
-              {''.join(acciones)}
-            </div>
-          </td>
-        </tr>
-        """)
-
-    if not rows_html:
-        rows_html.append("""
-        <tr>
-          <td colspan="8" class="text-center text-muted py-5">
-            No se encontraron campañas con los filtros aplicados.
-          </td>
-        </tr>
-        """)
-
-    agregar_btn = ""
-    if not read_only:
-        agregar_btn = f"""
-        <a href="{url_for('campanias_concientizacion_new')}"
-           class="btn btn-primary rounded-pill px-5 fw-bold">
-          ➕ Nueva campaña AI
-        </a>
-        """
-
-    estados = ["Generada", "Planificada", "En ejecución", "Ejecutada", "Cancelada"]
-
-    html = f"""
-    <div class="campmat-shell">
-
-      <div class="campmat-header-card">
-        <div class="campmat-header-overlay">
-          <div class="campmat-header-text">
-            <h3 class="campmat-title m-0">Campañas de Concientización</h3>
-            <div class="campmat-subtitle">
-              Gestión mensual de campañas de cultura, toma de conciencia y awareness de seguridad alineadas con ISO 27001
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="campmat-header-actions">
-        {agregar_btn}
-      </div>
-
-      <div class="campmat-kpi-grid">
-        <div class="campmat-kpi-card">
-          <div class="campmat-kpi-label">Total campañas</div>
-          <div class="campmat-kpi-value">{total}</div>
-        </div>
-        <div class="campmat-kpi-card">
-          <div class="campmat-kpi-label">Planificadas</div>
-          <div class="campmat-kpi-value">{planificadas}</div>
-        </div>
-        <div class="campmat-kpi-card">
-          <div class="campmat-kpi-label">En ejecución</div>
-          <div class="campmat-kpi-value">{en_ejecucion}</div>
-        </div>
-        <div class="campmat-kpi-card">
-          <div class="campmat-kpi-label">% Ejecutadas</div>
-          <div class="campmat-kpi-value">{cumplimiento}%</div>
-        </div>
-      </div>
-
-      <div class="campmat-filter-card">
-        <form method="get">
-          <div class="row g-2 align-items-end">
-            <div class="col-md-3">
-              <label class="form-label fw-bold">Estado</label>
-              <select name="estado" class="form-select">
-                <option value="">-- Todos --</option>
-                {''.join([f'<option value="{escape(e)}" {"selected" if filtro_estado == e else ""}>{escape(e)}</option>' for e in estados])}
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label fw-bold">Área</label>
-              <select name="area" class="form-select">
-                <option value="">-- Todas --</option>
-                {''.join([f'<option value="{escape(a["target_area"])}" {"selected" if filtro_area == a["target_area"] else ""}>{escape(a["target_area"])}</option>' for a in areas])}
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label fw-bold">División</label>
-              <select name="division" class="form-select">
-                <option value="">-- Todas --</option>
-                {''.join([f'<option value="{escape(d["target_division"])}" {"selected" if filtro_division == d["target_division"] else ""}>{escape(d["target_division"])}</option>' for d in divisiones])}
-              </select>
-            </div>
-            <div class="col-md-3">
-              <div class="d-flex gap-2 flex-wrap">
-                <button class="btn btn-primary rounded-pill px-4 fw-bold" type="submit">Filtrar</button>
-                <a class="btn btn-secondary rounded-pill px-4 fw-bold" href="{url_for('campanias_concientizacion_matriz')}" data-no-progress="true">Limpiar</a>
-              </div>
-            </div>
-          </div>
-        </form>
-      </div>
-
-      <div class="campmat-card">
-        <div class="campmat-topbar">
-          <div>
-            <h5 class="campmat-top-title mb-1">Matriz de campañas</h5>
-            <div class="campmat-top-note">
-              Cada registro puede generar 5 opciones con AI y convertir una opción en campaña completa ejecutable.
-            </div>
-          </div>
-          <div class="campmat-counter-badge">Total registros: {len(rows)}</div>
-        </div>
-
-        <div class="campmat-card-body">
-          <div class="table-responsive campmat-table-wrap">
-            <table class="table table-bordered table-hover align-middle mb-0 campmat-table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Fecha</th>
-                  <th>Área objetivo</th>
-                  <th>División</th>
-                  <th>Participantes</th>
-                  <th>Tema seleccionado</th>
-                  <th>Estado</th>
-                  <th class="campmat-col-acciones">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {''.join(rows_html)}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    {camp_conc_common_css("campmat")}
-    """
-
-    return render_template_string(BASE, content=Markup(html))
-
-
-# ============================================================
-# NUEVA CAMPAÑA — GENERA 5 OPCIONES
-# ============================================================
-
-@app.route("/campanias_concientizacion/new", methods=["GET", "POST"])
-@login_required
-def campanias_concientizacion_new():
-    user, resp = camp_conc_require_write()
-    if resp:
-        return resp
-
-    if request.method == "POST":
-        session_date = (request.form.get("session_date") or "").strip()
-        participants_raw = (request.form.get("participants") or "").strip()
-        target_area = (request.form.get("target_area") or "").strip()
-        target_division = (request.form.get("target_division") or "").strip()
-
-        if not session_date or not participants_raw or not target_area or not target_division:
-            flash("Campos obligatorios: fecha, participantes, área objetivo y división.", "danger")
-            return redirect(url_for("campanias_concientizacion_new"))
-
-        try:
-            participants = int(participants_raw)
-            if participants <= 0:
-                raise ValueError()
-        except Exception:
-            flash("El número de participantes debe ser numérico y mayor a cero.", "danger")
-            return redirect(url_for("campanias_concientizacion_new"))
-
-        try:
-            options = camp_conc_generate_options(session_date, participants, target_area)
-
-            conn = get_camp_conc_db_connection()
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO campanias_concientizacion (
-                    session_date, participants, target_area, target_division,
-                    generated_options_json, status, created_by, created_at, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                session_date,
-                participants,
-                target_area,
-                target_division,
-                json.dumps(options, ensure_ascii=False),
-                "Generada",
-                camp_conc_user_name(user),
-                camp_conc_now(),
-                camp_conc_now()
-            ))
-            session_id = cur.lastrowid
-            conn.commit()
-            conn.close()
-
-            flash("Las 5 opciones de campaña fueron generadas correctamente.", "success")
-            return redirect(url_for("campanias_concientizacion_opciones", id=session_id))
-
-        except Exception as e:
-            flash(f"No fue posible generar las opciones con AI: {str(e)}", "danger")
-            return redirect(url_for("campanias_concientizacion_new"))
-
-    areas_org, divisiones_por_area = camp_conc_obtener_areas_y_divisiones()
-    area_options = camp_conc_area_options(areas_org)
-    division_options = camp_conc_division_options(divisiones_por_area)
-
-    html = f"""
-    <div class="campform-shell">
-
-      <div class="campform-header-card">
-        <div class="campform-header-overlay">
-          <div class="campform-header-text">
-            <h3 class="campform-title m-0">Nueva Campaña de Concientización</h3>
-            <div class="campform-subtitle">
-              Genera 5 opciones de campañas mensuales con AI, evitando repetir temas ya ejecutados o demasiado similares
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="campform-header-actions">
-        <a href="{url_for('campanias_concientizacion_matriz')}"
-           class="btn rounded-pill px-5 fw-bold campform-back-btn" data-no-progress="true">
-          ⬅ Volver a la matriz
-        </a>
-      </div>
-
-      <div class="campform-card">
-        <div class="campform-card-body">
-          <form method="post" data-progress-text="Generando 5 opciones de campaña con AI...">
-            <div class="row g-3">
-              <div class="col-12">
-                <div class="campform-section-title">Datos base de la campaña mensual</div>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Fecha de concientización</label>
-                <input type="date" name="session_date" class="form-control" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Número de participantes</label>
-                <input type="number" name="participants" class="form-control" min="1" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Área a concientizar</label>
-                <select name="target_area" id="target_area" class="form-select" required>
-                  {area_options}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">División a concientizar</label>
-                <select name="target_division" id="target_division" class="form-select" data-selected="" required>
-                  {division_options}
-                </select>
-              </div>
-
-              <div class="col-12">
-                <div class="campform-info-box">
-                  La AI considerará campañas previas registradas para evitar repetición de temas como phishing,
-                  credenciales, ingeniería social u otros temas similares ya utilizados.
-                </div>
-              </div>
-            </div>
-
-            <div class="campform-bottom-actions">
-              <button class="btn btn-primary rounded-pill px-5 fw-bold" type="submit">
-                🤖 Generar 5 opciones con AI
-              </button>
-              <a href="{url_for('campanias_concientizacion_matriz')}"
-                 class="btn rounded-pill px-5 fw-bold campform-cancel-btn" data-no-progress="true">
-                Cancelar
-              </a>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-
-    {camp_conc_area_division_js(divisiones_por_area)}
-    {camp_conc_common_css("campform")}
-    """
-
-    return render_template_string(BASE, content=Markup(html))
-
-
-# ============================================================
-# OPCIONES AI
-# ============================================================
-
-@app.route("/campanias_concientizacion/<int:id>/opciones", methods=["GET"])
-@login_required
-def campanias_concientizacion_opciones(id):
-    user, resp = camp_conc_require_read()
-    if resp:
-        return resp
-
-    read_only = not camp_conc_can_write(user)
-    row = camp_conc_fetch_one(id)
-    if not row:
-        flash("No se encontró la campaña.", "danger")
-        return redirect(url_for("campanias_concientizacion_matriz"))
-
-    options = camp_conc_parse_json(row["generated_options_json"], default=[])
-
-    cards = []
-
-    for idx, opt in enumerate(options):
-        if not isinstance(opt, dict):
-            continue
-
-        selected = row["selected_option_index"] == idx
-        selected_badge = '<span class="badge bg-success">Seleccionada</span>' if selected else ""
-
-        action = ""
-        if not read_only:
-            action = f"""
-            <form method="post"
-                  action="{url_for('campanias_concientizacion_select', id=row['id'])}"
-                  data-progress-text="Generando campaña completa con AI..."
-                  class="mt-3">
-              <input type="hidden" name="option_index" value="{idx}">
-              <button class="btn btn-primary rounded-pill px-4 fw-bold w-100" type="submit">
-                ✅ Seleccionar y generar campaña completa
-              </button>
-            </form>
-            """
-
-        cards.append(f"""
-        <div class="col-lg-6">
-          <div class="campopt-card h-100">
-            <div class="d-flex justify-content-between gap-2 align-items-start">
-              <div class="campopt-card-title">{escape(opt.get('titulo') or 'Sin título')}</div>
-              {selected_badge}
-            </div>
-            <div class="campopt-chip">{escape(opt.get('categoria_tema') or 'Sin categoría')}</div>
-
-            <div class="campopt-block">
-              <div class="campopt-label">Objetivo</div>
-              <div class="campopt-text">{escape(opt.get('objetivo') or '—')}</div>
-            </div>
-
-            <div class="campopt-block">
-              <div class="campopt-label">Justificación</div>
-              <div class="campopt-text">{escape(opt.get('justificacion') or '—')}</div>
-            </div>
-
-            <div class="campopt-meta">
-              <span>Formato: {escape(opt.get('formato') or '—')}</span>
-              <span>Duración: {escape(opt.get('duracion_sugerida') or '—')}</span>
-              <span>Nivel: {escape(opt.get('nivel_publico') or '—')}</span>
-            </div>
-
-            {action}
-          </div>
-        </div>
-        """)
-
-    if not cards:
-        cards.append("""
-        <div class="col-12">
-          <div class="alert alert-warning mb-0">No hay opciones generadas para esta campaña.</div>
-        </div>
-        """)
-
-    regen_btn = ""
-    if not read_only:
-        regen_btn = f"""
-        <form method="post"
-              action="{url_for('campanias_concientizacion_regenerar_opciones', id=row['id'])}"
-              data-progress-text="Regenerando 5 opciones de campaña con AI..."
-              style="display:inline;">
-          <button class="btn btn-warning rounded-pill px-4 fw-bold" type="submit">
-            🔄 Regenerar opciones
-          </button>
-        </form>
-        """
-
-    detail_btn = ""
-    if row["detailed_plan_json"]:
-        detail_btn = f"""
-        <a href="{url_for('campanias_concientizacion_detalle', id=row['id'])}"
-           class="btn btn-info text-white rounded-pill px-4 fw-bold" data-no-progress="true">
-          Ver campaña completa
-        </a>
-        """
-
-    html = f"""
-    <div class="campopt-shell">
-
-      <div class="campopt-header-card">
-        <div class="campopt-header-overlay">
-          <div class="campopt-header-text">
-            <h3 class="campopt-title m-0">Opciones de Campaña AI</h3>
-            <div class="campopt-subtitle">
-              Selecciona una opción para convertirla en campaña completa, ejecutable y auditable
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="campopt-header-actions">
-        <a href="{url_for('campanias_concientizacion_matriz')}"
-           class="btn rounded-pill px-4 fw-bold campopt-back-btn" data-no-progress="true">
-          ⬅ Volver a la matriz
-        </a>
-        {detail_btn}
-        {regen_btn}
-      </div>
-
-      <div class="campopt-summary">
-        <div><strong>Fecha:</strong> {escape(row['session_date'] or '—')}</div>
-        <div><strong>Área:</strong> {escape(row['target_area'] or '—')}</div>
-        <div><strong>División:</strong> {escape(row['target_division'] or '—')}</div>
-        <div><strong>Participantes:</strong> {escape(str(row['participants'] or 0))}</div>
-        <div><strong>Estado:</strong> {Markup(camp_conc_status_badge(row['status']))}</div>
-      </div>
-
-      <div class="row g-3">
-        {''.join(cards)}
-      </div>
-    </div>
-
-    {camp_conc_common_css("campopt")}
-    """
-
-    return render_template_string(BASE, content=Markup(html))
-
-
-@app.route("/campanias_concientizacion/<int:id>/regenerar_opciones", methods=["POST"])
-@login_required
-def campanias_concientizacion_regenerar_opciones(id):
-    user, resp = camp_conc_require_write()
-    if resp:
-        return resp
-
-    row = camp_conc_fetch_one(id)
-    if not row:
-        flash("No se encontró la campaña.", "danger")
-        return redirect(url_for("campanias_concientizacion_matriz"))
-
-    try:
-        options = camp_conc_generate_options(
-            row["session_date"],
-            int(row["participants"] or 0),
-            row["target_area"],
-            exclude_id=id
-        )
-
-        conn = get_camp_conc_db_connection()
-        conn.execute("""
-            UPDATE campanias_concientizacion
-            SET generated_options_json = ?,
-                selected_option_index = NULL,
-                selected_title = NULL,
-                selected_category = NULL,
-                selected_format = NULL,
-                selected_duration = NULL,
-                selected_level = NULL,
-                selected_objective = NULL,
-                selected_justification = NULL,
-                detailed_plan_json = NULL,
-                status = 'Generada',
-                updated_at = ?
-            WHERE id = ?
-        """, (json.dumps(options, ensure_ascii=False), camp_conc_now(), id))
-        conn.commit()
-        conn.close()
-
-        flash("Opciones regeneradas correctamente.", "success")
-    except Exception as e:
-        flash(f"No fue posible regenerar opciones: {str(e)}", "danger")
-
-    return redirect(url_for("campanias_concientizacion_opciones", id=id))
-
-
-@app.route("/campanias_concientizacion/<int:id>/seleccionar", methods=["POST"])
-@login_required
-def campanias_concientizacion_select(id):
-    user, resp = camp_conc_require_write()
-    if resp:
-        return resp
-
-    row = camp_conc_fetch_one(id)
-    if not row:
-        flash("No se encontró la campaña.", "danger")
-        return redirect(url_for("campanias_concientizacion_matriz"))
-
-    try:
-        option_index = int(request.form.get("option_index"))
-    except Exception:
-        flash("Opción inválida.", "danger")
-        return redirect(url_for("campanias_concientizacion_opciones", id=id))
-
-    options = camp_conc_parse_json(row["generated_options_json"], default=[])
-
-    if option_index < 0 or option_index >= len(options):
-        flash("La opción seleccionada no existe.", "danger")
-        return redirect(url_for("campanias_concientizacion_opciones", id=id))
-
-    option = options[option_index]
-
-    try:
-        detail = camp_conc_generate_detail(row, option)
-
-        conn = get_camp_conc_db_connection()
-        conn.execute("""
-            UPDATE campanias_concientizacion
-            SET selected_option_index = ?,
-                selected_title = ?,
-                selected_category = ?,
-                selected_format = ?,
-                selected_duration = ?,
-                selected_level = ?,
-                selected_objective = ?,
-                selected_justification = ?,
-                detailed_plan_json = ?,
-                status = 'Planificada',
-                updated_at = ?
-            WHERE id = ?
-        """, (
-            option_index,
-            option.get("titulo") or "",
-            option.get("categoria_tema") or "",
-            option.get("formato") or "",
-            option.get("duracion_sugerida") or "",
-            option.get("nivel_publico") or "",
-            option.get("objetivo") or "",
-            option.get("justificacion") or "",
-            json.dumps(detail, ensure_ascii=False),
-            camp_conc_now(),
-            id
-        ))
-        conn.commit()
-        conn.close()
-
-        flash("Campaña completa generada correctamente.", "success")
-        return redirect(url_for("campanias_concientizacion_detalle", id=id))
-
-    except Exception as e:
-        flash(f"No fue posible generar la campaña completa con IA: {str(e)}", "danger")
-        return redirect(url_for("campanias_concientizacion_opciones", id=id))
-
-
-# ============================================================
-# DETALLE
-# ============================================================
-
-@app.route("/campanias_concientizacion/<int:id>/detalle", methods=["GET"])
-@login_required
-def campanias_concientizacion_detalle(id):
-    user, resp = camp_conc_require_read()
-    if resp:
-        return resp
-
-    read_only = not camp_conc_can_write(user)
-    row = camp_conc_fetch_one(id)
-    if not row:
-        flash("No se encontró la campaña.", "danger")
-        return redirect(url_for("campanias_concientizacion_matriz"))
-
-    detail = camp_conc_parse_json(row["detailed_plan_json"], default={})
-
-    if not detail:
-        detail_html = """
-        <div class="alert alert-warning mb-0">
-          Esta campaña aún no tiene plan completo generado. Ingresa a <strong>Opciones AI</strong> y selecciona una opción.
-        </div>
-        """
+    t = Table(resumen_data, colWidths=[9 * cm, 5 * cm])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f4e78")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 14))
+
+    story.append(Paragraph("Metodología", h2))
+    story.append(Paragraph(
+        "Se ejecutó un análisis técnico automatizado utilizando herramientas del entorno Kali Linux. "
+        "Según el tipo de objetivo se utilizaron Nmap, Nikto, testssl y Nuclei para identificar "
+        "servicios expuestos, puertos abiertos, debilidades de configuración web, hallazgos basados "
+        "en templates y vulnerabilidades o debilidades asociadas a TLS/SSL.",
+        normal
+    ))
+    story.append(Spacer(1, 14))
+
+    story.append(Paragraph("Hallazgos Detallados", h2))
+
+    if not findings:
+        story.append(Paragraph("No se encontraron hallazgos parseados en esta corrida.", normal))
     else:
-        sections = [
-            ("Temario detallado", "temario_detallado"),
-            ("Plan de acción", "plan_de_accion"),
-            ("Cómo abordarlo", "como_abordarlo"),
-            ("Pasos a seguir", "pasos_a_seguir"),
-            ("Evaluación de efectividad", "evaluacion_efectividad"),
-        ]
+        for idx, f in enumerate(findings, start=1):
+            story.append(Paragraph(f"{idx}. {html_escape(f.titulo)}", styles["Heading3"]))
+            story.append(Paragraph(f"<b>Fuente:</b> {html_escape(f.fuente)}", normal))
+            story.append(Paragraph(f"<b>Severidad:</b> {html_escape(f.severidad)}", normal))
+            story.append(Paragraph(f"<b>CVE:</b> {html_escape(f.cve or '—')}", normal))
+            story.append(Paragraph(f"<b>CVSS:</b> {html_escape(f.cvss or '—')}", normal))
+            story.append(Paragraph(f"<b>Puerto:</b> {html_escape(f.puerto or '—')}", normal))
+            story.append(Paragraph(f"<b>Servicio:</b> {html_escape(f.servicio or '—')}", normal))
+            story.append(Paragraph(f"<b>Descripción:</b> {html_escape(f.descripcion or '—')}", normal))
+            story.append(Paragraph(f"<b>Evidencia:</b> {html_escape(f.evidencia or '—')}", normal))
+            story.append(Paragraph(f"<b>Recomendación Base:</b> {html_escape(f.recomendacion_base or '—')}", normal))
+            story.append(Spacer(1, 10))
 
-        section_html = []
-        for title, key in sections:
-            section_html.append(f"""
-            <div class="campdet-section">
-              <div class="campdet-section-title">{escape(title)}</div>
-              <div class="campdet-section-body">{camp_conc_format_value(detail.get(key))}</div>
-            </div>
-            """)
-        detail_html = "".join(section_html)
+    story.append(PageBreak())
+    story.append(Paragraph("Descargo", h2))
+    story.append(Paragraph(
+        "Este reporte corresponde a un análisis automatizado sobre objetivos autorizados. "
+        "Los resultados deben ser validados por el equipo técnico y complementados con revisión contextual, "
+        "tratamiento de riesgos y seguimiento de remediación dentro del SGSI.",
+        normal
+    ))
 
-    edit_btn = ""
-    regen_btn = ""
-    if not read_only:
-        edit_btn = f"""
-        <a href="{url_for('campanias_concientizacion_edit', id=row['id'])}"
-           class="btn btn-warning rounded-pill px-4 fw-bold" data-no-progress="true">
-          Editar
-        </a>
-        """
-        if row["selected_option_index"] is not None:
-            regen_btn = f"""
-            <form method="post"
-                  action="{url_for('campanias_concientizacion_regenerar_detalle', id=row['id'])}"
-                  data-progress-text="Regenerando campaña completa con AI..."
-                  style="display:inline;">
-              <button class="btn btn-primary rounded-pill px-4 fw-bold" type="submit">
-                🔄 Regenerar detalle AI
-              </button>
-            </form>
-            """
-
-    html = f"""
-    <div class="campdet-shell">
-
-      <div class="campdet-header-card">
-        <div class="campdet-header-overlay">
-          <div class="campdet-header-text">
-            <h3 class="campdet-title m-0">Detalle de Campaña de Concientización</h3>
-            <div class="campdet-subtitle">
-              Campaña completa lista para ejecutar y conservar como evidencia de toma de conciencia del SGSI
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="campdet-header-actions">
-        <a href="{url_for('campanias_concientizacion_matriz')}"
-           class="btn rounded-pill px-4 fw-bold campdet-back-btn" data-no-progress="true">
-          ⬅ Volver a la matriz
-        </a>
-        <a href="{url_for('campanias_concientizacion_opciones', id=row['id'])}"
-           class="btn btn-info text-white rounded-pill px-4 fw-bold" data-no-progress="true">
-          Ver opciones
-        </a>
-        {edit_btn}
-        {regen_btn}
-      </div>
-
-      <div class="campdet-card">
-        <div class="campdet-card-body">
-          <div class="campdet-section">
-            <div class="campdet-section-title">Información general</div>
-            <div class="row g-3">
-              <div class="col-md-3"><div class="campdet-field"><div class="campdet-label">Fecha</div><div class="campdet-value">{escape(row['session_date'] or '—')}</div></div></div>
-              <div class="col-md-3"><div class="campdet-field"><div class="campdet-label">Participantes</div><div class="campdet-value">{escape(str(row['participants'] or 0))}</div></div></div>
-              <div class="col-md-3"><div class="campdet-field"><div class="campdet-label">Área objetivo</div><div class="campdet-value">{escape(row['target_area'] or '—')}</div></div></div>
-              <div class="col-md-3"><div class="campdet-field"><div class="campdet-label">División objetivo</div><div class="campdet-value">{escape(row['target_division'] or '—')}</div></div></div>
-              <div class="col-md-3"><div class="campdet-field"><div class="campdet-label">Estado</div><div class="campdet-value">{Markup(camp_conc_status_badge(row['status']))}</div></div></div>
-
-              <div class="col-md-6"><div class="campdet-field"><div class="campdet-label">Tema seleccionado</div><div class="campdet-value fw-bold">{escape(row['selected_title'] or '—')}</div></div></div>
-              <div class="col-md-3"><div class="campdet-field"><div class="campdet-label">Categoría</div><div class="campdet-value">{escape(row['selected_category'] or '—')}</div></div></div>
-              <div class="col-md-3"><div class="campdet-field"><div class="campdet-label">Formato</div><div class="campdet-value">{escape(row['selected_format'] or '—')}</div></div></div>
-
-              <div class="col-md-6"><div class="campdet-field"><div class="campdet-label">Objetivo</div><div class="campdet-value">{escape(row['selected_objective'] or '—')}</div></div></div>
-              <div class="col-md-6"><div class="campdet-field"><div class="campdet-label">Justificación</div><div class="campdet-value">{escape(row['selected_justification'] or '—')}</div></div></div>
-            </div>
-          </div>
-
-          {detail_html}
-        </div>
-      </div>
-    </div>
-
-    {camp_conc_common_css("campdet")}
-    """
-
-    return render_template_string(BASE, content=Markup(html))
+    doc.build(story)
+    return pdf_path
 
 
-@app.route("/campanias_concientizacion/<int:id>/regenerar_detalle", methods=["POST"])
+# ==========================
+# Entrada directa al módulo — Registro de Vulnerabilidades
+# ==========================
+@app.route('/vulnerabilidades_menu')
 @login_required
-def campanias_concientizacion_regenerar_detalle(id):
-    user, resp = camp_conc_require_write()
-    if resp:
-        return resp
-
-    row = camp_conc_fetch_one(id)
-    if not row:
-        flash("No se encontró la campaña.", "danger")
-        return redirect(url_for("campanias_concientizacion_matriz"))
-
-    options = camp_conc_parse_json(row["generated_options_json"], default=[])
-    option_index = row["selected_option_index"]
-
-    if option_index is None or option_index < 0 or option_index >= len(options):
-        flash("Primero debes seleccionar una opción de campaña.", "warning")
-        return redirect(url_for("campanias_concientizacion_opciones", id=id))
-
-    try:
-        option = options[option_index]
-        detail = camp_conc_generate_detail(row, option)
-
-        conn = get_camp_conc_db_connection()
-        conn.execute("""
-            UPDATE campanias_concientizacion
-            SET detailed_plan_json = ?, updated_at = ?
-            WHERE id = ?
-        """, (json.dumps(detail, ensure_ascii=False), camp_conc_now(), id))
-        conn.commit()
-        conn.close()
-
-        flash("Detalle AI regenerado correctamente.", "success")
-    except Exception as e:
-        flash(f"No fue posible regenerar el detalle con IA: {str(e)}", "danger")
-
-    return redirect(url_for("campanias_concientizacion_detalle", id=id))
-
-
-# ============================================================
-# EDITAR
-# ============================================================
-
-@app.route("/campanias_concientizacion/<int:id>/edit", methods=["GET", "POST"])
-@login_required
-def campanias_concientizacion_edit(id):
-    user, resp = camp_conc_require_write()
-    if resp:
-        return resp
-
-    row = camp_conc_fetch_one(id)
-    if not row:
-        flash("No se encontró la campaña.", "danger")
-        return redirect(url_for("campanias_concientizacion_matriz"))
-
-    if request.method == "POST":
-        session_date = (request.form.get("session_date") or "").strip()
-        participants_raw = (request.form.get("participants") or "").strip()
-        target_area = (request.form.get("target_area") or "").strip()
-        target_division = (request.form.get("target_division") or "").strip()
-        selected_title = (request.form.get("selected_title") or "").strip()
-        selected_category = (request.form.get("selected_category") or "").strip()
-        selected_format = (request.form.get("selected_format") or "").strip()
-        selected_duration = (request.form.get("selected_duration") or "").strip()
-        selected_level = (request.form.get("selected_level") or "").strip()
-        status = (request.form.get("status") or "").strip()
-
-        if not session_date or not participants_raw or not target_area or not target_division or not status:
-            flash("Campos obligatorios: fecha, participantes, área objetivo, división y estado.", "danger")
-            return redirect(url_for("campanias_concientizacion_edit", id=id))
-
-        try:
-            participants = int(participants_raw)
-            if participants <= 0:
-                raise ValueError()
-        except Exception:
-            flash("Participantes debe ser numérico y mayor a cero.", "danger")
-            return redirect(url_for("campanias_concientizacion_edit", id=id))
-
-        conn = get_camp_conc_db_connection()
-        conn.execute("""
-            UPDATE campanias_concientizacion
-            SET session_date = ?,
-                participants = ?,
-                target_area = ?,
-                target_division = ?,
-                selected_title = ?,
-                selected_category = ?,
-                selected_format = ?,
-                selected_duration = ?,
-                selected_level = ?,
-                status = ?,
-                updated_at = ?
-            WHERE id = ?
-        """, (
-            session_date,
-            participants,
-            target_area,
-            target_division,
-            selected_title,
-            selected_category,
-            selected_format,
-            selected_duration,
-            selected_level,
-            status,
-            camp_conc_now(),
-            id
-        ))
-        conn.commit()
-        conn.close()
-
-        flash("Campaña actualizada correctamente.", "success")
-        return redirect(url_for("campanias_concientizacion_detalle", id=id))
-
-    estados = ["Generada", "Planificada", "En ejecución", "Ejecutada", "Cancelada"]
-    areas_org, divisiones_por_area = camp_conc_obtener_areas_y_divisiones()
-    area_options = camp_conc_area_options(areas_org, row["target_area"] or "")
-    division_options = camp_conc_division_options(divisiones_por_area, row["target_area"] or "", row["target_division"] or "")
-
-    html = f"""
-    <div class="campform-shell">
-
-      <div class="campform-header-card">
-        <div class="campform-header-overlay">
-          <div class="campform-header-text">
-            <h3 class="campform-title m-0">Editar Campaña de Concientización</h3>
-            <div class="campform-subtitle">
-              Actualiza datos principales, estado y tema seleccionado de la campaña
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="campform-header-actions">
-        <a href="{url_for('campanias_concientizacion_detalle', id=row['id'])}"
-           class="btn rounded-pill px-5 fw-bold campform-back-btn" data-no-progress="true">
-          ⬅ Volver al detalle
-        </a>
-      </div>
-
-      <div class="campform-card">
-        <div class="campform-card-body">
-          <form method="post">
-            <div class="row g-3">
-              <div class="col-12">
-                <div class="campform-section-title">Información general</div>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Fecha de concientización</label>
-                <input type="date" name="session_date" class="form-control" value="{escape(row['session_date'] or '')}" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Número de participantes</label>
-                <input type="number" name="participants" class="form-control" min="1" value="{escape(str(row['participants'] or 0))}" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Área objetivo</label>
-                <select name="target_area" id="target_area" class="form-select" required>
-                  {area_options}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">División objetivo</label>
-                <select name="target_division" id="target_division" class="form-select" data-selected="{escape(row['target_division'] or '')}" required>
-                  {division_options}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Estado</label>
-                <select name="status" class="form-select" required>
-                  {''.join([f'<option value="{escape(e)}" {"selected" if (row["status"] or "") == e else ""}>{escape(e)}</option>' for e in estados])}
-                </select>
-              </div>
-
-              <div class="col-md-8">
-                <label class="form-label">Tema seleccionado</label>
-                <input type="text" name="selected_title" class="form-control" value="{escape(row['selected_title'] or '')}">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Categoría</label>
-                <input type="text" name="selected_category" class="form-control" value="{escape(row['selected_category'] or '')}">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Formato</label>
-                <input type="text" name="selected_format" class="form-control" value="{escape(row['selected_format'] or '')}">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Duración sugerida</label>
-                <input type="text" name="selected_duration" class="form-control" value="{escape(row['selected_duration'] or '')}">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Nivel público</label>
-                <input type="text" name="selected_level" class="form-control" value="{escape(row['selected_level'] or '')}">
-              </div>
-            </div>
-
-            <div class="campform-bottom-actions">
-              <button class="btn btn-success rounded-pill px-5 fw-bold" type="submit">
-                Guardar cambios
-              </button>
-              <a href="{url_for('campanias_concientizacion_detalle', id=row['id'])}"
-                 class="btn rounded-pill px-5 fw-bold campform-cancel-btn" data-no-progress="true">
-                Cancelar
-              </a>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-
-    {camp_conc_area_division_js(divisiones_por_area)}
-    {camp_conc_common_css("campform")}
-    """
-
-    return render_template_string(BASE, content=Markup(html))
-
-
-
-# ============================================================
-# REGISTRAR EN PLAN DE CONCIENTIZACIÓN Y FORMACIÓN
-# ============================================================
-
-@app.route("/campanias_concientizacion/<int:id>/registrar_plan_diseno", methods=["POST"])
-@login_required
-def campanias_concientizacion_registrar_plan_diseno(id):
-    user, resp = camp_conc_require_write()
-    if resp:
-        return resp
-
-    if user.role != "admin" and not verificar_permiso(user, "Plan de Concientización y Formación"):
-        flash("No tiene permiso para registrar información en el Plan de Concientización y Formación.", "danger")
-        return redirect(url_for("campanias_concientizacion_matriz"))
-
-    row = camp_conc_fetch_one(id)
-    if not row:
-        flash("No se encontró la campaña.", "danger")
-        return redirect(url_for("campanias_concientizacion_matriz"))
-
-    if row["plan_diseno_id"]:
-        flash("Esta campaña ya fue registrada previamente en el Plan de Concientización y Formación.", "warning")
-        try:
-            return redirect(url_for("plan_diseno_edit", id=row["plan_diseno_id"]))
-        except Exception:
-            return redirect(url_for("campanias_concientizacion_matriz"))
-
-    if not row["selected_title"] or not row["detailed_plan_json"]:
-        flash("Primero debes seleccionar una opción y generar la campaña completa.", "warning")
-        return redirect(url_for("campanias_concientizacion_opciones", id=id))
-
-    if "PlanDisenoRegistro" not in globals():
-        flash("No fue posible registrar: no se encontró el modelo PlanDisenoRegistro en Programasgsi2.py.", "danger")
-        return redirect(url_for("campanias_concientizacion_matriz"))
-
-    detail = camp_conc_parse_json(row["detailed_plan_json"], default={})
-
-    descripcion = camp_conc_text_from_detail(detail)
-    if not descripcion:
-        descripcion = (
-            f"Campaña de concientización generada desde GRAC.\\n\\n"
-            f"Tema: {row['selected_title'] or ''}\\n"
-            f"Objetivo: {row['selected_objective'] or ''}\\n"
-            f"Justificación: {row['selected_justification'] or ''}"
-        )
-
-    horas = camp_conc_duration_to_hours(row["selected_duration"])
-
-    try:
-        it = PlanDisenoRegistro(
-            tema_capacitacion=(row["selected_title"] or "").strip(),
-            descripcion=descripcion,
-            horas=horas,
-            dirigida_area=camp_conc_normalize_plan_area(row["target_area"]),
-            dirigida_division=(row["target_division"] or "").strip(),
-            fecha_programada=(row["session_date"] or "").strip(),
-            fecha_ejecucion="",
-            responsable=camp_conc_user_name(user),
-            metodologia=(row["selected_format"] or "Campaña de concientización").strip(),
-            evidencia="",
-            observaciones=(
-                "Registro generado automáticamente desde el módulo Campañas de Concientización. "
-                f"ID campaña origen: {row['id']} | "
-                f"Categoría: {row['selected_category'] or '—'} | "
-                f"División: {row['target_division'] or '—'} | "
-                f"Nivel público: {row['selected_level'] or '—'}"
-            )
-        )
-
-        db.session.add(it)
-        db.session.flush()
-
-        plan_id = it.id
-
-        conn = get_camp_conc_db_connection()
-        conn.execute("""
-            UPDATE campanias_concientizacion
-            SET plan_diseno_id = ?,
-                registered_at = ?,
-                updated_at = ?
-            WHERE id = ?
-        """, (plan_id, camp_conc_now(), camp_conc_now(), id))
-        conn.commit()
-        conn.close()
-
-        db.session.commit()
-
-        flash("Campaña registrada correctamente en el Plan de Concientización y Formación.", "success")
-        return redirect(url_for("plan_diseno_edit", id=plan_id))
-
-    except Exception as e:
-        db.session.rollback()
-        flash(f"No fue posible registrar la campaña en el Plan de Concientización y Formación: {str(e)}", "danger")
-        return redirect(url_for("campanias_concientizacion_matriz"))
-
-
-# ============================================================
-# ELIMINAR
-# ============================================================
-
-@app.route("/campanias_concientizacion/<int:id>/delete", methods=["POST"])
-@login_required
-def campanias_concientizacion_delete(id):
-    user, resp = camp_conc_require_write()
-    if resp:
-        return resp
-
-    conn = get_camp_conc_db_connection()
-    row = conn.execute("SELECT id FROM campanias_concientizacion WHERE id = ?", (id,)).fetchone()
-
-    if not row:
-        conn.close()
-        flash("No se encontró la campaña.", "warning")
-        return redirect(url_for("campanias_concientizacion_matriz"))
-
-    conn.execute("DELETE FROM campanias_concientizacion WHERE id = ?", (id,))
-    conn.commit()
-    conn.close()
-
-    flash("Campaña eliminada correctamente.", "success")
-    return redirect(url_for("campanias_concientizacion_matriz"))
-
-
-# ============================================================
-# API SIMPLE PARA DASHBOARD / FUTURAS MÉTRICAS
-# ============================================================
-
-@app.route("/campanias_concientizacion/api/resumen")
-@login_required
-def campanias_concientizacion_api_resumen():
-    user, resp = camp_conc_require_read()
-    if resp:
-        return jsonify({"ok": False, "error": "No autorizado"}), 403
-
-    conn = get_camp_conc_db_connection()
-    r = conn.execute("""
-        SELECT
-            COUNT(*) AS total,
-            SUM(CASE WHEN status = 'Ejecutada' THEN 1 ELSE 0 END) AS ejecutadas,
-            SUM(CASE WHEN status = 'Planificada' THEN 1 ELSE 0 END) AS planificadas,
-            SUM(CASE WHEN status = 'En ejecución' THEN 1 ELSE 0 END) AS en_ejecucion,
-            COUNT(DISTINCT target_area) AS areas
-        FROM campanias_concientizacion
-    """).fetchone()
-    conn.close()
-
-    total = int(r["total"] or 0)
-    ejecutadas = int(r["ejecutadas"] or 0)
-
-    return jsonify({
-        "ok": True,
-        "total": total,
-        "ejecutadas": ejecutadas,
-        "planificadas": int(r["planificadas"] or 0),
-        "en_ejecucion": int(r["en_ejecucion"] or 0),
-        "areas": int(r["areas"] or 0),
-        "cumplimiento": round((ejecutadas / total) * 100, 1) if total else 0
-    })
-
-
-# ============================================================
-# CSS COMÚN DEL MÓDULO
-# ============================================================
-
-def camp_conc_common_css(prefix):
-    return f"""
-    <style>
-      body{{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .{prefix}-shell{{
-        width:96%;
-        max-width:1650px;
-        margin:10px auto 24px auto;
-      }}
-
-      .{prefix}-header-card{{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }}
-
-      .{prefix}-header-card::before{{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }}
-
-      .{prefix}-header-overlay{{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-      }}
-
-      .{prefix}-header-overlay::before{{
-        content:"🎯";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }}
-
-      .{prefix}-header-text::before{{
-        content:"SGSI · Competencias y Cultura";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }}
-
-      .{prefix}-title{{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }}
-
-      .{prefix}-subtitle{{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }}
-
-      .{prefix}-header-actions{{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }}
-
-      .{prefix}-header-actions .btn,
-      .{prefix}-bottom-actions .btn{{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }}
-
-      .{prefix}-back-btn,
-      .{prefix}-cancel-btn{{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }}
-
-      .{prefix}-back-btn:hover,
-      .{prefix}-cancel-btn:hover{{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }}
-
-      .{prefix}-card,
-      .{prefix}-filter-card{{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-        margin-bottom:14px;
-      }}
-
-      .{prefix}-card-body,
-      .{prefix}-filter-card{{
-        padding:16px;
-      }}
-
-      .{prefix}-topbar{{
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:12px;
-        padding:16px;
-        border-bottom:1px solid #e6eef8;
-        flex-wrap:wrap;
-      }}
-
-      .{prefix}-top-title{{
-        font-weight:950;
-        color:#0f172a;
-      }}
-
-      .{prefix}-top-note{{
-        font-size:.80rem;
-        color:#475569;
-      }}
-
-      .{prefix}-counter-badge{{
-        background:linear-gradient(135deg,#0f172a,#1e3a8a);
-        color:#fff;
-        border-radius:999px;
-        padding:8px 14px;
-        font-weight:900;
-        font-size:.82rem;
-      }}
-
-      .{prefix}-table-wrap{{
-        border-radius:16px;
-        overflow:auto;
-        background:#fff;
-        border:1px solid #e2e8f0;
-        box-shadow:0 6px 16px rgba(0,0,0,.08);
-      }}
-
-      .{prefix}-table{{
-        min-width:1250px;
-      }}
-
-      .{prefix}-table thead th{{
-        background:#3f86d6 !important;
-        color:#fff;
-        font-weight:900;
-        font-size:.78rem;
-        text-align:center;
-        vertical-align:middle;
-      }}
-
-      .{prefix}-table td{{
-        font-size:.82rem;
-        vertical-align:middle;
-      }}
-
-      .{prefix}-actions-wrap{{
-        display:flex;
-        flex-direction:column;
-        gap:6px;
-        align-items:center;
-      }}
-
-      .{prefix}-btn-action{{
-        min-width:120px;
-        font-size:.74rem;
-      }}
-
-      .{prefix}-title-topic{{
-        font-weight:900;
-        color:#0f172a;
-        line-height:1.25;
-      }}
-
-      .{prefix}-topic-category{{
-        display:inline-block;
-        margin-top:4px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        color:#0b4a8f;
-        border-radius:999px;
-        padding:3px 9px;
-        font-size:.70rem;
-        font-weight:900;
-      }}
-
-      .{prefix}-kpi-grid{{
-        display:grid;
-        grid-template-columns:repeat(4,minmax(0,1fr));
-        gap:12px;
-        margin-bottom:14px;
-      }}
-
-      .{prefix}-kpi-card{{
-        background:rgba(255,255,255,.96);
-        border-radius:18px;
-        border:1px solid rgba(219,230,244,.9);
-        box-shadow:0 10px 22px rgba(15,23,42,.16);
-        padding:16px;
-        text-align:center;
-      }}
-
-      .{prefix}-kpi-label{{
-        font-size:.68rem;
-        font-weight:900;
-        color:#0b4a8f;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-      }}
-
-      .{prefix}-kpi-value{{
-        font-size:1.65rem;
-        font-weight:950;
-        color:#0f172a;
-        line-height:1.1;
-      }}
-
-      .{prefix}-section-title{{
-        font-weight:950;
-        font-size:.78rem;
-        color:#0b4a8f;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin:10px 0 12px;
-      }}
-
-      .{prefix}-bottom-actions{{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:22px;
-        flex-wrap:wrap;
-      }}
-
-      .{prefix}-card .form-label,
-      .{prefix}-filter-card .form-label{{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }}
-
-      .{prefix}-card .form-control,
-      .{prefix}-card .form-select,
-      .{prefix}-filter-card .form-control,
-      .{prefix}-filter-card .form-select{{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }}
-
-      .{prefix}-card .form-control:focus,
-      .{prefix}-card .form-select:focus,
-      .{prefix}-filter-card .form-control:focus,
-      .{prefix}-filter-card .form-select:focus{{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#ffffff;
-      }}
-
-      .{prefix}-info-box{{
-        border-radius:14px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        padding:12px 14px;
-        color:#334155;
-        font-size:.82rem;
-        line-height:1.45;
-      }}
-
-      .campopt-summary{{
-        background:rgba(255,255,255,.96);
-        border:1px solid rgba(219,230,244,.9);
-        border-radius:18px;
-        padding:14px 16px;
-        box-shadow:0 10px 22px rgba(15,23,42,.14);
-        display:grid;
-        grid-template-columns:repeat(4,minmax(0,1fr));
-        gap:10px;
-        margin-bottom:14px;
-        font-size:.82rem;
-      }}
-
-      .campopt-card{{
-        background:rgba(255,255,255,.97);
-        border:1px solid #dbe6f4;
-        border-radius:18px;
-        padding:16px;
-        box-shadow:0 10px 22px rgba(15,23,42,.14);
-      }}
-
-      .campopt-card-title{{
-        font-weight:950;
-        color:#0f172a;
-        font-size:1rem;
-        line-height:1.25;
-      }}
-
-      .campopt-chip{{
-        display:inline-block;
-        margin:8px 0 10px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        color:#0b4a8f;
-        border-radius:999px;
-        padding:4px 10px;
-        font-size:.72rem;
-        font-weight:900;
-      }}
-
-      .campopt-block{{
-        margin-top:10px;
-      }}
-
-      .campopt-label{{
-        font-size:.70rem;
-        font-weight:950;
-        color:#0b4a8f;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        margin-bottom:3px;
-      }}
-
-      .campopt-text{{
-        font-size:.82rem;
-        color:#334155;
-        line-height:1.42;
-      }}
-
-      .campopt-meta{{
-        display:flex;
-        gap:6px;
-        flex-wrap:wrap;
-        margin-top:12px;
-      }}
-
-      .campopt-meta span{{
-        background:#f8fafc;
-        border:1px solid #e2e8f0;
-        border-radius:999px;
-        padding:4px 9px;
-        font-size:.70rem;
-        font-weight:800;
-        color:#475569;
-      }}
-
-      .campdet-section{{
-        background:#ffffff;
-        border:1px solid #dbe6f4;
-        border-radius:16px;
-        padding:8px 7px;
-        margin-bottom:14px;
-        box-shadow:0 8px 18px rgba(15,23,42,.08);
-      }}
-
-      .campdet-section-title{{
-        font-weight:950;
-        font-size:.78rem;
-        color:#0b4a8f;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin:0 0 12px 0;
-      }}
-
-      .campdet-field{{
-        background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        padding:12px;
-        min-height:86px;
-        height:100%;
-      }}
-
-      .campdet-label,
-      .campdet-struct-key{{
-        font-size:.70rem;
-        font-weight:950;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        color:#0b4a8f;
-        margin-bottom:6px;
-      }}
-
-      .campdet-value,
-      .campdet-section-body,
-      .campdet-struct-value{{
-        color:#101827;
-        font-size:.84rem;
-        line-height:1.48;
-        word-break:break-word;
-      }}
-
-      .campdet-list{{
-        margin:4px 0 8px 18px;
-        padding:0;
-      }}
-
-      .campdet-list li{{
-        margin-bottom:6px;
-      }}
-
-      .campdet-struct-item{{
-        border-left:3px solid #d9eaff;
-        padding-left:10px;
-        margin:9px 0;
-      }}
-
-      @media (max-width:992px){{
-        .{prefix}-kpi-grid,
-        .campopt-summary{{
-          grid-template-columns:repeat(2,minmax(0,1fr));
-        }}
-      }}
-
-      @media (max-width:768px){{
-        .{prefix}-shell{{
-          width:98%;
-          margin:8px auto 22px auto;
-        }}
-
-        .{prefix}-header-overlay{{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }}
-
-        .{prefix}-header-overlay::before{{
-          margin:0;
-        }}
-
-        .{prefix}-header-actions .btn,
-        .{prefix}-bottom-actions .btn{{
-          width:100%;
-        }}
-
-        .{prefix}-kpi-grid,
-        .campopt-summary{{
-          grid-template-columns:1fr;
-        }}
-      }}
-    </style>
-    """
-
-# ==========================================================================================================================================
-#                                                  Fin Módulo de Camapañas de Concientización 
-# ==========================================================================================================================================
-
-# =================================================================================================================================================
-#                                           Módulo de Plan de Concientización y Formación INGRESO DIRECTO A LA MATRIZ
-# =================================================================================================================================================
-@app.route('/plan_diseno_menu', methods=['GET'])
-@login_required
-def plan_diseno_menu():
+def vulnerabilidades_menu():
     user = User.query.get(session.get('user_id'))
 
-    # Permisos correctos
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Plan de Concientización y Formación"):
-        flash("No tiene permiso para acceder al Plan de Concientización y Formación.", "danger")
-        return redirect(url_for('capacitacion_menu'))
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para acceder al módulo de registro de vulnerabilidades.", "danger")
+        return redirect(url_for('menu'))
 
-    return redirect(url_for('plan_diseno_matriz'))
+    return redirect(url_for('vulnerabilidades_matriz'))
 
+# ==========================
+# Agregar Vulnerabilidades
+# ==========================
 
-# Alias corto opcional
-@app.route('/plan_diseno', methods=['GET'])
+@app.route('/vulnerabilidad/new', methods=['GET', 'POST'])
 @login_required
-def plan_diseno_redirect():
-    return redirect(url_for('plan_diseno_matriz'))
-
-
-# =========================
-# Obtener áreas y divisiones
-# =========================
-def obtener_areas_y_divisiones_plan():
-    """
-    Devuelve:
-      - areas: lista de áreas únicas
-      - divisiones_por_area: dict { nombre_area: [div1, div2, ...] }
-    """
-    areas_db = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
-
-    areas = []
-    divisiones_por_area = {}
-
-    for a in areas_db:
-        nombre_area = (a.area or '').strip()
-        if not nombre_area:
-            continue
-
-        areas.append(nombre_area)
-        divisiones_por_area[nombre_area] = []
-
-        for d in (a.divisiones or []):
-            nombre_div = (d.nombre_division or '').strip()
-            if nombre_div and nombre_div not in divisiones_por_area[nombre_area]:
-                divisiones_por_area[nombre_area].append(nombre_div)
-
-        divisiones_por_area[nombre_area].sort(key=lambda s: s.lower())
-
-    areas = sorted(set(areas), key=lambda s: s.lower())
-    return areas, divisiones_por_area
-
-
-# =========================
-# AGREGAR — Plan de Concientización y Formación
-# =========================
-@app.route('/plan_diseno/new', methods=['GET', 'POST'])
-@login_required
-def plan_diseno_new():
-
+def vulnerabilidad_new():
     user = User.query.get(session.get('user_id'))
 
     if user.role == 'auditor':
-        flash("El rol Auditor no puede agregar registros del plan.", "danger")
-        return redirect(url_for('plan_diseno_matriz'))
+        flash("El rol Auditor no puede agregar registros.", "danger")
+        return redirect(url_for('vulnerabilidades_menu'))
 
-    if user.role != 'admin' and not verificar_permiso(user, "Plan de Concientización y Formación"):
-        flash("No tiene permiso para agregar registros del plan.", "danger")
-        return redirect(url_for('plan_diseno_matriz'))
-
-    areas, divisiones_por_area = obtener_areas_y_divisiones_plan()
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para agregar requisitos legales.", "danger")
+        return redirect(url_for('vulnerabilidades_menu'))
 
     if request.method == 'POST':
-        it = PlanDisenoRegistro(
-            tema_capacitacion=(request.form.get('tema_capacitacion') or '').strip(),
-            descripcion=(request.form.get('descripcion') or '').strip(),
-            horas=request.form.get('horas', type=int) or 0,
-            dirigida_area=(request.form.get('dirigida_area') or '').strip(),
-            dirigida_division=(request.form.get('dirigida_division') or '').strip(),
-            fecha_programada=request.form.get('fecha_programada') or '',
-            fecha_ejecucion=request.form.get('fecha_ejecucion') or '',
-            responsable=(request.form.get('responsable') or '').strip(),
-            metodologia=(request.form.get('metodologia') or '').strip(),
-            evidencia=(request.form.get('evidencia') or '').strip(),
-            observaciones=(request.form.get('observaciones') or '').strip(),
-        )
+        codigo = (request.form.get('codigo') or '').strip()
+        activo = (request.form.get('activo') or '').strip()
+        descripcion_vulnerabilidad = (request.form.get('descripcion_vulnerabilidad') or '').strip()
+        cve = (request.form.get('cve') or '').strip()
+        cvss = (request.form.get('cvss') or '').strip()
+        clasificacion = (request.form.get('clasificacion') or '').strip()
+        responsable = (request.form.get('responsable') or '').strip()
+        riesgo_residual = (request.form.get('riesgo_residual') or '').strip()
+        estado = request.form.get('estado') or ''
 
+        fecha_str = (request.form.get('fecha_identificacion') or '').strip()
+        fecha_identificacion = None
+        if fecha_str:
+            try:
+                fecha_identificacion = datetime.strptime(fecha_str, '%Y-%m-%d').date()
+            except ValueError:
+                flash("Fecha de identificación inválida.", "danger")
+                return redirect(url_for('vulnerabilidad_new'))
+        
+        fecha_cierre_str = (request.form.get('fecha_cierre') or '').strip()
+        fecha_cierre = None
+        if fecha_cierre_str:
+            try:
+                fecha_cierre = datetime.strptime(fecha_cierre_str, '%Y-%m-%d').date()
+            except ValueError:
+                flash("Fecha de cierre inválida.", "danger")
+                return redirect(url_for('vulnerabilidad_new'))
+            
+
+        # Validaciones mínimas
+        if not all([codigo, activo, descripcion_vulnerabilidad, estado, responsable]):
+            flash("Campos obligatorios: ID, Activo, Descripción, Estado y Responsable.", "danger")
+            return redirect(url_for('vulnerabilidad_new'))
+
+        it = VulnerabilidadRegistro(
+            codigo=codigo,
+            activo=activo,
+            descripcion_vulnerabilidad=descripcion_vulnerabilidad,
+            cve=cve,
+            cvss=cvss,
+            clasificacion=clasificacion,          # ⬅⬅ importante
+            fecha_identificacion=fecha_identificacion,
+            fecha_cierre=fecha_cierre, 
+            estado=estado,
+            responsable=responsable,
+            riesgo_residual=riesgo_residual
+        )
         db.session.add(it)
 
+        # Evidencias (varios archivos, como en otros módulos)
         files = request.files.getlist('evidencias')
         for f in files:
             if not f or not f.filename:
                 continue
-            if not is_allowed_pdf(f.filename):
-                flash(f"Archivo no permitido (solo PDF): {f.filename}", "danger")
+            if not is_allowed_pdf(f.filename):   # o tu validador de tipos (puedes permitir .pdf,.jpg,etc.)
+                flash(f"Archivo no permitido: {f.filename}", "danger")
                 continue
 
             store_name = unique_store_name(f.filename)
-            path = os.path.join(app.config['UPLOAD_PLAN_DISENO_DIR'], store_name)
+            path = os.path.join(app.config['UPLOAD_VULNERABILIDADES_DIR'], store_name)
             f.save(path)
 
-            ev = PlanDisenoEvidencia(
-                registro=it,
+            ev = VulnerabilidadEvidencia(
+                vulnerabilidad=it,
                 filename=store_name,
                 original_name=secure_filename(f.filename),
                 mime='application/pdf',
@@ -4969,104 +219,118 @@ def plan_diseno_new():
             )
             db.session.add(ev)
 
+        # Sincronización automática con Modelamiento de Amenazas / MITRE ATT&CK
+        db.session.flush()
+        sincronizar_vulnerabilidad_con_modelamiento(it)
+
         db.session.commit()
-        flash("Registro del plan guardado.", "success")
-        return redirect(url_for('plan_diseno_matriz'))
+        flash("Vulnerabilidad registrada y sincronizada con Modelamiento de Amenazas.", "success")
+        return redirect(url_for('vulnerabilidades_matriz'))
 
+    # GET
     html = """
-    <div class="plandis-shell">
+    <div class="vulnadd-shell">
 
-      <div class="plandis-header-card">
-        <div class="plandis-header-overlay">
-          <div class="plandis-header-text">
-            <h3 class="plandis-title m-0">Agregar Plan de Concientización</h3>
-            <div class="plandis-subtitle">
-              Registro de actividades del plan de concientización y formación, incluyendo tema, público objetivo, fechas, responsable, metodología y evidencias
+      <!-- CABECERA -->
+      <div class="vulnadd-header-card">
+        <div class="vulnadd-header-overlay">
+          <div class="vulnadd-header-text">
+            <h3 class="vulnadd-title m-0">Agregar Vulnerabilidad</h3>
+            <div class="vulnadd-subtitle">
+              Registro y gestión de vulnerabilidades identificadas, incluyendo activo afectado, clasificación, responsable, riesgo residual y evidencias de cierre
             </div>
           </div>
         </div>
       </div>
 
-      <div class="plandis-header-actions">
-        <a href="{{ url_for('plan_diseno_matriz') }}"
-           class="btn rounded-pill px-5 fw-bold plandis-back-btn">
+      <!-- BOTÓN VOLVER -->
+      <div class="vulnadd-header-actions">
+        <a href="{{ url_for('vulnerabilidades_matriz') }}"
+           class="btn rounded-pill px-5 fw-bold vulnadd-back-btn">
           ⬅ Volver a la Matriz
         </a>
       </div>
 
-      <div class="plandis-card">
-        <div class="plandis-card-body">
+      <!-- TARJETA -->
+      <div class="vulnadd-card">
+        <div class="vulnadd-card-body">
           <form method="post" enctype="multipart/form-data">
             <div class="row g-3">
 
               <div class="col-12">
-                <div class="plandis-section-title">Información de la actividad</div>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Tema de la capacitación</label>
-                <input class="form-control" name="tema_capacitacion" required>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label"># Horas</label>
-                <input type="number" class="form-control" name="horas" min="0" value="0">
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Descripción</label>
-                <textarea class="form-control" name="descripcion" rows="2"></textarea>
+                <div class="vulnadd-section-title">Información de la vulnerabilidad</div>
               </div>
 
               <div class="col-md-3">
-                <label class="form-label">Dirigida a (área)</label>
-                <select class="form-select" name="dirigida_area" id="dirigida_area" onchange="cargarDivisionesPlan()" required>
+                <label class="form-label">ID (alfanumérico)</label>
+                <input name="codigo" class="form-control" required>
+              </div>
+
+              <div class="col-md-9">
+                <label class="form-label">Activo</label>
+                <input name="activo" class="form-control" required>
+              </div>
+
+              <div class="col-md-12">
+                <label class="form-label">Descripción de la Vulnerabilidad</label>
+                <textarea name="descripcion_vulnerabilidad" class="form-control" rows="2" required></textarea>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">CVE</label>
+                <input name="cve" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">CVSS</label>
+                <input name="cvss" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Clasificación</label>
+                <select name="clasificacion" class="form-select">
                   <option value="">-- Seleccione --</option>
-                  <option value="Todas las áreas">Todas las áreas</option>
-                  {% for a in areas %}
-                    <option value="{{ a }}">{{ a }}</option>
+                  {% for op in clasif_choices %}
+                    <option value="{{ op }}">{{ op }}</option>
                   {% endfor %}
                 </select>
               </div>
 
               <div class="col-md-3">
-                <label class="form-label">Dirigida a (división)</label>
-                <select class="form-select" name="dirigida_division" id="dirigida_division" required>
+                <label class="form-label">Fecha de Identificación</label>
+                <input type="date" name="fecha_identificacion" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Fecha de Cierre</label>
+                <input type="date" name="fecha_cierre" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select" required>
                   <option value="">-- Seleccione --</option>
+                  <option value="Abierto">Abierto</option>
+                  <option value="Cerrado">Cerrado</option>
                 </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Fecha programada</label>
-                <input type="date" class="form-control" name="fecha_programada">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Fecha ejecución</label>
-                <input type="date" class="form-control" name="fecha_ejecucion">
               </div>
 
               <div class="col-md-6">
                 <label class="form-label">Responsable</label>
-                <input class="form-control" name="responsable">
+                <input name="responsable" class="form-control" required>
               </div>
 
               <div class="col-md-6">
-                <label class="form-label">Metodología medición, evaluación y eficacia</label>
-                <textarea class="form-control" name="metodologia" rows="2"></textarea>
-              </div>
-
-              <div class="col-12">
-                <div class="plandis-section-title">Evidencias y observaciones</div>
+                <label class="form-label">Riesgo Residual</label>
+                <textarea name="riesgo_residual" class="form-control" rows="2"></textarea>
               </div>
 
               <div class="col-md-6">
-                <label class="form-label">Evidencias PDF (puede adjuntar varios)</label>
+                <label class="form-label">Evidencia de Cierre (múltiples archivos)</label>
                 <input
                   type="file"
                   id="evidencias"
                   name="evidencias"
-                  accept=".pdf"
                   multiple
                   class="form-control"
                   onchange="acumularEvidencias(this)"
@@ -5074,24 +338,17 @@ def plan_diseno_new():
                 <small class="text-muted">
                   Puedes seleccionar varios a la vez o ir agregando en varias rondas.
                 </small>
-
                 <div id="lista_evidencias_nuevas" class="mt-2"></div>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Observaciones</label>
-                <textarea class="form-control" name="observaciones" rows="2"></textarea>
               </div>
 
             </div>
 
-            <div class="plandis-bottom-actions">
+            <div class="vulnadd-bottom-actions">
               <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
                 Guardar
               </button>
-
-              <a class="btn rounded-pill px-4 fw-bold plandis-cancel-btn"
-                 href="{{ url_for('plan_diseno_matriz') }}">
+              <a href="{{ url_for('vulnerabilidades_matriz') }}"
+                 class="btn rounded-pill px-4 fw-bold vulnadd-cancel-btn">
                 Cancelar
               </a>
             </div>
@@ -5099,49 +356,6 @@ def plan_diseno_new():
         </div>
       </div>
     </div>
-
-    <script>
-      const DIVISIONES_POR_AREA_PLAN = {{ divisiones_por_area|tojson }};
-
-      function cargarDivisionesPlan() {
-        const areaSelect = document.getElementById('dirigida_area');
-        const divisionSelect = document.getElementById('dirigida_division');
-        const area = (areaSelect.value || '').trim();
-
-        divisionSelect.innerHTML = '';
-
-        const optDefault = document.createElement('option');
-        optDefault.value = '';
-        optDefault.textContent = '-- Seleccione --';
-        divisionSelect.appendChild(optDefault);
-
-        const optTodas = document.createElement('option');
-        optTodas.value = 'Todas las divisiones';
-        optTodas.textContent = 'Todas las divisiones';
-        divisionSelect.appendChild(optTodas);
-
-        if (!area) {
-          return;
-        }
-
-        if (area === 'Todas las áreas') {
-          return;
-        }
-
-        const divisiones = DIVISIONES_POR_AREA_PLAN[area] || [];
-
-        divisiones.forEach(function(div) {
-          const opt = document.createElement('option');
-          opt.value = div;
-          opt.textContent = div;
-          divisionSelect.appendChild(opt);
-        });
-      }
-
-      document.addEventListener('DOMContentLoaded', function() {
-        cargarDivisionesPlan();
-      });
-    </script>
 
     <style>
       body{
@@ -5152,16 +366,16 @@ def plan_diseno_new():
         background-repeat:no-repeat;
       }
 
-      .plandis-shell{
+      .vulnadd-shell{
         width:96%;
         max-width:1500px;
         margin:10px auto 24px auto;
       }
 
       /* =========================
-         HEADER SGSI UNIFICADO (CORREGIDO)
+         HEADER SGSI UNIFICADO (IGUAL A TODOS)
       ========================= */
-      .plandis-header-card{
+      .vulnadd-header-card{
         background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
@@ -5175,7 +389,7 @@ def plan_diseno_new():
         margin-bottom:10px;
       }
 
-      .plandis-header-card::before{
+      .vulnadd-header-card::before{
         content:"";
         position:absolute;
         inset:0;
@@ -5184,7 +398,7 @@ def plan_diseno_new():
           repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
       }
 
-      .plandis-header-overlay{
+      .vulnadd-header-overlay{
         width:100%;
         display:flex;
         align-items:center;
@@ -5194,8 +408,8 @@ def plan_diseno_new():
         z-index:1;
       }
 
-      .plandis-header-overlay::before{
-        content:"📋";
+      .vulnadd-header-overlay::before{
+        content:"🛡️";
         width:54px;
         height:54px;
         min-width:54px;
@@ -5205,17 +419,18 @@ def plan_diseno_new():
         display:flex;
         align-items:center;
         justify-content:center;
-        font-size:1.4rem;
+        font-size:1.45rem;
         box-shadow:0 8px 18px rgba(0,0,0,.25);
         margin-right:14px;
       }
 
-      .plandis-header-text{
-        max-width:1200px;
+      .vulnadd-header-text{
+        max-width:1100px;
+        width:100%;
       }
 
-      .plandis-header-text::before{
-        content:"SGSI · Plan de Disposición";
+      .vulnadd-header-text::before{
+        content:"SGSI · Gestión de Vulnerabilidades";
         display:inline-block;
         background:rgba(255,255,255,.18);
         border-radius:999px;
@@ -5226,7 +441,7 @@ def plan_diseno_new():
         color:#fff;
       }
 
-      .plandis-title{
+      .vulnadd-title{
         color:#ffffff !important;
         font-weight:950;
         font-size:1.32rem;
@@ -5235,7 +450,7 @@ def plan_diseno_new():
         margin:0 !important;
       }
 
-      .plandis-subtitle{
+      .vulnadd-subtitle{
         color:rgba(255,255,255,.95);
         font-size:.78rem;
         margin-top:4px;
@@ -5244,7 +459,7 @@ def plan_diseno_new():
       /* =========================
          BOTONES SUPERIORES
       ========================= */
-      .plandis-header-actions{
+      .vulnadd-header-actions{
         display:flex;
         justify-content:center;
         gap:10px;
@@ -5252,8 +467,7 @@ def plan_diseno_new():
         margin:10px 0 14px;
       }
 
-      .plandis-header-actions .btn,
-      .plandis-bottom-actions .btn{
+      .vulnadd-header-actions .btn{
         border-radius:10px !important;
         min-height:32px;
         padding:8px 22px !important;
@@ -5262,15 +476,13 @@ def plan_diseno_new():
         box-shadow:0 8px 16px rgba(15,23,42,.15);
       }
 
-      .plandis-back-btn,
-      .plandis-cancel-btn{
+      .vulnadd-back-btn{
         background:#ffffff;
         color:#0f172a;
         border:1px solid #cfd8e3;
       }
 
-      .plandis-back-btn:hover,
-      .plandis-cancel-btn:hover{
+      .vulnadd-back-btn:hover{
         background:#edf5ff;
         color:#0b65d8;
         border-color:#9ec5fe;
@@ -5279,7 +491,7 @@ def plan_diseno_new():
       /* =========================
          CARD PRINCIPAL
       ========================= */
-      .plandis-card{
+      .vulnadd-card{
         background:rgba(255,255,255,.96)!important;
         border-radius:18px;
         backdrop-filter:blur(8px);
@@ -5288,22 +500,22 @@ def plan_diseno_new():
         overflow:hidden;
       }
 
-      .plandis-card-body{
+      .vulnadd-card-body{
         padding:18px;
       }
 
       /* =========================
          FORMULARIOS
       ========================= */
-      .plandis-card .form-label{
+      .vulnadd-card .form-label{
         font-weight:800;
         color:#25324a;
         margin-bottom:4px;
         font-size:.78rem;
       }
 
-      .plandis-card .form-control,
-      .plandis-card .form-select{
+      .vulnadd-card .form-control,
+      .vulnadd-card .form-select{
         border-radius:9px;
         border:1px solid #d9e3f0;
         min-height:32px;
@@ -5311,21 +523,21 @@ def plan_diseno_new():
         background:#f8fafc;
       }
 
-      .plandis-card textarea.form-control{
+      .vulnadd-card textarea.form-control{
         min-height:70px;
       }
 
-      .plandis-card .form-control:focus,
-      .plandis-card .form-select:focus{
+      .vulnadd-card .form-control:focus,
+      .vulnadd-card .form-select:focus{
         border-color:#3f86d6;
         box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#fff;
+        background:#ffffff;
       }
 
       /* =========================
-         SECCIONES
+         TITULOS
       ========================= */
-      .plandis-section-title{
+      .vulnadd-section-title{
         font-weight:950;
         font-size:.78rem;
         color:#0b4a8f;
@@ -5334,765 +546,20 @@ def plan_diseno_new():
         background:#eef5ff;
         border:1px solid #d9eaff;
         margin:10px 0 12px;
-      }
-
-      /* =========================
-         EVIDENCIAS (MEJORADO)
-      ========================= */
-      #lista_evidencias_nuevas .d-flex{
-        background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
-        border:1px solid #dbe6f4;
-        border-radius:12px;
-        padding:10px 12px;
-        box-shadow:0 6px 14px rgba(15,23,42,.08);
       }
 
       /* =========================
          BOTONES INFERIORES
       ========================= */
-      .plandis-bottom-actions{
+      .vulnadd-bottom-actions{
         display:flex;
         justify-content:center;
         gap:10px;
         margin-top:22px;
         flex-wrap:wrap;
-        width:100%;
       }
 
-      /* =========================
-         RESPONSIVE
-      ========================= */
-      @media (max-width:768px){
-        .plandis-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .plandis-header-overlay::before{
-          margin:0;
-        }
-
-        .plandis-header-actions .btn,
-        .plandis-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(
-        html,
-        areas=areas,
-        divisiones_por_area=divisiones_por_area
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-
-# =========================
-# MATRIZ — Plan de Concientización y Formación
-# =========================
-@app.route('/plan_diseno_matriz', methods=['GET'])
-@login_required
-def plan_diseno_matriz():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        read_only = True
-    else:
-        if user.role != 'admin' and not verificar_permiso(user, "Plan de Concientización y Formación"):
-            flash("No tiene permiso para ver la Matriz del Plan de Concientización y Formación.", "danger")
-            return redirect(url_for('capacitacion_menu'))
-        read_only = False
-
-    items = (
-        PlanDisenoRegistro.query
-        .options(selectinload(PlanDisenoRegistro.evidencias))
-        .order_by(PlanDisenoRegistro.id.desc())
-        .all()
-    )
-
-    rows_html = []
-
-    for it in items:
-        tema = escape(it.tema_capacitacion or '—')
-        fecha_programada = escape(it.fecha_programada or '—')
-        fecha_ejecucion = escape(it.fecha_ejecucion or '—')
-        responsable = escape(it.responsable or '—')
-        metodologia = escape(it.metodologia or '—')
-
-        acciones = [
-            f'''
-            <a href="{url_for('plan_diseno_detalle', id=it.id)}"
-               class="btn btn-info btn-sm rounded-pill plancapmat-btn-action text-white fw-bold"
-               data-no-progress="true">
-              Ver detalle
-            </a>
-            '''
-        ]
-
-        if not read_only:
-            acciones.append(
-                f'''
-                <a href="{url_for('plan_diseno_edit', id=it.id)}"
-                   class="btn btn-warning btn-sm rounded-pill plancapmat-btn-action text-dark fw-bold"
-                   data-no-progress="true">
-                  Editar
-                </a>
-                '''
-            )
-
-            acciones.append(
-                f'''
-                <form method="post"
-                      action="{url_for('plan_diseno_delete', id=it.id)}"
-                      onsubmit="return confirm('¿Desea eliminar este registro?');"
-                      style="margin:0;"
-                      data-no-progress="true">
-                  <button type="submit"
-                          class="btn btn-danger btn-sm rounded-pill plancapmat-btn-action fw-bold"
-                          data-no-progress="true">
-                    Eliminar
-                  </button>
-                </form>
-                '''
-            )
-        else:
-            acciones.append('<span class="badge bg-secondary">Solo lectura</span>')
-
-        rows_html.append(f"""
-        <tr>
-          <td>{tema}</td>
-          <td>{fecha_programada}</td>
-          <td>{fecha_ejecucion}</td>
-          <td>{responsable}</td>
-          <td class="small">{metodologia}</td>
-          <td class="text-center plancapmat-col-acciones">
-            <div class="plancapmat-actions-wrap">
-              {''.join(acciones)}
-            </div>
-          </td>
-        </tr>
-        """)
-
-    if not rows_html:
-        rows_html.append("""
-        <tr>
-          <td colspan="6" class="text-center text-muted py-5">
-            Sin registros
-          </td>
-        </tr>
-        """)
-
-    agregar_btn_header = ""
-    if not read_only:
-        agregar_btn_header = f'''
-          <a href="{url_for('plan_diseno_new')}"
-             class="btn btn-primary rounded-pill fw-bold"
-             data-no-progress="true">
-            ➕ Agregar registro
-          </a>
-        '''
-
-    html = f"""
-    <div class="plancapmat-shell">
-
-      <div class="plancapmat-header-card">
-        <div class="plancapmat-header-overlay">
-          <div class="plancapmat-header-text">
-            <h3 class="plancapmat-title m-0">Plan de Concientización y Formación</h3>
-            <div class="plancapmat-subtitle">
-              Visualización resumida de actividades de capacitación, concientización y formación del SGSI
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="plancapmat-card">
-        <div class="plancapmat-topbar">
-          <div>
-            <h5 class="plancapmat-top-title mb-1">Resumen de actividades</h5>
-            <div class="plancapmat-top-note">
-              La matriz muestra los campos principales. Para consultar toda la información usa el botón <strong>Ver detalle</strong>.
-            </div>
-          </div>
-
-          <div class="d-flex align-items-center gap-2 flex-wrap">
-            <div class="plancapmat-counter-badge">
-              Total registros: {len(items)}
-            </div>
-            {agregar_btn_header}
-          </div>
-        </div>
-
-        <div class="plancapmat-card-body">
-          <div class="plancapmat-table-wrap">
-            <div class="table-responsive">
-              <table class="table table-bordered table-hover align-middle plancapmat-table mb-0">
-                <colgroup>
-                  <col style="width: 20%;">
-                  <col style="width: 12%;">
-                  <col style="width: 12%;">
-                  <col style="width: 16%;">
-                  <col style="width: 24%;">
-                  <col style="width: 16%;">
-                </colgroup>
-
-                <thead>
-                  <tr>
-                    <th>Tema de la capacitación</th>
-                    <th>Fecha programada</th>
-                    <th>Fecha ejecución</th>
-                    <th>Responsable</th>
-                    <th>Metodología medición, evaluación y eficacia</th>
-                    <th class="plancapmat-col-acciones">Acciones</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {''.join(rows_html)}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-      body{{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .plancapmat-shell{{
-        width:96%;
-        max-width:1650px;
-        margin:10px auto 24px auto;
-      }}
-
-      .plancapmat-header-card{{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }}
-
-      .plancapmat-header-card::before{{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }}
-
-      .plancapmat-header-overlay{{
-        width:100%;
-        height:auto;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }}
-
-      .plancapmat-header-overlay::before{{
-        content:"🎓";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }}
-
-      .plancapmat-header-text{{
-        max-width:1200px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }}
-
-      .plancapmat-header-text::before{{
-        content:"SGSI · Matriz de Plan de Capacitación";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }}
-
-      .plancapmat-title{{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }}
-
-      .plancapmat-subtitle{{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }}
-
-      .plancapmat-card{{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }}
-
-      .plancapmat-topbar{{
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:14px;
-        padding:16px 16px 0 16px;
-        flex-wrap:wrap;
-      }}
-
-      .plancapmat-top-title{{
-        color:#0f172a;
-        font-weight:950;
-        font-size:.92rem;
-      }}
-
-      .plancapmat-top-note{{
-        color:#475569;
-        font-size:.78rem;
-      }}
-
-      .plancapmat-counter-badge{{
-        background:linear-gradient(135deg,#0f172a,#1e3a8a);
-        color:#fff;
-        font-weight:900;
-        border-radius:999px;
-        padding:8px 14px;
-        box-shadow:0 8px 18px rgba(0,0,0,.15);
-      }}
-
-      .plancapmat-card-body{{
-        padding:14px 16px 16px 16px;
-      }}
-
-      .plancapmat-table-wrap{{
-        max-height:72vh;
-        overflow-y:auto;
-        overflow-x:auto;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:#ffffff;
-      }}
-
-      .plancapmat-table{{
-        min-width:1180px;
-        table-layout:fixed;
-        margin-bottom:0;
-      }}
-
-      .plancapmat-table thead th{{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#ffffff !important;
-        font-weight:900;
-        text-align:center;
-        vertical-align:middle;
-        font-size:.78rem;
-        padding:9px 8px;
-        white-space:normal;
-      }}
-
-      .plancapmat-table th,
-      .plancapmat-table td{{
-        vertical-align:top;
-        font-size:.78rem;
-        padding:9px 8px;
-        white-space:normal;
-        word-break:break-word;
-        overflow-wrap:anywhere;
-      }}
-
-      .plancapmat-table td{{
-        border-bottom:1px solid #e5edf7;
-        color:#101827;
-      }}
-
-      .plancapmat-table tbody tr:nth-child(even){{
-        background:#f8fbff;
-      }}
-
-      .plancapmat-table tbody tr:hover{{
-        background:#eef6ff;
-      }}
-
-      .plancapmat-col-acciones{{
-        width:180px !important;
-        min-width:180px !important;
-        text-align:center;
-        vertical-align:middle !important;
-      }}
-
-      .plancapmat-actions-wrap{{
-        display:flex;
-        flex-direction:column;
-        gap:6px;
-        align-items:center;
-        justify-content:center;
-      }}
-
-      .plancapmat-btn-action,
-      .plancapmat-actions-wrap .badge{{
-        min-width:110px;
-        max-width:125px;
-        padding:4px 12px !important;
-        font-size:.64rem !important;
-        line-height:1.2;
-        text-align:center;
-        white-space:nowrap;
-        border-radius:999px !important;
-        font-weight:900;
-      }}
-
-      .badge{{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }}
-
-      .btn.rounded-pill{{
-        border-radius:10px !important;
-      }}
-
-      .plancapmat-card .btn{{
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-        font-weight:900;
-      }}
-    </style>
-    """
-
-    return render_template_string(BASE, content=Markup(html))
-
-# ==========================
-# Detalle Plan de Concientización y Formación
-# ==========================
-@app.route('/plan_diseno/detalle/<int:id>')
-@login_required
-def plan_diseno_detalle(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        read_only = True
-    else:
-        if user.role != 'admin' and not verificar_permiso(user, "Plan de Concientización y Formación"):
-            flash("No tiene permiso para ver el detalle del plan de concientización y formación.", "danger")
-            return redirect(url_for('plan_diseno_matriz'))
-        read_only = False
-
-    it = (
-        PlanDisenoRegistro.query
-        .options(selectinload(PlanDisenoRegistro.evidencias))
-        .get_or_404(id)
-    )
-
-    html = """
-    <div class="plancapdet-shell">
-
-      <div class="plancapdet-header-card">
-        <div class="plancapdet-header-overlay">
-          <div class="plancapdet-header-text">
-            <h3 class="plancapdet-title m-0">Detalle del Plan de Concientización y Formación</h3>
-            <div class="plancapdet-subtitle">
-              Consulta completa del registro en modo solo lectura
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="plancapdet-header-actions">
-        <a href="{{ url_for('plan_diseno_matriz') }}"
-           class="btn rounded-pill px-4 fw-bold plancapdet-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-
-        {% if not read_only %}
-          <a href="{{ url_for('plan_diseno_edit', id=it.id) }}"
-             class="btn btn-warning rounded-pill px-4 fw-bold">
-            Editar registro
-          </a>
-        {% endif %}
-      </div>
-
-      <div class="plancapdet-card">
-        <div class="plancapdet-card-body">
-
-          <div class="plancapdet-section">
-            <div class="plancapdet-section-title">Información general</div>
-            <div class="row g-3">
-
-              <div class="col-md-6">
-                <div class="plancapdet-field">
-                  <div class="plancapdet-label">Tema de la capacitación</div>
-                  <div class="plancapdet-value">{{ it.tema_capacitacion or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-3">
-                <div class="plancapdet-field">
-                  <div class="plancapdet-label">Horas</div>
-                  <div class="plancapdet-value">{{ it.horas if it.horas is not none else '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-3">
-                <div class="plancapdet-field">
-                  <div class="plancapdet-label">Responsable</div>
-                  <div class="plancapdet-value">{{ it.responsable or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-4">
-                <div class="plancapdet-field">
-                  <div class="plancapdet-label">Dirigida a (área)</div>
-                  <div class="plancapdet-value">{{ it.dirigida_area or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-4">
-                <div class="plancapdet-field">
-                  <div class="plancapdet-label">Dirigida a (división)</div>
-                  <div class="plancapdet-value">{{ it.dirigida_division or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-2">
-                <div class="plancapdet-field">
-                  <div class="plancapdet-label">Fecha programada</div>
-                  <div class="plancapdet-value">{{ it.fecha_programada or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-2">
-                <div class="plancapdet-field">
-                  <div class="plancapdet-label">Fecha ejecución</div>
-                  <div class="plancapdet-value">{{ it.fecha_ejecucion or '—' }}</div>
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-          <div class="plancapdet-section">
-            <div class="plancapdet-section-title">Descripción y seguimiento</div>
-            <div class="row g-3">
-
-              <div class="col-12">
-                <div class="plancapdet-field">
-                  <div class="plancapdet-label">Descripción</div>
-                  <div class="plancapdet-value plancapdet-value-lg">{{ it.descripcion or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-12">
-                <div class="plancapdet-field">
-                  <div class="plancapdet-label">Metodología medición, evaluación y eficacia</div>
-                  <div class="plancapdet-value plancapdet-value-lg">{{ it.metodologia or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-12">
-                <div class="plancapdet-field">
-                  <div class="plancapdet-label">Observaciones</div>
-                  <div class="plancapdet-value plancapdet-value-lg">{{ it.observaciones or '—' }}</div>
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-          <div class="plancapdet-section">
-            <div class="plancapdet-section-title">Archivos asociados</div>
-
-            {% if it.evidencias %}
-              <div class="plancapdet-ev-grid">
-                {% for ev in it.evidencias %}
-                  <div class="plancapdet-file-card">
-                    <div class="plancapdet-file-left">
-                      <div class="plancapdet-file-icon">PDF</div>
-                      <div class="plancapdet-file-meta">
-                        <div class="plancapdet-file-label">Evidencia</div>
-                        <a href="{{ url_for('plan_diseno_evidencia_view', evi_id=ev.id, next='plan_diseno_detalle', reg_id=it.id) }}"
-                           class="plancapdet-file-name">
-                          {{ ev.original_name }}
-                        </a>
-                        <div class="plancapdet-file-size">{{ ((ev.size or 0) / 1024)|round(1) }} KB</div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <a href="{{ url_for('plan_diseno_evidencia_view', evi_id=ev.id, next='plan_diseno_detalle', reg_id=it.id) }}"
-                         class="btn btn-outline-primary btn-sm rounded-pill px-3">
-                        Ver archivo
-                      </a>
-                    </div>
-                  </div>
-                {% endfor %}
-              </div>
-            {% else %}
-              <div class="plancapdet-empty-box">
-                No hay archivos asociados a este registro.
-              </div>
-            {% endif %}
-          </div>
-
-        </div>
-      </div>
-
-    </div>
-
-   <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .plancapdet-shell{
-        width:96%;
-        max-width:1500px;
-        margin:10px auto 24px auto;
-      }
-
-      .plancapdet-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .plancapdet-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }
-
-      .plancapdet-header-overlay{
-        width:100%;
-        height:auto;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }
-
-      .plancapdet-header-overlay::before{
-        content:"🔎";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .plancapdet-header-text{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }
-
-      .plancapdet-header-text::before{
-        content:"SGSI · Detalle de Plan de Capacitación";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }
-
-      .plancapdet-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .plancapdet-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }
-
-      .plancapdet-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .plancapdet-header-actions .btn{
+      .vulnadd-bottom-actions .btn{
         border-radius:10px !important;
         min-height:32px;
         padding:8px 22px !important;
@@ -6101,3643 +568,53 @@ def plan_diseno_detalle(id):
         box-shadow:0 8px 16px rgba(15,23,42,.15);
       }
 
-      .plancapdet-back-btn{
+      .vulnadd-cancel-btn{
         background:#ffffff;
         color:#0f172a;
         border:1px solid #cfd8e3;
       }
 
-      .plancapdet-back-btn:hover{
+      .vulnadd-cancel-btn:hover{
         background:#edf5ff;
         color:#0b65d8;
         border-color:#9ec5fe;
-      }
-
-      .plancapdet-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .plancapdet-card-body{
-        padding:18px;
-      }
-
-      .plancapdet-section{
-        margin-bottom:14px;
-        background:#ffffff;
-        border:1px solid #dbe6f4;
-        border-radius:16px;
-        padding:8px 7px;
-        box-shadow:0 8px 18px rgba(15,23,42,.08);
-      }
-
-      .plancapdet-section-title{
-        font-weight:950;
-        font-size:.78rem;
-        color:#0b4a8f;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin:0 0 12px 0;
-      }
-
-      .plancapdet-field{
-        background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        padding:12px;
-        min-height:78px;
-        height:100%;
-      }
-
-      .plancapdet-label{
-        font-size:.70rem;
-        font-weight:900;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        color:#0b4a8f;
-        margin-bottom:6px;
-      }
-
-      .plancapdet-value{
-        color:#101827;
-        font-size:.82rem;
-        line-height:1.38;
-        white-space:pre-wrap;
-        word-break:break-word;
-      }
-
-      .plancapdet-value-lg{
-        min-height:72px;
-      }
-
-      .plancapdet-ev-grid{
-        display:grid;
-        grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));
-        gap:14px;
-      }
-
-      .plancapdet-file-card{
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:12px;
-        background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        padding:8px 7px;
-        box-shadow:0 6px 14px rgba(15,23,42,.08);
-        transition:all .2s ease;
-      }
-
-      .plancapdet-file-card:hover{
-        transform:translateY(-3px);
-        box-shadow:0 10px 20px rgba(15,23,42,.13);
-      }
-
-      .plancapdet-file-left{
-        display:flex;
-        align-items:center;
-        gap:12px;
-        min-width:0;
-      }
-
-      .plancapdet-file-icon{
-        width:52px;
-        height:52px;
-        min-width:52px;
-        border-radius:12px;
-        background:linear-gradient(135deg,#b91c1c,#b91c1c);
-        color:#fff;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-weight:950;
-        font-size:.82rem;
-      }
-
-      .plancapdet-file-meta{
-        min-width:0;
-      }
-
-      .plancapdet-file-label{
-        font-size:.70rem;
-        color:#475569;
-        font-weight:900;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-      }
-
-      .plancapdet-file-name{
-        display:block;
-        font-weight:900;
-        color:#1d4ed8;
-        text-decoration:none;
-        word-break:break-word;
-        font-size:.82rem;
-        margin-top:2px;
-      }
-
-      .plancapdet-file-name:hover{
-        text-decoration:underline;
-      }
-
-      .plancapdet-file-size{
-        font-size:.70rem;
-        color:#475569;
-        margin-top:3px;
-        font-weight:700;
-      }
-
-      .plancapdet-empty-box{
-        background:#f8fbff;
-        border:1px dashed #b8cce8;
-        border-radius:14px;
-        padding:16px;
-        text-align:center;
-        color:#475569;
-        font-size:.82rem;
-        font-weight:800;
-      }
-
-      @media (max-width:992px){
-        .plancapdet-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .plancapdet-header-card{
-          min-height:88px;
-        }
-
-        .plancapdet-title{
-          font-size:1.20rem;
-        }
-
-        .plancapdet-card-body{
-          padding:8px 7px;
-        }
-
-        .plancapdet-file-card{
-          flex-direction:column;
-          align-items:flex-start;
-        }
-      }
-
-      @media (max-width:768px){
-        .plancapdet-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .plancapdet-header-overlay::before{
-          margin:0;
-        }
-
-        .plancapdet-header-text::before{
-          margin-left:auto;
-          margin-right:auto;
-        }
-
-        .plancapdet-header-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-
-    inner = render_template_string(
-        html,
-        it=it,
-        read_only=read_only
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-# =========================
-# Edición y Borrado del Plan de capacitación
-# =========================
-
-@app.route('/plan_diseno/edit/<int:id>', methods=['GET','POST'])
-@login_required
-def plan_diseno_edit(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor' or (
-        user.role != 'admin' and not verificar_permiso(user, "Plan de Concientización y Formación")
-    ):
-        flash("No tiene permiso para editar registros del plan.", "danger")
-        return redirect(url_for('plan_diseno_matriz'))
-    
-    item = PlanDisenoRegistro.query.get_or_404(id)
-    areas, divisiones_por_area = obtener_areas_y_divisiones_plan()
-
-    if request.method == 'POST':
-        item.tema_capacitacion = (request.form.get('tema_capacitacion') or '').strip()
-        item.descripcion       = (request.form.get('descripcion') or '').strip()
-        item.horas             = request.form.get('horas', type=int) or 0
-        item.dirigida_area      = (request.form.get('dirigida_area') or '').strip()
-        item.dirigida_division  = (request.form.get('dirigida_division') or '').strip()
-        item.fecha_programada  = request.form.get('fecha_programada') or ''
-        item.fecha_ejecucion   = request.form.get('fecha_ejecucion') or ''
-        item.responsable       = (request.form.get('responsable') or '').strip()
-        item.metodologia       = (request.form.get('metodologia') or '').strip()
-        item.evidencia         = (request.form.get('evidencia') or '').strip()
-        item.observaciones     = (request.form.get('observaciones') or '').strip()
-
-        # 🔹 Nuevas evidencias PDF
-        files = request.files.getlist('evidencias')
-        for f in files:
-            if not f or not f.filename:
-                continue
-            if not is_allowed_pdf(f.filename):
-                flash(f"Archivo no permitido (solo PDF): {f.filename}", "danger")
-                continue
-
-            store_name = unique_store_name(f.filename)
-            path = os.path.join(app.config['UPLOAD_PLAN_DISENO_DIR'], store_name)
-            f.save(path)
-
-            ev = PlanDisenoEvidencia(
-                registro=item,
-                filename=store_name,
-                original_name=secure_filename(f.filename),
-                mime='application/pdf',
-                size=os.path.getsize(path)
-            )
-            db.session.add(ev)
-
-        db.session.commit()
-        flash("Registro del plan actualizado.", "success")
-        return redirect(url_for('plan_diseno_matriz'))
-
-    html = """
-    <div class="plancapedit-shell">
-
-      <!-- CABECERA -->
-      <div class="plancapedit-header-card">
-        <div class="plancapedit-header-overlay">
-          <div class="plancapedit-header-text">
-            <h3 class="plancapedit-title m-0">Editar registro del Plan de Concientización y Formación</h3>
-            <div class="plancapedit-subtitle">
-              Actualización de actividades de capacitación, concientización y formación del SGSI, incluyendo público objetivo, fechas, responsable, metodología y evidencias
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOTÓN VOLVER -->
-      <div class="plancapedit-header-actions">
-        <a href="{{ url_for('plan_diseno_matriz') }}"
-           class="btn rounded-pill px-5 fw-bold plancapedit-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-      </div>
-
-      <!-- TARJETA PRINCIPAL -->
-      <div class="plancapedit-card">
-        <div class="plancapedit-card-body">
-
-          <form method="post" enctype="multipart/form-data">
-            <div class="row g-3">
-
-              <div class="col-12">
-                <div class="plancapedit-section-title">Información de la actividad</div>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Tema de la capacitación</label>
-                <input class="form-control"
-                       name="tema_capacitacion"
-                       value="{{ item.tema_capacitacion or '' }}"
-                       required>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label"># Horas</label>
-                <input type="number"
-                       class="form-control"
-                       name="horas"
-                       min="0"
-                       value="{{ item.horas or 0 }}">
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Descripción</label>
-                <textarea class="form-control"
-                          name="descripcion"
-                          rows="2">{{ item.descripcion or '' }}</textarea>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Dirigida a (área)</label>
-                <select class="form-select"
-                        name="dirigida_area"
-                        id="dirigida_area"
-                        required
-                        onchange="cargarDivisionesPlan()">
-                  <option value="">-- Seleccione --</option>
-                  <option value="Todas las áreas" {% if item.dirigida_area == 'Todas las áreas' %}selected{% endif %}>Todas las áreas</option>
-                  {% for a in areas %}
-                    <option value="{{ a }}" {% if item.dirigida_area == a %}selected{% endif %}>{{ a }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Dirigida a (división)</label>
-                <select class="form-select"
-                        name="dirigida_division"
-                        id="dirigida_division"
-                        required>
-                  <option value="">-- Seleccione un área primero --</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Fecha programada</label>
-                <input type="date"
-                       class="form-control"
-                       name="fecha_programada"
-                       value="{{ item.fecha_programada or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Fecha ejecución</label>
-                <input type="date"
-                       class="form-control"
-                       name="fecha_ejecucion"
-                       value="{{ item.fecha_ejecucion or '' }}">
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Responsable</label>
-                <input class="form-control"
-                       name="responsable"
-                       value="{{ item.responsable or '' }}">
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Metodología medición, evaluación y eficacia</label>
-                <textarea class="form-control"
-                          name="metodologia"
-                          rows="2">{{ item.metodologia or '' }}</textarea>
-              </div>
-
-              <div class="col-12">
-                <div class="plancapedit-section-title">Evidencias y observaciones</div>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Agregar nuevas evidencias PDF</label>
-                <input type="file"
-                       name="evidencias"
-                       class="form-control"
-                       accept="application/pdf"
-                       multiple>
-                <small class="text-muted">Solo PDF. Puedes adjuntar varios.</small>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Observaciones</label>
-                <textarea class="form-control"
-                          name="observaciones"
-                          rows="2">{{ item.observaciones or '' }}</textarea>
-              </div>
-
-            </div>
-
-            <div class="plancapedit-bottom-actions">
-              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
-                Guardar cambios
-              </button>
-
-              <a class="btn rounded-pill px-4 fw-bold plancapedit-cancel-btn"
-                 href="{{ url_for('plan_diseno_matriz') }}">
-                Cancelar
-              </a>
-            </div>
-          </form>
-
-          <hr class="my-4">
-
-          <div class="plancapedit-section-title">Evidencias PDF existentes</div>
-
-          <div class="table-responsive plancapedit-table-wrap">
-            <table class="table table-sm align-middle mb-0">
-              <thead class="plancapedit-table-head">
-                <tr>
-                  <th>Archivo</th>
-                  <th>Tamaño</th>
-                  <th style="width:22%">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for ev in item.evidencias %}
-                  <tr>
-                    <td class="text-break">{{ ev.original_name }}</td>
-                    <td>{{ (ev.size or 0) // 1024 }} KB</td>
-                    <td>
-                      <a class="btn btn-outline-primary btn-sm rounded-pill px-3"
-                           href="{{ url_for('plan_diseno_evidencia_view', evi_id=ev.id, next='plan_diseno_edit', reg_id=item.id) }}">
-                          Ver en navegador
-                      </a>
-
-                      <form method="post"
-                            action="{{ url_for('plan_diseno_evidencia_delete', evi_id=ev.id) }}"
-                            class="d-inline"
-                            onsubmit="return confirm('¿Eliminar esta evidencia?');">
-                        <button class="btn btn-outline-danger btn-sm rounded-pill px-3" type="submit">
-                          Eliminar
-                        </button>
-                      </form>
-                    </td>
-                  </tr>
-                {% else %}
-                  <tr>
-                    <td colspan="3" class="text-muted text-center">Sin evidencias PDF</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-
-        </div>
-      </div>
-    </div>
-
-    <style>
-    /* =========================
-       FONDO SGSI
-    ========================= */
-    body{
-      background-image:url('/static/img/ccsgsi.jpg');
-      background-size:cover;
-      background-position:center;
-      background-attachment:fixed;
-      background-repeat:no-repeat;
-    }
-
-    /* =========================
-       CONTENEDOR
-    ========================= */
-    .plancapedit-shell{
-      width:96%;
-      max-width:1500px;
-      margin:10px auto 24px auto;
-    }
-
-    /* =========================
-       HEADER SGSI MODERNO (🔥 CLAVE)
-    ========================= */
-    .plancapedit-header-card{
-      background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-      border-radius:18px;
-      padding:16px 24px;
-      min-height:94px;
-      display:flex;
-      align-items:center;
-      justify-content:flex-start;
-      box-shadow:0 12px 24px rgba(15,23,42,.25);
-      position:relative;
-      overflow:hidden;
-      margin-bottom:10px;
-    }
-
-    .plancapedit-header-card::before{
-      content:"";
-      position:absolute;
-      inset:0;
-      background:
-        radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-        repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-    }
-
-    .plancapedit-header-overlay{
-      width:100%;
-      display:flex;
-      align-items:center;
-      justify-content:flex-start;
-      text-align:left;
-      position:relative;
-      z-index:1;
-      background:transparent !important;
-      padding:0 !important;
-    }
-
-    .plancapedit-header-overlay::before{
-      content:"✏️";
-      width:54px;
-      height:54px;
-      min-width:54px;
-      border-radius:14px;
-      background:#ffffff;
-      color:#0b4a8f;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      font-size:1.4rem;
-      box-shadow:0 8px 18px rgba(0,0,0,.25);
-      margin-right:14px;
-    }
-
-    .plancapedit-header-text{
-      max-width:1100px;
-    }
-
-    .plancapedit-header-text::before{
-      content:"SGSI · Edición Plan Capacitación";
-      display:inline-block;
-      background:rgba(255,255,255,.18);
-      border-radius:999px;
-      padding:3px 10px;
-      font-size:.65rem;
-      font-weight:800;
-      margin-bottom:4px;
-      color:#fff;
-    }
-
-    .plancapedit-title{
-      color:#ffffff !important;
-      font-weight:950;
-      font-size:1.32rem;
-      line-height:1.1;
-      text-shadow:0 3px 10px rgba(0,0,0,.35);
-      margin:0 !important;
-    }
-
-    .plancapedit-subtitle{
-      color:rgba(255,255,255,.95);
-      font-size:.78rem;
-      margin-top:4px;
-    }
-
-    /* =========================
-       BOTONES
-    ========================= */
-    .plancapedit-header-actions{
-      display:flex;
-      justify-content:center;
-      gap:10px;
-      flex-wrap:wrap;
-      margin:10px 0 14px;
-    }
-
-    .plancapedit-header-actions .btn{
-      border-radius:10px !important;
-      font-weight:900;
-      box-shadow:0 8px 16px rgba(15,23,42,.15);
-    }
-
-    .plancapedit-back-btn{
-      background:#ffffff;
-      color:#0f172a;
-      border:1px solid #cfd8e3;
-    }
-
-    .plancapedit-back-btn:hover{
-      background:#edf5ff;
-      color:#0b65d8;
-    }
-
-    /* =========================
-       CARD
-    ========================= */
-    .plancapedit-card{
-      background:rgba(255,255,255,.96)!important;
-      border-radius:18px;
-      backdrop-filter:blur(8px);
-      box-shadow:0 12px 24px rgba(15,23,42,.18);
-      border:1px solid rgba(219,230,244,.9);
-      overflow:hidden;
-    }
-
-    .plancapedit-card-body{
-      padding:18px;
-    }
-
-    /* =========================
-       FORMULARIOS
-    ========================= */
-    .plancapedit-card .form-label{
-      font-weight:800;
-      font-size:.75rem;
-      text-transform:uppercase;
-      color:#0b4a8f;
-    }
-
-    .plancapedit-card .form-control,
-    .plancapedit-card .form-select{
-      border-radius:10px;
-      border:1px solid #dbe6f4;
-      min-height:40px;
-      font-size:.85rem;
-    }
-
-    .plancapedit-card .form-control:focus,
-    .plancapedit-card .form-select:focus{
-      border-color:#1d5fae;
-      box-shadow:0 0 0 0.2rem rgba(44,123,229,.15);
-    }
-
-    /* =========================
-       SECCIONES
-    ========================= */
-    .plancapedit-section-title{
-      font-weight:950;
-      font-size:.78rem;
-      color:#0b4a8f;
-      padding:10px 12px;
-      border-radius:12px;
-      background:#eef5ff;
-      border:1px solid #d9eaff;
-      margin-bottom:12px;
-    }
-
-    /* =========================
-       TABLA SGSI
-    ========================= */
-    .plancapedit-table-wrap{
-      border:1px solid #dbe6f4;
-      border-radius:14px;
-      overflow:hidden;
-    }
-
-    .plancapedit-table-head th{
-      background:#3f86d6 !important;
-      color:#fff !important;
-      font-weight:900;
-      font-size:.78rem;
-    }
-
-    .table-hover tbody tr:hover{
-      background:rgba(63,134,214,.08);
-    }
-
-    /* =========================
-       BOTONES INFERIORES
-    ========================= */
-    .plancapedit-bottom-actions{
-      display:flex;
-      justify-content:center;
-      gap:12px;
-      margin-top:26px;
-      flex-wrap:wrap;
-    }
-
-    .plancapedit-cancel-btn{
-      background:#ffffff;
-      color:#000;
-      border:1px solid #cfd8e3;
-    }
-
-    .plancapedit-cancel-btn:hover{
-      background:#edf5ff;
-    }
-
-    /* =========================
-       RESPONSIVE
-    ========================= */
-    @media (max-width:992px){
-      .plancapedit-shell{ width:98%; }
-
-      .plancapedit-title{ font-size:1.15rem; }
-
-      .plancapedit-card-body{ padding:8px 7px; }
-
-      .plancapedit-header-overlay{
-        flex-direction:column;
-        text-align:center;
-      }
-
-      .plancapedit-header-overlay::before{
-        margin:0 0 8px 0;
-      }
-    }
-    </style>
-
-    <script>
-      const divisionesPlanPorArea = {{ divisiones_por_area|tojson }};
-
-      function cargarDivisionesPlan(valorSeleccionado = null) {
-        const areaSel = document.getElementById('dirigida_area');
-        const divSel = document.getElementById('dirigida_division');
-        const area = (areaSel.value || '').trim();
-
-        divSel.innerHTML = '';
-
-        if (!area) {
-          divSel.innerHTML = '<option value="">-- Seleccione un área primero --</option>';
-          return;
-        }
-
-        let opciones = '<option value="">-- Seleccione --</option>';
-        opciones += '<option value="Todas las divisiones">Todas las divisiones</option>';
-
-        if (area !== 'Todas las áreas') {
-          const divisiones = divisionesPlanPorArea[area] || [];
-          for (const d of divisiones) {
-            opciones += `<option value="${d}">${d}</option>`;
-          }
-        }
-
-        divSel.innerHTML = opciones;
-
-        if (valorSeleccionado) {
-          divSel.value = valorSeleccionado;
-        }
-      }
-
-      window.addEventListener('DOMContentLoaded', function () {
-        cargarDivisionesPlan({{ (item.dirigida_division or '')|tojson }});
-      });
-    </script>
-    """
-    inner = render_template_string(
-        html,
-        item=item,
-        areas=areas,
-        divisiones_por_area=divisiones_por_area
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-# =========================
-# ELIMINAR — Plan de Concientización y Formación
-# =========================
-@app.route('/plan_diseno/delete/<int:id>', methods=['GET', 'POST'])
-@login_required
-def plan_diseno_delete(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede eliminar registros.", "danger")
-        return redirect(url_for('plan_diseno_matriz'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Plan de Concientización y Formación"):
-        flash("No tiene permiso para eliminar registros.", "danger")
-        return redirect(url_for('plan_diseno_matriz'))
-
-    if request.method == 'GET':
-        flash("Para eliminar un registro debes usar el botón Eliminar desde la matriz.", "warning")
-        return redirect(url_for('plan_diseno_matriz'))
-
-    item = PlanDisenoRegistro.query.get(id)
-
-    if not item:
-        flash("El registro no existe o ya fue eliminado.", "warning")
-        return redirect(url_for('plan_diseno_matriz'))
-
-    try:
-        db.session.delete(item)
-        db.session.commit()
-        flash("Plan de concientización eliminado correctamente.", "success")
-
-    except Exception as e:
-        db.session.rollback()
-        flash(f"No fue posible eliminar el plan de concientización: {str(e)}", "danger")
-
-    return redirect(url_for('plan_diseno_matriz'))
-
-@app.route('/plan_diseno/evidencia/<int:evi_id>/file')
-@login_required
-def plan_diseno_evidencia_file(evi_id):
-    evi = PlanDisenoEvidencia.query.get_or_404(evi_id)
-    fullpath = os.path.join(app.config['UPLOAD_PLAN_DISENO_DIR'], evi.filename)
-
-    if not os.path.isfile(fullpath):
-        abort(404)
-
-    return send_file(
-        fullpath,
-        mimetype=evi.mime or 'application/pdf',
-        as_attachment=False,
-        download_name=evi.original_name or evi.filename,
-        conditional=True
-    )
-
-@app.route('/plan_diseno/evidencia/<int:evi_id>/view')
-@login_required
-def plan_diseno_evidencia_view(evi_id):
-    evi = PlanDisenoEvidencia.query.get_or_404(evi_id)
-
-    path = os.path.join(app.config['UPLOAD_PLAN_DISENO_DIR'], evi.filename)
-    if not os.path.isfile(path):
-        abort(404)
-
-    ext = os.path.splitext(evi.filename or '')[1].lower()
-    is_pdf = ext == '.pdf'
-    is_office = ext in {'.doc', '.docx', '.xls', '.xlsx'}
-    is_image = ext in {'.png', '.jpg', '.jpeg', '.webp', '.gif'}
-
-    # =========================
-    # Botón volver
-    # =========================
-    next_ep = request.args.get('next')
-    reg_id = request.args.get('reg_id', type=int)
-
-    if next_ep == 'plan_diseno_detalle' and reg_id:
-        back_url = url_for('plan_diseno_detalle', id=reg_id)
-        back_label = '⬅ Volver al Detalle'
-    elif next_ep == 'plan_diseno_edit' and reg_id:
-        back_url = url_for('plan_diseno_edit', id=reg_id)
-        back_label = '⬅ Volver a Edición'
-    elif next_ep == 'plan_diseno_matriz':
-        back_url = url_for('plan_diseno_matriz')
-        back_label = '⬅ Volver a la Matriz'
-    elif next_ep == 'plan_diseno_menu':
-        back_url = url_for('plan_diseno_menu')
-        back_label = '⬅ Volver al Menú'
-    else:
-        back_url = request.referrer or url_for('plan_diseno_matriz')
-        back_label = '⬅ Volver'
-
-    # =========================
-    # Conversión Office -> PDF
-    # =========================
-    pdf_converted_name = None
-    if is_office:
-        try:
-            converted_dir = app.config.get(
-                'UPLOAD_PLAN_DISENO_CONVERTED_DIR',
-                os.path.join(app.root_path, 'static', 'converted_plan_diseno_evidencias')
-            )
-            os.makedirs(converted_dir, exist_ok=True)
-
-            pdf_converted_path = ensure_pdf_from_office(path, output_dir=converted_dir)
-
-            if pdf_converted_path and os.path.isfile(pdf_converted_path):
-                pdf_converted_name = os.path.basename(pdf_converted_path)
-        except Exception:
-            pdf_converted_name = None
-
-    inner_html = """
-    <div class="plancevi-shell">
-
-      <div class="plancevi-header-actions">
-        <a href="{{ back_url }}"
-           class="btn rounded-pill px-4 py-2 fw-bold plancevi-back-btn">
-          {{ back_label }}
-        </a>
-
-        <div class="plancevi-file-pill" title="{{ original_name }}">
-          📎 {{ original_name }}
-        </div>
-      </div>
-
-      <div class="plancevi-card">
-        <div class="plancevi-card-body">
-
-          {% if is_pdf %}
-            <div class="plancevi-pdf-container">
-              <iframe id="pdfFrame"
-                      src="{{ url_for('plan_diseno_evidencia_file', evi_id=evi_id) }}#zoom=page-width"
-                      title="Visor PDF"></iframe>
-            </div>
-
-          {% elif pdf_converted_name %}
-            <div class="plancevi-pdf-container">
-              <iframe id="pdfFrame"
-                      src="{{ url_for('plan_diseno_evidencia_convertido', filename=pdf_converted_name) }}#zoom=page-width"
-                      title="Visor PDF convertido"></iframe>
-            </div>
-
-            <div class="plancevi-extra-actions">
-              <a class="btn btn-outline-primary rounded-pill px-4"
-                 href="{{ url_for('plan_diseno_evidencia_file', evi_id=evi_id) }}">
-                Abrir archivo original
-              </a>
-            </div>
-
-          {% elif is_image %}
-            <div class="text-center p-3">
-              <img src="{{ url_for('plan_diseno_evidencia_file', evi_id=evi_id) }}"
-                   alt="{{ original_name }}"
-                   class="img-fluid rounded-4 shadow-sm"
-                   style="max-height: 78vh; object-fit: contain;">
-            </div>
-
-          {% elif is_office %}
-            <div class="alert alert-warning m-2 rounded-4">
-              No fue posible generar una vista previa interna del archivo Office.
-              Verifica que LibreOffice esté instalado en el servidor.
-            </div>
-
-            <div class="plancevi-extra-actions">
-              <a class="btn btn-outline-primary rounded-pill px-4"
-                 href="{{ url_for('plan_diseno_evidencia_file', evi_id=evi_id) }}">
-                Abrir / descargar archivo original
-              </a>
-            </div>
-
-          {% else %}
-            <div class="alert alert-info m-2 rounded-4">
-              Este tipo de archivo (<b>{{ ext }}</b>) no se puede previsualizar.
-              Puedes abrirlo o descargarlo.
-            </div>
-
-            <div class="plancevi-extra-actions">
-              <a class="btn btn-outline-primary rounded-pill px-4"
-                 href="{{ url_for('plan_diseno_evidencia_file', evi_id=evi_id) }}">
-                Abrir archivo
-              </a>
-            </div>
-          {% endif %}
-
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .plancevi-shell{
-        width:96%;
-        max-width:1500px;
-        margin:22px auto 30px auto;
-      }
-
-      .plancevi-header-actions{
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:12px;
-        flex-wrap:wrap;
-        margin-bottom:16px;
-      }
-
-      .plancevi-back-btn{
-        background:#ffffff;
-        color:#000000;
-        border:2px solid #ffffff;
-        box-shadow:0 4px 10px rgba(0,0,0,.10);
-      }
-
-      .plancevi-back-btn:hover{
-        background:#f3f4f6;
-        color:#000000;
-        border-color:#f3f4f6;
-      }
-
-      .plancevi-file-pill{
-        max-width:70%;
-        background:rgba(255,255,255,.92);
-        color:#101827;
-        border:1px solid rgba(0,0,0,.08);
-        border-radius:999px;
-        padding:10px 16px;
-        font-size:.90rem;
-        font-weight:700;
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-        box-shadow:0 4px 10px rgba(0,0,0,.10);
-      }
-
-      .plancevi-card{
-        background:rgba(255,255,255,.88)!important;
-        border-radius:18px;
-        backdrop-filter:blur(6px);
-        box-shadow:0 10px 24px rgba(0,0,0,.18);
-        overflow:hidden;
-      }
-
-      .plancevi-card-body{
-        padding:8px 7px;
-      }
-
-      .plancevi-pdf-container{
-        height:min(82vh,1000px);
-        min-height:600px;
-        width:100%;
-      }
-
-      .plancevi-pdf-container iframe{
-        width:100%;
-        height:100%;
-        border:1px solid #dee2e6;
-        border-radius:16px;
-        background:#fff;
-      }
-
-      .plancevi-extra-actions{
-        text-align:center;
-        margin-top:14px;
-      }
-
-      @media (max-width:992px){
-        .plancevi-shell{
-          width:98%;
-          margin:14px auto 24px auto;
-        }
-
-        .plancevi-header-actions{
-          flex-direction:column;
-          align-items:stretch;
-        }
-
-        .plancevi-file-pill{
-          max-width:100%;
-        }
-
-        .plancevi-card-body{
-          padding:10px;
-        }
-
-        .plancevi-pdf-container{
-          min-height:520px;
-        }
-      }
-    </style>
-
-    <script>
-      function setZoom(z) {
-        var f = document.getElementById('pdfFrame');
-        if (!f) return;
-        var base = f.src.split('#')[0];
-        f.src = base + '#zoom=' + encodeURIComponent(z);
-      }
-    </script>
-    """
-
-    return render_template_string(
-        BASE,
-        content=Markup(render_template_string(
-            inner_html,
-            evi_id=evi_id,
-            original_name=evi.original_name or evi.filename,
-            ext=ext,
-            is_pdf=is_pdf,
-            is_office=is_office,
-            is_image=is_image,
-            pdf_converted_name=pdf_converted_name,
-            back_url=back_url,
-            back_label=back_label
-        ))
-    )
-
-@app.route('/plan_diseno/evidencia/convertido/<path:filename>')
-@login_required
-def plan_diseno_evidencia_convertido(filename):
-    converted_dir = app.config.get(
-        'UPLOAD_PLAN_DISENO_CONVERTED_DIR',
-        os.path.join(app.root_path, 'static', 'converted_plan_diseno_evidencias')
-    )
-
-    full_path = safe_join(converted_dir, filename)
-    if not full_path or not os.path.isfile(full_path):
-        abort(404)
-
-    return send_file(
-        full_path,
-        mimetype='application/pdf',
-        as_attachment=False,
-        download_name=filename,
-        conditional=True
-    )
-
-@app.route('/plan_diseno/evidencia/<int:evi_id>/delete', methods=['POST'])
-@login_required
-def plan_diseno_evidencia_delete(evi_id):
-    evi = PlanDisenoEvidencia.query.get_or_404(evi_id)
-    path = os.path.join(app.config['UPLOAD_PLAN_DISENO_DIR'], evi.filename)
-
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-    except Exception:
-        pass
-
-    plan_id = evi.registro.id if evi.registro else None
-
-    db.session.delete(evi)
-    db.session.commit()
-    flash("Evidencia eliminada.", "success")
-
-    if plan_id:
-        return redirect(url_for('plan_diseno_edit', id=plan_id))
-    return redirect(url_for('plan_diseno_matriz'))
-
-
-# =================================================================================================================================================
-#                                       Fin Módulo Plan de Concientización y Formación INGRESO DIRECTO A LA MATRIZ
-# =================================================================================================================================================
-
-
-# =================================================================================================================================================
-#                                    Módulo Seguimiento Plan de Concientización y Formación INGRESO DIRECTO A LA MATRIZ
-# =================================================================================================================================================
-
-@app.route('/plan_cf/menu')
-@login_required
-def plan_cf_menu():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Seguimiento Plan de Concientización y Formación"):
-        flash("No tiene permiso para acceder al Seguimiento Plan de Concientización y Formación.", "danger")
-        return redirect(url_for('menu'))
-
-    return redirect(url_for('plan_cf_matriz'))
-
-# =========================
-# Obtener áreas y divisiones
-# =========================
-def obtener_areas_y_divisiones():
-    """
-    Devuelve:
-      - areas: lista de áreas únicas
-      - divisiones_por_area: dict { nombre_area: [div1, div2, ...] }
-    """
-    areas_db = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
-
-    areas = []
-    divisiones_por_area = {}
-
-    for a in areas_db:
-        nombre_area = (a.area or '').strip()
-        if not nombre_area:
-            continue
-
-        areas.append(nombre_area)
-        divisiones_por_area[nombre_area] = []
-
-        for d in (a.divisiones or []):
-            nombre_div = (d.nombre_division or '').strip()
-            if nombre_div and nombre_div not in divisiones_por_area[nombre_area]:
-                divisiones_por_area[nombre_area].append(nombre_div)
-
-        divisiones_por_area[nombre_area].sort(key=lambda s: s.lower())
-
-    areas = sorted(set(areas), key=lambda s: s.lower())
-    return areas, divisiones_por_area
-
-
-# =========================
-# Agregar Registros Seguimiento
-# =========================
-@app.route('/plan_cf/new', methods=['GET','POST'])
-@login_required
-def plan_cf_new():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede agregar registros de seguimiento.", "danger")
-        return redirect(url_for('plan_cf_matriz'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Seguimiento Plan de Concientización y Formación"):
-        flash("No tiene permiso para agregar registros de seguimiento.", "danger")
-        return redirect(url_for('plan_cf_matriz'))
-
-    areas, divisiones_por_area = obtener_areas_y_divisiones()
-
-    if request.method == 'POST':
-        it = PlanCFRegistro(
-            total_empleados_contratados=request.form.get('total_empleados_contratados', type=int) or 0,
-            tipo_capacitacion=request.form.get('tipo_capacitacion') or '',
-            nombre_capacitacion=(request.form.get('nombre_capacitacion') or '').strip(),
-            objetivo_capacitacion=(request.form.get('objetivo_capacitacion') or '').strip(),
-            temario=(request.form.get('temario') or '').strip(),
-            fecha_programada=request.form.get('fecha_programada') or '',
-            fecha_realizacion=request.form.get('fecha_realizacion') or '',
-            cumplimiento_pct=request.form.get('cumplimiento_pct', type=int) or 0,
-            area_participantes=request.form.get('area_participantes') or '',
-            division_participantes=request.form.get('division_participantes') or '',
-            competencia_entrenador=request.form.get('competencia_entrenador') or 'interno',
-            quien_realizo=(request.form.get('quien_realizo') or '').strip(),
-            horas_duracion=request.form.get('horas_duracion', type=int) or 0,
-            indicador_realizacion=request.form.get('indicador_realizacion', type=int) or 0,
-            num_asistentes=request.form.get('num_asistentes', type=int) or 0,
-            num_programados=request.form.get('num_programados', type=int) or 0,
-            num_evaluados=request.form.get('num_evaluados', type=int) or 0,
-            num_eficaces=request.form.get('num_eficaces', type=int) or 0,
-        )
-
-        it.recalcular_indicadores()
-
-        db.session.add(it)
-        db.session.commit()
-        flash("Registro agregado.", "success")
-        return redirect(url_for('plan_cf_matriz'))
-
-    html = """
-    <div class="plancf-shell">
-
-      <div class="plancf-header-card">
-        <div class="plancf-header-overlay">
-          <div class="plancf-header-text">
-            <h3 class="plancf-title m-0">Agregar Seguimiento de Concientización</h3>
-            <div class="plancf-subtitle">
-              Registro de seguimiento de concientización y formación, incluyendo cobertura, eficacia, participantes, cumplimiento del programa y métricas automáticas
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="plancf-header-actions">
-        <a href="{{ url_for('plan_cf_matriz') }}"
-           class="btn rounded-pill px-5 fw-bold plancf-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-      </div>
-
-      <div class="plancf-card">
-        <div class="plancf-card-body">
-          <form method="post" oninput="autocalc()">
-            <div class="row g-3">
-
-              <div class="col-12">
-                <div class="plancf-section-title">Información general</div>
-              </div>
-
-              <div class="col-md-2">
-                <label class="form-label">Total de empleados contratados</label>
-                <input type="number" class="form-control" name="total_empleados_contratados" min="0" value="0" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Tipo de capacitación</label>
-                <select class="form-select" name="tipo_capacitacion" required>
-                  <option value="">-- Seleccione --</option>
-                  <option value="Inducción">Inducción</option>
-                  <option value="Reinducción">Reinducción</option>
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Nombre de la capacitación</label>
-                <input class="form-control" name="nombre_capacitacion" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Fecha Programada</label>
-                <input type="date" class="form-control" name="fecha_programada" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Fecha de realización</label>
-                <input type="date" class="form-control" name="fecha_realizacion">
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Objetivo de la capacitación</label>
-                <textarea class="form-control" name="objetivo_capacitacion" rows="2"></textarea>
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Temario</label>
-                <textarea class="form-control" name="temario" rows="2"></textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">% Cumplimiento Programa</label>
-                <input type="number" class="form-control" name="cumplimiento_pct" min="0" max="100" value="0">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Área de colaboradores participantes</label>
-                <select class="form-select"
-                        name="area_participantes"
-                        id="area_participantes"
-                        required
-                        onchange="cargarDivisiones()">
-                  <option value="">-- Seleccione --</option>
-                  <option value="Todas las áreas">Todas las áreas</option>
-                  {% for a in areas %}
-                    <option value="{{ a }}">{{ a }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">División de colaboradores participantes</label>
-                <select class="form-select"
-                        name="division_participantes"
-                        id="division_participantes"
-                        required>
-                  <option value="">-- Seleccione un área primero --</option>
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Competencia del entrenador</label>
-                <select class="form-select" name="competencia_entrenador">
-                  <option value="interno">interno</option>
-                  <option value="externo">externo</option>
-                </select>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Quién realizó la Capacitación y/o Entrenamiento</label>
-                <input class="form-control" name="quien_realizo">
-              </div>
-
-              <div class="col-md-2">
-                <label class="form-label">Horas de duración</label>
-                <input type="number" class="form-control" name="horas_duracion" min="0" value="0">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Indicador de realización (100/0)</label>
-                <select class="form-select" name="indicador_realizacion">
-                  <option value="100">100%</option>
-                  <option value="0">0%</option>
-                </select>
-              </div>
-
-              <div class="col-12">
-                <div class="plancf-section-title">Métricas automáticas</div>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Número asistentes</label>
-                <input type="number" class="form-control" name="num_asistentes" id="asist" min="0" value="0">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Número programados</label>
-                <input type="number" class="form-control" name="num_programados" id="prog" min="0" value="0">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">% Cobertura (auto)</label>
-                <input class="form-control plancf-readonly" id="cov" value="0" readonly>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Número evaluados</label>
-                <input type="number" class="form-control" name="num_evaluados" id="eval" min="0" value="0">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Número evaluaciones eficaces</label>
-                <input type="number" class="form-control" name="num_eficaces" id="efi" min="0" value="0">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">% de evaluaciones eficaces (auto)</label>
-                <input class="form-control plancf-readonly" id="efi_pct" value="0" readonly>
-              </div>
-
-            </div>
-
-            <div class="plancf-bottom-actions">
-              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
-                Guardar
-              </button>
-
-              <a class="btn rounded-pill px-4 fw-bold plancf-cancel-btn"
-                 href="{{ url_for('plan_cf_matriz') }}">
-                Cancelar
-              </a>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .plancf-shell{
-        width:96%;
-        max-width:1500px;
-        margin:10px auto 24px auto;
-      }
-
-      .plancf-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .plancf-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }
-
-      .plancf-header-overlay{
-        width:100%;
-        height:auto;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }
-
-      .plancf-header-overlay::before{
-        content:"✅";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .plancf-header-text{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }
-
-      .plancf-header-text::before{
-        content:"SGSI · Cumplimiento Final";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }
-
-      .plancf-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .plancf-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }
-
-      .plancf-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .plancf-header-actions .btn,
-      .plancf-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .plancf-back-btn,
-      .plancf-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .plancf-back-btn:hover,
-      .plancf-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .plancf-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .plancf-card-body{
-        padding:18px;
-      }
-
-      .plancf-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .plancf-card .form-control,
-      .plancf-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .plancf-card textarea.form-control{
-        min-height:70px;
-        resize:vertical;
-      }
-
-      .plancf-card .form-control:focus,
-      .plancf-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#ffffff;
-      }
-
-      .plancf-section-title{
-        font-weight:950;
-        font-size:.78rem;
-        color:#0b4a8f;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin:10px 0 12px;
-      }
-
-      .plancf-readonly{
-        background:#eef5ff !important;
-        color:#0b4a8f !important;
-        border:1px solid #d9eaff !important;
-        font-weight:900;
-      }
-
-      .plancf-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:22px;
-        flex-wrap:wrap;
-        width:100%;
-      }
-
-      .plancf-card .btn{
-        font-weight:900;
-      }
-
-      @media (max-width:992px){
-        .plancf-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .plancf-header-card{
-          min-height:88px;
-        }
-
-        .plancf-title{
-          font-size:1.20rem;
-        }
-
-        .plancf-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .plancf-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .plancf-header-overlay::before{
-          margin:0;
-        }
-
-        .plancf-header-text::before{
-          margin-left:auto;
-          margin-right:auto;
-        }
-
-        .plancf-header-actions .btn,
-        .plancf-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-
-    <script>
-      const divisionesPorArea = {{ divisiones_por_area|tojson }};
-
-      function cargarDivisiones(valorSeleccionado = null) {
-        const areaSel = document.getElementById('area_participantes');
-        const divSel = document.getElementById('division_participantes');
-        const area = (areaSel.value || '').trim();
-
-        divSel.innerHTML = '';
-
-        if (!area) {
-          divSel.innerHTML = '<option value="">-- Seleccione un área primero --</option>';
-          return;
-        }
-
-        let opciones = '<option value="">-- Seleccione --</option>';
-        opciones += '<option value="Todas las divisiones">Todas las divisiones</option>';
-
-        if (area !== 'Todas las áreas') {
-          const divisiones = divisionesPorArea[area] || [];
-          for (const d of divisiones) {
-            opciones += `<option value="${d}">${d}</option>`;
-          }
-        }
-
-        divSel.innerHTML = opciones;
-
-        if (valorSeleccionado) {
-          divSel.value = valorSeleccionado;
-        }
-      }
-
-      function autocalc() {
-        const asist = parseInt(document.getElementById('asist').value || '0');
-        const prog  = parseInt(document.getElementById('prog').value  || '0');
-        const evals = parseInt(document.getElementById('eval').value  || '0');
-        const efi   = parseInt(document.getElementById('efi').value   || '0');
-
-        const cov = (prog > 0) ? Math.round(asist * 100 / prog) : 0;
-        const efp = (evals > 0) ? Math.round(efi * 100 / evals) : 0;
-
-        document.getElementById('cov').value = cov;
-        document.getElementById('efi_pct').value = efp;
-      }
-
-      window.addEventListener('DOMContentLoaded', function () {
-        autocalc();
-        cargarDivisiones();
-      });
-    </script>
-    """
-
-    inner = render_template_string(
-        html,
-        areas=areas,
-        divisiones_por_area=divisiones_por_area
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-def attribute(obj, name):
-    """Devuelve obj.<name> o None si no existe."""
-    return getattr(obj, name, None)
-
-# =========================
-# Matriz Seguimiento
-# =========================
-
-@app.route('/plan_cf', methods=['GET'])
-@login_required
-def plan_cf_matriz():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        read_only = True
-    else:
-        if user.role != 'admin' and not verificar_permiso(user, "Seguimiento Plan de Concientización y Formación"):
-            flash("No tiene permiso para ver la Matriz de Seguimiento.", "danger")
-            return redirect(url_for('capacitacion_menu'))
-        read_only = False
-
-    items = PlanCFRegistro.query.order_by(PlanCFRegistro.id.desc()).all()
-
-    rows_html = []
-
-    for it in items:
-        tipo = escape(it.tipo_capacitacion or '—')
-        nombre = escape(it.nombre_capacitacion or '—')
-        fecha_programada = escape(it.fecha_programada or '—')
-        quien = escape(it.quien_realizo or '—')
-        asistentes = it.num_asistentes if it.num_asistentes is not None else 0
-        cumplimiento = it.cumplimiento_pct if it.cumplimiento_pct is not None else 0
-        cobertura = it.cobertura_pct if hasattr(it, 'cobertura_pct') and it.cobertura_pct is not None else 0
-        eficaces = it.eficaces_pct if hasattr(it, 'eficaces_pct') and it.eficaces_pct is not None else 0
-
-        acciones = [
-            f'''
-            <a href="{url_for('plan_cf_detalle', id=it.id)}"
-               class="btn btn-info btn-sm rounded-pill plancfmat-btn-action text-white fw-bold">
-              Ver detalle
-            </a>
-            '''
-        ]
-
-        if not read_only:
-            try:
-                acciones.append(
-                    f'''
-                    <a href="{url_for('plan_cf_edit', id=it.id)}"
-                       class="btn btn-warning btn-sm rounded-pill plancfmat-btn-action fw-bold">
-                      Editar
-                    </a>
-                    '''
-                )
-            except:
-                pass
-
-            try:
-                acciones.append(
-                    f'''
-                    <a href="{url_for('plan_cf_delete', id=it.id)}"
-                       class="btn btn-danger btn-sm rounded-pill plancfmat-btn-action fw-bold"
-                       onclick="return confirm('¿Eliminar este registro?');">
-                      Eliminar
-                    </a>
-                    '''
-                )
-            except:
-                pass
-        else:
-            acciones.append('<span class="badge bg-secondary">Solo lectura</span>')
-
-        rows_html.append(f"""
-        <tr>
-          <td>{tipo}</td>
-          <td>{nombre}</td>
-          <td>{fecha_programada}</td>
-          <td>{quien}</td>
-          <td class="text-center">{asistentes}</td>
-          <td class="text-center">{cumplimiento}%</td>
-          <td class="text-center">{cobertura}%</td>
-          <td class="text-center">{eficaces}%</td>
-          <td class="text-center plancfmat-col-acciones">
-            <div class="plancfmat-actions-wrap">
-              {''.join(acciones)}
-            </div>
-          </td>
-        </tr>
-        """)
-
-    if not rows_html:
-        rows_html.append("""
-        <tr>
-          <td colspan="9" class="text-center text-muted py-4">Sin registros</td>
-        </tr>
-        """)
-
-    agregar_top = ""
-    agregar_header = ""
-    if not read_only:
-        agregar_top = f'''
-        <a href="{url_for('plan_cf_new')}"
-           class="btn btn-primary rounded-pill px-5 fw-bold">
-          ➕ Agregar registro
-        </a>
-        '''
-        agregar_header = f'''
-        <a href="{url_for('plan_cf_new')}"
-           class="btn btn-primary rounded-pill fw-bold">
-          ➕ Agregar registro
-        </a>
-        '''
-
-    html = f"""
-    <div class="plancfmat-shell">
-
-      <div class="plancfmat-header-card">
-        <div class="plancfmat-header-overlay">
-          <div class="plancfmat-header-text">
-            <h3 class="plancfmat-title m-0">Matriz Seguimiento Plan de Concientización y Formación</h3>
-            <div class="plancfmat-subtitle">
-              Seguimiento del programa de concientización y formación, incluyendo cobertura, eficacia, cumplimiento, participantes y métricas del proceso
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="plancfmat-header-actions">
-       
-
-        {agregar_top}
-      </div>
-
-      <div class="plancfmat-card">
-
-        <div class="plancfmat-topbar">
-          <div>
-            <h5 class="plancfmat-top-title mb-1">Resumen del seguimiento</h5>
-            <div class="plancfmat-top-note">
-              La matriz muestra los campos principales. Para consultar toda la información usa el botón <strong>Ver detalle</strong>.
-            </div>
-          </div>
-          <div class="d-flex align-items-center gap-2 flex-wrap">
-            <div class="plancfmat-counter-badge">
-              Total registros: {len(items)}
-            </div>
-
-          </div>
-        </div>
-
-        <div class="plancfmat-card-body">
-          <div class="table-responsive plancfmat-table-wrap">
-            <table class="table table-bordered table-hover align-middle mb-0 plancfmat-table">
-
-              <thead class="text-center">
-                <tr class="plancfmat-group-row">
-                  <th>Tipo</th>
-                  <th>Nombre de la capacitación</th>
-                  <th>Fecha programada</th>
-                  <th>Quién realizó</th>
-                  <th>Asistentes</th>
-                  <th>% Cumplimiento</th>
-                  <th>% Cobertura</th>
-                  <th>% Eficaces</th>
-                  <th class="plancfmat-col-acciones">Acciones</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {''.join(rows_html)}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-      </div>
-    </div>
-
-    <style>
-      body{{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .plancfmat-shell{{
-        width:96%;
-        max-width:1650px;
-        margin:10px auto 24px auto;
-      }}
-
-      .plancfmat-header-card{{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }}
-
-      .plancfmat-header-card::before{{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }}
-
-      .plancfmat-header-overlay{{
-        width:100%;
-        height:auto;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }}
-
-      .plancfmat-header-overlay::before{{
-        content:"✅";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }}
-
-      .plancfmat-header-text{{
-        max-width:1200px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }}
-
-      .plancfmat-header-text::before{{
-        content:"SGSI · Matriz de Cumplimiento Final";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }}
-
-      .plancfmat-title{{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }}
-
-      .plancfmat-subtitle{{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }}
-
-      .plancfmat-header-actions{{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }}
-
-      .plancfmat-header-actions .btn{{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }}
-
-      .plancfmat-back-btn{{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }}
-
-      .plancfmat-back-btn:hover{{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }}
-
-      .plancfmat-card{{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }}
-
-      .plancfmat-topbar{{
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:14px;
-        padding:16px 16px 0 16px;
-        flex-wrap:wrap;
-      }}
-
-      .plancfmat-top-title{{
-        color:#0f172a;
-        font-weight:950;
-        font-size:.92rem;
-      }}
-
-      .plancfmat-top-note{{
-        color:#475569;
-        font-size:.78rem;
-      }}
-
-      .plancfmat-counter-badge{{
-        background:linear-gradient(135deg,#0f172a,#1e3a8a);
-        color:#fff;
-        font-weight:900;
-        border-radius:999px;
-        padding:8px 14px;
-        box-shadow:0 8px 18px rgba(0,0,0,.15);
-        font-size:.78rem;
-      }}
-
-      .plancfmat-card-body{{
-        padding:14px 16px 16px 16px;
-      }}
-
-      .plancfmat-table-wrap{{
-        max-height:72vh;
-        overflow-y:auto;
-        overflow-x:auto;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:#ffffff;
-      }}
-
-      .plancfmat-table{{
-        min-width:1280px;
-        table-layout:fixed;
-        margin-bottom:0;
-      }}
-
-      .plancfmat-table thead th{{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#ffffff !important;
-        font-weight:900;
-        text-align:center;
-        vertical-align:middle;
-        border-color:rgba(0,0,0,.08) !important;
-        font-size:.78rem;
-        padding:9px 8px;
-        white-space:normal;
-      }}
-
-      .plancfmat-table th,
-      .plancfmat-table td{{
-        vertical-align:top;
-        font-size:.78rem;
-        padding:9px 8px;
-        white-space:normal;
-        word-break:break-word;
-        overflow-wrap:anywhere;
-      }}
-
-      .plancfmat-table td{{
-        border-bottom:1px solid #e5edf7;
-        color:#101827;
-      }}
-
-      .plancfmat-table tbody tr:nth-child(even){{
-        background:#f8fbff;
-      }}
-
-      .plancfmat-table tbody tr:hover{{
-        background:#eef6ff;
-      }}
-
-      .plancfmat-col-acciones{{
-        width:190px !important;
-        min-width:190px !important;
-        text-align:center;
-        vertical-align:middle !important;
-      }}
-
-      .plancfmat-actions-wrap{{
-        display:flex;
-        flex-direction:column;
-        gap:6px;
-        align-items:center;
-        justify-content:center;
-      }}
-
-      .plancfmat-btn-action,
-      .plancfmat-actions-wrap .badge{{
-        min-width:110px;
-        max-width:125px;
-        padding:4px 12px !important;
-        font-size:.64rem !important;
-        line-height:1.2;
-        text-align:center;
-        white-space:nowrap;
-        border-radius:999px !important;
-        font-weight:900;
-      }}
-
-      .btn{{
-        border-radius:10px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
-
-      @media (max-width:992px){{
-        .plancfmat-shell{{
-          width:98%;
-          margin:8px auto 22px auto;
-        }}
-
-        .plancfmat-header-card{{
-          min-height:88px;
-        }}
-
-        .plancfmat-title{{
-          font-size:1.20rem;
-        }}
-
-        .plancfmat-card-body{{
-          padding:12px;
-        }}
-
-        .plancfmat-topbar{{
-          padding:12px 12px 0 12px;
-        }}
-
-        .plancfmat-col-acciones{{
-          width:170px !important;
-          min-width:170px !important;
-        }}
-      }}
-
-      @media (max-width:768px){{
-        .plancfmat-header-overlay{{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }}
-
-        .plancfmat-header-overlay::before{{
-          margin:0;
-        }}
-
-        .plancfmat-header-text::before{{
-          margin-left:auto;
-          margin-right:auto;
-        }}
-
-        .plancfmat-header-actions .btn{{
-          width:100%;
-        }}
-      }}
-    </style>
-    """
-
-    return render_template_string(BASE, content=Markup(html))
-
-# =========================
-# Detalle Seguimiento
-# =========================
-@app.route('/plan_cf/detalle/<int:id>')
-@login_required
-def plan_cf_detalle(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        read_only = True
-    else:
-        if user.role != 'admin' and not verificar_permiso(user, "Seguimiento del Plan de Formación"):
-            flash("No tiene permiso para ver el detalle del seguimiento.", "danger")
-            return redirect(url_for('plan_cf_menu'))
-        read_only = False
-
-    it = PlanCFRegistro.query.get_or_404(id)
-    label_by_key = dict(PLANCF_COLS)
-
-    compact_candidates = [
-        'tema',
-        'actividad',
-        'fecha',
-        'responsable',
-        'horas_duracion',
-        'num_asistentes',
-        'num_programados',
-        'num_evaluados',
-        'num_eficaces',
-        'cumplimiento_pct',
-        'cobertura_pct',
-        'eficaces_pct',
-        'indicador_realizacion'
-    ]
-
-    long_candidates = [
-        'objetivo_capacitacion',
-        'temario',
-        'observaciones'
-    ]
-
-    compact_keys = [k for k in compact_candidates if hasattr(it, k)]
-    long_keys = [k for k in long_candidates if hasattr(it, k)]
-
-    used = set(compact_keys + long_keys)
-    extra_keys = [k for k, _ in PLANCF_COLS if hasattr(it, k) and k not in used]
-
-    percent_keys = {"cumplimiento_pct", "cobertura_pct", "eficaces_pct", "indicador_realizacion"}
-
-    html = """
-    <div class="plancfdet-shell">
-
-      <div class="plancfdet-header-card">
-        <div class="plancfdet-header-overlay">
-          <div class="plancfdet-header-text">
-            <h3 class="plancfdet-title m-0">Detalle del Seguimiento del Plan de Concientización y Formación</h3>
-            <div class="plancfdet-subtitle">
-              Consulta completa del registro en modo solo lectura
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="plancfdet-header-actions">
-        <a href="{{ url_for('plan_cf_matriz') }}"
-           class="btn rounded-pill px-4 fw-bold plancfdet-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-
-        {% if not read_only %}
-          <a href="{{ url_for('plan_cf_edit', id=it.id) }}"
-             class="btn btn-warning rounded-pill px-4 fw-bold">
-            Editar registro
-          </a>
-        {% endif %}
-      </div>
-
-      <div class="plancfdet-card">
-        <div class="plancfdet-card-body">
-
-          {% if compact_keys %}
-          <div class="plancfdet-section">
-            <div class="plancfdet-section-title">Información general</div>
-            <div class="row g-3">
-              {% for key in compact_keys %}
-                <div class="col-md-3">
-                  <div class="plancfdet-field plancfdet-field-compact">
-                    <div class="plancfdet-label">{{ labels.get(key, key) }}</div>
-                    <div class="plancfdet-value plancfdet-value-compact">
-                      {% set val = it|attr(key) %}
-                      {% if key in percent_keys %}
-                        {{ val if val is not none else 0 }}%
-                      {% else %}
-                        {{ val if val is not none and val != '' else '—' }}
-                      {% endif %}
-                    </div>
-                  </div>
-                </div>
-              {% endfor %}
-            </div>
-          </div>
-          {% endif %}
-
-          {% if extra_keys %}
-          <div class="plancfdet-section">
-            <div class="plancfdet-section-title">Datos complementarios</div>
-            <div class="row g-3">
-              {% for key in extra_keys %}
-                <div class="col-md-6">
-                  <div class="plancfdet-field">
-                    <div class="plancfdet-label">{{ labels.get(key, key) }}</div>
-                    <div class="plancfdet-value">
-                      {% set val = it|attr(key) %}
-                      {% if key in percent_keys %}
-                        {{ val if val is not none else 0 }}%
-                      {% else %}
-                        {{ val if val is not none and val != '' else '—' }}
-                      {% endif %}
-                    </div>
-                  </div>
-                </div>
-              {% endfor %}
-            </div>
-          </div>
-          {% endif %}
-
-          {% if long_keys %}
-          <div class="plancfdet-section">
-            <div class="plancfdet-section-title">Contenido y observaciones</div>
-            <div class="row g-3">
-              {% for key in long_keys %}
-                <div class="col-md-12">
-                  <div class="plancfdet-field">
-                    <div class="plancfdet-label">{{ labels.get(key, key) }}</div>
-                    <div class="plancfdet-value {% if loop.first %}plancfdet-value-lg{% endif %}">
-                      {{ it|attr(key) if it|attr(key) not in [None, ''] else '—' }}
-                    </div>
-                  </div>
-                </div>
-              {% endfor %}
-            </div>
-          </div>
-          {% endif %}
-
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .plancfdet-shell{
-        width:96%;
-        max-width:1250px;
-        margin:10px auto 24px auto;
-      }
-
-      /* =========================
-         HEADER SGSI MODERNO (UNIFICADO)
-      ========================= */
-      .plancfdet-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .plancfdet-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .plancfdet-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-      }
-
-      .plancfdet-header-overlay::before{
-        content:"🔎";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .plancfdet-header-text{
-        max-width:1100px;
-      }
-
-      .plancfdet-header-text::before{
-        content:"SGSI · Cumplimiento Final";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .plancfdet-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .plancfdet-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      /* =========================
-         BOTONES SUPERIORES
-      ========================= */
-      .plancfdet-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .plancfdet-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .plancfdet-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .plancfdet-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      /* =========================
-         CARD PRINCIPAL (SGSI)
-      ========================= */
-      .plancfdet-card{
-        background:rgba(255,255,255,.96);
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .plancfdet-card-body{
-        padding:18px;
-      }
-
-      /* =========================
-         SECCIONES
-      ========================= */
-      .plancfdet-section{
-        margin-bottom:18px;
-      }
-
-      .plancfdet-section-title{
-        font-weight:950;
-        font-size:.78rem;
-        color:#0b4a8f;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin-bottom:12px;
-      }
-
-      /* =========================
-         CAMPOS
-      ========================= */
-      .plancfdet-field{
-        background:#f8fafc;
-        border:1px solid #dbe5f0;
-        border-radius:14px;
-        padding:8px 7px;
-      }
-
-      .plancfdet-label{
-        font-size:.75rem;
-        font-weight:900;
-        color:#2563eb;
-        text-transform:uppercase;
-        margin-bottom:6px;
-      }
-
-      .plancfdet-value{
-        color:#0b1220;
-        font-size:.90rem;
-        word-break:break-word;
       }
 
       /* =========================
          RESPONSIVE
       ========================= */
       @media (max-width:992px){
-        .plancfdet-shell{
+        .vulnadd-shell{
           width:98%;
           margin:8px auto 22px auto;
         }
 
-        .plancfdet-title{
-          font-size:1.20rem;
-        }
-
-        .plancfdet-card-body{
-          padding:8px 7px;
-        }
-      }
-    </style>
-    """
-
-    inner = render_template_string(
-        html,
-        it=it,
-        read_only=read_only,
-        compact_keys=compact_keys,
-        extra_keys=extra_keys,
-        long_keys=long_keys,
-        labels=label_by_key,
-        percent_keys=percent_keys
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-# =========================
-# Editar seguimiento
-# =========================
-
-@app.route('/plan_cf/edit/<int:id>', methods=['GET','POST'])
-@login_required
-def plan_cf_edit(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor' or (
-        user.role != 'admin' and not verificar_permiso(user, "Seguimiento del Plan de Formación")
-    ):
-        flash("No tiene permiso para editar registros de seguimiento.", "danger")
-        return redirect(url_for('plan_cf_matriz'))
-    
-    item = PlanCFRegistro.query.get_or_404(id)
-    areas, divisiones_por_area = obtener_areas_y_divisiones()
-
-    if request.method == 'POST':
-        item.nombre_capacitacion   = (request.form.get('nombre_capacitacion') or '').strip()
-        item.objetivo_capacitacion = (request.form.get('objetivo_capacitacion') or '').strip()
-        item.temario               = (request.form.get('temario') or '').strip()
-        item.fecha_programada      = request.form.get('fecha_programada') or ''
-        item.fecha_realizacion     = request.form.get('fecha_realizacion') or ''
-        item.cumplimiento_pct      = request.form.get('cumplimiento_pct', type=int) or 0
-        item.area_participantes     = request.form.get('area_participantes') or ''
-        item.division_participantes = request.form.get('division_participantes') or ''
-        item.competencia_entrenador= request.form.get('competencia_entrenador') or 'interno'
-        item.quien_realizo         = (request.form.get('quien_realizo') or '').strip()
-        item.horas_duracion        = request.form.get('horas_duracion', type=int) or 0
-        item.indicador_realizacion = request.form.get('indicador_realizacion', type=int) or 0
-        item.num_asistentes        = request.form.get('num_asistentes', type=int) or 0
-        item.num_programados       = request.form.get('num_programados', type=int) or 0
-        item.num_evaluados         = request.form.get('num_evaluados', type=int) or 0
-        item.num_eficaces          = request.form.get('num_eficaces', type=int) or 0
-        tipo_multi                 = request.form.getlist('tipo_capacitacion')
-        item.total_empleados_contratados = request.form.get('total_empleados_contratados', type=int) or 0
-        item.tipo_capacitacion     = request.form.get('tipo_capacitacion') or ''
-        item.recalcular_indicadores()
-        db.session.commit()
-        flash("Cambios guardados.", "success")
-        return redirect(url_for('plan_cf_matriz'))
-
-    html = """
-    <div class="plancfedit-shell">
-
-      <!-- CABECERA -->
-      <div class="plancfedit-header-card">
-        <div class="plancfedit-header-overlay">
-          <div class="plancfedit-header-text">
-            <h3 class="plancfedit-title m-0">Editar registro — Plan de Concientización y Formación</h3>
-            <div class="plancfedit-subtitle">
-              Actualización del seguimiento de actividades de concientización y formación, incluyendo participantes, cobertura, eficacia y cumplimiento del programa
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOTÓN VOLVER -->
-      <div class="plancfedit-header-actions">
-        <a href="{{ url_for('plan_cf_matriz') }}"
-           class="btn rounded-pill px-5 fw-bold plancfedit-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-      </div>
-
-      <!-- TARJETA -->
-      <div class="plancfedit-card">
-        <div class="plancfedit-card-body">
-          <form method="post" oninput="autocalc()">
-            <div class="row g-3">
-
-              <div class="col-12">
-                <div class="plancfedit-section-title">Información general</div>
-              </div>
-
-              <div class="col-md-2">
-                <label class="form-label">Total de empleados contratados</label>
-                <input type="number"
-                       class="form-control"
-                       name="total_empleados_contratados"
-                       min="0"
-                       value="{{ item.total_empleados_contratados or 0 }}"
-                       required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Tipo de capacitación</label>
-                <select class="form-select" name="tipo_capacitacion" required>
-                  <option value="">-- Seleccione --</option>
-                  <option value="Inducción" {% if item.tipo_capacitacion=='Inducción' %}selected{% endif %}>Inducción</option>
-                  <option value="Reinducción" {% if item.tipo_capacitacion=='Reinducción' %}selected{% endif %}>Reinducción</option>
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Nombre de la capacitación</label>
-                <input class="form-control"
-                       name="nombre_capacitacion"
-                       value="{{ item.nombre_capacitacion or '' }}"
-                       required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Fecha Programada</label>
-                <input type="date"
-                       class="form-control"
-                       name="fecha_programada"
-                       value="{{ item.fecha_programada or '' }}"
-                       required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Fecha de realización</label>
-                <input type="date"
-                       class="form-control"
-                       name="fecha_realizacion"
-                       value="{{ item.fecha_realizacion or '' }}">
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Objetivo de la capacitación</label>
-                <textarea class="form-control"
-                          name="objetivo_capacitacion"
-                          rows="2">{{ item.objetivo_capacitacion or '' }}</textarea>
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Temario</label>
-                <textarea class="form-control"
-                          name="temario"
-                          rows="2">{{ item.temario or '' }}</textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">% Cumplimiento Programa</label>
-                <input type="number"
-                       class="form-control"
-                       name="cumplimiento_pct"
-                       min="0"
-                       max="100"
-                       value="{{ item.cumplimiento_pct or 0 }}">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Área de colaboradores participantes</label>
-                <select class="form-select"
-                        name="area_participantes"
-                        id="area_participantes"
-                        required
-                        onchange="cargarDivisiones()">
-                  <option value="">-- Seleccione --</option>
-                  <option value="Todas las áreas" {% if item.area_participantes == 'Todas las áreas' %}selected{% endif %}>Todas las áreas</option>
-                  {% for a in areas %}
-                    <option value="{{ a }}" {% if item.area_participantes == a %}selected{% endif %}>{{ a }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">División de colaboradores participantes</label>
-                <select class="form-select"
-                        name="division_participantes"
-                        id="division_participantes"
-                        required>
-                  <option value="">-- Seleccione un área primero --</option>
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Competencia del entrenador</label>
-                <select class="form-select" name="competencia_entrenador">
-                  {% for opt in ['interno','externo'] %}
-                    <option value="{{ opt }}" {% if item.competencia_entrenador==opt %}selected{% endif %}>{{ opt }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Quién realizó la Capacitación y/o Entrenamiento</label>
-                <input class="form-control"
-                       name="quien_realizo"
-                       value="{{ item.quien_realizo or '' }}">
-              </div>
-
-              <div class="col-md-2">
-                <label class="form-label">Horas de duración</label>
-                <input type="number"
-                       class="form-control"
-                       name="horas_duracion"
-                       min="0"
-                       value="{{ item.horas_duracion or 0 }}">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Indicador de realización (100/0)</label>
-                <select class="form-select" name="indicador_realizacion">
-                  <option value="100" {% if item.indicador_realizacion==100 %}selected{% endif %}>100%</option>
-                  <option value="0" {% if item.indicador_realizacion==0 %}selected{% endif %}>0%</option>
-                </select>
-              </div>
-
-              <div class="col-12">
-                <div class="plancfedit-section-title">Métricas automáticas</div>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Número asistentes</label>
-                <input type="number"
-                       class="form-control"
-                       name="num_asistentes"
-                       id="asist"
-                       min="0"
-                       value="{{ item.num_asistentes or 0 }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Número programados</label>
-                <input type="number"
-                       class="form-control"
-                       name="num_programados"
-                       id="prog"
-                       min="0"
-                       value="{{ item.num_programados or 0 }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">% Cobertura (auto)</label>
-                <input class="form-control plancfedit-readonly"
-                       id="cov"
-                       value="{{ item.cobertura_pct or 0 }}"
-                       readonly>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Número evaluados</label>
-                <input type="number"
-                       class="form-control"
-                       name="num_evaluados"
-                       id="eval"
-                       min="0"
-                       value="{{ item.num_evaluados or 0 }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Número evaluaciones eficaces</label>
-                <input type="number"
-                       class="form-control"
-                       name="num_eficaces"
-                       id="efi"
-                       min="0"
-                       value="{{ item.num_eficaces or 0 }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">% de evaluaciones eficaces (auto)</label>
-                <input class="form-control plancfedit-readonly"
-                       id="efi_pct"
-                       value="{{ item.eficaces_pct or 0 }}"
-                       readonly>
-              </div>
-
-            </div>
-
-            <div class="plancfedit-bottom-actions">
-              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
-                Guardar cambios
-              </button>
-
-              <a class="btn rounded-pill px-4 fw-bold plancfedit-cancel-btn"
-                 href="{{ url_for('plan_cf_matriz') }}">
-                Cancelar
-              </a>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .plancfedit-shell{
-        width:96%;
-        max-width:1200px;
-        margin:10px auto 24px auto;
-      }
-
-      .plancfedit-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .plancfedit-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }
-
-      .plancfedit-header-overlay{
-        width:100%;
-        height:auto;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }
-
-      .plancfedit-header-overlay::before{
-        content:"✏️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .plancfedit-header-text{
-        max-width:1000px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }
-
-      .plancfedit-header-text::before{
-        content:"SGSI · Edición de Cumplimiento Final";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }
-
-      .plancfedit-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .plancfedit-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }
-
-      .plancfedit-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .plancfedit-header-actions .btn,
-      .plancfedit-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .plancfedit-back-btn,
-      .plancfedit-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .plancfedit-back-btn:hover,
-      .plancfedit-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .plancfedit-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .plancfedit-card-body{
-        padding:18px;
-      }
-
-      .plancfedit-section-title{
-        font-weight:950;
-        font-size:.78rem;
-        color:#0b4a8f;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin:10px 0 12px;
-      }
-
-      .plancfedit-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .plancfedit-card .form-control,
-      .plancfedit-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .plancfedit-card textarea.form-control{
-        min-height:70px;
-        resize:vertical;
-      }
-
-      .plancfedit-card .form-control:focus,
-      .plancfedit-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#ffffff;
-      }
-
-      .plancfedit-card .input-group-text{
-        border-radius:0 9px 9px 0;
-        border:1px solid #d9e3f0;
-        background:#eef5ff;
-        color:#0b4a8f;
-        font-weight:900;
-      }
-
-      .plancfedit-readonly{
-        background:#eef5ff !important;
-        color:#0b4a8f !important;
-        border:1px solid #d9eaff !important;
-        font-weight:900;
-      }
-
-      .plancfedit-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:22px;
-        flex-wrap:wrap;
-        width:100%;
-      }
-
-      .plancfedit-soft-box{
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        border-radius:14px;
-        padding:12px 14px;
-        box-shadow:0 6px 14px rgba(15,23,42,.06);
-      }
-
-      .plancfedit-card .btn{
-        font-weight:900;
-      }
-
-      @media (max-width:992px){
-        .plancfedit-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .plancfedit-header-card{
+        .vulnadd-header-card{
           min-height:88px;
         }
 
-        .plancfedit-title{
+        .vulnadd-title{
           font-size:1.20rem;
         }
 
-        .plancfedit-card-body{
+        .vulnadd-card-body{
           padding:8px 7px;
         }
       }
 
       @media (max-width:768px){
-        .plancfedit-header-overlay{
+        .vulnadd-header-overlay{
           flex-direction:column;
           text-align:center;
           gap:10px;
         }
 
-        .plancfedit-header-overlay::before{
+        .vulnadd-header-overlay::before{
           margin:0;
         }
 
-        .plancfedit-header-text::before{
-          margin-left:auto;
-          margin-right:auto;
-        }
-
-        .plancfedit-header-actions .btn,
-        .plancfedit-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-
-    <script>
-      const divisionesPorArea = {{ divisiones_por_area|tojson }};
-
-      function cargarDivisiones(valorSeleccionado = null) {
-        const areaSel = document.getElementById('area_participantes');
-        const divSel = document.getElementById('division_participantes');
-        const area = (areaSel.value || '').trim();
-
-        divSel.innerHTML = '';
-
-        if (!area) {
-          divSel.innerHTML = '<option value="">-- Seleccione un área primero --</option>';
-          return;
-        }
-
-        let opciones = '<option value="">-- Seleccione --</option>';
-        opciones += '<option value="Todas las divisiones">Todas las divisiones</option>';
-
-        if (area !== 'Todas las áreas') {
-          const divisiones = divisionesPorArea[area] || [];
-          for (const d of divisiones) {
-            opciones += `<option value="${d}">${d}</option>`;
-          }
-        }
-
-        divSel.innerHTML = opciones;
-
-        if (valorSeleccionado) {
-          divSel.value = valorSeleccionado;
-        }
-      }
-
-      function autocalc() {
-        const asist = parseInt(document.getElementById('asist').value || '0');
-        const prog  = parseInt(document.getElementById('prog').value  || '0');
-        const evals = parseInt(document.getElementById('eval').value  || '0');
-        const efi   = parseInt(document.getElementById('efi').value   || '0');
-
-        const cov = (prog > 0) ? Math.round(asist * 100 / prog) : 0;
-        const efp = (evals > 0) ? Math.round(efi * 100 / evals) : 0;
-
-        document.getElementById('cov').value = cov;
-        document.getElementById('efi_pct').value = efp;
-      }
-
-      window.addEventListener('DOMContentLoaded', function () {
-        autocalc();
-        cargarDivisiones({{ (item.division_participantes or '')|tojson }});
-      });
-    </script>
-    """
-    inner = render_template_string(
-        html,
-        item=item,
-        areas=areas,
-        divisiones_por_area=divisiones_por_area
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-# =========================
-# Eliminar
-# =========================
-
-@app.route('/plan_cf/delete/<int:id>')
-@login_required
-def plan_cf_delete(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor' or (
-        user.role != 'admin' and not verificar_permiso(user, "Seguimiento del Plan de Formación")
-    ):
-        flash("No tiene permiso para eliminar registros de seguimiento.", "danger")
-        return redirect(url_for('plan_cf_matriz'))
-    
-    it = PlanCFRegistro.query.get_or_404(id)
-    db.session.delete(it)
-    db.session.commit()
-    flash("Registro eliminado.", "success")
-    return redirect(url_for('plan_cf_matriz'))
-
-# =================================================================================================================================================
-#                                    Fin Módulo Seguimiento Plan de Concientización y Formación INGRESO DIRECTO A LA MATRIZ
-# =================================================================================================================================================
-
-
-# ==========================================================================================================================================
-#                                                               Módulo Plan de Competencias
-# ==========================================================================================================================================
-
-# ==========================
-# ENTRADA DIRECTA — PLAN DE COMPETENCIAS
-# ==========================
-@app.route("/plan_remediacion_competencias_menu")
-@login_required
-def plan_remediacion_competencias_menu():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Plan de Competencias"):
-        flash("No tiene permiso para acceder al módulo de plan de competencias.", "danger")
-        return redirect(url_for('menu'))
-
-    return redirect(url_for('plan_remediacion_competencias_matriz'))
-
-
-# ==========================
-# AGREGAR PLAN DE COMPETENCIAS
-# ==========================
-@app.route("/plan_remediacion_competencias/new", methods=["GET", "POST"])
-@login_required
-def plan_remediacion_competencias_new():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede agregar registros.", "danger")
-        return redirect(url_for('plan_remediacion_competencias_matriz'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Plan de Competencias"):
-        flash("No tiene permiso para agregar planes de competencias.", "danger")
-        return redirect(url_for('plan_remediacion_competencias_matriz'))
-
-    if request.method == "POST":
-        rol_cargo = (request.form.get("rol_cargo") or "").strip()
-        responsable = (request.form.get("responsable") or "").strip()
-        competencias_requeridas = (request.form.get("competencias_requeridas") or "").strip()
-        brechas_detectadas = (request.form.get("brechas_detectadas") or "").strip()
-        plan_capacitacion = (request.form.get("plan_capacitacion") or "").strip()
-        #observaciones = (request.form.get("observaciones") or "").strip()
-        fecha_str = (request.form.get("fecha_cumplimiento") or "").strip()
-
-        fecha_cumplimiento = None
-        if fecha_str:
-            try:
-                fecha_cumplimiento = datetime.strptime(fecha_str, "%Y-%m-%d").date()
-            except ValueError:
-                flash("Fecha de cumplimiento inválida.", "danger")
-                return redirect(url_for("plan_remediacion_competencias_new"))
-
-        if not all([rol_cargo, responsable, competencias_requeridas]):
-            flash("Rol/Cargo, Responsable y Competencias Requeridas son obligatorios.", "danger")
-            return redirect(url_for("plan_remediacion_competencias_new"))
-
-        it = PlanRemediacionCompetenciaRegistro(
-            rol_cargo=rol_cargo,
-            responsable=responsable,
-            competencias_requeridas=competencias_requeridas,
-            brechas_detectadas=brechas_detectadas,
-            plan_capacitacion=plan_capacitacion,
-            fecha_cumplimiento=fecha_cumplimiento,
-        )
-        db.session.add(it)
-        db.session.flush()
-
-        files = request.files.getlist("evidencias")
-        for f in files:
-            if not f or not f.filename:
-                continue
-            if not is_allowed_pdf(f.filename):
-                flash(f"Archivo no permitido (solo PDF): {f.filename}", "danger")
-                continue
-
-            store_name = unique_store_name(f.filename)
-            path = os.path.join(app.config["UPLOAD_PLAN_REMEDIACION_COMP_DIR"], store_name)
-            f.save(path)
-
-            ev = PlanRemediacionCompetenciaEvidencia(
-                plan=it,
-                filename=store_name,
-                original_name=secure_filename(f.filename),
-                mime="application/pdf",
-                size=os.path.getsize(path),
-            )
-            db.session.add(ev)
-
-        db.session.commit()
-        flash("Plan de remediación de competencias registrado.", "success")
-        return redirect(url_for("plan_remediacion_competencias_matriz"))
-
-    html = """
-    <div class="plancomp-shell">
-
-      <div class="plancomp-header-card">
-        <div class="plancomp-header-overlay">
-          <div class="plancomp-header-text">
-            <h3 class="plancomp-title m-0">Agregar Plan de Competencias</h3>
-            <div class="plancomp-subtitle">
-              Registro de competencias requeridas, brechas detectadas, acciones de capacitación y evidencias asociadas al personal del SGSI
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="plancomp-header-actions">
-        <a href="{{ url_for('plan_remediacion_competencias_matriz') }}"
-           class="btn rounded-pill px-4 fw-bold plancomp-back-btn"
-           onclick="showLoader()">
-          ⬅ Volver a la Matriz
-        </a>
-      </div>
-
-      <div class="plancomp-card">
-        <div class="plancomp-card-body">
-          <form method="post" enctype="multipart/form-data">
-            <div class="row g-3">
-
-              <div class="col-12">
-                <div class="plancomp-section-title">Información general</div>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Rol / Cargo</label>
-                <input name="rol_cargo" class="form-control" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Responsable / Persona</label>
-                <input name="responsable" class="form-control" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Fecha de Cumplimiento</label>
-                <input type="date" name="fecha_cumplimiento" class="form-control">
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Competencias Requeridas</label>
-                <textarea name="competencias_requeridas"
-                          class="form-control"
-                          rows="2"
-                          required></textarea>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Brechas Detectadas</label>
-                <textarea name="brechas_detectadas"
-                          class="form-control"
-                          rows="2"></textarea>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Plan de Capacitación / Acción</label>
-                <textarea name="plan_capacitacion"
-                          class="form-control"
-                          rows="2"></textarea>
-              </div>
-
-              <div class="col-12">
-                <div class="plancomp-section-title">Evidencias</div>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Evidencias de Competencia (PDF, varios)</label>
-                <input type="file"
-                       id="evidencias"
-                       name="evidencias"
-                       accept=".pdf"
-                       multiple
-                       class="form-control"
-                       onchange="acumularEvidencias(this)">
-                <small class="text-muted">
-                  Puedes seleccionar varios a la vez o en varias rondas.
-                </small>
-                <div id="lista_evidencias_nuevas" class="mt-2"></div>
-              </div>
-
-            </div>
-
-            <div class="plancomp-bottom-actions">
-              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
-                Guardar
-              </button>
-
-              <a href="{{ url_for('plan_remediacion_competencias_matriz') }}"
-                 class="btn rounded-pill px-4 fw-bold plancomp-cancel-btn"
-                 onclick="showLoader()">
-                Cancelar
-              </a>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .plancomp-shell{
-        width:96%;
-        max-width:1650px;
-        margin:10px auto 24px auto;
-      }
-
-      .plancomp-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .plancomp-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }
-
-      .plancomp-header-overlay{
-        width:100%;
-        height:auto;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }
-
-      .plancomp-header-overlay::before{
-        content:"✅";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .plancomp-header-text{
-        max-width:1200px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }
-
-      .plancomp-header-text::before{
-        content:"SGSI · Cumplimiento del Plan";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }
-
-      .plancomp-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .plancomp-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }
-
-      .plancomp-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .plancomp-header-actions .btn,
-      .plancomp-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .plancomp-back-btn,
-      .plancomp-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .plancomp-back-btn:hover,
-      .plancomp-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .plancomp-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .plancomp-card-body{
-        padding:18px;
-      }
-
-      .plancomp-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .plancomp-card .form-control,
-      .plancomp-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .plancomp-card textarea.form-control{
-        min-height:70px;
-        resize:vertical;
-      }
-
-      .plancomp-card .form-control:focus,
-      .plancomp-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#ffffff;
-      }
-
-      .plancomp-section-title{
-        font-weight:950;
-        font-size:.78rem;
-        color:#0b4a8f;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin:10px 0 12px;
-      }
-
-      .plancomp-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:22px;
-        flex-wrap:wrap;
-        width:100%;
-      }
-
-      .plancomp-card .btn{
-        font-weight:900;
-      }
-
-      @media (max-width:992px){
-        .plancomp-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .plancomp-header-card{
-          min-height:88px;
-        }
-
-        .plancomp-title{
-          font-size:1.20rem;
-        }
-
-        .plancomp-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .plancomp-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .plancomp-header-overlay::before{
-          margin:0;
-        }
-
-        .plancomp-header-text::before{
-          margin-left:auto;
-          margin-right:auto;
-        }
-
-        .plancomp-header-actions .btn,
-        .plancomp-bottom-actions .btn{
+        .vulnadd-header-actions .btn,
+        .vulnadd-bottom-actions .btn{
           width:100%;
         }
       }
@@ -9749,13 +626,11 @@ def plan_remediacion_competencias_new():
       function renderListaEvidencias() {
         const cont = document.getElementById('lista_evidencias_nuevas');
         if (!cont) return;
-
         cont.innerHTML = '';
         if (evidenciasBufferDT.files.length === 0) {
           cont.innerHTML = '<div class="text-muted small">No hay archivos seleccionados</div>';
           return;
         }
-
         for (let i = 0; i < evidenciasBufferDT.files.length; i++) {
           const f = evidenciasBufferDT.files[i];
           const row = document.createElement('div');
@@ -9786,7 +661,6 @@ def plan_remediacion_competencias_new():
           if (i !== index) tmp.items.add(evidenciasBufferDT.files[i]);
         }
         evidenciasBufferDT = tmp;
-
         const inputEl = document.getElementById('evidencias');
         if (inputEl) inputEl.files = evidenciasBufferDT.files;
         renderListaEvidencias();
@@ -9797,10 +671,7778 @@ def plan_remediacion_competencias_new():
       });
     </script>
     """
-    inner = render_template_string(html)
+    inner = render_template_string(html, clasif_choices=VULN_CLASIFICACIONES)
+    return render_template_string(BASE, content=Markup(inner))
+
+# ==========================
+# Matriz Vulnerabilidades
+# ==========================
+
+@app.route('/vulnerabilidades_matriz')
+@login_required
+def vulnerabilidades_matriz():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        read_only = True
+    else:
+        if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+            flash("No tiene permiso para ver la matriz de vulnerabilidades.", "danger")
+            return redirect(url_for('menu'))
+        read_only = False
+
+    # ==========================
+    # Filtros
+    # ==========================
+    filtro_campo = (request.args.get('campo') or 'activo').strip()
+    filtro_valor = (request.args.get('valor') or '').strip()
+    filtro_clasificacion = (request.args.get('clasificacion') or '').strip()
+
+    campos_validos = {
+        'codigo',
+        'activo',
+        'cve',
+        'clasificacion',
+        'responsable',
+        'estado',
+        'tipo_vulnerabilidad'
+    }
+
+    if filtro_campo not in campos_validos:
+        filtro_campo = 'activo'
+
+    q = VulnerabilidadRegistro.query.options(
+        selectinload(VulnerabilidadRegistro.evidencias)
+    )
+
+    if filtro_valor:
+        columna = getattr(VulnerabilidadRegistro, filtro_campo, None)
+        if columna is not None:
+            q = q.filter(columna.ilike(f"%{filtro_valor}%"))
+
+    if filtro_clasificacion:
+        q = q.filter(VulnerabilidadRegistro.clasificacion == filtro_clasificacion)
+
+    items = q.order_by(VulnerabilidadRegistro.id.desc()).all()
+
+    html = """
+    <div class="vulnmx-shell">
+
+      <!-- CABECERA -->
+      <div class="plan-hero">
+        <h2 class="plan-title">Registro de Vulnerabilidades</h2>
+      </div>
+
+      <!-- BOTONERA SUPERIOR -->
+      <div class="volver-center">
+        <div class="top-actions-wrap">
+
+          {% if not read_only %}
+            <a href="{{ url_for('vulnerabilidad_new') }}"
+               class="btn btn-primary rounded-pill px-4 fw-semibold"
+               onclick="showLoader()">
+              Agregar vulnerabilidad
+            </a>
+          {% else %}
+            <button class="btn btn-secondary rounded-pill px-4 fw-semibold"
+                    disabled
+                    title="Auditor: solo lectura">
+              Agregar vulnerabilidad
+            </button>
+          {% endif %}
+
+          <!-- DESPLEGABLE KALI PROFESIONAL -->
+          <div class="kali-dropdown-wrap">
+            <button type="button"
+                    class="btn kali-main-btn rounded-pill px-4 fw-semibold"
+                    onclick="toggleKaliMenu(event)">
+              Kali Linux
+              <span class="kali-caret">▾</span>
+            </button>
+
+            <div id="kaliVerticalDropdown" class="kali-vertical-dropdown">
+              <div class="kali-menu-header">Escaneo con Kali Linux</div>
+
+              {% if not read_only %}
+                <a href="{{ url_for('vuln_scan_new') }}"
+                   class="kali-menu-item"
+                   onclick="showLoader()">
+                  Nuevo escaneo
+                </a>
+              {% else %}
+                <button class="kali-menu-item kali-menu-item-disabled"
+                        disabled
+                        title="Auditor: solo lectura">
+                  Nuevo escaneo
+                </button>
+              {% endif %}
+
+              <a href="{{ url_for('vuln_scan_runs') }}"
+                 class="kali-menu-item"
+                 onclick="showLoader()">
+                Reportes de escaneo
+              </a>
+
+              {% if not read_only %}
+                <a href="{{ url_for('vuln_scan_config') }}"
+                   class="kali-menu-item"
+                   onclick="showLoader()">
+                  Configuración Kali
+                </a>
+              {% else %}
+                <button class="kali-menu-item kali-menu-item-disabled"
+                        disabled
+                        title="Auditor: solo lectura">
+                  Configuración Kali
+                </button>
+              {% endif %}
+            </div>
+          </div>
+
+          <a href="{{ url_for('sast_index') }}"
+             class="btn btn-primary rounded-pill px-4 fw-semibold"
+             onclick="showLoader()">
+            Pruebas SAST
+          </a>
+
+        </div>
+      </div>
+
+      <!-- TARJETA PRINCIPAL -->
+      <div class="vulnmx-card">
+        <div class="vulnmx-card-body">
+
+          <!-- FILTROS -->
+          <form method="get" class="row g-3 mb-3" id="vulnFiltroForm">
+            <div class="col-md-3">
+              <label class="form-label fw-bold">Campo</label>
+              <select name="campo" class="form-select">
+                <option value="activo" {{ 'selected' if filtro_campo == 'activo' else '' }}>Activo</option>
+                <option value="codigo" {{ 'selected' if filtro_campo == 'codigo' else '' }}>Código</option>
+                <option value="cve" {{ 'selected' if filtro_campo == 'cve' else '' }}>CVE</option>
+                <option value="responsable" {{ 'selected' if filtro_campo == 'responsable' else '' }}>Responsable</option>
+                <option value="estado" {{ 'selected' if filtro_campo == 'estado' else '' }}>Estado</option>
+                <option value="tipo_vulnerabilidad" {{ 'selected' if filtro_campo == 'tipo_vulnerabilidad' else '' }}>Tipo de vulnerabilidad</option>
+              </select>
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label fw-bold">Buscar</label>
+              <input type="text"
+                     name="valor"
+                     value="{{ filtro_valor }}"
+                     class="form-control"
+                     placeholder="Digite el valor a buscar">
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label fw-bold">Clasificación</label>
+              <select name="clasificacion" class="form-select">
+                <option value="">-- Todas --</option>
+                {% for op in clasif_choices %}
+                  <option value="{{ op }}" {{ 'selected' if filtro_clasificacion == op else '' }}>
+                    {{ op }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="col-md-2 d-flex align-items-end gap-2 flex-wrap vuln-filter-actions">
+              <button class="btn btn-primary rounded-pill" type="submit">
+                Filtrar
+              </button>
+
+              <a href="{{ url_for('vulnerabilidades_matriz') }}"
+                 class="btn btn-secondary rounded-pill">
+                Limpiar
+              </a>
+
+              {% if not read_only %}
+                <button type="button"
+                        class="btn btn-danger rounded-pill"
+                        onclick="eliminarVulnerabilidadesFiltradas()">
+                  Eliminar filtrados
+                </button>
+              {% else %}
+                <button type="button"
+                        class="btn btn-secondary rounded-pill"
+                        disabled
+                        title="Auditor: solo lectura">
+                  Eliminar filtrados
+                </button>
+              {% endif %}
+            </div>
+          </form>
+
+          <form method="post"
+                id="vulnDeleteFiltradosForm"
+                action="{{ url_for('vulnerabilidades_delete_filtrados') }}"
+                style="display:none;">
+            <input type="hidden" name="campo" value="{{ filtro_campo }}">
+            <input type="hidden" name="valor" value="{{ filtro_valor }}">
+            <input type="hidden" name="clasificacion" value="{{ filtro_clasificacion }}">
+          </form>
+
+          <!-- TABLA -->
+          <div class="table-responsive">
+            <table class="table table-hover align-middle vuln-table">
+
+              <colgroup>
+                <col style="width:6%;">
+                <col style="width:11%;">
+                <col style="width:14%;">
+                <col style="width:34%;">
+                <col style="width:12%;">
+                <col style="width:11%;">
+                <col style="width:8%;">
+                <col style="width:14%;">
+              </colgroup>
+
+              <thead class="table-dark">
+                <tr>
+                  <th>ID</th>
+                  <th>Código</th>
+                  <th>Activo</th>
+                  <th>Descripción</th>
+                  <th>Clasificación</th>
+                  <th>Responsable</th>
+                  <th>Estado</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {% for it in items %}
+                <tr>
+                  <td>{{ it.id }}</td>
+                  <td>{{ it.codigo or '' }}</td>
+                  <td>{{ it.activo or '' }}</td>
+                  <td class="desc-cell">{{ it.descripcion_vulnerabilidad or '' }}</td>
+                  <td>{{ it.clasificacion or '' }}</td>
+                  <td>{{ it.responsable or '' }}</td>
+                  <td>{{ it.estado or '' }}</td>
+
+                  <td class="text-nowrap">
+                    <div class="acciones-wrap">
+
+                      <a href="{{ url_for('vulnerabilidad_detalle', id=it.id) }}"
+                         class="btn btn-sm btn-info text-white rounded-pill">
+                        Ver detalle
+                      </a>
+
+                      {% if not read_only %}
+                        <a href="{{ url_for('vulnerabilidad_delete', id=it.id) }}"
+                           class="btn btn-sm btn-danger rounded-pill"
+                           onclick="return confirmarEliminarVulnerabilidad();">
+                          Eliminar
+                        </a>
+                      {% else %}
+                        <button class="btn btn-sm btn-secondary rounded-pill"
+                                disabled
+                                title="Auditor: solo lectura">
+                          Eliminar
+                        </button>
+                      {% endif %}
+
+                    </div>
+                  </td>
+                </tr>
+
+                {% else %}
+                <tr>
+                  <td colspan="8" class="text-center text-muted py-4">
+                    No se encontraron registros.
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .vulnmx-shell{
+        width:96%;
+        max-width:1500px;
+        margin:26px auto 24px auto;
+        overflow:visible;
+      }
+
+      .plan-hero{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .plan-hero::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }
+
+      .plan-hero::after{
+        content:"🛡️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.4rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+        position:relative;
+        z-index:1;
+        order:-1;
+      }
+
+      .plan-title{
+        position:relative;
+        z-index:1;
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 4px 14px rgba(0,0,0,.45);
+        margin:0 !important;
+        text-align:left;
+        padding:0;
+        transform:none;
+        overflow-wrap:break-word;
+      }
+
+      .plan-title::before{
+        content:"SGSI · Matriz de Vulnerabilidades";
+        display:block;
+        width:fit-content;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }
+
+      .volver-center{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .top-actions-wrap{
+        width:100%;
+        display:flex;
+        flex-wrap:wrap;
+        gap:10px;
+        justify-content:center;
+        align-items:flex-start;
+        overflow:visible;
+      }
+
+      .volver-center .btn,
+      .top-actions-wrap .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+        max-width:100%;
+      }
+
+      .volver-center .btn-secondary,
+      .volver-center .btn-outline-secondary,
+      .kali-main-btn{
+        background:#ffffff !important;
+        color:#0f172a !important;
+        border:1px solid #cfd8e3 !important;
+      }
+
+      .volver-center .btn-secondary:hover,
+      .volver-center .btn-outline-secondary:hover,
+      .kali-main-btn:hover{
+        background:#edf5ff !important;
+        color:#0b65d8 !important;
+        border-color:#9ec5fe !important;
+      }
+
+      .kali-dropdown-wrap{
+        position:relative;
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        overflow:visible;
+        z-index:20;
+      }
+
+      .kali-caret{
+        margin-left:6px;
+        font-size:.86rem;
+        opacity:.75;
+      }
+
+      .kali-vertical-dropdown{
+        display:none;
+        position:absolute;
+        top:100%;
+        left:50%;
+        transform:translateX(-50%);
+        margin-top:8px;
+        background:#ffffff;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        padding:8px;
+        z-index:30;
+        min-width:240px;
+        flex-direction:column;
+        align-items:stretch;
+        gap:4px;
+      }
+
+      .kali-vertical-dropdown.show{
+        display:flex;
+      }
+
+      .kali-menu-header{
+        font-size:.72rem;
+        font-weight:900;
+        color:#0b4a8f;
+        text-transform:uppercase;
+        letter-spacing:.04em;
+        padding:7px 10px 8px 10px;
+        border-bottom:1px solid #eef2f7;
+        margin-bottom:4px;
+      }
+
+      .kali-menu-item{
+        display:block;
+        width:100%;
+        text-decoration:none;
+        text-align:left;
+        background:transparent;
+        color:#101827;
+        border:none;
+        border-radius:10px;
+        padding:9px 12px;
+        font-size:.80rem;
+        font-weight:800;
+        transition:all .18s ease;
+        white-space:nowrap;
+      }
+
+      .kali-menu-item:hover{
+        background:#eef5ff;
+        color:#0b4a8f;
+      }
+
+      .kali-menu-item-disabled{
+        color:#9ca3af !important;
+        cursor:not-allowed;
+      }
+
+      .kali-menu-item-disabled:hover{
+        background:transparent !important;
+      }
+
+      .vulnmx-card{
+        background:rgba(255,255,255,.96);
+        backdrop-filter:blur(8px);
+        border:1px solid rgba(219,230,244,.9);
+        border-radius:18px;
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        overflow:hidden;
+        width:100%;
+        max-width:100%;
+      }
+
+      .vulnmx-card-body{
+        padding:18px;
+        overflow:hidden;
+      }
+
+      .form-label{
+        color:#25324a;
+        margin-bottom:4px;
+        font-weight:900;
+        font-size:.78rem;
+      }
+
+      .form-control,
+      .form-select{
+        border-radius:10px;
+        min-height:40px;
+        border:1px solid #d9e3f0;
+        font-size:.86rem;
+        background:#f8fafc;
+        max-width:100%;
+      }
+
+      .form-control:focus,
+      .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
+        background:#ffffff;
+      }
+
+      .vuln-filter-actions .btn{
+        width:100%;
+        min-height:32px;
+        padding:7px 12px !important;
+        font-size:.68rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.12);
+      }
+
+      .table-responsive{
+        max-height:70vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#ffffff;
+        width:100%;
+        max-width:100%;
+      }
+
+      .vuln-table{
+        min-width:1180px;
+        table-layout:fixed;
+        margin-bottom:0;
+        background:#ffffff;
+      }
+
+      .vuln-table thead th{
+        position:sticky;
+        top:0;
+        z-index:10;
+        vertical-align:middle;
+        white-space:normal;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-weight:900;
+        border-color:rgba(0,0,0,.08) !important;
+        text-align:center;
+        font-size:.78rem;
+        padding:9px 8px;
+      }
+
+      .vuln-table th,
+      .vuln-table td{
+        vertical-align:top;
+        font-size:.78rem;
+        padding:9px 8px;
+        white-space:normal;
+        word-break:normal;
+        overflow-wrap:break-word;
+      }
+
+      .vuln-table td{
+        border-bottom:1px solid #e5edf7;
+        color:#101827;
+      }
+
+      .desc-cell{
+        min-width:360px;
+        line-height:1.45;
+        text-align:left;
+      }
+
+      .vuln-table tbody tr:nth-child(even){
+        background:#f8fbff;
+      }
+
+      .vuln-table tbody tr:hover{
+        background:#eef6ff;
+      }
+
+      .acciones-wrap{
+        display:flex;
+        gap:6px;
+        flex-wrap:wrap;
+        justify-content:center;
+        align-items:center;
+      }
+
+      .acciones-wrap .btn{
+        font-size:.72rem;
+        font-weight:900;
+        padding:5px 10px;
+        white-space:nowrap;
+      }
+
+      .table-responsive::-webkit-scrollbar{
+        height:11px;
+        width:11px;
+      }
+
+      .table-responsive::-webkit-scrollbar-track{
+        background:#dbe4f0;
+        border-radius:12px;
+      }
+
+      .table-responsive::-webkit-scrollbar-thumb{
+        background:linear-gradient(180deg,#5aa3ea 0%,#3f86d6 100%);
+        border-radius:12px;
+        border:2px solid #dbe4f0;
+      }
+
+      .table-responsive{
+        scrollbar-width:thin;
+        scrollbar-color:#3f86d6 #dbe4f0;
+      }
+
+      h3{
+        color:#ffffff;
+        margin:0;
+      }
+
+      @media (max-width:992px){
+        .vulnmx-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .plan-hero{
+          min-height:88px;
+        }
+
+        .plan-title{
+          font-size:1.20rem;
+        }
+
+        .vulnmx-card-body{
+          padding:8px 7px;
+        }
+      }
+
+      @media (max-width:768px){
+        .plan-hero{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .plan-hero::after{
+          margin:0;
+        }
+
+        .plan-title{
+          text-align:center;
+        }
+
+        .plan-title::before{
+          margin-left:auto;
+          margin-right:auto;
+        }
+
+        .top-actions-wrap{
+          flex-direction:column;
+          align-items:stretch;
+        }
+
+        .top-actions-wrap .btn,
+        .volver-center .btn{
+          width:100%;
+        }
+
+        .kali-dropdown-wrap{
+          width:100%;
+        }
+
+        .kali-main-btn{
+          width:100%;
+        }
+
+        .kali-vertical-dropdown{
+          position:static;
+          left:auto;
+          top:auto;
+          transform:none;
+          width:100%;
+          min-width:100%;
+          margin-top:10px;
+        }
+
+        .acciones-wrap{
+          flex-direction:column;
+          align-items:stretch;
+        }
+
+        .acciones-wrap .btn{
+          width:100%;
+        }
+      }
+    </style>
+
+    <script>
+      function toggleKaliMenu(event){
+        event.stopPropagation();
+
+        const menu = document.getElementById('kaliVerticalDropdown');
+        if(!menu) return;
+
+        menu.classList.toggle('show');
+      }
+
+      document.addEventListener('click', function(e){
+        const wrap = document.querySelector('.kali-dropdown-wrap');
+        const menu = document.getElementById('kaliVerticalDropdown');
+
+        if(!wrap || !menu) return;
+
+        if(!wrap.contains(e.target)){
+          menu.classList.remove('show');
+        }
+      });
+
+      function confirmarEliminarVulnerabilidad(){
+        if(typeof hideLoader === 'function'){
+          hideLoader();
+        }
+
+        return confirm(
+          '¿Está seguro de eliminar esta vulnerabilidad?\\n\\n' +
+          'También se eliminarán sus evidencias asociadas.\\n' +
+          'Esta acción no se puede deshacer.'
+        );
+      }
+
+      function eliminarVulnerabilidadesFiltradas(){
+        const total = {{ items|length }};
+
+        if(total <= 0){
+          alert('No hay registros para eliminar con los filtros aplicados.');
+          return false;
+        }
+
+        const campo = "{{ filtro_campo }}";
+        const valor = "{{ filtro_valor }}";
+        const clasificacion = "{{ filtro_clasificacion }}";
+
+        let mensaje = '¿Está seguro de eliminar las vulnerabilidades filtradas?\\n\\n';
+        mensaje += 'Total registros a eliminar: ' + total + '\\n';
+
+        if(campo && valor){
+          mensaje += 'Filtro: ' + campo + ' contiene "' + valor + '"\\n';
+        }
+
+        if(clasificacion){
+          mensaje += 'Clasificación: ' + clasificacion + '\\n';
+        }
+
+        if(!valor && !clasificacion){
+          mensaje += '\\nADVERTENCIA: No hay filtros aplicados. Se eliminarán TODAS las vulnerabilidades.\\n';
+        }
+
+        mensaje += '\\nTambién se eliminarán evidencias y planes asociados.\\n';
+        mensaje += 'Esta acción no se puede deshacer.';
+
+        if(confirm(mensaje)){
+          const form = document.getElementById('vulnDeleteFiltradosForm');
+          if(form){
+            form.submit();
+          }
+        }
+
+        return false;
+      }
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          document.addEventListener('DOMContentLoaded', function(){
+            let stack = document.getElementById('sgsiFlashStack');
+
+            if(!stack){
+              stack = document.createElement('div');
+              stack.id = 'sgsiFlashStack';
+              stack.style.position = 'fixed';
+              stack.style.top = '92px';
+              stack.style.right = '24px';
+              stack.style.zIndex = '999998';
+              stack.style.display = 'flex';
+              stack.style.flexDirection = 'column';
+              stack.style.gap = '10px';
+              stack.style.maxWidth = '440px';
+              document.body.appendChild(stack);
+            }
+
+            const palette = {
+              success: ['#ecfdf5', '#087c3d', '#14532d', '✅'],
+              warning: ['#fffbeb', '#c76b00', '#78350f', '⚠️'],
+              danger:  ['#fef2f2', '#b91c1c', '#7f1d1d', '⛔'],
+              info:    ['#eff6ff', '#3f86d6', '#1e3a8a', 'ℹ️']
+            };
+
+            {% for category, message in messages %}
+              (function(){
+                const cfg = palette[{{ category|tojson }}] || palette.info;
+
+                const box = document.createElement('div');
+                box.style.background = cfg[0];
+                box.style.borderLeft = '6px solid ' + cfg[1];
+                box.style.color = cfg[2];
+                box.style.borderRadius = '16px';
+                box.style.padding = '14px 16px';
+                box.style.boxShadow = '0 14px 34px rgba(0,0,0,.22)';
+                box.style.fontWeight = '800';
+                box.style.fontSize = '.88rem';
+                box.style.lineHeight = '1.35';
+                box.style.display = 'flex';
+                box.style.alignItems = 'flex-start';
+                box.style.gap = '10px';
+
+                const icon = document.createElement('div');
+                icon.textContent = cfg[3];
+                icon.style.fontSize = '1.05rem';
+
+                const text = document.createElement('div');
+                text.textContent = {{ message|tojson }};
+
+                const close = document.createElement('button');
+                close.type = 'button';
+                close.textContent = '×';
+                close.style.marginLeft = 'auto';
+                close.style.border = '0';
+                close.style.background = 'transparent';
+                close.style.color = cfg[2];
+                close.style.fontSize = '1.2rem';
+                close.style.fontWeight = '900';
+                close.style.lineHeight = '1';
+                close.onclick = function(){
+                  box.remove();
+                };
+
+                box.appendChild(icon);
+                box.appendChild(text);
+                box.appendChild(close);
+                stack.appendChild(box);
+
+                setTimeout(function(){
+                  box.style.transition = 'opacity .25s ease, transform .25s ease';
+                  box.style.opacity = '0';
+                  box.style.transform = 'translateX(18px)';
+                  setTimeout(function(){ box.remove(); }, 280);
+                }, 6500);
+              })();
+            {% endfor %}
+          });
+        {% endif %}
+      {% endwith %}
+    </script>
+    """
+
+    inner = render_template_string(
+        html,
+        items=items,
+        filtro_campo=filtro_campo,
+        filtro_valor=filtro_valor,
+        filtro_clasificacion=filtro_clasificacion,
+        clasif_choices=VULN_CLASIFICACIONES,
+        read_only=read_only
+    )
+
+    return render_template_string(BASE, content=Markup(inner))
+
+
+
+# ==========================
+# Detalle Vulnerabilidad
+# ==========================
+
+@app.route('/vulnerabilidades/detalle/<int:id>')
+@login_required
+def vulnerabilidad_detalle(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        read_only = True
+    else:
+        if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+            flash("No tiene permiso para ver el detalle de la vulnerabilidad.", "danger")
+            return redirect(url_for('vulnerabilidades_matriz'))
+        read_only = False
+
+    it = (
+        VulnerabilidadRegistro.query
+        .options(selectinload(VulnerabilidadRegistro.evidencias))
+        .get_or_404(id)
+    )
+
+    html = """
+    <div class="vulndet-shell">
+
+      <div class="vulndet-header-card">
+        <div class="vulndet-header-overlay">
+          <div class="vulndet-header-text">
+            <h3 class="vulndet-title m-0">Detalle de la Vulnerabilidad</h3>
+            <div class="vulndet-subtitle">
+              Consulta completa del registro en modo solo lectura
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="vulndet-header-actions">
+        <a href="{{ url_for('vulnerabilidades_matriz') }}"
+           class="btn rounded-pill px-4 fw-bold vulndet-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+
+        {% if not read_only %}
+          <a href="{{ url_for('vulnerabilidad_edit', id=it.id) }}"
+             class="btn btn-warning rounded-pill px-4 fw-bold">
+            Editar registro
+          </a>
+        {% endif %}
+      </div>
+
+      <div class="vulndet-card">
+        <div class="vulndet-card-body">
+
+          <div class="vulndet-section">
+            <div class="vulndet-section-title">Información general</div>
+            <div class="row g-3">
+
+              <div class="col-md-3">
+                <div class="vulndet-field">
+                  <div class="vulndet-label">ID</div>
+                  <div class="vulndet-value">{{ it.codigo or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-3">
+                <div class="vulndet-field">
+                  <div class="vulndet-label">CVE</div>
+                  <div class="vulndet-value">{{ it.cve or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-3">
+                <div class="vulndet-field">
+                  <div class="vulndet-label">Clasificación</div>
+                  <div class="vulndet-value">{{ it.clasificacion or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-3">
+                <div class="vulndet-field">
+                  <div class="vulndet-label">Estado</div>
+                  <div class="vulndet-value">{{ it.estado or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="vulndet-field">
+                  <div class="vulndet-label">Activo</div>
+                  <div class="vulndet-value vulndet-value-lg">{{ it.activo or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="vulndet-field">
+                  <div class="vulndet-label">Responsable</div>
+                  <div class="vulndet-value">{{ it.responsable or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="vulndet-field">
+                  <div class="vulndet-label">Tipo de Vulnerabilidad</div>
+                  <div class="vulndet-value">{{ it.tipo_vulnerabilidad or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="vulndet-field">
+                  <div class="vulndet-label">Riesgo Residual</div>
+                  <div class="vulndet-value">{{ it.riesgo_residual or '—' }}</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <div class="vulndet-section">
+            <div class="vulndet-section-title">Descripción y tratamiento</div>
+            <div class="row g-3">
+
+              <div class="col-md-12">
+                <div class="vulndet-field">
+                  <div class="vulndet-label">Descripción de la Vulnerabilidad</div>
+                  <div class="vulndet-value">{{ it.descripcion_vulnerabilidad or '—' }}</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <div class="vulndet-section">
+              <div class="vulndet-section-title">Evidencias</div>
+
+              {% if it.evidencias %}
+                <div class="vulndet-files-grid">
+                  {% for ev in it.evidencias %}
+                    <div class="vulndet-file-card">
+                      <div class="vulndet-file-left">
+                        <div class="vulndet-file-icon">PDF</div>
+                        <div class="vulndet-file-meta">
+                          <div class="vulndet-file-label">Archivo asociado</div>
+                          <a href="{{ url_for('vulnerabilidad_evidencia_view', evi_id=ev.id) }}"
+                             class="vulndet-file-name">
+                            {{ ev.original_name }}
+                          </a>
+                          <div class="vulndet-file-size">{{ (ev.size or 0) // 1024 }} KB</div>
+                        </div>
+                      </div>
+
+                      <div class="vulndet-file-actions">
+                        <a href="{{ url_for('vulnerabilidad_evidencia_view', evi_id=ev.id) }}"
+                           class="btn btn-outline-primary btn-sm rounded-pill px-3">
+                          Ver archivo
+                        </a>
+                      </div>
+                    </div>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <div class="vulndet-empty-box">
+                  No hay archivos asociados a esta vulnerabilidad.
+                </div>
+              {% endif %}
+            </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .vulndet-shell{
+        width:96%;
+        max-width:1250px;
+        margin:26px auto 24px auto;
+        overflow:hidden;
+      }
+
+      .vulndet-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .vulndet-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }
+
+      .vulndet-header-card::after{
+        content:"🔎️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.4rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+        position:relative;
+        z-index:1;
+        order:-1;
+      }
+
+      .vulndet-header-text{
+        position:relative;
+        z-index:1;
+        max-width:1000px;
+        min-width:0;
+      }
+
+      .vulndet-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 4px 14px rgba(0,0,0,.45);
+        margin:0 !important;
+        overflow-wrap:break-word;
+      }
+
+      .vulndet-title::before{
+        content:"SGSI · Detalle Vulnerabilidad";
+        display:block;
+        width:fit-content;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }
+
+      .vulndet-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        line-height:1.25;
+        margin-top:3px;
+        overflow-wrap:break-word;
+      }
+
+      .vulndet-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:12px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .btn,
+      .vulndet-back-btn{
+        border-radius:10px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+        max-width:100%;
+      }
+
+      .vulndet-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+        padding:8px 22px;
+        font-size:.82rem;
+      }
+
+      .vulndet-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .vulndet-card{
+        background:rgba(255,255,255,.96);
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+        width:100%;
+        max-width:100%;
+      }
+
+      .vulndet-card-body{
+        padding:20px;
+        overflow:hidden;
+      }
+
+      .vulndet-section{
+        margin-bottom:18px;
+        background:#ffffff;
+        border:1px solid #e2ebf5;
+        border-radius:14px;
+        padding:8px 7px;
+        box-shadow:0 4px 12px rgba(15,23,42,.06);
+        overflow:hidden;
+      }
+
+      .vulndet-section-title{
+        font-weight:950;
+        font-size:.95rem;
+        color:#0b4a8f;
+        margin-bottom:10px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+        padding-bottom:6px;
+        overflow-wrap:break-word;
+      }
+
+      .vulndet-field{
+        background:#f8fbff;
+        border:1px solid #e2ebf5;
+        border-radius:12px;
+        padding:12px;
+        min-width:0;
+        overflow:hidden;
+      }
+
+      .vulndet-label{
+        font-size:.70rem;
+        font-weight:900;
+        text-transform:uppercase;
+        color:#0b4a8f;
+        margin-bottom:4px;
+        letter-spacing:.03em;
+      }
+
+      .vulndet-value{
+        color:#334155;
+        font-size:.82rem;
+        line-height:1.45;
+        white-space:pre-wrap;
+        word-break:break-word;
+        overflow-wrap:anywhere;
+      }
+
+      .vulndet-value-lg{
+        font-size:.90rem;
+        font-weight:800;
+        color:#101827;
+      }
+
+      .vulndet-file-card{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+        background:#f8fbff;
+        border:1px solid #e2ebf5;
+        border-radius:12px;
+        padding:10px 12px;
+        box-shadow:0 4px 10px rgba(15,23,42,.06);
+        flex-wrap:wrap;
+        overflow:hidden;
+      }
+
+      .vulndet-file-name{
+        font-size:.82rem;
+        font-weight:900;
+        color:#0b4a8f;
+        text-decoration:none;
+        word-break:break-word;
+        overflow-wrap:anywhere;
+      }
+
+      .vulndet-file-name:hover{
+        text-decoration:underline;
+      }
+
+      .vulndet-empty-box{
+        background:#f8fbff;
+        border:1px dashed #cfd8e3;
+        border-radius:12px;
+        padding:8px 7px;
+        text-align:center;
+        font-size:.82rem;
+        color:#475569;
+        font-weight:700;
+      }
+
+      h3{
+        color:#ffffff;
+        margin:0;
+      }
+
+      @media (max-width:992px){
+        .vulndet-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .vulndet-title{
+          font-size:1.20rem;
+        }
+
+        .vulndet-card-body{
+          padding:16px;
+        }
+      }
+
+      @media (max-width:768px){
+        .vulndet-header-card{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .vulndet-header-card::after{
+          margin:0;
+        }
+
+        .vulndet-title,
+        .vulndet-subtitle{
+          text-align:center;
+        }
+
+        .vulndet-title::before{
+          margin-left:auto;
+          margin-right:auto;
+        }
+
+        .vulndet-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+
+    inner = render_template_string(
+        html,
+        it=it,
+        read_only=read_only
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+# ==========================
+# Editar Vulnerabilidades
+# ==========================
+
+@app.route('/vulnerabilidad/<int:id>/edit', methods=['GET', 'POST'])
+@login_required
+def vulnerabilidad_edit(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede editar registros.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para editar vulnerabilidades.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    it = VulnerabilidadRegistro.query.get_or_404(id)
+
+    if request.method == 'POST':
+        codigo = (request.form.get('codigo') or '').strip()
+        activo = (request.form.get('activo') or '').strip()
+        descripcion_vulnerabilidad = (request.form.get('descripcion_vulnerabilidad') or '').strip()
+        cve = (request.form.get('cve') or '').strip()
+        cvss = (request.form.get('cvss') or '').strip()
+        clasificacion = (request.form.get('clasificacion') or '').strip()
+        responsable = (request.form.get('responsable') or '').strip()
+        riesgo_residual = (request.form.get('riesgo_residual') or '').strip()
+        estado = request.form.get('estado') or ''
+
+        fecha_str = (request.form.get('fecha_identificacion') or '').strip()
+        fecha_identificacion = None
+        if fecha_str:
+            try:
+                fecha_identificacion = datetime.strptime(fecha_str, '%Y-%m-%d').date()
+            except ValueError:
+                flash("Fecha de identificación inválida.", "danger")
+                return redirect(url_for('vulnerabilidad_edit', id=id))
+        
+        fecha_cierre_str = (request.form.get('fecha_cierre') or '').strip()
+        fecha_cierre = None
+        if fecha_cierre_str:
+            try:
+                fecha_cierre = datetime.strptime(fecha_cierre_str, '%Y-%m-%d').date()
+            except ValueError:
+                flash("Fecha de cierre inválida.", "danger")
+                return redirect(url_for('vulnerabilidad_edit', id=id))
+
+        if not all([codigo, activo, descripcion_vulnerabilidad, estado, responsable]):
+            flash("Campos obligatorios: ID, Activo, Descripción, Estado y Responsable.", "danger")
+            return redirect(url_for('vulnerabilidad_edit', id=id))
+
+        it.codigo = codigo
+        it.activo = activo
+        it.descripcion_vulnerabilidad = descripcion_vulnerabilidad
+        it.cve = cve
+        it.cvss = cvss
+        it.clasificacion = clasificacion
+        it.fecha_identificacion = fecha_identificacion
+        it.fecha_cierre = fecha_cierre 
+        it.estado = estado
+        it.responsable = responsable
+        it.riesgo_residual = riesgo_residual
+
+         # Manejar nuevas evidencias subidas en la edición
+        files = request.files.getlist('evidencias')
+        for f in files:
+            if not f or not f.filename:
+                continue
+            if not is_allowed_pdf(f.filename):
+                flash(f"Archivo no permitido: {f.filename}", "danger")
+                continue
+
+            store_name = unique_store_name(f.filename)
+            path = os.path.join(app.config['UPLOAD_VULNERABILIDADES_DIR'], store_name)
+            f.save(path)
+
+            ev = VulnerabilidadEvidencia(
+                vulnerabilidad=it,
+                filename=store_name,
+                original_name=secure_filename(f.filename),
+                mime='application/pdf',
+                size=os.path.getsize(path)
+            )
+            db.session.add(ev)
+
+        # Actualiza también el modelamiento asociado y sus técnicas MITRE
+        sincronizar_vulnerabilidad_con_modelamiento(it)
+
+        db.session.commit()
+        flash("Vulnerabilidad actualizada y sincronizada con Modelamiento de Amenazas.", "success")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    # GET: reutilizamos el mismo formulario de new pero con valores precargados
+    html = """
+    <div class="vulnedit-shell">
+
+      <!-- CABECERA -->
+      <div class="vulnedit-header-card">
+        <div class="vulnedit-header-overlay">
+          <div class="vulnedit-header-text">
+            <h3 class="vulnedit-title m-0">Editar Vulnerabilidad</h3>
+            <div class="vulnedit-subtitle">
+              Actualización de la vulnerabilidad identificada, incluyendo activo afectado, clasificación, fechas, responsable, riesgo residual y gestión de evidencias
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BOTÓN VOLVER -->
+      <div class="vulnedit-header-actions">
+        <a href="{{ url_for('vuln_scan_runs') }}"
+           class="btn rounded-pill px-5 fw-bold vulnedit-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+      </div>
+
+      <!-- TARJETA -->
+      <div class="vulnedit-card">
+        <div class="vulnedit-card-body">
+          <form method="post" enctype="multipart/form-data">
+            <div class="row g-3">
+
+              <div class="col-12">
+                <div class="vulnedit-section-title">Información de la vulnerabilidad</div>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">ID (alfanumérico)</label>
+                <input name="codigo" class="form-control" value="{{ it.codigo }}" required>
+              </div>
+
+              <div class="col-md-9">
+                <label class="form-label">Activo</label>
+                <input name="activo" class="form-control" value="{{ it.activo }}" required>
+              </div>
+
+              <div class="col-md-12">
+                <label class="form-label">Descripción de la Vulnerabilidad</label>
+                <textarea name="descripcion_vulnerabilidad" class="form-control" rows="2" required>{{ it.descripcion_vulnerabilidad }}</textarea>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">CVE</label>
+                <input name="cve" class="form-control" value="{{ it.cve or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">CVSS</label>
+                <input name="cvss" class="form-control" value="{{ it.cvss or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Clasificación</label>
+                <select name="clasificacion" class="form-select">
+                  <option value="">-- Seleccione --</option>
+                  {% for op in clasif_choices %}
+                    <option value="{{ op }}" {% if it.clasificacion == op %}selected{% endif %}>{{ op }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Fecha de Identificación</label>
+                <input type="date"
+                       name="fecha_identificacion"
+                       class="form-control"
+                       value="{{ it.fecha_identificacion.isoformat() if it.fecha_identificacion else '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select" required>
+                  <option value="">-- Seleccione --</option>
+                  <option value="Abierto" {% if it.estado == 'Abierto' %}selected{% endif %}>Abierto</option>
+                  <option value="Cerrado" {% if it.estado == 'Cerrado' %}selected{% endif %}>Cerrado</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Fecha de Cierre</label>
+                <input type="date"
+                       name="fecha_cierre"
+                       class="form-control"
+                       value="{{ it.fecha_cierre.isoformat() if it.fecha_cierre else '' }}">
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Responsable</label>
+                <input name="responsable" class="form-control" value="{{ it.responsable }}" required>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Riesgo Residual</label>
+                <textarea name="riesgo_residual" class="form-control" rows="2">{{ it.riesgo_residual or '' }}</textarea>
+              </div>
+
+              <!-- EVIDENCIAS EXISTENTES -->
+              <div class="col-12 mt-3">
+                <div class="vulnedit-section-title">Evidencias existentes</div>
+
+                {% if it.evidencias %}
+                  <div class="vulnedit-evidence-list">
+                    {% for ev in it.evidencias %}
+                      <div class="vulnedit-evidence-item d-flex justify-content-between align-items-center">
+                        <div class="d-flex flex-column">
+                          <a href="{{ url_for('vulnerabilidad_evidencia_view', evi_id=ev.id) }}" target="_blank">
+                            📄 {{ ev.original_name }}
+                          </a>
+                          <span class="text-muted small">({{ (ev.size or 0) // 1024 }} KB)</span>
+                        </div>
+
+                        <a href="{{ url_for('vulnerabilidad_evidencia_delete', evi_id=ev.id) }}"
+                           class="btn btn-sm btn-outline-danger rounded-pill px-3"
+                           onclick="return confirm('¿Eliminar esta evidencia?');">
+                          🗑️ Eliminar
+                        </a>
+                      </div>
+                    {% endfor %}
+                  </div>
+                {% else %}
+                  <div class="text-muted small">No hay evidencias asociadas.</div>
+                {% endif %}
+              </div>
+
+              <!-- NUEVAS EVIDENCIAS -->
+              <div class="col-12 mt-3">
+                <div class="vulnedit-section-title">Agregar nuevas evidencias</div>
+
+                <label class="form-label">Nuevas evidencias (múltiples archivos)</label>
+                <input
+                  type="file"
+                  id="evidencias"
+                  name="evidencias"
+                  multiple
+                  class="form-control"
+                  onchange="acumularEvidencias(this)"
+                >
+                <small class="text-muted">
+                  Puedes seleccionar varios a la vez o ir agregando en varias rondas.
+                </small>
+                <div id="lista_evidencias_nuevas" class="mt-2"></div>
+              </div>
+
+            </div>
+
+            <div class="vulnedit-bottom-actions">
+              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
+                Guardar cambios
+              </button>
+              <a href="{{ url_for('vulnerabilidades_matriz') }}"
+                 class="btn rounded-pill px-4 fw-bold vulnedit-cancel-btn">
+                Cancelar
+              </a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .vulnedit-shell{
+        width:96%;
+        max-width:1200px;
+        margin:10px auto 24px auto;
+      }
+
+      .vulnedit-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .vulnedit-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .vulnedit-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent;
+        padding:0;
+        position:relative;
+        z-index:1;
+      }
+
+      .vulnedit-header-overlay::before{
+        content:"✏️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .vulnedit-header-text{
+        max-width:1000px;
+        width:100%;
+        display:block;
+        transform:none;
+      }
+
+      .vulnedit-header-text::before{
+        content:"SGSI · Edición de Vulnerabilidad";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }
+
+      .vulnedit-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .vulnedit-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+        line-height:1.25;
+      }
+
+      .vulnedit-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .vulnedit-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .vulnedit-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .vulnedit-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .vulnedit-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .vulnedit-card-body{
+        padding:18px;
+      }
+
+      .vulnedit-section-title{
+        font-weight:950;
+        font-size:.78rem;
+        color:#0b4a8f;
+        padding:9px 12px;
+        border-radius:12px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        margin:10px 0 12px;
+      }
+
+      .vulnedit-card .form-label{
+        font-weight:800;
+        color:#25324a;
+        margin-bottom:4px;
+        font-size:.78rem;
+      }
+
+      .vulnedit-card .form-control,
+      .vulnedit-card .form-select{
+        border-radius:9px;
+        border:1px solid #d9e3f0;
+        min-height:32px;
+        font-size:.80rem;
+        background:#f8fafc;
+      }
+
+      .vulnedit-card textarea.form-control{
+        min-height:70px;
+        resize:vertical;
+      }
+
+      .vulnedit-card .form-control:focus,
+      .vulnedit-card .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
+        background:#ffffff;
+      }
+
+      .vulnedit-card .input-group-text{
+        border-radius:0 9px 9px 0;
+        border:1px solid #d9e3f0;
+        background:#eef5ff;
+        color:#0b4a8f;
+        font-weight:900;
+      }
+
+      .vulnedit-evidence-list{
+        display:flex;
+        flex-direction:column;
+        gap:10px;
+      }
+
+      .vulnedit-evidence-item{
+        background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        padding:10px 12px;
+        box-shadow:0 6px 14px rgba(15,23,42,.08);
+      }
+
+      .vulnedit-evidence-name{
+        font-size:.80rem;
+        font-weight:900;
+        color:#1d4ed8;
+        word-break:break-word;
+      }
+
+      .vulnedit-evidence-meta{
+        font-size:.70rem;
+        color:#475569;
+        margin-top:4px;
+        font-weight:700;
+      }
+
+      .vulnedit-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        margin-top:22px;
+        flex-wrap:wrap;
+        width:100%;
+      }
+
+      .vulnedit-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .vulnedit-cancel-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .vulnedit-cancel-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .vulnedit-save-btn{
+        font-weight:900;
+      }
+
+      .vulnedit-soft-box{
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        border-radius:14px;
+        padding:12px 14px;
+        box-shadow:0 6px 14px rgba(15,23,42,.06);
+      }
+
+      @media (max-width:992px){
+        .vulnedit-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .vulnedit-header-card{
+          min-height:88px;
+        }
+
+        .vulnedit-title{
+          font-size:1.20rem;
+        }
+
+        .vulnedit-card-body{
+          padding:8px 7px;
+        }
+      }
+
+      @media (max-width:768px){
+        .vulnedit-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .vulnedit-header-overlay::before{
+          margin:0;
+        }
+
+        .vulnedit-header-actions .btn,
+        .vulnedit-bottom-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+
+    <script>
+      let evidenciasBufferDT = new DataTransfer();
+
+      function renderListaEvidencias() {
+        const cont = document.getElementById('lista_evidencias_nuevas');
+        if (!cont) return;
+        cont.innerHTML = '';
+        if (evidenciasBufferDT.files.length === 0) {
+          cont.innerHTML = '<div class="text-muted small">No hay archivos nuevos seleccionados</div>';
+          return;
+        }
+        for (let i = 0; i < evidenciasBufferDT.files.length; i++) {
+          const f = evidenciasBufferDT.files[i];
+          const row = document.createElement('div');
+          row.className = 'd-flex align-items-center justify-content-between mb-1';
+          row.innerHTML = `
+            <span class="text-truncate small" style="max-width:260px;">📎 ${f.name}</span>
+            <button type="button"
+                    class="btn btn-link text-danger p-0 small"
+                    onclick="removeEvidenciaFromBuffer(${i})">
+              🗑️
+            </button>
+          `;
+          cont.appendChild(row);
+        }
+      }
+
+      function acumularEvidencias(inputEl) {
+        for (const f of inputEl.files) {
+          evidenciasBufferDT.items.add(f);
+        }
+        inputEl.files = evidenciasBufferDT.files;
+        renderListaEvidencias();
+      }
+
+      function removeEvidenciaFromBuffer(index) {
+        const tmp = new DataTransfer();
+        for (let i = 0; i < evidenciasBufferDT.files.length; i++) {
+          if (i !== index) tmp.items.add(evidenciasBufferDT.files[i]);
+        }
+        evidenciasBufferDT = tmp;
+        const inputEl = document.getElementById('evidencias');
+        if (inputEl) inputEl.files = evidenciasBufferDT.files;
+        renderListaEvidencias();
+      }
+
+      window.addEventListener('DOMContentLoaded', () => {
+        renderListaEvidencias();
+      });
+    </script>
+    """
+    inner = render_template_string(html, it=it, clasif_choices=VULN_CLASIFICACIONES)
     return render_template_string(BASE, content=Markup(inner))
 
 
 # ==========================
-# MATRIZ PLAN DE COMPETENCIAS
+# Eliminar
+# =========================
+
+@app.route('/vulnerabilidades/evidencia/<int:evi_id>/delete')
+@login_required
+def vulnerabilidad_evidencia_delete(evi_id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar evidencias.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para eliminar evidencias.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    ev = VulnerabilidadEvidencia.query.get_or_404(evi_id)
+    vuln_id = ev.vulnerabilidad_id  # asumiendo columna FK
+
+    # borrar archivo físico
+    try:
+        path = os.path.join(app.config['UPLOAD_VULNERABILIDADES_DIR'], ev.filename)
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        pass
+
+    db.session.delete(ev)
+    db.session.commit()
+    flash("Evidencia eliminada.", "success")
+    return redirect(url_for('vulnerabilidad_edit', id=vuln_id))
+
+
 # ==========================
+# Helpers de relación Vulnerabilidades ↔ Modelamiento de Amenazas
+# ==========================
+
+def _normalizar_ids_vulnerabilidad(ids):
+    """Retorna una lista limpia de IDs enteros únicos."""
+    limpios = []
+    vistos = set()
+
+    for valor in ids or []:
+        try:
+            vid = int(valor)
+        except Exception:
+            continue
+
+        if vid > 0 and vid not in vistos:
+            vistos.add(vid)
+            limpios.append(vid)
+
+    return limpios
+
+
+def eliminar_modelamientos_por_vulnerabilidades(vulnerabilidad_ids):
+    """
+    Elimina los registros de modelamiento asociados a vulnerabilidades.
+
+    Además de las entradas y técnicas MITRE, elimina los registros de
+    ``Clasificación complementaria No Mapeados`` creados automáticamente
+    para vulnerabilidades que no pudieron clasificarse en MITRE ATT&CK.
+    """
+    ids = _normalizar_ids_vulnerabilidad(vulnerabilidad_ids)
+
+    if not ids:
+        return 0
+
+    try:
+        registros = (
+            ThreatModelEntry.query
+            .options(selectinload(ThreatModelEntry.tecnicas))
+            .filter(ThreatModelEntry.vulnerabilidad_registro_id.in_(ids))
+            .all()
+        )
+
+        no_mapeados = (
+            ThreatModelUnmapped.query
+            .filter(
+                ThreatModelUnmapped.herramienta == THREAT_MODEL_VULN_SOURCE,
+                ThreatModelUnmapped.finding_id.in_(ids)
+            )
+            .all()
+        )
+
+        total = len(registros) + len(no_mapeados)
+
+        for item in registros:
+            db.session.delete(item)
+
+        # La clasificación complementaria se elimina por cascade desde
+        # ThreatModelUnmapped.clasificacion_complementaria.
+        for item in no_mapeados:
+            db.session.delete(item)
+
+        return total
+
+    except Exception:
+        # Fallback SQL para arranques parciales o bases históricas.
+        placeholders = ",".join(str(i) for i in ids)
+        if not placeholders:
+            return 0
+
+        try:
+            db.session.execute(text(f"""
+                DELETE FROM threat_model_unmapped_classifications
+                WHERE unmapped_id IN (
+                    SELECT id
+                    FROM threat_model_unmapped
+                    WHERE herramienta = '{THREAT_MODEL_VULN_SOURCE}'
+                      AND finding_id IN ({placeholders})
+                )
+            """))
+
+            db.session.execute(text(f"""
+                DELETE FROM threat_model_unmapped
+                WHERE herramienta = '{THREAT_MODEL_VULN_SOURCE}'
+                  AND finding_id IN ({placeholders})
+            """))
+
+            db.session.execute(text(f"""
+                DELETE FROM threat_model_techniques
+                WHERE threat_entry_id IN (
+                    SELECT id
+                    FROM threat_model_entries
+                    WHERE vulnerabilidad_registro_id IN ({placeholders})
+                )
+            """))
+
+            db.session.execute(text(f"""
+                DELETE FROM threat_model_entries
+                WHERE vulnerabilidad_registro_id IN ({placeholders})
+            """))
+
+            return 0
+
+        except Exception:
+            raise
+
+
+
+def existe_vulnerabilidad_asociada_a_threat_model(item):
+    """
+    Valida si un registro de modelamiento tiene una vulnerabilidad vigente asociada.
+
+    Regla funcional:
+    - No se permite eliminar manualmente un ID de modelamiento si todavía existe
+      la vulnerabilidad relacionada.
+    """
+    if not item:
+        return False
+
+    vuln_id = getattr(item, "vulnerabilidad_registro_id", None)
+
+    if not vuln_id:
+        return False
+
+    try:
+        return VulnerabilidadRegistro.query.get(int(vuln_id)) is not None
+    except Exception:
+        return False
+
+# ==========================
+# Eliminar Vulnerabilidad
+# ==========================
+
+@app.route('/vulnerabilidad/<int:id>/delete')
+@login_required
+def vulnerabilidad_delete(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar registros.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para eliminar vulnerabilidades.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    db.session.rollback()
+
+    it = VulnerabilidadRegistro.query.get_or_404(id)
+
+    try:
+        # ==========================
+        # Validar si tiene remediación asociada
+        # ==========================
+        plan_asociado = PlanRemediacion.query.filter_by(
+            vulnerabilidad_id=id
+        ).first()
+
+        if plan_asociado:
+            flash(
+                "No se puede eliminar esta vulnerabilidad porque tiene un plan de remediación asociado. "
+                "Primero elimine el plan de remediación correspondiente.",
+                "warning"
+            )
+            return redirect(url_for('vulnerabilidades_matriz'))
+
+        # ==========================
+        # Eliminar modelamiento de amenazas asociado
+        # ==========================
+        total_threat = eliminar_modelamientos_por_vulnerabilidades([id])
+
+        # ==========================
+        # Desvincular hallazgos de escaneo
+        # ==========================
+        try:
+            VulnerabilityScanFinding.query.filter_by(
+                vulnerabilidad_registro_id=id
+            ).update(
+                {"vulnerabilidad_registro_id": None},
+                synchronize_session=False
+            )
+        except Exception:
+            pass
+
+        # ==========================
+        # Eliminar evidencias físicas y BD
+        # ==========================
+        try:
+            for ev in list(getattr(it, "evidencias", []) or []):
+                try:
+                    filename = getattr(ev, "filename", None)
+
+                    if filename:
+                        path = os.path.join(
+                            app.config['UPLOAD_VULNERABILIDADES_DIR'],
+                            filename
+                        )
+
+                        if os.path.exists(path):
+                            os.remove(path)
+
+                    db.session.delete(ev)
+
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # ==========================
+        # Eliminar vulnerabilidad
+        # ==========================
+        db.session.delete(it)
+        db.session.commit()
+
+        if total_threat:
+            flash(
+                f"Vulnerabilidad eliminada correctamente. También se eliminaron {total_threat} registro(s) de modelamiento de amenazas asociado(s).",
+                "success"
+            )
+        else:
+            flash("Vulnerabilidad eliminada correctamente.", "success")
+
+    except Exception as e:
+        db.session.rollback()
+        flash(
+            "No fue posible eliminar la vulnerabilidad. "
+            "Verifique si tiene registros asociados en planes de remediación, evidencias o escaneos.",
+            "danger"
+        )
+
+    return redirect(url_for('vulnerabilidades_matriz'))
+
+# ==========================
+# Eliminar vulnerabilidades por filtros
+# ==========================
+
+@app.route('/vulnerabilidades/delete_filtrados', methods=['POST'])
+@login_required
+def vulnerabilidades_delete_filtrados():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar registros.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para eliminar vulnerabilidades.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    db.session.rollback()
+
+    filtro_campo = (request.form.get('campo') or 'activo').strip()
+    filtro_valor = (request.form.get('valor') or '').strip()
+    filtro_clasificacion = (request.form.get('clasificacion') or '').strip()
+
+    campos_validos = {
+        'codigo',
+        'activo',
+        'cve',
+        'clasificacion',
+        'responsable',
+        'estado',
+        'tipo_vulnerabilidad'
+    }
+
+    if filtro_campo not in campos_validos:
+        filtro_campo = 'activo'
+
+    q = VulnerabilidadRegistro.query.options(
+        selectinload(VulnerabilidadRegistro.evidencias)
+    )
+
+    if filtro_valor:
+        columna = getattr(VulnerabilidadRegistro, filtro_campo, None)
+        if columna is not None:
+            q = q.filter(columna.ilike(f"%{filtro_valor}%"))
+
+    if filtro_clasificacion:
+        q = q.filter(VulnerabilidadRegistro.clasificacion == filtro_clasificacion)
+
+    registros = q.all()
+
+    if not registros:
+        flash("No se encontraron vulnerabilidades para eliminar con los filtros aplicados.", "warning")
+        return redirect(url_for(
+            'vulnerabilidades_matriz',
+            campo=filtro_campo,
+            valor=filtro_valor,
+            clasificacion=filtro_clasificacion
+        ))
+
+    try:
+        total = len(registros)
+        ids = [int(it.id) for it in registros if it and it.id]
+
+        if not ids:
+            flash("No se encontraron IDs válidos para eliminar.", "warning")
+            return redirect(url_for('vulnerabilidades_matriz'))
+
+        placeholders = ",".join(str(i) for i in ids)
+
+        # ==========================
+        # 1. Eliminar archivos físicos de evidencias
+        # ==========================
+        try:
+            evidencias = VulnerabilidadEvidencia.query.filter(
+                VulnerabilidadEvidencia.vulnerabilidad_id.in_(ids)
+            ).all()
+
+            for ev in evidencias:
+                try:
+                    filename = getattr(ev, "filename", None)
+                    if filename:
+                        path = os.path.join(
+                            app.config['UPLOAD_VULNERABILIDADES_DIR'],
+                            filename
+                        )
+                        if os.path.exists(path):
+                            os.remove(path)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # ==========================
+        # 2. Eliminar evidencias desde el modelo correcto
+        # ==========================
+        try:
+            VulnerabilidadEvidencia.query.filter(
+                VulnerabilidadEvidencia.vulnerabilidad_id.in_(ids)
+            ).delete(synchronize_session=False)
+        except Exception:
+            pass
+
+        # ==========================
+        # 3. Eliminar planes de remediación asociados
+        # ==========================
+        try:
+            db.session.execute(text(f"""
+                DELETE FROM plan_remediacion
+                WHERE vulnerabilidad_id IN ({placeholders})
+            """))
+        except Exception:
+            pass
+
+        # ==========================
+        # 4. Eliminar modelamiento de amenazas asociado
+        # ==========================
+        total_threat = eliminar_modelamientos_por_vulnerabilidades(ids)
+
+        # ==========================
+        # 5. Desvincular hallazgos de escaneo
+        # ==========================
+        try:
+            db.session.execute(text(f"""
+                UPDATE vulnerability_scan_findings
+                SET vulnerabilidad_registro_id = NULL
+                WHERE vulnerabilidad_registro_id IN ({placeholders})
+            """))
+        except Exception:
+            pass
+
+        # ==========================
+        # 6. Eliminar vulnerabilidades
+        # ==========================
+        db.session.execute(text(f"""
+            DELETE FROM vulnerabilidades_registro
+            WHERE id IN ({placeholders})
+        """))
+
+        db.session.commit()
+
+        if total_threat:
+            flash(
+                f"Se eliminaron {total} vulnerabilidades correctamente. También se eliminaron {total_threat} registro(s) de modelamiento de amenazas asociado(s).",
+                "success"
+            )
+        else:
+            flash(f"Se eliminaron {total} vulnerabilidades correctamente.", "success")
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f"No fue posible eliminar las vulnerabilidades filtradas: {str(e)}", "danger")
+
+    return redirect(url_for('vulnerabilidades_matriz'))
+
+# ==========================
+# Archivo físico de evidencia — Vulnerabilidades
+# ==========================
+@app.route('/vulnerabilidades/evidencia/<int:evi_id>/file')
+@login_required
+def vulnerabilidad_evidencia_file(evi_id):
+    ev = VulnerabilidadEvidencia.query.get_or_404(evi_id)
+
+    file_path = os.path.join(app.config['UPLOAD_VULNERABILIDADES_DIR'], ev.filename)
+
+    if not os.path.exists(file_path):
+        flash("El archivo de evidencia no se encuentra en el servidor.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    resp = send_file(
+        file_path,
+        as_attachment=False,
+        download_name=ev.original_name,
+        mimetype=ev.mime or 'application/pdf'
+    )
+    resp.headers['Content-Disposition'] = f'inline; filename="{ev.original_name}"'
+    return resp
+
+# ==========================
+# Vista de evidencia — Vulnerabilidades
+# ==========================
+@app.route('/vulnerabilidades/evidencia/<int:evi_id>/view')
+@login_required
+def vulnerabilidad_evidencia_view(evi_id):
+    ev = VulnerabilidadEvidencia.query.get_or_404(evi_id)
+
+    html = """
+    <div class="vulevi-shell">
+
+      <!-- CABECERA -->
+      <div class="vulevi-header-card">
+        <div class="vulevi-header-overlay">
+          <div class="vulevi-header-text">
+            <h3 class="vulevi-title m-0">📄 Evidencia de Vulnerabilidad</h3>
+            <div class="vulevi-subtitle">
+              Visualización del archivo adjunto asociado al registro de vulnerabilidad
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BOTÓN VOLVER -->
+      <div class="vulevi-header-actions">
+        <a href="{{ url_for('vulnerabilidades_matriz') }}"
+           class="btn rounded-pill px-5 fw-bold vulevi-back-btn">
+          ⬅ Volver a la Matriz de Vulnerabilidades
+        </a>
+      </div>
+
+      <!-- TARJETA VISOR -->
+      <div class="vulevi-card">
+        <div class="vulevi-card-body">
+
+          <div class="vulevi-file-bar">
+            <div class="vulevi-file-left">
+              <div class="vulevi-file-icon">PDF</div>
+              <div class="vulevi-file-meta">
+                <div class="vulevi-file-label">Archivo de evidencia</div>
+                <div class="vulevi-file-name">{{ ev.original_name or 'Evidencia' }}</div>
+              </div>
+            </div>
+
+            <div class="vulevi-file-actions">
+              <a href="{{ url_for('vulnerabilidad_evidencia_file', evi_id=ev.id) }}"
+                 target="_blank"
+                 class="btn btn-outline-primary rounded-pill px-4 fw-bold">
+                Abrir en nueva pestaña
+              </a>
+            </div>
+          </div>
+
+          <div class="vulevi-viewer-wrap">
+            <iframe
+              src="{{ url_for('vulnerabilidad_evidencia_file', evi_id=ev.id) }}"
+              class="vulevi-iframe">
+            </iframe>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .vulevi-shell{
+        width:96%;
+        max-width:1500px;
+        margin:10px auto 30px auto;
+      }
+
+      /* =========================
+         HEADER ESTÁNDAR SGSI
+         ========================= */
+      .vulevi-header-card{
+        background:#3f86d6;
+        height:88px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        border-radius:18px;
+        box-shadow:0 12px 30px rgba(0,0,0,.30);
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .vulevi-header-overlay{
+        width:100%;
+        height:100%;
+        display:flex;
+        align-items:flex-start;
+        justify-content:center;
+        text-align:center;
+        padding:8px 24px 6px 24px;
+        background:rgba(0,0,0,.08);
+      }
+
+      .vulevi-header-text{
+        max-width:1100px;
+        width:100%;
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        justify-content:flex-start;
+        transform:translateY(8px);
+      }
+
+      .vulevi-title{
+        color:#fff !important;
+        font-weight:900;
+        font-size:1.38rem;
+        line-height:1.10;
+        text-shadow:0 4px 14px rgba(0,0,0,.45);
+        margin:0 !important;
+      }
+
+      .vulevi-subtitle{
+        color:rgba(255,255,255,.96);
+        font-size:.82rem;
+        margin-top:4px;
+        line-height:1.15;
+      }
+
+      /* =========================
+         BOTONES
+         ========================= */
+      .vulevi-header-actions{
+        display:flex;
+        justify-content:center;
+        margin-bottom:16px;
+        gap:10px;
+        flex-wrap:wrap;
+      }
+
+      .vulevi-back-btn{
+        background:#ffffff;
+        color:#000000;
+        border:2px solid #ffffff;
+        box-shadow:0 4px 10px rgba(0,0,0,.10);
+      }
+
+      .vulevi-back-btn:hover{
+        background:#f3f4f6;
+        color:#000000;
+        border-color:#f3f4f6;
+      }
+
+      /* =========================
+         CARD PRINCIPAL
+         ========================= */
+      .vulevi-card{
+        background:rgba(255,255,255,.95);
+        border-radius:20px;
+        backdrop-filter:blur(6px);
+        box-shadow:0 14px 30px rgba(0,0,0,.18);
+        overflow:hidden;
+      }
+
+      .vulevi-card-body{
+        padding:18px;
+      }
+
+      /* =========================
+         BARRA DE ARCHIVO
+         ========================= */
+      .vulevi-file-bar{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:14px;
+        flex-wrap:wrap;
+        margin-bottom:16px;
+        padding:14px 16px;
+        background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);
+        border:1px solid rgba(0,0,0,.06);
+        border-radius:16px;
+        box-shadow:0 4px 12px rgba(0,0,0,.05);
+      }
+
+      .vulevi-file-left{
+        display:flex;
+        align-items:center;
+        gap:12px;
+        min-width:0;
+      }
+
+      .vulevi-file-icon{
+        width:46px;
+        height:46px;
+        min-width:46px;
+        border-radius:12px;
+        background:#ef4444;
+        color:#fff;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:.82rem;
+        font-weight:800;
+        box-shadow:0 6px 14px rgba(239,68,68,.22);
+      }
+
+      .vulevi-file-meta{
+        min-width:0;
+      }
+
+      .vulevi-file-label{
+        font-size:.78rem;
+        color:#475569;
+        font-weight:700;
+      }
+
+      .vulevi-file-name{
+        font-size:.96rem;
+        font-weight:800;
+        color:#0f172a;
+        word-break:break-word;
+      }
+
+      /* =========================
+         VISOR
+         ========================= */
+      .vulevi-viewer-wrap{
+        height:78vh;
+        border:1px solid rgba(0,0,0,.08);
+        border-radius:16px;
+        overflow:hidden;
+        background:#ffffff;
+        box-shadow:inset 0 1px 2px rgba(0,0,0,.04);
+      }
+
+      .vulevi-iframe{
+        width:100%;
+        height:100%;
+        border:0;
+        display:block;
+        background:#fff;
+      }
+
+      /* =========================
+         RESPONSIVE
+         ========================= */
+      @media (max-width:992px){
+        .vulevi-shell{
+          width:98%;
+          margin:8px auto 24px auto;
+        }
+
+        .vulevi-header-card{
+          height:84px;
+        }
+
+        .vulevi-header-overlay{
+          padding:8px 16px 6px 16px;
+        }
+
+        .vulevi-header-text{
+          transform:translateY(-1px);
+        }
+
+        .vulevi-title{
+          font-size:1.20rem;
+          line-height:1.08;
+        }
+
+        .vulevi-subtitle{
+          font-size:.68rem;
+          line-height:1.12;
+        }
+
+        .vulevi-card-body{
+          padding:8px 7px;
+        }
+
+        .vulevi-viewer-wrap{
+          height:72vh;
+        }
+      }
+    </style>
+    """
+
+    inner = render_template_string(html, ev=ev)
+    return render_template_string(BASE, content=Markup(inner))
+
+# ==========================
+# Configuración Kali Linux
+# ==========================
+@app.route('/vulnerabilidades/scan/config', methods=['GET', 'POST'])
+@login_required
+def vuln_scan_config():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede modificar la configuración.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para configurar el escaneo.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    cfg = _scan_cfg()
+
+    if request.method == 'POST':
+        cfg.modo = (request.form.get('modo') or 'local').strip()
+        cfg.host = (request.form.get('host') or '').strip() or None
+        cfg.puerto_ssh = request.form.get('puerto_ssh', type=int) or 22
+        cfg.usuario_ssh = (request.form.get('usuario_ssh') or '').strip() or None
+        cfg.password_ssh = (request.form.get('password_ssh') or '').strip() or None
+        cfg.ruta_base_remota = (request.form.get('ruta_base_remota') or '').strip() or None
+
+        cfg.ruta_nmap = (request.form.get('ruta_nmap') or '/usr/bin/nmap').strip()
+        cfg.ruta_nikto = (request.form.get('ruta_nikto') or '/usr/bin/nikto').strip()
+        cfg.ruta_nuclei = (request.form.get('ruta_nuclei') or '/usr/bin/nuclei').strip()
+        cfg.ruta_whatweb = (request.form.get('ruta_whatweb') or '/usr/bin/whatweb').strip()
+        cfg.ruta_testssl = (request.form.get('ruta_testssl') or '/usr/bin/testssl').strip()
+        cfg.ruta_zap = (request.form.get('ruta_zap') or '/usr/share/zaproxy/zap.sh').strip()
+
+        cfg.updated_at = datetime.utcnow()
+
+        db.session.commit()
+        flash("Configuración de Kali Linux guardada correctamente.", "success")
+        return redirect(url_for('vuln_scan_config'))
+
+    body = """
+    <div class="glass-card p-4 mt-2">
+      <div class="section-title">⚙️ Configuración del Motor de Escaneo</div>
+
+      <form method="post">
+        <div class="row g-3">
+
+          <div class="col-md-4">
+            <label class="form-label">Modo de Integración</label>
+            <select name="modo" class="form-select">
+              <option value="local" {% if cfg.modo == 'local' %}selected{% endif %}>
+                Local
+              </option>
+              <option value="remoto" {% if cfg.modo == 'remoto' %}selected{% endif %}>
+                Remoto (otra IP por SSH)
+              </option>
+            </select>
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label">Host Kali Remoto</label>
+            <input name="host"
+                   class="form-control"
+                   value="{{ cfg.host or '' }}"
+                   placeholder="192.168.1.50">
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label">Puerto SSH</label>
+            <input name="puerto_ssh"
+                   type="number"
+                   class="form-control"
+                   value="{{ cfg.puerto_ssh or 22 }}">
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label">Usuario SSH</label>
+            <input name="usuario_ssh"
+                   class="form-control"
+                   value="{{ cfg.usuario_ssh or '' }}">
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label">Password SSH</label>
+            <input name="password_ssh"
+                   type="password"
+                   class="form-control"
+                   value="{{ cfg.password_ssh or '' }}">
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label">Ruta Base Remota</label>
+            <input name="ruta_base_remota"
+                   class="form-control"
+                   value="{{ cfg.ruta_base_remota or '/tmp' }}">
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Ruta Nmap</label>
+            <input name="ruta_nmap"
+                   class="form-control"
+                   value="{{ cfg.ruta_nmap or '/usr/bin/nmap' }}">
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Ruta Nikto</label>
+            <input name="ruta_nikto"
+                   class="form-control"
+                   value="{{ cfg.ruta_nikto or '/usr/bin/nikto' }}">
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Ruta Nuclei</label>
+            <input name="ruta_nuclei"
+                   class="form-control"
+                   value="{{ cfg.ruta_nuclei or '/usr/bin/nuclei' }}">
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Ruta WhatWeb</label>
+            <input name="ruta_whatweb"
+                   class="form-control"
+                   value="{{ cfg.ruta_whatweb or '/usr/bin/whatweb' }}">
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Ruta testssl</label>
+            <input name="ruta_testssl"
+                   class="form-control"
+                   value="{{ cfg.ruta_testssl or '/usr/bin/testssl' }}">
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Ruta OWASP ZAP</label>
+            <input name="ruta_zap"
+                   class="form-control"
+                   value="{{ cfg.ruta_zap or '/usr/share/zaproxy/zap.sh' }}"
+                   placeholder="/usr/share/zaproxy/zap.sh">
+          </div>
+
+          <div class="col-12">
+            <div class="toolbar-actions justify-content-center mt-2">
+              <button class="btn btn-primary rounded-pill px-4">
+                Guardar Configuración
+              </button>
+
+              <a href="{{ url_for('vulnerabilidades_matriz') }}"
+                 class="btn btn-outline-secondary rounded-pill px-4">
+                Cancelar
+              </a>
+            </div>
+          </div>
+
+        </div>
+      </form>
+    </div>
+    """
+
+    return vuln_scan_shell(
+        "Configuración de Kali Linux",
+        render_template_string(body, cfg=cfg)
+    )
+
+
+# ==========================
+# Nuevo escaneo
+# ==========================
+@app.route('/vulnerabilidades/scan/new', methods=['GET', 'POST'])
+@login_required
+def vuln_scan_new():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede ejecutar escaneos.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para ejecutar escaneos.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    cfg = _scan_cfg()
+
+    if request.method == 'POST':
+        target = (request.form.get('target') or '').strip()
+        responsable = (request.form.get('responsable') or '').strip()
+        crear_vulns = bool(request.form.get('crear_vulns'))
+        crear_planes = bool(request.form.get('crear_planes'))
+
+        # ==========================
+        # Herramientas seleccionadas
+        # ==========================
+        herramientas = request.form.getlist("herramientas")
+
+        herramientas_validas = [
+            "nmap",
+            "nikto",
+            "nuclei",
+            "whatweb",
+            "testssl",
+            "zap"
+        ]
+
+        herramientas = [
+            h for h in herramientas
+            if h in herramientas_validas
+        ]
+
+        if not herramientas:
+            herramientas = ["nmap"]
+
+        if not target_valido(target):
+            flash("Debe ingresar una URL o IP válida.", "danger")
+            return redirect(url_for('vuln_scan_new'))
+
+        target_type = detectar_tipo_objetivo(target)
+
+        run = VulnerabilityScanRun(
+            target=normalizar_target_para_scan(target) if target_type == "url" else target,
+            target_type=target_type,
+            scan_mode='full',
+            scanner_mode=cfg.modo,
+            estado='ejecutando',
+            fecha_inicio=datetime.utcnow(),
+            fecha_fin=None,
+            ejecutado_por=getattr(user, 'username', None),
+            responsable_asignado=responsable or getattr(user, 'username', None),
+            progress_pct=1,
+            current_stage="Encolando escaneo",
+            current_tool="dispatcher",
+            cancel_requested=False,
+            stopped_by_user=False,
+            findings_streamed=0,
+            created_vulns=0,
+            created_plans=0,
+            herramientas=json.dumps(herramientas)
+        )
+
+        db.session.add(run)
+        db.session.commit()
+
+        lanzar_scan_background(
+            run.id,
+            crear_vulns=crear_vulns,
+            crear_planes=crear_planes
+        )
+
+        return redirect(url_for('vuln_scan_monitor', run_id=run.id))
+
+    body = """
+    <div class="glass-card p-4 mt-2">
+      <div class="section-title">🛰️ Nuevo Análisis Automático</div>
+
+      <form method="post">
+        <div class="row g-3">
+
+          <div class="col-md-8">
+            <label class="form-label">Objetivo a escanear (URL o IP)</label>
+            <input name="target"
+                   class="form-control"
+                   placeholder="https://midominio.com o 192.168.1.10"
+                   required>
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label">Responsable</label>
+            <input name="responsable"
+                   class="form-control"
+                   value="{{ current_user.username if current_user.is_authenticated else '' }}">
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label">Modo configurado</label>
+            <input class="form-control" value="{{ cfg.modo }}" readonly>
+          </div>
+
+          <div class="col-md-8">
+            <label class="form-label">Motor Kali actual</label>
+            <input class="form-control"
+                   value="{% if cfg.modo == 'local' %}Localhost{% else %}{{ cfg.host or 'No configurado' }}{% endif %}"
+                   readonly>
+          </div>
+
+          <div class="col-12">
+            <div class="glass-card p-3 mb-2 mt-2">
+              <div class="section-title">
+                🛠️ Herramientas de Escaneo
+              </div>
+
+              <div class="row">
+
+                <div class="col-md-4 mb-2">
+                  <div class="form-check">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           name="herramientas"
+                           value="nmap"
+                           id="tool_nmap"
+                           checked>
+                    <label class="form-check-label fw-semibold" for="tool_nmap">
+                      Nmap
+                    </label>
+                  </div>
+                </div>
+
+                <div class="col-md-4 mb-2">
+                  <div class="form-check">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           name="herramientas"
+                           value="nikto"
+                           id="tool_nikto"
+                           checked>
+                    <label class="form-check-label fw-semibold" for="tool_nikto">
+                      Nikto
+                    </label>
+                  </div>
+                </div>
+
+                <div class="col-md-4 mb-2">
+                  <div class="form-check">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           name="herramientas"
+                           value="nuclei"
+                           id="tool_nuclei"
+                           checked>
+                    <label class="form-check-label fw-semibold" for="tool_nuclei">
+                      Nuclei
+                    </label>
+                  </div>
+                </div>
+
+                <div class="col-md-4 mb-2">
+                  <div class="form-check">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           name="herramientas"
+                           value="whatweb"
+                           id="tool_whatweb"
+                           checked>
+                    <label class="form-check-label fw-semibold" for="tool_whatweb">
+                      WhatWeb
+                    </label>
+                  </div>
+                </div>
+
+                <div class="col-md-4 mb-2">
+                  <div class="form-check">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           name="herramientas"
+                           value="testssl"
+                           id="tool_testssl"
+                           checked>
+                    <label class="form-check-label fw-semibold" for="tool_testssl">
+                      testssl
+                    </label>
+                  </div>
+                </div>
+
+                <div class="col-md-4 mb-2">
+                  <div class="form-check">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           name="herramientas"
+                           value="zap"
+                           id="tool_zap"
+                           checked>
+                    <label class="form-check-label fw-semibold" for="tool_zap">
+                      OWASP ZAP
+                    </label>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-6">
+            <div class="form-check mt-4">
+              <input class="form-check-input"
+                     type="checkbox"
+                     name="crear_vulns"
+                     id="crear_vulns"
+                     checked>
+              <label class="form-check-label" for="crear_vulns">
+                Crear registros en la matriz de vulnerabilidades
+              </label>
+            </div>
+          </div>
+
+          <div class="col-md-6">
+            <div class="form-check mt-4">
+              <input class="form-check-input"
+                     type="checkbox"
+                     name="crear_planes"
+                     id="crear_planes"
+                     checked>
+              <label class="form-check-label" for="crear_planes">
+                Crear planes de remediación automáticamente
+              </label>
+            </div>
+          </div>
+
+          <div class="col-12 mt-3">
+            <div class="toolbar-actions justify-content-center">
+              <button class="btn btn-primary rounded-pill px-4">
+                Ejecutar Escaneo
+              </button>
+
+              <a href="{{ url_for('vulnerabilidades_matriz') }}"
+                 class="btn btn-outline-secondary rounded-pill px-4">
+                Cancelar
+              </a>
+            </div>
+          </div>
+
+        </div>
+      </form>
+    </div>
+
+    <div class="glass-card p-3 mt-3">
+      <div class="small text-muted">
+        <b>Herramientas disponibles:</b>
+        Nmap, Nikto, Nuclei, WhatWeb, testssl y OWASP ZAP.
+      </div>
+    </div>
+    """
+
+    return vuln_scan_shell(
+        "Análisis Automático de Vulnerabilidades",
+        render_template_string(
+            body,
+            cfg=cfg,
+            current_user=current_user
+        )
+    )
+
+# ==========================
+# PANTALLA DE MONITOREO CON BARRA Y BOTÓN PARAR
+# ==========================
+@app.route('/vulnerabilidades/scan/<int:run_id>/monitor')
+@login_required
+def vuln_scan_monitor(run_id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede ejecutar escaneos.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para monitorear escaneos.", "danger")
+        return redirect(url_for('menu'))
+
+    run = VulnerabilityScanRun.query.get_or_404(run_id)
+
+    body = """
+    <div class="glass-card p-4 mt-2">
+      <div class="section-title">Monitoreo del Escaneo #{{ run.id }}</div>
+
+      <div class="row g-3">
+        <div class="col-md-8">
+          <label class="form-label">Objetivo</label>
+          <input class="form-control" value="{{ run.target }}" readonly>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Estado</label>
+          <div id="estado_badge">{{ badge_estado_scan_html(run.estado) }}</div>
+        </div>
+
+        <div class="col-12">
+          <label class="form-label">Etapa actual</label>
+          <input class="form-control" id="current_stage" value="{{ run.current_stage or 'Pendiente' }}" readonly>
+        </div>
+
+        <div class="col-12">
+          <label class="form-label">Progreso</label>
+          <div class="progress">
+            <div id="progress_bar" class="progress-bar bg-primary" role="progressbar" style="width: {{ run.progress_pct or 0 }}%;">
+              {{ run.progress_pct or 0 }}%
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-3">
+          <div class="metric-box">
+            <div class="metric-label">Hallazgos en línea</div>
+            <div class="metric-value" id="metric_findings">{{ run.findings_streamed or 0 }}</div>
+          </div>
+        </div>
+
+        <div class="col-md-3">
+          <div class="metric-box">
+            <div class="metric-label">Vulnerabilidades creadas</div>
+            <div class="metric-value" id="metric_vulns">{{ run.created_vulns or 0 }}</div>
+          </div>
+        </div>
+
+        <div class="col-md-3">
+          <div class="metric-box">
+            <div class="metric-label">Planes creados</div>
+            <div class="metric-value" id="metric_plans">{{ run.created_plans or 0 }}</div>
+          </div>
+        </div>
+
+        <div class="col-md-3">
+          <div class="metric-box">
+            <div class="metric-label">Herramienta actual</div>
+            <div class="metric-value" id="metric_tool">{{ run.current_tool or '—' }}</div>
+          </div>
+        </div>
+
+        <div class="col-12">
+          <div class="toolbar-actions justify-content-center mt-2">
+            <button id="btn_stop" class="btn btn-danger rounded-pill px-4" {% if run.estado not in ['pendiente','ejecutando'] %}disabled{% endif %}>
+              ⏹ Parar Escaneo
+            </button>
+
+            <a href="{{ url_for('vuln_scan_detail', run_id=run.id) }}"
+               class="btn btn-warning rounded-pill px-4"
+               id="btn_ver_detalle">
+              Ver Detalle
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="soft-table-wrap mt-3">
+      <div class="p-3 pb-0">
+        <div class="section-title mb-2">🧾 Hallazgos cargados en línea</div>
+      </div>
+
+      <div class="table-responsive px-3 pb-3">
+        <table class="table table-hover align-middle soft-table mb-0">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Fuente</th>
+              <th>Título</th>
+              <th>Severidad</th>
+              <th>Puerto</th>
+              <th>Servicio</th>
+            </tr>
+          </thead>
+          <tbody id="tbody_findings">
+            {% for f in findings %}
+            <tr>
+              <td class="text-center fw-bold">{{ loop.index }}</td>
+              <td class="text-center">{{ f.fuente }}</td>
+              <td class="small">{{ f.titulo }}</td>
+              <td class="text-center">{{ badge_severidad_html(f.severidad) }}</td>
+              <td class="text-center">{{ f.puerto or '—' }}</td>
+              <td class="small">{{ f.servicio or '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <script>
+      const RUN_ID = {{ run.id }};
+
+      async function refreshScanStatus() {
+        try {
+          const r = await fetch(`/vulnerabilidades/scan/${RUN_ID}/status`);
+          const data = await r.json();
+
+          document.getElementById('current_stage').value = data.current_stage || '—';
+
+          const bar = document.getElementById('progress_bar');
+          bar.style.width = `${data.progress_pct || 0}%`;
+          bar.textContent = `${data.progress_pct || 0}%`;
+
+          document.getElementById('metric_findings').textContent = data.findings_streamed || 0;
+          document.getElementById('metric_vulns').textContent = data.created_vulns || 0;
+          document.getElementById('metric_plans').textContent = data.created_plans || 0;
+          document.getElementById('metric_tool').textContent = data.current_tool || '—';
+          document.getElementById('estado_badge').innerHTML = data.estado_badge_html || '';
+
+          const tbody = document.getElementById('tbody_findings');
+          tbody.innerHTML = '';
+          (data.findings || []).forEach((f, idx) => {
+            tbody.innerHTML += `
+              <tr>
+                <td class="text-center fw-bold">${idx + 1}</td>
+                <td class="text-center">${f.fuente || '—'}</td>
+                <td class="small">${f.titulo || '—'}</td>
+                <td class="text-center">${f.severidad_badge_html || '—'}</td>
+                <td class="text-center">${f.puerto || '—'}</td>
+                <td class="small">${f.servicio || '—'}</td>
+              </tr>
+            `;
+          });
+
+          if (['finalizado', 'error', 'detenido'].includes(data.estado)) {
+            document.getElementById('btn_stop').disabled = true;
+            return;
+          }
+        } catch (e) {
+          console.error(e);
+        }
+
+        setTimeout(refreshScanStatus, 2000);
+      }
+
+      document.getElementById('btn_stop').addEventListener('click', async () => {
+        if (!confirm('¿Desea detener el escaneo en curso?')) return;
+
+        const r = await fetch(`/vulnerabilidades/scan/${RUN_ID}/stop`, {method:'POST'});
+        const data = await r.json();
+
+        if (data.ok) {
+          document.getElementById('btn_stop').disabled = true;
+        }
+      });
+
+      window.addEventListener('DOMContentLoaded', refreshScanStatus);
+    </script>
+    """
+
+    findings = VulnerabilityScanFinding.query.filter_by(run_id=run.id).order_by(VulnerabilityScanFinding.id.asc()).all()
+
+    return vuln_scan_shell(
+        f"Monitoreo del Escaneo #{run.id}",
+        render_template_string(
+            body,
+            run=run,
+            findings=findings,
+            badge_estado_scan_html=badge_estado_scan_html,
+            badge_severidad_html=badge_severidad_html
+        )
+    )
+
+# ==========================
+# NUEVA RUTA JSON DE ESTADO
+# ==========================
+
+@app.route('/vulnerabilidades/scan/<int:run_id>/status')
+@login_required
+def vuln_scan_status(run_id):
+    run = VulnerabilityScanRun.query.get_or_404(run_id)
+    findings = VulnerabilityScanFinding.query.filter_by(run_id=run.id).order_by(VulnerabilityScanFinding.id.asc()).all()
+
+    payload = {
+        "id": run.id,
+        "estado": run.estado,
+        "estado_badge_html": str(badge_estado_scan_html(run.estado)),
+        "progress_pct": run.progress_pct or 0,
+        "current_stage": run.current_stage or "",
+        "current_tool": run.current_tool or "",
+        "findings_streamed": run.findings_streamed or 0,
+        "created_vulns": run.created_vulns or 0,
+        "created_plans": run.created_plans or 0,
+        "findings": [
+            {
+                "id": f.id,
+                "fuente": f.fuente,
+                "titulo": f.titulo,
+                "severidad": f.severidad,
+                "severidad_badge_html": str(badge_severidad_html(f.severidad)),
+                "puerto": f.puerto or "—",
+                "servicio": f.servicio or "—",
+            }
+            for f in findings
+        ]
+    }
+    return jsonify(payload)
+
+# ==========================
+# NUEVA RUTA “PARAR ESCANEO
+# ==========================
+
+@app.route('/vulnerabilidades/scan/<int:run_id>/stop', methods=['POST'])
+@login_required
+def vuln_scan_stop(run_id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        return jsonify({"ok": False, "error": "No autorizado"}), 403
+
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        return jsonify({"ok": False, "error": "No autorizado"}), 403
+
+    run = VulnerabilityScanRun.query.get_or_404(run_id)
+
+    if run.estado not in ("pendiente", "ejecutando"):
+        return jsonify({"ok": False, "error": "La corrida no está en ejecución"}), 400
+
+    run.cancel_requested = True
+    run.current_stage = "Solicitud de detención enviada"
+    db.session.commit()
+
+    # Intentar matar el proceso activo local (si existe)
+    try:
+        if run.active_pid:
+            try:
+                os.killpg(run.active_pid, signal.SIGTERM)
+            except Exception:
+                os.kill(run.active_pid, signal.SIGTERM)
+    except Exception:
+        pass
+
+    # Marcar inmediatamente como detenido
+    scan_mark_stopped(run.id, "Escaneo detenido manualmente por el usuario.")
+
+    return jsonify({"ok": True})
+
+# ==========================
+# Matriz de corridas
+# ==========================
+@app.route('/vulnerabilidades/scan/runs')
+@login_required
+def vuln_scan_runs():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para acceder a los reportes de escaneo.", "danger")
+        return redirect(url_for('menu'))
+
+    items = VulnerabilityScanRun.query.order_by(VulnerabilityScanRun.id.desc()).all()
+
+    body = """
+    <style>
+      .scan-actions-cell{
+        width:170px;
+        min-width:170px;
+        max-width:170px;
+        text-align:center;
+        vertical-align:middle !important;
+      }
+
+      .scan-actions-wrap{
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        justify-content:center;
+        gap:6px;
+        width:100%;
+        max-width:100%;
+      }
+
+      .scan-actions-wrap .btn{
+        width:100%;
+        max-width:125px;
+        min-height:28px;
+        padding:4px 8px !important;
+        font-size:.70rem;
+        font-weight:900;
+        border-radius:999px !important;
+        white-space:nowrap;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }
+
+      .soft-table th:last-child,
+      .soft-table td:last-child{
+        width:170px;
+        min-width:170px;
+        max-width:170px;
+      }
+
+      .soft-table{
+        min-width:1250px;
+      }
+
+      @media (max-width:768px){
+        .scan-actions-cell{
+          width:150px;
+          min-width:150px;
+          max-width:150px;
+        }
+
+        .scan-actions-wrap .btn{
+          max-width:115px;
+          font-size:.68rem;
+        }
+      }
+    </style>
+
+    <div class="toolbar-actions justify-content-end mb-3">
+      {% if user.role != 'auditor' %}
+        <a href="{{ url_for('vuln_scan_new') }}" class="btn btn-primary rounded-pill px-4" onclick="showLoader()">
+          ➕ Nuevo Escaneo
+        </a>
+      {% endif %}
+    </div>
+
+    <div class="soft-table-wrap">
+      <div class="p-3 pb-0">
+        <div class="section-title mb-2">Matriz de Reportes de Escaneo</div>
+      </div>
+
+      <div class="table-responsive px-3 pb-3">
+        <table class="table table-hover align-middle soft-table mb-0">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Fecha</th>
+              <th>Objetivo</th>
+              <th>Tipo</th>
+              <th>Modo</th>
+              <th>Estado</th>
+              <th>Total</th>
+              <th>Críticas</th>
+              <th>Altas</th>
+              <th>Medias</th>
+              <th>Bajas</th>
+              <th class="scan-actions-cell">Acciones</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {% for it in items %}
+            <tr>
+              <td class="text-center fw-bold">{{ it.id }}</td>
+              <td class="text-center">{{ it.created_at.strftime('%Y-%m-%d %H:%M') if it.created_at else '—' }}</td>
+              <td class="small">{{ it.target }}</td>
+              <td class="text-center">{{ it.target_type }}</td>
+              <td class="text-center">{{ it.scanner_mode }}</td>
+              <td class="text-center">{{ badge_estado_scan_html(it.estado) }}</td>
+              <td class="text-center fw-bold">{{ it.total_hallazgos or 0 }}</td>
+              <td class="text-center">{{ it.criticas or 0 }}</td>
+              <td class="text-center">{{ it.altas or 0 }}</td>
+              <td class="text-center">{{ it.medias or 0 }}</td>
+              <td class="text-center">{{ it.bajas or 0 }}</td>
+
+              <td class="scan-actions-cell">
+                <div class="scan-actions-wrap">
+
+                  {% if it.estado in ['pendiente', 'ejecutando', 'detenido'] %}
+                    <a href="{{ url_for('vuln_scan_monitor', run_id=it.id) }}"
+                       class="btn btn-primary btn-sm"
+                       onclick="showLoader()">
+                      Monitorear
+                    </a>
+                  {% endif %}
+
+                  <a href="{{ url_for('vuln_scan_detail', run_id=it.id) }}"
+                     class="btn btn-warning btn-sm"
+                     onclick="showLoader()">
+                    Ver
+                  </a>
+
+                  <a href="{{ url_for('vuln_scan_pdf', run_id=it.id) }}"
+                     class="btn btn-success btn-sm"
+                     target="_blank">
+                    PDF
+                  </a>
+
+                  {% if user.role != 'auditor' and it.estado != 'ejecutando' %}
+                    <a href="{{ url_for('vuln_scan_delete', run_id=it.id) }}"
+                       class="btn btn-danger btn-sm"
+                       onclick="return confirm('¿Eliminar esta corrida de escaneo?');">
+                      Eliminar
+                    </a>
+                  {% endif %}
+
+                </div>
+              </td>
+            </tr>
+
+            {% else %}
+            <tr>
+              <td colspan="12" class="text-center text-muted py-4">
+                No hay corridas registradas.
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    """
+
+    return vuln_scan_shell(
+        "Reportes de Escaneo",
+        render_template_string(
+            body,
+            items=items,
+            user=user,
+            badge_estado_scan_html=badge_estado_scan_html
+        )
+    )
+
+# ==========================
+# Eliminar escaneos
+# ==========================
+
+@app.route('/vulnerabilidades/scan/<int:run_id>/delete')
+@login_required
+def vuln_scan_delete(run_id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar corridas.", "danger")
+        return redirect(url_for('vuln_scan_runs'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para eliminar corridas.", "danger")
+        return redirect(url_for('vuln_scan_runs'))
+
+    run = VulnerabilityScanRun.query.get_or_404(run_id)
+
+    if run.estado in ("pendiente", "ejecutando"):
+        flash("No puede eliminar una corrida mientras está en ejecución. Debe detenerla primero.", "danger")
+        return redirect(url_for('vuln_scan_runs'))
+
+    # Guardar rutas antes de borrar DB
+    paths_to_delete = [
+        run.archivo_resumen_json,
+        run.archivo_reporte_pdf,
+        run.archivo_log,
+    ]
+
+    base_dir = None
+    try:
+        if run.archivo_log:
+            base_dir = os.path.dirname(run.archivo_log)
+    except Exception:
+        base_dir = None
+
+    # Reintentos por bloqueo SQLite
+    max_retries = 5
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            # MUY IMPORTANTE: limpiar cualquier transacción previa fallida
+            db.session.rollback()
+
+            # Volver a cargar la corrida en sesión limpia
+            run = VulnerabilityScanRun.query.get(run_id)
+            if not run:
+                flash("La corrida ya había sido eliminada.", "info")
+                return redirect(url_for('vuln_scan_runs'))
+
+            # Marcar como eliminando para evitar operaciones concurrentes lógicas
+            run.current_stage = "Eliminando corrida"
+            run.current_tool = None
+            run.cancel_requested = True
+            run.active_pid = None
+            run.active_command = None
+            db.session.commit()
+
+            db.session.rollback()
+
+            # Borrado masivo de hallazgos asociados
+            VulnerabilityScanFinding.query.filter_by(run_id=run_id).delete(synchronize_session=False)
+
+            # Si tienes otras tablas hijas ligadas al run_id, aquí puedes agregarlas igual
+            # Ejemplo:
+            # ThreatModelFinding.query.filter_by(scan_run_id=run_id).delete(synchronize_session=False)
+
+            db.session.commit()
+            db.session.rollback()
+
+            # Borrar corrida principal
+            run = VulnerabilityScanRun.query.get(run_id)
+            if run:
+                db.session.delete(run)
+                db.session.commit()
+
+            # Borrar archivos físicos solo después del commit exitoso
+            for path in paths_to_delete:
+                try:
+                    if path and os.path.exists(path):
+                        os.remove(path)
+                except Exception:
+                    pass
+
+            # Borrar directorio si existe
+            try:
+                if base_dir and os.path.isdir(base_dir):
+                    shutil.rmtree(base_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+            flash("Corrida de escaneo eliminada correctamente.", "success")
+            return redirect(url_for('vuln_scan_runs'))
+
+        except Exception as e:
+            last_error = e
+            print(f"DEBUG DELETE SCAN intento {attempt + 1}/{max_retries}: {e}")
+            db.session.rollback()
+            time.sleep(1.2)
+
+    flash(f"No se pudo eliminar la corrida por bloqueo de base de datos: {last_error}", "danger")
+    return redirect(url_for('vuln_scan_runs'))
+
+# ==========================
+# Detalle de corrida
+# ==========================
+@app.route('/vulnerabilidades/scan/<int:run_id>')
+@login_required
+def vuln_scan_detail(run_id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para ver el reporte.", "danger")
+        return redirect(url_for('menu'))
+
+    run = VulnerabilityScanRun.query.get_or_404(run_id)
+    findings = VulnerabilityScanFinding.query.filter_by(run_id=run.id).order_by(VulnerabilityScanFinding.id.asc()).all()
+
+    body = """
+    <div class="toolbar-actions justify-content-end mb-3">
+     {% if run.estado in ['pendiente', 'ejecutando', 'detenido'] %}
+        <a href="{{ url_for('vuln_scan_monitor', run_id=run.id) }}"
+           class="btn btn-primary rounded-pill px-4"
+           onclick="showLoader()">
+          📡 Monitorear
+        </a>
+        <a href="{{ url_for('threat_model_asset_view') }}?activo={{ run.target|urlencode }}"
+           class="btn btn-primary rounded-pill px-4"
+           onclick="showLoader()">
+          🧭 MITRE ATT&CK
+        </a>
+     {% endif %}
+      <a href="{{ url_for('vuln_scan_pdf', run_id=run.id) }}" class="btn btn-success rounded-pill px-4" target="_blank">
+        📄 PDF
+      </a>
+      <a href="{{ url_for('vuln_scan_runs') }}" class="btn btn-outline-secondary rounded-pill px-4" onclick="showLoader()">
+        ⬅ Volver a Reportes
+      </a>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-lg-2 col-md-4 col-6">
+        <div class="metric-box">
+          <div class="metric-label">Objetivo</div>
+          <div class="small fw-bold mt-2">{{ run.target }}</div>
+        </div>
+      </div>
+      <div class="col-lg-2 col-md-4 col-6">
+        <div class="metric-box">
+          <div class="metric-label">Tipo</div>
+          <div class="metric-value">{{ run.target_type }}</div>
+        </div>
+      </div>
+      <div class="col-lg-2 col-md-4 col-6">
+        <div class="metric-box">
+          <div class="metric-label">Modo</div>
+          <div class="metric-value">{{ run.scanner_mode }}</div>
+        </div>
+      </div>
+      <div class="col-lg-2 col-md-4 col-6">
+        <div class="metric-box">
+          <div class="metric-label">Estado</div>
+          <div class="mt-2">{{ badge_estado_scan_html(run.estado) }}</div>
+        </div>
+      </div>
+      <div class="col-lg-2 col-md-4 col-6">
+        <div class="metric-box">
+          <div class="metric-label">Total Hallazgos</div>
+          <div class="metric-value">{{ run.total_hallazgos or 0 }}</div>
+        </div>
+      </div>
+      <div class="col-lg-2 col-md-4 col-6">
+        <div class="metric-box">
+          <div class="metric-label">Responsable</div>
+          <div class="small fw-bold mt-2">{{ run.responsable_asignado or '—' }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-md-3"><div class="metric-box"><div class="metric-label">Críticas</div><div class="metric-value">{{ run.criticas or 0 }}</div></div></div>
+      <div class="col-md-3"><div class="metric-box"><div class="metric-label">Altas</div><div class="metric-value">{{ run.altas or 0 }}</div></div></div>
+      <div class="col-md-3"><div class="metric-box"><div class="metric-label">Medias</div><div class="metric-value">{{ run.medias or 0 }}</div></div></div>
+      <div class="col-md-3"><div class="metric-box"><div class="metric-label">Bajas</div><div class="metric-value">{{ run.bajas or 0 }}</div></div></div>
+    </div>
+
+    <div class="soft-table-wrap mb-3">
+      <div class="p-3 pb-0">
+        <div class="section-title mb-2">🧾 Hallazgos del Escaneo</div>
+      </div>
+
+      <div class="table-responsive px-3 pb-3">
+        <table class="table table-hover align-middle soft-table mb-0">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Fuente</th>
+              <th>Título / Evidencia</th>
+              <th>Severidad</th>
+              <th>Puerto</th>
+              <th>Servicio</th>
+              <th>Registro</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for f in findings %}
+            <tr>
+              <td class="text-center fw-bold">{{ loop.index }}</td>
+              <td class="text-center">{{ f.fuente }}</td>
+              <td class="small">
+                <div class="fw-bold">{{ f.titulo }}</div>
+                <div class="text-muted">{{ f.descripcion or '—' }}</div>
+                <div class="mt-1"><b>Evidencia:</b> {{ f.evidencia or '—' }}</div>
+              </td>
+              <td class="text-center">{{ badge_severidad_html(f.severidad) }}</td>
+              <td class="text-center">{{ f.puerto or '—' }}</td>
+              <td class="small">{{ f.servicio or '—' }}</td>
+              <td class="text-center">
+                {% if f.vulnerabilidad_registro_id %}
+                  <a href="{{ url_for('vulnerabilidad_edit', id=f.vulnerabilidad_registro_id) }}"
+                     class="btn btn-warning btn-sm rounded-pill px-3"
+                     onclick="showLoader()">
+                    Abrir
+                  </a>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="text-center text-muted py-4">No hay hallazgos cargados.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {% if run.salida_consola %}
+    <div class="glass-card p-4">
+      <div class="section-title">Log resumido</div>
+      <pre style="white-space: pre-wrap; margin-bottom:0;">{{ run.salida_consola }}</pre>
+    </div>
+    {% endif %}
+    """
+    return vuln_scan_shell(
+        f"Detalle del Reporte #{run.id}",
+        render_template_string(
+            body,
+            run=run,
+            findings=findings,
+            badge_estado_scan_html=badge_estado_scan_html,
+            badge_severidad_html=badge_severidad_html
+        )
+    )
+
+
+# ==========================
+# PDF de corrida
+# ==========================
+@app.route('/vulnerabilidades/scan/<int:run_id>/pdf')
+@login_required
+def vuln_scan_pdf(run_id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para descargar el PDF.", "danger")
+        return redirect(url_for('menu'))
+
+    run = VulnerabilityScanRun.query.get_or_404(run_id)
+
+    pdf_path = run.archivo_reporte_pdf
+    if not pdf_path or not os.path.exists(pdf_path):
+        pdf_path = build_vulnerability_scan_pdf(run.id)
+        run.archivo_reporte_pdf = pdf_path
+        db.session.commit()
+
+    return send_file(
+        pdf_path,
+        as_attachment=False,
+        download_name=f"Reporte_Vulnerabilidades_{run.id}.pdf",
+        mimetype="application/pdf"
+    )
+
+# ==========================
+# Importación del Nessus
+# ==========================
+
+@app.route('/vulnerabilidades/threat_model/nessus_import', methods=['GET', 'POST'])
+@login_required
+def threat_model_nessus_import():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede importar archivos Nessus.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Vulnerabilidades"):
+        flash("No tiene permiso para importar archivos Nessus.", "danger")
+        return redirect(url_for('vulnerabilidades_matriz'))
+
+    if request.method == 'POST':
+        target = (request.form.get('target') or '').strip()
+        responsable = (request.form.get('responsable') or '').strip()
+        crear_vulns = bool(request.form.get('crear_vulns'))
+        crear_planes = bool(request.form.get('crear_planes'))
+        archivo = request.files.get('archivo_nessus')
+
+        if not target:
+            flash("Debe indicar el activo u objetivo asociado.", "danger")
+            return redirect(url_for('threat_model_nessus_import'))
+
+        if not archivo or not archivo.filename.lower().endswith('.nessus'):
+            flash("Debe cargar un archivo .nessus válido.", "danger")
+            return redirect(url_for('threat_model_nessus_import'))
+
+        cfg = _scan_cfg()
+
+        run = VulnerabilityScanRun(
+            target=target,
+            target_type='url' if detectar_tipo_objetivo(target) == 'url' else 'ip',
+            scan_mode='nessus_import',
+            scanner_mode=cfg.modo,
+            estado='finalizado',
+            fecha_inicio=datetime.utcnow(),
+            fecha_fin=datetime.utcnow(),
+            ejecutado_por=getattr(user, 'username', None),
+            responsable_asignado=responsable or getattr(user, 'username', None),
+            progress_pct=100,
+            current_stage="Importación Nessus finalizada",
+            current_tool="nessus"
+        )
+        db.session.add(run)
+        db.session.commit()
+
+        run_dir = scan_run_dir(run.id, target)
+        nessus_path = scan_output_file(run_dir, "nessus_import", "nessus")
+        archivo.save(nessus_path)
+
+        findings = parse_nessus_xml(nessus_path)
+        guardar_findings_y_sincronizar(run, findings, run_dir, crear_vulns=crear_vulns, crear_planes=crear_planes)
+
+        resumir_hallazgos_run(run)
+        resumen_path = scan_output_file(run_dir, "summary", "json")
+        run.archivo_resumen_json = resumen_path
+        run.archivo_log = nessus_path
+        run.archivo_reporte_pdf = build_vulnerability_scan_pdf(run.id)
+        db.session.commit()
+
+        flash("Archivo Nessus importado correctamente y modelado contra MITRE ATT&CK.", "success")
+        return redirect(url_for('threat_model_dashboard'))
+
+    body = """
+    <div class="glass-card p-4 mt-2">
+      <div class="section-title">📥 Importar archivo Nessus</div>
+
+      <form method="post" enctype="multipart/form-data">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Activo / Objetivo</label>
+            <input name="target" class="form-control" placeholder="https://midominio.com o 192.168.1.10" required>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Responsable</label>
+            <input name="responsable" class="form-control" value="{{ current_user.username if current_user.is_authenticated else '' }}">
+          </div>
+
+          <div class="col-md-12">
+            <label class="form-label">Archivo .nessus</label>
+            <input type="file" name="archivo_nessus" class="form-control" accept=".nessus" required>
+          </div>
+
+          <div class="col-md-6">
+            <div class="form-check mt-3">
+              <input class="form-check-input" type="checkbox" name="crear_vulns" id="crear_vulns" checked>
+              <label class="form-check-label" for="crear_vulns">Crear registros en la matriz de vulnerabilidades</label>
+            </div>
+          </div>
+
+          <div class="col-md-6">
+            <div class="form-check mt-3">
+              <input class="form-check-input" type="checkbox" name="crear_planes" id="crear_planes" checked>
+              <label class="form-check-label" for="crear_planes">Crear planes de remediación automáticamente</label>
+            </div>
+          </div>
+
+          <div class="col-12">
+            <div class="toolbar-actions justify-content-center mt-3">
+              <button class="btn btn-primary rounded-pill px-4">Importar</button>
+              <a href="{{ url_for('vulnerabilidades_matriz') }}" class="btn btn-outline-secondary rounded-pill px-4">Cancelar</a>
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
+    """
+    return vuln_scan_shell("📥 Importación Nessus + MITRE ATT&CK", render_template_string(body, current_user=current_user))
+
+# ==========================================================================================================================================
+#                                                           Fin Módulo Registro de Vulnerabilidades
+# ==========================================================================================================================================
+
+# ==========================================================================================================================================
+#                                                       Módulo Modelamiento de Amenazas
+# ==========================================================================================================================================
+
+
+class ThreatModelEntry(db.Model):
+    __tablename__ = "threat_model_entries"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Relaciones con tu ecosistema actual
+    run_id = db.Column(db.Integer, db.ForeignKey("vulnerability_scan_runs.id", ondelete="SET NULL"), nullable=True)
+    finding_id = db.Column(db.Integer, db.ForeignKey("vulnerability_scan_findings.id", ondelete="SET NULL"), nullable=True)
+    vulnerabilidad_registro_id = db.Column(
+        db.Integer,
+        db.ForeignKey("vulnerabilidades_registro.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
+    # Datos del contexto
+    activo = db.Column(db.String(200), nullable=False)
+    herramienta = db.Column(db.String(50), nullable=False)   # nikto / nessus / nuclei / nmap / testssl
+    vulnerabilidad = db.Column(db.String(500), nullable=False)
+    descripcion = db.Column(db.Text, nullable=True)
+    impacto = db.Column(db.Text, nullable=True)
+
+    # Estado
+    severidad = db.Column(db.String(20), nullable=True)
+    confianza = db.Column(db.Integer, default=70)   # 0..100
+
+    # trazabilidad
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relaciones
+    tecnicas = db.relationship(
+        "ThreatModelTechnique",
+        backref="threat_entry",
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
+
+    vulnerabilidad_registro = db.relationship(
+        "VulnerabilidadRegistro",
+        backref=db.backref("threat_models", lazy="selectin")
+    )
+
+
+class ThreatModelTechnique(db.Model):
+    __tablename__ = "threat_model_techniques"
+
+    id = db.Column(db.Integer, primary_key=True)
+    threat_entry_id = db.Column(
+        db.Integer,
+        db.ForeignKey("threat_model_entries.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    mitre_technique_id = db.Column(db.String(20), nullable=False)      # T1190
+    mitre_technique_name = db.Column(db.String(255), nullable=False)   # Exploit Public-Facing Application
+    mitre_tactic_id = db.Column(db.String(20), nullable=True)          # TA0001
+    mitre_tactic_name = db.Column(db.String(100), nullable=False)      # Initial Access
+
+    rationale = db.Column(db.Text, nullable=True)
+    score = db.Column(db.Integer, default=50)  # score para Navigator / heatmap
+
+class ThreatModelUnmapped(db.Model):
+    __tablename__ = "threat_model_unmapped"
+
+    id = db.Column(db.Integer, primary_key=True)
+    run_id = db.Column(db.Integer, nullable=True)
+    finding_id = db.Column(db.Integer, nullable=True)
+    activo = db.Column(db.String(200), nullable=True)
+    herramienta = db.Column(db.String(50), nullable=True)
+    severidad = db.Column(db.String(20), nullable=True)
+    titulo = db.Column(db.String(500), nullable=True)
+    descripcion = db.Column(db.Text, nullable=True)
+    evidencia = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+            return f"<ConfigImpactoResidual {self.min}-{self.max} => bajar {self.bajar}>"
+
+class ThreatModelUnmappedClassification(db.Model):
+    __tablename__ = "threat_model_unmapped_classifications"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    unmapped_id = db.Column(
+        db.Integer,
+        db.ForeignKey("threat_model_unmapped.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True
+    )
+
+    owasp_category = db.Column(db.String(120), nullable=True)
+    cwe_id = db.Column(db.String(40), nullable=True)
+    cwe_name = db.Column(db.String(255), nullable=True)
+    capec_id = db.Column(db.String(40), nullable=True)
+    capec_name = db.Column(db.String(255), nullable=True)
+    iso_control = db.Column(db.String(120), nullable=True)
+    iso_control_name = db.Column(db.String(255), nullable=True)
+    nist_function = db.Column(db.String(80), nullable=True)
+    nist_category = db.Column(db.String(120), nullable=True)
+
+    recomendacion = db.Column(db.Text, nullable=True)
+    rationale = db.Column(db.Text, nullable=True)
+    confianza = db.Column(db.Integer, default=50)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    unmapped = db.relationship(
+        "ThreatModelUnmapped",
+        backref=db.backref(
+            "clasificacion_complementaria",
+            uselist=False,
+            cascade="all, delete-orphan"
+        )
+    )
+
+
+def init_threat_model_unmapped_classifications():
+    try:
+        with app.app_context():
+            db.create_all()
+    except Exception as e:
+        print("No fue posible inicializar threat_model_unmapped_classifications:", repr(e))
+
+
+init_threat_model_unmapped_classifications()
+
+
+ATTACK_DOMAIN = "enterprise-attack"
+
+ATTACK_TACTIC_ORDER = [
+    "Reconnaissance",
+    "Resource Development",
+    "Initial Access",
+    "Execution",
+    "Persistence",
+    "Privilege Escalation",
+    "Defense Evasion",
+    "Credential Access",
+    "Discovery",
+    "Lateral Movement",
+    "Collection",
+    "Command and Control",
+    "Exfiltration",
+    "Impact"
+]
+
+MITRE_PENDING_TACTIC = "Pendiente de mapeo MITRE"
+
+MITRE_ATTACK_MAPPING_RULES = [
+    # =========================
+    # Discovery / Recon
+    # =========================
+    {
+        "keywords": [
+            "directory indexing enabled",
+            "directory indexing",
+            "directory listing",
+            "autoindex",
+            "index of /",
+            "listing of directories",
+            "file listing",
+            "browseable directory",
+            "directory browsing"
+        ],
+        "patterns": [
+            r"\bindex of\s*/",
+            r"\bdirectory\s+(listing|indexing|browsing)\b"
+        ],
+        "technique_id": "T1083",
+        "technique_name": "File and Directory Discovery",
+        "tactic_id": "TA0007",
+        "tactic_name": "Discovery",
+        "impacto": "Exposición de información sensible por enumeración de directorios y archivos.",
+        "score": 55,
+        "confidence": 92,
+        "category": "discovery"
+    },
+    {
+        "keywords": [
+            "server leaks version",
+            "information disclosure",
+            "banner disclosure",
+            "version disclosure",
+            "x-powered-by",
+            "server header",
+            "trace method",
+            "debug enabled",
+            "stack trace",
+            "verbose error",
+            "discloses version",
+            "phpinfo",
+            "robots.txt"
+        ],
+        "patterns": [
+            r"\b(server|x-powered-by)\b.*\b(version|header)\b",
+            r"\b(verbose|debug|stack trace|phpinfo)\b",
+            r"\brobots\.txt\b"
+        ],
+        "technique_id": "T1592",
+        "technique_name": "Gather Victim Host Information",
+        "tactic_id": "TA0043",
+        "tactic_name": "Reconnaissance",
+        "impacto": "Divulgación de información útil para reconocimiento y preparación del ataque.",
+        "score": 40,
+        "confidence": 82,
+        "category": "recon"
+    },
+
+    # =========================
+    # Initial Access
+    # =========================
+    {
+        "keywords": [
+            "outdated apache",
+            "apache outdated",
+            "obsolete apache",
+            "old apache version",
+            "apache httpd",
+            "unsupported apache",
+            "apache version",
+            "outdated nginx",
+            "outdated tomcat",
+            "unsupported web server",
+            "web server multiple vulnerabilities",
+            "multiple vulnerabilities"
+        ],
+        "patterns": [
+            r"\b(apache|nginx|tomcat|iis|httpd)\b.*\b(outdated|obsolete|unsupported|multiple vulnerabilities)\b",
+            r"\bunsupported\b.*\b(version|release)\b"
+        ],
+        "technique_id": "T1190",
+        "technique_name": "Exploit Public-Facing Application",
+        "tactic_id": "TA0001",
+        "tactic_name": "Initial Access",
+        "impacto": "Posible explotación remota sobre aplicación o servicio público expuesto.",
+        "score": 80,
+        "confidence": 88,
+        "category": "public_facing"
+    },
+    {
+        "keywords": [
+            "sql injection",
+            "sqli",
+            "blind sql injection",
+            "union select",
+            "time based sql injection",
+            "error based sql injection"
+        ],
+        "patterns": [
+            r"\bsql\b.*\binjection\b",
+            r"\bunion\s+select\b"
+        ],
+        "technique_id": "T1190",
+        "technique_name": "Exploit Public-Facing Application",
+        "tactic_id": "TA0001",
+        "tactic_name": "Initial Access",
+        "impacto": "Compromiso de la aplicación por explotación de entrada insegura.",
+        "score": 96,
+        "confidence": 97,
+        "category": "public_facing"
+    },
+    {
+        "keywords": [
+            "remote code execution",
+            "rce",
+            "command injection",
+            "os command injection",
+            "code execution",
+            "arbitrary command execution",
+            "deserialization",
+            "insecure deserialization"
+        ],
+        "patterns": [
+            r"\bremote\b.*\bcode\b.*\bexecution\b",
+            r"\brce\b",
+            r"\bcommand\b.*\binjection\b",
+            r"\bdeserialization\b"
+        ],
+        "technique_id": "T1190",
+        "technique_name": "Exploit Public-Facing Application",
+        "tactic_id": "TA0001",
+        "tactic_name": "Initial Access",
+        "impacto": "Posible ejecución remota de código sobre la aplicación expuesta.",
+        "score": 100,
+        "confidence": 98,
+        "category": "public_facing"
+    },
+    {
+        "keywords": [
+            "authentication bypass",
+            "auth bypass",
+            "bypass authentication",
+            "improper authentication",
+            "missing authentication",
+            "unauthenticated access",
+            "admin panel",
+            "admin login",
+            "exposed admin panel"
+        ],
+        "patterns": [
+            r"\b(auth|authentication)\b.*\b(bypass|missing|improper)\b",
+            r"\bunauthenticated\b.*\b(access|request)\b",
+            r"\badmin\b.*\b(panel|login|console)\b"
+        ],
+        "technique_id": "T1190",
+        "technique_name": "Exploit Public-Facing Application",
+        "tactic_id": "TA0001",
+        "tactic_name": "Initial Access",
+        "impacto": "Acceso no autorizado por bypass o ausencia de autenticación.",
+        "score": 95,
+        "confidence": 95,
+        "category": "public_facing"
+    },
+    {
+        "keywords": [
+            "file upload",
+            "arbitrary file upload",
+            "unrestricted file upload",
+            "upload bypass",
+            "malicious upload"
+        ],
+        "patterns": [
+            r"\b(file|arbitrary|malicious)\b.*\bupload\b",
+            r"\bupload\b.*\b(bypass|unrestricted)\b"
+        ],
+        "technique_id": "T1190",
+        "technique_name": "Exploit Public-Facing Application",
+        "tactic_id": "TA0001",
+        "tactic_name": "Initial Access",
+        "impacto": "Carga de archivo malicioso con potencial de ejecución remota.",
+        "score": 92,
+        "confidence": 94,
+        "category": "public_facing"
+    },
+
+    # =========================
+    # Credentials
+    # =========================
+    {
+        "keywords": [
+            "default credentials",
+            "default password",
+            "default login",
+            "weak credentials",
+            "anonymous login",
+            "guest login",
+            "guest account",
+            "hardcoded credentials"
+        ],
+        "patterns": [
+            r"\bdefault\b.*\b(password|credential|login)\b",
+            r"\b(guest|anonymous)\b.*\b(login|access|account)\b"
+        ],
+        "technique_id": "T1078",
+        "technique_name": "Valid Accounts",
+        "tactic_id": "TA0001",
+        "tactic_name": "Initial Access",
+        "impacto": "Acceso indebido mediante cuentas válidas o credenciales por defecto.",
+        "score": 85,
+        "confidence": 94,
+        "category": "credentials"
+    },
+
+    # =========================
+    # Traversal / Files
+    # =========================
+    {
+        "keywords": [
+            "path traversal",
+            "directory traversal",
+            "../",
+            "local file inclusion",
+            "lfi",
+            "remote file inclusion",
+            "rfi",
+            "file inclusion",
+            "backup file",
+            "exposed backup"
+        ],
+        "patterns": [
+            r"\b(path|directory)\b.*\btraversal\b",
+            r"\b(local|remote)\b.*\bfile inclusion\b",
+            r"\bbackup\b.*\b(file|archive|zip|tar|sql)\b"
+        ],
+        "technique_id": "T1006",
+        "technique_name": "Path Traversal",
+        "tactic_id": "TA0009",
+        "tactic_name": "Collection",
+        "impacto": "Acceso no autorizado a archivos sensibles del sistema o aplicación.",
+        "score": 88,
+        "confidence": 92,
+        "category": "traversal"
+    },
+
+    # =========================
+    # Execution
+    # =========================
+    {
+        "keywords": [
+            "cross-site scripting",
+            "xss",
+            "stored xss",
+            "reflected xss",
+            "dom xss"
+        ],
+        "patterns": [
+            r"\bxss\b",
+            r"\bcross[\s\-]?site scripting\b"
+        ],
+        "technique_id": "T1059",
+        "technique_name": "Command and Scripting Interpreter",
+        "tactic_id": "TA0002",
+        "tactic_name": "Execution",
+        "impacto": "Ejecución de scripts maliciosos en el contexto del navegador o de la aplicación.",
+        "score": 75,
+        "confidence": 78,
+        "category": "execution"
+    },
+
+    # =========================
+    # TLS / Weak Config
+    # =========================
+    {
+        "keywords": [
+            "tls 1.0",
+            "tls 1.1",
+            "deprecated protocol",
+            "weak cipher",
+            "weak ciphers",
+            "ssl weak",
+            "weak ssl",
+            "insecure renegotiation",
+            "obsolete ssl",
+            "self-signed certificate",
+            "expired certificate",
+            "certificate expired"
+        ],
+        "patterns": [
+            r"\btls\s*1\.[01]\b",
+            r"\bweak\b.*\b(cipher|ciphersuite|ssl|tls)\b",
+            r"\b(self signed|expired)\b.*\bcertificate\b"
+        ],
+        "technique_id": "T1190",
+        "technique_name": "Exploit Public-Facing Application",
+        "tactic_id": "TA0001",
+        "tactic_name": "Initial Access",
+        "impacto": "Debilidad criptográfica o de configuración que incrementa superficie de explotación del servicio expuesto.",
+        "score": 50,
+        "confidence": 70,
+        "category": "tls"
+    },
+
+    # =========================
+    # Security Headers / Hardening
+    # =========================
+    {
+        "keywords": [
+            "missing security header",
+            "missing x-frame-options",
+            "missing content-security-policy",
+            "missing x-content-type-options",
+            "cookie without httponly",
+            "cookie without secure flag"
+        ],
+        "patterns": [
+            r"\bmissing\b.*\b(header|x frame options|content security policy|x content type options)\b",
+            r"\bcookie\b.*\b(httponly|secure)\b"
+        ],
+        "technique_id": "T1190",
+        "technique_name": "Exploit Public-Facing Application",
+        "tactic_id": "TA0001",
+        "tactic_name": "Initial Access",
+        "impacto": "Configuración insegura que facilita explotación o abuso de la aplicación pública.",
+        "score": 45,
+        "confidence": 60,
+        "category": "hardening"
+    }
+]
+
+COMPLEMENTARY_CLASSIFICATION_RULES = [
+    {
+        "keywords": [
+            "missing security header",
+            "x-frame-options",
+            "content-security-policy",
+            "x-content-type-options",
+            "strict-transport-security",
+            "hsts",
+            "security header",
+            "cookie without httponly",
+            "cookie without secure",
+            "httponly",
+            "secure flag"
+        ],
+        "patterns": [
+            r"\bmissing\b.*\b(header|security header)\b",
+            r"\bcontent[\s\-]?security[\s\-]?policy\b",
+            r"\bx[\s\-]?frame[\s\-]?options\b",
+            r"\bcookie\b.*\b(httponly|secure)\b"
+        ],
+        "owasp": "A05:2021 - Security Misconfiguration",
+        "cwe_id": "CWE-693",
+        "cwe_name": "Protection Mechanism Failure",
+        "capec_id": "CAPEC-100",
+        "capec_name": "Overflow Buffers / Security Mechanism Abuse",
+        "iso_control": "A.8.9",
+        "iso_control_name": "Gestión de la configuración",
+        "nist_function": "Protect",
+        "nist_category": "PR.PS - Platform Security",
+        "recomendacion": "Definir y aplicar cabeceras de seguridad HTTP, endurecer cookies y validar configuración segura del servicio web.",
+        "confianza": 90
+    },
+    {
+        "keywords": [
+            "directory listing",
+            "directory indexing",
+            "index of /",
+            "directory browsing",
+            "autoindex"
+        ],
+        "patterns": [
+            r"\bindex of\s*/",
+            r"\bdirectory\s+(listing|indexing|browsing)\b"
+        ],
+        "owasp": "A05:2021 - Security Misconfiguration",
+        "cwe_id": "CWE-548",
+        "cwe_name": "Exposure of Information Through Directory Listing",
+        "capec_id": "CAPEC-116",
+        "capec_name": "Excavation",
+        "iso_control": "A.8.9",
+        "iso_control_name": "Gestión de la configuración",
+        "nist_function": "Protect",
+        "nist_category": "PR.PS - Platform Security",
+        "recomendacion": "Deshabilitar el listado de directorios, restringir navegación no autorizada y revisar exposición de archivos sensibles.",
+        "confianza": 95
+    },
+    {
+        "keywords": [
+            "tls 1.0",
+            "tls 1.1",
+            "weak cipher",
+            "weak ciphers",
+            "ssl",
+            "deprecated protocol",
+            "expired certificate",
+            "self-signed certificate",
+            "certificate expired"
+        ],
+        "patterns": [
+            r"\btls\s*1\.[01]\b",
+            r"\bweak\b.*\b(cipher|ssl|tls)\b",
+            r"\b(expired|self signed|self-signed)\b.*\bcertificate\b"
+        ],
+        "owasp": "A02:2021 - Cryptographic Failures",
+        "cwe_id": "CWE-326",
+        "cwe_name": "Inadequate Encryption Strength",
+        "capec_id": "CAPEC-217",
+        "capec_name": "Exploiting Incorrectly Configured SSL/TLS",
+        "iso_control": "A.8.24",
+        "iso_control_name": "Uso de criptografía",
+        "nist_function": "Protect",
+        "nist_category": "PR.DS - Data Security",
+        "recomendacion": "Deshabilitar protocolos obsoletos, eliminar cifrados débiles y renovar certificados inseguros o vencidos.",
+        "confianza": 92
+    },
+    {
+        "keywords": [
+            "information disclosure",
+            "version disclosure",
+            "server leaks version",
+            "x-powered-by",
+            "banner disclosure",
+            "verbose error",
+            "stack trace",
+            "debug enabled",
+            "phpinfo"
+        ],
+        "patterns": [
+            r"\b(version|banner|information)\b.*\b(disclosure|leak)\b",
+            r"\bx[\s\-]?powered[\s\-]?by\b",
+            r"\b(stack trace|debug|phpinfo)\b"
+        ],
+        "owasp": "A05:2021 - Security Misconfiguration",
+        "cwe_id": "CWE-200",
+        "cwe_name": "Exposure of Sensitive Information to an Unauthorized Actor",
+        "capec_id": "CAPEC-118",
+        "capec_name": "Collect and Analyze Information",
+        "iso_control": "A.8.12",
+        "iso_control_name": "Prevención de fuga de datos",
+        "nist_function": "Identify",
+        "nist_category": "ID.RA - Risk Assessment",
+        "recomendacion": "Reducir banners, ocultar versiones, deshabilitar mensajes técnicos detallados y controlar la información expuesta.",
+        "confianza": 88
+    },
+    {
+        "keywords": [
+            "default credentials",
+            "default password",
+            "weak password",
+            "anonymous login",
+            "guest login",
+            "hardcoded credentials",
+            "missing authentication",
+            "authentication bypass"
+        ],
+        "patterns": [
+            r"\bdefault\b.*\b(password|credential|login)\b",
+            r"\b(anonymous|guest)\b.*\b(login|access)\b",
+            r"\bauthentication\b.*\b(bypass|missing|weak)\b"
+        ],
+        "owasp": "A07:2021 - Identification and Authentication Failures",
+        "cwe_id": "CWE-287",
+        "cwe_name": "Improper Authentication",
+        "capec_id": "CAPEC-115",
+        "capec_name": "Authentication Bypass",
+        "iso_control": "A.5.17",
+        "iso_control_name": "Información de autenticación",
+        "nist_function": "Protect",
+        "nist_category": "PR.AA - Identity Management, Authentication and Access Control",
+        "recomendacion": "Eliminar credenciales por defecto, fortalecer autenticación, aplicar MFA y validar controles de acceso.",
+        "confianza": 94
+    },
+    {
+        "keywords": [
+            "sql injection",
+            "sqli",
+            "union select",
+            "blind sql injection"
+        ],
+        "patterns": [
+            r"\bsql\b.*\binjection\b",
+            r"\bunion\s+select\b"
+        ],
+        "owasp": "A03:2021 - Injection",
+        "cwe_id": "CWE-89",
+        "cwe_name": "SQL Injection",
+        "capec_id": "CAPEC-66",
+        "capec_name": "SQL Injection",
+        "iso_control": "A.8.28",
+        "iso_control_name": "Codificación segura",
+        "nist_function": "Protect",
+        "nist_category": "PR.PS - Platform Security",
+        "recomendacion": "Usar consultas parametrizadas, validar entradas, aplicar controles ORM seguros y pruebas de seguridad en desarrollo.",
+        "confianza": 98
+    },
+    {
+        "keywords": [
+            "cross-site scripting",
+            "xss",
+            "stored xss",
+            "reflected xss",
+            "dom xss"
+        ],
+        "patterns": [
+            r"\bxss\b",
+            r"\bcross[\s\-]?site scripting\b"
+        ],
+        "owasp": "A03:2021 - Injection",
+        "cwe_id": "CWE-79",
+        "cwe_name": "Cross-site Scripting",
+        "capec_id": "CAPEC-63",
+        "capec_name": "Cross-Site Scripting",
+        "iso_control": "A.8.28",
+        "iso_control_name": "Codificación segura",
+        "nist_function": "Protect",
+        "nist_category": "PR.PS - Platform Security",
+        "recomendacion": "Validar y codificar salidas, aplicar CSP, sanitizar entradas y proteger formularios frente a scripts maliciosos.",
+        "confianza": 96
+    },
+    {
+        "keywords": [
+            "path traversal",
+            "directory traversal",
+            "../",
+            "local file inclusion",
+            "lfi",
+            "remote file inclusion",
+            "rfi"
+        ],
+        "patterns": [
+            r"\b(path|directory)\b.*\btraversal\b",
+            r"\b(local|remote)\b.*\bfile inclusion\b",
+            r"\.\./"
+        ],
+        "owasp": "A01:2021 - Broken Access Control",
+        "cwe_id": "CWE-22",
+        "cwe_name": "Improper Limitation of a Pathname to a Restricted Directory",
+        "capec_id": "CAPEC-126",
+        "capec_name": "Path Traversal",
+        "iso_control": "A.8.3",
+        "iso_control_name": "Restricción de acceso a la información",
+        "nist_function": "Protect",
+        "nist_category": "PR.AA - Identity Management, Authentication and Access Control",
+        "recomendacion": "Restringir rutas permitidas, validar nombres de archivo, aplicar listas blancas y evitar acceso directo a directorios sensibles.",
+        "confianza": 96
+    },
+    {
+        "keywords": [
+            "remote code execution",
+            "rce",
+            "command injection",
+            "os command injection",
+            "arbitrary command execution"
+        ],
+        "patterns": [
+            r"\bremote\b.*\bcode\b.*\bexecution\b",
+            r"\brce\b",
+            r"\bcommand\b.*\binjection\b"
+        ],
+        "owasp": "A03:2021 - Injection",
+        "cwe_id": "CWE-78",
+        "cwe_name": "OS Command Injection",
+        "capec_id": "CAPEC-88",
+        "capec_name": "OS Command Injection",
+        "iso_control": "A.8.28",
+        "iso_control_name": "Codificación segura",
+        "nist_function": "Protect",
+        "nist_category": "PR.PS - Platform Security",
+        "recomendacion": "Eliminar ejecución directa de comandos, validar entradas, usar APIs seguras y aislar procesos con mínimos privilegios.",
+        "confianza": 98
+    }
+]
+
+
+def clasificar_hallazgo_no_mapeado_complementario(item):
+    haystack = tm_normalize_text(
+        item.titulo,
+        item.descripcion,
+        item.evidencia,
+        item.herramienta,
+        item.severidad
+    )
+
+    mejor = None
+    mejor_score = 0
+    razones = []
+
+    for rule in COMPLEMENTARY_CLASSIFICATION_RULES:
+        score = 0
+        razones_regla = []
+
+        for kw in rule.get("keywords", []):
+            kw_norm = tm_normalize_text(kw)
+            if kw_norm and kw_norm in haystack:
+                score += 12
+                razones_regla.append(f"Palabra clave: {kw}")
+
+        for pat in rule.get("patterns", []):
+            try:
+                if re.search(pat, haystack, re.I):
+                    score += 18
+                    razones_regla.append(f"Patrón: {pat}")
+            except Exception:
+                pass
+
+        if score > mejor_score:
+            mejor_score = score
+            mejor = rule
+            razones = razones_regla
+
+    if not mejor:
+        return {
+            "owasp_category": "Sin clasificación OWASP concluyente",
+            "cwe_id": "N/A",
+            "cwe_name": "No determinado",
+            "capec_id": "N/A",
+            "capec_name": "No determinado",
+            "iso_control": "A.5.7",
+            "iso_control_name": "Inteligencia de amenazas",
+            "nist_function": "Identify",
+            "nist_category": "ID.RA - Risk Assessment",
+            "recomendacion": "Revisar manualmente el hallazgo, validar impacto técnico y definir tratamiento de riesgo.",
+            "rationale": "No se encontró una coincidencia fuerte con las reglas complementarias configuradas.",
+            "confianza": 35
+        }
+
+    confianza = min(100, int(mejor.get("confianza", 50)) + min(10, mejor_score // 10))
+
+    return {
+        "owasp_category": mejor.get("owasp"),
+        "cwe_id": mejor.get("cwe_id"),
+        "cwe_name": mejor.get("cwe_name"),
+        "capec_id": mejor.get("capec_id"),
+        "capec_name": mejor.get("capec_name"),
+        "iso_control": mejor.get("iso_control"),
+        "iso_control_name": mejor.get("iso_control_name"),
+        "nist_function": mejor.get("nist_function"),
+        "nist_category": mejor.get("nist_category"),
+        "recomendacion": mejor.get("recomendacion"),
+        "rationale": "; ".join(razones) if razones else "Coincidencia por contexto técnico del hallazgo.",
+        "confianza": confianza
+    }
+
+
+def guardar_clasificacion_complementaria_unmapped(item):
+    data = clasificar_hallazgo_no_mapeado_complementario(item)
+
+    existente = ThreatModelUnmappedClassification.query.filter_by(
+        unmapped_id=item.id
+    ).first()
+
+    if not existente:
+        existente = ThreatModelUnmappedClassification(unmapped_id=item.id)
+        db.session.add(existente)
+
+    existente.owasp_category = data.get("owasp_category")
+    existente.cwe_id = data.get("cwe_id")
+    existente.cwe_name = data.get("cwe_name")
+    existente.capec_id = data.get("capec_id")
+    existente.capec_name = data.get("capec_name")
+    existente.iso_control = data.get("iso_control")
+    existente.iso_control_name = data.get("iso_control_name")
+    existente.nist_function = data.get("nist_function")
+    existente.nist_category = data.get("nist_category")
+    existente.recomendacion = data.get("recomendacion")
+    existente.rationale = data.get("rationale")
+    existente.confianza = data.get("confianza") or 50
+
+    return existente
+
+def tm_normalize_text(*parts):
+    txt = " ".join([(str(p) if p is not None else "") for p in parts]).strip().lower()
+    txt = unicodedata.normalize("NFKD", txt)
+    txt = "".join(c for c in txt if not unicodedata.combining(c))
+    txt = txt.replace("_", " ").replace("-", " ")
+    txt = re.sub(r"[^a-z0-9./:# ]+", " ", txt)
+    txt = re.sub(r"\s+", " ", txt).strip()
+    return txt
+
+
+def tm_deduplicate_mappings(items):
+    unique = OrderedDict()
+    for it in items:
+        key = (it["technique_id"], it["tactic_id"])
+        prev = unique.get(key)
+        if not prev or (it.get("confidence", 0) > prev.get("confidence", 0)):
+            unique[key] = it
+    return list(unique.values())
+
+
+def tm_map_finding_to_mitre(hallazgo: dict):
+    titulo = hallazgo.get("titulo") or ""
+    descripcion = hallazgo.get("descripcion") or ""
+    evidencia = hallazgo.get("evidencia") or ""
+    recomendacion = hallazgo.get("recomendacion_base") or ""
+    servicio = hallazgo.get("servicio") or ""
+    severidad = (hallazgo.get("severidad") or "").strip()
+    cve = (hallazgo.get("cve") or "").strip()
+
+    haystack = tm_normalize_text(titulo, descripcion, evidencia, recomendacion, servicio, cve)
+    ctx = tm_detect_context(haystack)
+    matches = []
+
+    for rule in MITRE_ATTACK_MAPPING_RULES:
+        best_reason = None
+
+        # 1) match por keywords
+        matched_keywords = [kw for kw in rule.get("keywords", []) if tm_normalize_text(kw) in haystack]
+        if matched_keywords:
+            best_reason = f"Coincidencia por palabra clave: {max(matched_keywords, key=len)}"
+
+        # 2) match por regex
+        if not best_reason:
+            for pat in rule.get("patterns", []):
+                if re.search(pat, haystack, re.I):
+                    best_reason = f"Coincidencia por patrón regex: {pat}"
+                    break
+
+        if best_reason:
+            bonus = 0
+
+            # reforzar por contexto
+            if rule.get("category") == "public_facing" and ctx["web"]:
+                bonus += 4
+            if rule.get("category") == "credentials" and ctx["auth"]:
+                bonus += 4
+            if rule.get("category") in ("traversal", "discovery") and ctx["file"]:
+                bonus += 4
+            if rule.get("category") == "tls" and ctx["tls"]:
+                bonus += 4
+            if rule.get("category") == "public_facing" and ctx["code_exec"]:
+                bonus += 5
+
+            matches.append({
+                "technique_id": rule["technique_id"],
+                "technique_name": rule["technique_name"],
+                "tactic_id": rule["tactic_id"],
+                "tactic_name": rule["tactic_name"],
+                "impacto": rule["impacto"],
+                "score": min(100, int(rule["score"]) + bonus),
+                "confidence": min(100, int(rule["confidence"]) + bonus),
+                "rationale": best_reason
+            })
+
+    # =========================
+    # Fallbacks inteligentes
+    # =========================
+    if not matches:
+        sev_score = tm_score_from_severity(severidad)
+
+        if sev_score >= 80 and ctx["code_exec"]:
+            matches.append({
+                "technique_id": "T1190",
+                "technique_name": "Exploit Public-Facing Application",
+                "tactic_id": "TA0001",
+                "tactic_name": "Initial Access",
+                "impacto": "Posible explotación remota con capacidad de ejecución de código.",
+                "score": 98,
+                "confidence": 68,
+                "rationale": "Fallback por severidad alta/crítica y contexto de ejecución"
+            })
+
+        elif sev_score >= 80 and ctx["web"]:
+            matches.append({
+                "technique_id": "T1190",
+                "technique_name": "Exploit Public-Facing Application",
+                "tactic_id": "TA0001",
+                "tactic_name": "Initial Access",
+                "impacto": "Posible explotación de servicio o aplicación pública expuesta.",
+                "score": 95 if sev_score >= 90 else 85,
+                "confidence": 62,
+                "rationale": "Fallback por severidad alta/crítica en contexto web"
+            })
+
+        elif sev_score >= 55 and ctx["auth"]:
+            matches.append({
+                "technique_id": "T1078",
+                "technique_name": "Valid Accounts",
+                "tactic_id": "TA0001",
+                "tactic_name": "Initial Access",
+                "impacto": "Posible acceso indebido asociado a autenticación o credenciales.",
+                "score": max(sev_score, 70),
+                "confidence": 58,
+                "rationale": "Fallback por contexto de autenticación/credenciales"
+            })
+
+        elif sev_score >= 55 and ctx["file"]:
+            matches.append({
+                "technique_id": "T1083",
+                "technique_name": "File and Directory Discovery",
+                "tactic_id": "TA0007",
+                "tactic_name": "Discovery",
+                "impacto": "Exposición o descubrimiento indebido de directorios y archivos.",
+                "score": max(sev_score, 60),
+                "confidence": 56,
+                "rationale": "Fallback por contexto de archivos/directorios"
+            })
+
+        elif ctx["tls"]:
+            matches.append({
+                "technique_id": "T1190",
+                "technique_name": "Exploit Public-Facing Application",
+                "tactic_id": "TA0001",
+                "tactic_name": "Initial Access",
+                "impacto": "Debilidad de configuración TLS/SSL en servicio expuesto.",
+                "score": max(sev_score, 45),
+                "confidence": 52,
+                "rationale": "Fallback por contexto TLS/SSL"
+            })
+
+        elif "cve-" in haystack and ctx["web"]:
+            matches.append({
+                "technique_id": "T1190",
+                "technique_name": "Exploit Public-Facing Application",
+                "tactic_id": "TA0001",
+                "tactic_name": "Initial Access",
+                "impacto": "Hallazgo con CVE asociado en contexto de aplicación pública expuesta.",
+                "score": max(sev_score, 75),
+                "confidence": 55,
+                "rationale": "Fallback por presencia de CVE en contexto web"
+            })
+
+    return tm_deduplicate_mappings(matches)
+
+
+def tm_score_from_severity(severidad: str) -> int:
+    sev = (severidad or "").strip().lower()
+    if sev in ("crítica", "critica"):
+        return 100
+    if sev == "alta":
+        return 80
+    if sev == "media":
+        return 55
+    if sev == "baja":
+        return 25
+    return 40
+
+
+def tm_color_from_score(score: int) -> str:
+    try:
+        s = int(score)
+    except Exception:
+        s = 50
+
+    if s >= 90:
+        return "#b91c1c"
+    if s >= 70:
+        return "#ea580c"
+    if s >= 40:
+        return "#ca8a04"
+    return "#15803d"
+
+def crear_threat_model_desde_hallazgo(run, hallazgo, vuln=None, finding_rec=None):
+    mappings = tm_map_finding_to_mitre(hallazgo)
+
+    print("\n=== DEBUG MITRE ===")
+    print("FUENTE:", hallazgo.get("fuente"))
+    print("SEVERIDAD:", hallazgo.get("severidad"))
+    print("TITULO:", hallazgo.get("titulo"))
+    print("MAPPINGS:", mappings)
+
+    if not mappings:
+        guardar_threat_model_unmapped(run, hallazgo, finding_rec=finding_rec)
+        return None
+
+    impacto_final = None
+    max_conf = 0
+
+    for m in mappings:
+        if m.get("confidence", 0) > max_conf:
+            max_conf = m.get("confidence", 0)
+            impacto_final = m.get("impacto")
+
+    entry = ThreatModelEntry(
+        run_id=run.id if run else None,
+        finding_id=finding_rec.id if finding_rec else None,
+        vulnerabilidad_registro_id=vuln.id if vuln else None,
+        activo=(run.target if run else hallazgo.get("activo") or "Activo"),
+        herramienta=(hallazgo.get("fuente") or "scanner").lower(),
+        vulnerabilidad=(hallazgo.get("titulo") or "Hallazgo técnico")[:500],
+        descripcion=(hallazgo.get("descripcion") or "")[:5000],
+        impacto=(impacto_final or hallazgo.get("recomendacion_base") or "")[:4000],
+        severidad=hallazgo.get("severidad"),
+        confianza=max_conf or 70
+    )
+    db.session.add(entry)
+    db.session.flush()
+
+    base_score = tm_score_from_severity(hallazgo.get("severidad"))
+
+    for m in mappings:
+        score = max(base_score, int(m.get("score", 50)))
+        db.session.add(ThreatModelTechnique(
+            threat_entry_id=entry.id,
+            mitre_technique_id=m["technique_id"],
+            mitre_technique_name=m["technique_name"],
+            mitre_tactic_id=m["tactic_id"],
+            mitre_tactic_name=m["tactic_name"],
+            rationale=m.get("rationale"),
+            score=score
+        ))
+
+    db.session.flush()
+    return entry
+
+
+# ============================================================================
+# SINCRONIZACIÓN MATRIZ DE VULNERABILIDADES -> MODELAMIENTO / MITRE ATT&CK
+# ============================================================================
+
+THREAT_MODEL_VULN_SOURCE = "registro_vulnerabilidades"
+
+
+def tm_severidad_desde_vulnerabilidad(vuln):
+    """Normaliza la clasificación de la matriz y usa CVSS como respaldo."""
+    clasificacion = (getattr(vuln, "clasificacion", None) or "").strip()
+    normalizadas = {
+        "critica": "Crítica",
+        "crítica": "Crítica",
+        "alta": "Alta",
+        "media": "Media",
+        "baja": "Baja",
+    }
+
+    clave = tm_normalize_text(clasificacion)
+    if clave in normalizadas:
+        return normalizadas[clave]
+
+    cvss_raw = str(getattr(vuln, "cvss", None) or "").strip().replace(",", ".")
+    match = re.search(r"(?:^|\s)(10(?:\.0+)?|[0-9](?:\.[0-9]+)?)(?:\s|$)", cvss_raw)
+    if match:
+        try:
+            cvss = float(match.group(1))
+            if cvss >= 9.0:
+                return "Crítica"
+            if cvss >= 7.0:
+                return "Alta"
+            if cvss >= 4.0:
+                return "Media"
+            return "Baja"
+        except Exception:
+            pass
+
+    return "Media"
+
+
+def tm_aliases_mitre_espanol(*textos):
+    """Agrega términos equivalentes para reconocer descripciones escritas en español."""
+    base = tm_normalize_text(*textos)
+    equivalencias = [
+        (("inyeccion sql", "inyeccion de sql"), "sql injection"),
+        (("inyeccion de comandos", "ejecucion remota de codigo", "ejecucion de codigo", "rce"),
+         "remote code execution command injection"),
+        (("credenciales por defecto", "contrasena por defecto", "clave por defecto"),
+         "default credentials default password"),
+        (("credenciales debiles", "contrasena debil", "autenticacion debil"),
+         "weak credentials weak password"),
+        (("acceso anonimo", "inicio de sesion anonimo"), "anonymous login"),
+        (("omision de autenticacion", "bypass de autenticacion", "evasión de autenticacion", "autenticacion ausente"),
+         "authentication bypass missing authentication"),
+        (("listado de directorios", "indexacion de directorios", "navegacion de directorios"),
+         "directory listing directory indexing"),
+        (("divulgacion de informacion", "exposicion de informacion", "filtracion de informacion"),
+         "information disclosure"),
+        (("version expuesta", "divulgacion de version", "cabecera del servidor", "banner expuesto"),
+         "version disclosure server header banner disclosure"),
+        (("recorrido de directorios", "traversal de rutas", "traversal de directorios"),
+         "path traversal directory traversal"),
+        (("inclusion local de archivos", "inclusion de archivos locales"), "local file inclusion lfi"),
+        (("inclusion remota de archivos", "inclusion de archivos remotos"), "remote file inclusion rfi"),
+        (("carga de archivos", "subida de archivos", "carga irrestricta de archivos"),
+         "unrestricted file upload arbitrary file upload"),
+        (("cross site scripting", "secuencias de comandos entre sitios", "xss"), "cross-site scripting xss"),
+        (("tls obsoleto", "ssl obsoleto", "protocolo obsoleto"), "deprecated protocol obsolete ssl"),
+        (("cifrado debil", "cifrados debiles", "suite criptografica debil"), "weak cipher weak ciphers"),
+        (("certificado vencido", "certificado expirado"), "expired certificate"),
+        (("certificado autofirmado", "certificado auto firmado"), "self-signed certificate"),
+        (("cabecera de seguridad faltante", "cabeceras de seguridad faltantes", "falta cabecera de seguridad"),
+         "missing security header"),
+        (("servidor desactualizado", "software obsoleto", "version obsoleta", "version no soportada"),
+         "outdated web server unsupported version multiple vulnerabilities"),
+    ]
+
+    encontrados = []
+    for frases, alias in equivalencias:
+        if any(tm_normalize_text(frase) in base for frase in frases):
+            encontrados.append(alias)
+
+    return " ".join(encontrados)
+
+
+def tm_hallazgo_desde_vulnerabilidad(vuln):
+    """Convierte una fila de la matriz de vulnerabilidades al formato MITRE interno."""
+    codigo = (getattr(vuln, "codigo", None) or f"VULN-{getattr(vuln, 'id', '')}").strip()
+    descripcion = (getattr(vuln, "descripcion_vulnerabilidad", None) or "Vulnerabilidad registrada").strip()
+    activo = (getattr(vuln, "activo", None) or "Activo").strip()
+    cve = (getattr(vuln, "cve", None) or "").strip().upper()
+    cvss = (getattr(vuln, "cvss", None) or "").strip()
+    riesgo = (getattr(vuln, "riesgo_residual", None) or "").strip()
+    estado = (getattr(vuln, "estado", None) or "").strip()
+    responsable = (getattr(vuln, "responsable", None) or "").strip()
+    aliases_mitre = tm_aliases_mitre_espanol(descripcion, riesgo, activo, cve)
+
+    contexto = [descripcion]
+    if cve:
+        contexto.append(f"CVE: {cve}")
+    if cvss:
+        contexto.append(f"CVSS: {cvss}")
+    if estado:
+        contexto.append(f"Estado: {estado}")
+    if responsable:
+        contexto.append(f"Responsable: {responsable}")
+
+    return {
+        "fuente": THREAT_MODEL_VULN_SOURCE,
+        "titulo": f"{codigo} - {descripcion}"[:500],
+        "descripcion": " | ".join(contexto)[:5000],
+        "evidencia": riesgo[:5000],
+        "recomendacion_base": f"{riesgo} {aliases_mitre}".strip()[:5000],
+        "servicio": activo[:200],
+        "activo": activo[:200],
+        "severidad": tm_severidad_desde_vulnerabilidad(vuln),
+        "cve": cve,
+        "cvss": cvss,
+    }
+
+
+def sincronizar_vulnerabilidad_no_mapeada(vuln, hallazgo, mappings):
+    """
+    Mantiene sincronizada la vulnerabilidad en
+    ``Clasificación complementaria No Mapeados``.
+
+    Reglas:
+    - Si la vulnerabilidad tiene una técnica MITRE válida, elimina cualquier
+      registro complementario anterior.
+    - Si no puede mapearse a MITRE ATT&CK, crea o actualiza un único registro
+      ``ThreatModelUnmapped`` con origen ``registro_vulnerabilidades``.
+    - Genera automáticamente su clasificación complementaria OWASP, CWE,
+      CAPEC, ISO 27001 y NIST CSF 2.0.
+    """
+    if vuln is None or not getattr(vuln, "id", None):
+        return None
+
+    registros = (
+        ThreatModelUnmapped.query
+        .filter(
+            ThreatModelUnmapped.herramienta == THREAT_MODEL_VULN_SOURCE,
+            ThreatModelUnmapped.finding_id == int(vuln.id)
+        )
+        .order_by(ThreatModelUnmapped.id.asc())
+        .all()
+    )
+
+    # Si ya existe un mapeo MITRE, el registro deja de ser "No Mapeado".
+    if mappings:
+        for item in registros:
+            db.session.delete(item)
+        db.session.flush()
+        return None
+
+    principal = registros[0] if registros else None
+
+    # Elimina duplicados históricos de la misma vulnerabilidad.
+    for duplicado in registros[1:]:
+        db.session.delete(duplicado)
+
+    if principal is None:
+        principal = ThreatModelUnmapped(
+            run_id=None,
+            finding_id=int(vuln.id),
+            activo=(hallazgo.get("activo") or "Activo")[:200],
+            herramienta=THREAT_MODEL_VULN_SOURCE,
+            severidad=(hallazgo.get("severidad") or "Media")[:20],
+            titulo=(hallazgo.get("titulo") or "Vulnerabilidad registrada")[:500],
+            descripcion=(hallazgo.get("descripcion") or "")[:5000],
+            evidencia=(hallazgo.get("evidencia") or "")[:5000],
+        )
+        db.session.add(principal)
+    else:
+        principal.run_id = None
+        principal.finding_id = int(vuln.id)
+        principal.activo = (hallazgo.get("activo") or "Activo")[:200]
+        principal.herramienta = THREAT_MODEL_VULN_SOURCE
+        principal.severidad = (hallazgo.get("severidad") or "Media")[:20]
+        principal.titulo = (hallazgo.get("titulo") or "Vulnerabilidad registrada")[:500]
+        principal.descripcion = (hallazgo.get("descripcion") or "")[:5000]
+        principal.evidencia = (hallazgo.get("evidencia") or "")[:5000]
+
+    db.session.flush()
+
+    # La clasificación complementaria se crea o actualiza automáticamente.
+    guardar_clasificacion_complementaria_unmapped(principal)
+    db.session.flush()
+
+    return principal
+
+
+def sincronizar_vulnerabilidad_con_modelamiento(vuln):
+    """
+    Garantiza que cada vulnerabilidad registrada tenga una entrada propia y
+    trazable en Modelamiento de Amenazas.
+
+    Reglas:
+    - Siempre existe una entrada canónica con herramienta
+      ``registro_vulnerabilidades``.
+    - Los registros generados por escáneres se conservan.
+    - Las técnicas MITRE de la entrada canónica se reconstruyen de forma
+      idempotente.
+    - Cuando no existe una coincidencia MITRE confiable, la vulnerabilidad se
+      registra automáticamente en ``Clasificación complementaria No Mapeados``.
+    """
+    if vuln is None:
+        return None
+
+    if not getattr(vuln, "id", None):
+        db.session.flush()
+
+    hallazgo = tm_hallazgo_desde_vulnerabilidad(vuln)
+    severidad = hallazgo.get("severidad") or "Media"
+
+    existentes = (
+        ThreatModelEntry.query
+        .options(selectinload(ThreatModelEntry.tecnicas))
+        .filter_by(vulnerabilidad_registro_id=vuln.id)
+        .order_by(ThreatModelEntry.id.asc())
+        .all()
+    )
+
+    manuales = [
+        entry for entry in existentes
+        if (entry.herramienta or "").strip().lower() == THREAT_MODEL_VULN_SOURCE
+    ]
+    manual = manuales[0] if manuales else None
+
+    # Elimina solo duplicados automáticos; conserva modelamientos de escáner.
+    for duplicado in manuales[1:]:
+        db.session.delete(duplicado)
+
+    # Mantiene actualizados los hallazgos de escáner vinculados.
+    for entry in existentes:
+        if entry in manuales:
+            continue
+        entry.activo = hallazgo["activo"]
+        entry.vulnerabilidad = hallazgo["titulo"]
+        entry.descripcion = hallazgo["descripcion"]
+        entry.severidad = severidad
+        if (getattr(vuln, "riesgo_residual", None) or "").strip():
+            entry.impacto = (vuln.riesgo_residual or "")[:4000]
+        entry.updated_at = datetime.utcnow()
+
+    mappings = tm_map_finding_to_mitre(hallazgo)
+    impacto_final = (getattr(vuln, "riesgo_residual", None) or "").strip()
+    max_conf = 0
+
+    for mapping in mappings:
+        conf = int(mapping.get("confidence", 0) or 0)
+        if conf > max_conf:
+            max_conf = conf
+            impacto_final = mapping.get("impacto") or impacto_final
+
+    impacto_entrada = (
+        impacto_final or
+        "No fue posible clasificar automáticamente esta vulnerabilidad en MITRE ATT&CK. "
+        "Se registró en Clasificación complementaria No Mapeados."
+    )[:4000]
+
+    if manual is None:
+        manual = ThreatModelEntry(
+            vulnerabilidad_registro_id=vuln.id,
+            activo=hallazgo["activo"],
+            herramienta=THREAT_MODEL_VULN_SOURCE,
+            vulnerabilidad=hallazgo["titulo"],
+            descripcion=hallazgo["descripcion"],
+            impacto=impacto_entrada,
+            severidad=severidad,
+            confianza=max_conf or 0,
+        )
+        db.session.add(manual)
+        db.session.flush()
+    else:
+        manual.activo = hallazgo["activo"]
+        manual.herramienta = THREAT_MODEL_VULN_SOURCE
+        manual.vulnerabilidad = hallazgo["titulo"]
+        manual.descripcion = hallazgo["descripcion"]
+        manual.impacto = impacto_entrada
+        manual.severidad = severidad
+        manual.confianza = max_conf or 0
+        manual.updated_at = datetime.utcnow()
+
+        # Reconstruye solo las técnicas de la entrada canónica.
+        manual.tecnicas.clear()
+        db.session.flush()
+
+    base_score = tm_score_from_severity(severidad)
+
+    for mapping in mappings:
+        manual.tecnicas.append(ThreatModelTechnique(
+            mitre_technique_id=mapping["technique_id"],
+            mitre_technique_name=mapping["technique_name"],
+            mitre_tactic_id=mapping.get("tactic_id"),
+            mitre_tactic_name=mapping["tactic_name"],
+            rationale=(
+                mapping.get("rationale") or
+                "Mapeo automático desde la matriz de vulnerabilidades"
+            ),
+            score=max(base_score, int(mapping.get("score", 50) or 50)),
+        ))
+
+    # Crea la clasificación complementaria cuando no existe mapeo MITRE,
+    # o elimina el registro complementario si posteriormente logra mapearse.
+    sincronizar_vulnerabilidad_no_mapeada(vuln, hallazgo, mappings)
+
+    db.session.flush()
+    return manual
+
+
+def sincronizar_todas_vulnerabilidades_con_modelamiento():
+    """
+    Sincroniza todas las vulnerabilidades existentes y corrige históricos.
+
+    También garantiza que cada vulnerabilidad sin técnica MITRE tenga un único
+    registro en ``Clasificación complementaria No Mapeados``.
+    """
+    vulnerabilidades = (
+        VulnerabilidadRegistro.query
+        .order_by(VulnerabilidadRegistro.id.asc())
+        .all()
+    )
+
+    if not vulnerabilidades:
+        return 0
+
+    entradas = (
+        ThreatModelEntry.query
+        .options(selectinload(ThreatModelEntry.tecnicas))
+        .filter(ThreatModelEntry.vulnerabilidad_registro_id.isnot(None))
+        .order_by(ThreatModelEntry.id.asc())
+        .all()
+    )
+
+    manuales_por_vulnerabilidad = defaultdict(list)
+    for entry in entradas:
+        if (
+            entry.vulnerabilidad_registro_id is not None and
+            (entry.herramienta or "").strip().lower() == THREAT_MODEL_VULN_SOURCE
+        ):
+            manuales_por_vulnerabilidad[int(entry.vulnerabilidad_registro_id)].append(entry)
+
+    no_mapeados = (
+        ThreatModelUnmapped.query
+        .filter(
+            ThreatModelUnmapped.herramienta == THREAT_MODEL_VULN_SOURCE,
+            ThreatModelUnmapped.finding_id.isnot(None)
+        )
+        .order_by(ThreatModelUnmapped.id.asc())
+        .all()
+    )
+
+    no_mapeados_por_vulnerabilidad = defaultdict(list)
+    for item in no_mapeados:
+        try:
+            no_mapeados_por_vulnerabilidad[int(item.finding_id)].append(item)
+        except Exception:
+            continue
+
+    ids_vigentes = {int(v.id) for v in vulnerabilidades if getattr(v, "id", None)}
+    cambios = 0
+
+    # Elimina registros complementarios huérfanos de vulnerabilidades ya borradas.
+    for vuln_id, items in list(no_mapeados_por_vulnerabilidad.items()):
+        if vuln_id not in ids_vigentes:
+            for item in items:
+                db.session.delete(item)
+                cambios += 1
+
+    for vuln in vulnerabilidades:
+        hallazgo = tm_hallazgo_desde_vulnerabilidad(vuln)
+        mappings = tm_map_finding_to_mitre(hallazgo)
+        manuales = manuales_por_vulnerabilidad.get(int(vuln.id), [])
+        complementarios = no_mapeados_por_vulnerabilidad.get(int(vuln.id), [])
+
+        expected_keys = {
+            (
+                str(mapping.get("technique_id") or "").strip().upper(),
+                str(mapping.get("tactic_id") or "").strip().upper(),
+            )
+            for mapping in mappings
+            if mapping.get("technique_id")
+        }
+
+        necesita_sincronizacion = len(manuales) != 1
+
+        if len(manuales) == 1:
+            manual = manuales[0]
+            actual_keys = {
+                (
+                    str(tech.mitre_technique_id or "").strip().upper(),
+                    str(tech.mitre_tactic_id or "").strip().upper(),
+                )
+                for tech in (manual.tecnicas or [])
+            }
+
+            severidad = hallazgo.get("severidad") or "Media"
+            datos_desactualizados = any([
+                (manual.activo or "") != hallazgo["activo"],
+                (manual.vulnerabilidad or "") != hallazgo["titulo"],
+                (manual.descripcion or "") != hallazgo["descripcion"],
+                (manual.severidad or "") != severidad,
+                actual_keys != expected_keys,
+            ])
+            necesita_sincronizacion = necesita_sincronizacion or datos_desactualizados
+
+        if mappings:
+            # Una vulnerabilidad mapeada no debe permanecer en No Mapeados.
+            if complementarios:
+                necesita_sincronizacion = True
+        else:
+            # Una vulnerabilidad no mapeada debe tener un único registro y una
+            # clasificación complementaria generada.
+            if len(complementarios) != 1:
+                necesita_sincronizacion = True
+            else:
+                item = complementarios[0]
+                clasificacion = getattr(item, "clasificacion_complementaria", None)
+                datos_complementarios_desactualizados = any([
+                    (item.activo or "") != hallazgo["activo"],
+                    (item.herramienta or "") != THREAT_MODEL_VULN_SOURCE,
+                    (item.severidad or "") != (hallazgo.get("severidad") or "Media"),
+                    (item.titulo or "") != hallazgo["titulo"],
+                    (item.descripcion or "") != hallazgo["descripcion"],
+                    (item.evidencia or "") != hallazgo["evidencia"],
+                    clasificacion is None,
+                ])
+                necesita_sincronizacion = (
+                    necesita_sincronizacion or
+                    datos_complementarios_desactualizados
+                )
+
+        if necesita_sincronizacion:
+            sincronizar_vulnerabilidad_con_modelamiento(vuln)
+            cambios += 1
+
+    if cambios:
+        db.session.commit()
+
+    return cambios
+
+
+def asegurar_sincronizacion_vulnerabilidades_modelamiento():
+    """Ejecuta la sincronización automática sin impedir el acceso si ocurre un error."""
+    try:
+        return sincronizar_todas_vulnerabilidades_con_modelamiento()
+    except Exception as exc:
+        db.session.rollback()
+        print("No fue posible sincronizar vulnerabilidades con MITRE ATT&CK:", repr(exc))
+        return 0
+
+
+# ============================================================
+# ACTIVE DIRECTORY -> MODELAMIENTO DE AMENAZAS / MITRE ATT&CK
+# ============================================================
+THREAT_MODEL_AD_SOURCE = "active_directory"
+THREAT_MODEL_AD_MARKER_RE = re.compile(r"\[GRAC-AD-FINDING:(\d+)\]", re.I)
+
+
+def tm_ad_marker(finding_id):
+    try:
+        return "[GRAC-AD-FINDING:{}]".format(int(finding_id))
+    except Exception:
+        return ""
+
+
+def tm_ad_finding_id(entry):
+    """Obtiene el ID externo del hallazgo AD sin reutilizar llaves foráneas de escáneres."""
+    if entry is None or (getattr(entry, "herramienta", "") or "").strip().lower() != THREAT_MODEL_AD_SOURCE:
+        return None
+    for value in (
+        getattr(entry, "descripcion", None),
+        getattr(entry, "impacto", None),
+        getattr(entry, "vulnerabilidad", None),
+    ):
+        match = THREAT_MODEL_AD_MARKER_RE.search(str(value or ""))
+        if match:
+            try:
+                return int(match.group(1))
+            except Exception:
+                return None
+    return None
+
+
+def tm_ad_source_ready():
+    """Confirma que la base y tabla de Gobierno AD están disponibles antes de sincronizar."""
+    ad_db_path = os.path.join(app.instance_path, "ad_governance.db")
+    if not os.path.exists(ad_db_path):
+        return False
+    conn = None
+    try:
+        conn = sqlite3.connect(ad_db_path, timeout=15)
+        return conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ad_findings'"
+        ).fetchone() is not None
+    except sqlite3.Error:
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def sincronizar_active_directory_con_modelamiento():
+    """
+    Incorpora cada hallazgo activo de Gobierno del Directorio Activo como una
+    entrada trazable de Modelamiento de Amenazas.
+
+    La identificación externa se conserva dentro de un marcador técnico en la
+    descripción para no mezclar IDs de Active Directory con las llaves foráneas
+    de hallazgos producidos por escáneres. La sincronización es idempotente:
+    actualiza cambios, elimina duplicados y retira registros que ya no están
+    activos en la fuente AD.
+    """
+    if not tm_ad_source_ready():
+        return 0
+
+    collector = globals().get("attack_auto_collect_active_directory")
+    if not callable(collector):
+        # La función se define más adelante en el archivo y estará disponible
+        # durante las solicitudes Flask, una vez cargado completamente el módulo.
+        return 0
+
+    records = collector() or []
+    existing = (
+        ThreatModelEntry.query
+        .options(selectinload(ThreatModelEntry.tecnicas))
+        .filter(func.lower(ThreatModelEntry.herramienta) == THREAT_MODEL_AD_SOURCE)
+        .order_by(ThreatModelEntry.id.asc())
+        .all()
+    )
+
+    existing_by_id = defaultdict(list)
+    for entry in existing:
+        finding_id = tm_ad_finding_id(entry)
+        if finding_id is not None:
+            existing_by_id[int(finding_id)].append(entry)
+
+    source_ids = set()
+    changes = 0
+
+    def update_attr(obj, attr, value):
+        nonlocal changes
+        if getattr(obj, attr) != value:
+            setattr(obj, attr, value)
+            changes += 1
+
+    for record in records:
+        source_ref = str(record.get("source_ref") or "")
+        match = re.search(r"(?:^|:)AD:(\d+)$", source_ref, flags=re.I)
+        if not match:
+            match = re.search(r"(\d+)$", source_ref)
+        if not match:
+            continue
+
+        finding_id = int(match.group(1))
+        source_ids.add(finding_id)
+        candidates = existing_by_id.get(finding_id, [])
+        entry = candidates[0] if candidates else None
+
+        for duplicate in candidates[1:]:
+            db.session.delete(duplicate)
+            changes += 1
+
+        severity = attack_auto_normalize_severity(record.get("severity"))
+        asset = attack_auto_clean(record.get("asset_name") or "Directorio corporativo", 200)
+        vulnerability = attack_auto_clean(
+            record.get("vulnerability") or record.get("title") or "Hallazgo de Gobierno del Directorio Activo",
+            500,
+        )
+        marker = tm_ad_marker(finding_id)
+        description_parts = [
+            attack_auto_clean(record.get("description") or vulnerability, 4300),
+            "Estado en Gobierno AD: {}.".format(attack_auto_clean(record.get("status") or "En análisis", 80)),
+        ]
+        if record.get("existing_controls"):
+            description_parts.append("Controles relacionados: {}".format(attack_auto_clean(record.get("existing_controls"), 1200)))
+        if record.get("control_weaknesses"):
+            description_parts.append("Tratamiento recomendado: {}".format(attack_auto_clean(record.get("control_weaknesses"), 1500)))
+        if record.get("evidence"):
+            description_parts.append("Evidencia: {}".format(attack_auto_clean(record.get("evidence"), 1200)))
+        description_parts.append(marker)
+        description = "\n\n".join(part for part in description_parts if part)[:5000]
+        impact = attack_auto_clean(
+            record.get("consequences") or
+            "Compromiso de identidad, persistencia, escalamiento de privilegios y movimiento lateral en el dominio.",
+            4000,
+        )
+
+        techniques = list(record.get("techniques") or [])
+        if not techniques:
+            techniques = [
+                {
+                    "technique_id": "T1078.002",
+                    "technique_name": "Valid Accounts: Domain Accounts",
+                    "tactic_id": "TA0001",
+                    "tactic_name": "Initial Access",
+                    "rationale": "El hallazgo puede facilitar el uso indebido de una identidad válida de dominio.",
+                    "confidence": 90,
+                },
+                {
+                    "technique_id": "T1098",
+                    "technique_name": "Account Manipulation",
+                    "tactic_id": "TA0003",
+                    "tactic_name": "Persistence",
+                    "rationale": "La debilidad de gobierno puede permitir persistencia mediante cambios de cuentas, grupos o privilegios.",
+                    "confidence": 82,
+                },
+            ]
+
+        confidence = max(
+            [int(item.get("confidence") or 0) for item in techniques] or [80]
+        )
+
+        if entry is None:
+            entry = ThreatModelEntry(
+                activo=asset,
+                herramienta=THREAT_MODEL_AD_SOURCE,
+                vulnerabilidad=vulnerability,
+                descripcion=description,
+                impacto=impact,
+                severidad=severity,
+                confianza=confidence,
+            )
+            db.session.add(entry)
+            db.session.flush()
+            changes += 1
+        else:
+            update_attr(entry, "activo", asset)
+            update_attr(entry, "herramienta", THREAT_MODEL_AD_SOURCE)
+            update_attr(entry, "vulnerabilidad", vulnerability)
+            update_attr(entry, "descripcion", description)
+            update_attr(entry, "impacto", impact)
+            update_attr(entry, "severidad", severity)
+            update_attr(entry, "confianza", confidence)
+
+        expected = []
+        base_score = tm_score_from_severity(severity)
+        for item in techniques:
+            technique_id = attack_auto_clean(item.get("technique_id"), 20)
+            if not technique_id:
+                continue
+            expected.append((
+                technique_id,
+                attack_auto_clean(item.get("technique_name") or technique_id, 255),
+                attack_auto_clean(item.get("tactic_id"), 20) or None,
+                attack_auto_clean(item.get("tactic_name") or "Other", 100),
+                attack_auto_clean(item.get("rationale") or "Mapeo desde Gobierno del Directorio Activo", 4000),
+                max(base_score, int(item.get("confidence") or confidence or 60)),
+            ))
+
+        actual = [
+            (
+                tech.mitre_technique_id,
+                tech.mitre_technique_name,
+                tech.mitre_tactic_id,
+                tech.mitre_tactic_name,
+                tech.rationale or "",
+                int(tech.score or 0),
+            )
+            for tech in (entry.tecnicas or [])
+        ]
+
+        if actual != expected:
+            entry.tecnicas.clear()
+            db.session.flush()
+            for technique_id, technique_name, tactic_id, tactic_name, rationale, score in expected:
+                entry.tecnicas.append(ThreatModelTechnique(
+                    mitre_technique_id=technique_id,
+                    mitre_technique_name=technique_name,
+                    mitre_tactic_id=tactic_id,
+                    mitre_tactic_name=tactic_name,
+                    rationale=rationale,
+                    score=score,
+                ))
+            changes += 1
+
+    # Retira del modelamiento los hallazgos que dejaron de estar activos en AD.
+    for entry in existing:
+        finding_id = tm_ad_finding_id(entry)
+        if finding_id is None or int(finding_id) not in source_ids:
+            db.session.delete(entry)
+            changes += 1
+
+    if changes:
+        db.session.commit()
+    return changes
+
+
+def asegurar_sincronizacion_active_directory_modelamiento():
+    """Sincroniza Gobierno AD sin impedir el acceso al módulo ante un error externo."""
+    try:
+        return sincronizar_active_directory_con_modelamiento()
+    except Exception as exc:
+        db.session.rollback()
+        print("No fue posible sincronizar Gobierno del Directorio Activo con Modelamiento de Amenazas:", repr(exc))
+        return 0
+
+
+# ============================================================
+# GOBIERNO DE FIREWALL -> MODELAMIENTO DE AMENAZAS / MITRE ATT&CK
+# ============================================================
+THREAT_MODEL_FIREWALL_SOURCE = "firewall_governance"
+THREAT_MODEL_FIREWALL_MARKER_RE = re.compile(r"\[GRAC-FIREWALL-FINDING:(\d+)\]", re.I)
+
+
+def tm_firewall_marker(finding_id):
+    try:
+        return "[GRAC-FIREWALL-FINDING:{}]".format(int(finding_id))
+    except Exception:
+        return ""
+
+
+def tm_firewall_finding_id(entry):
+    """Obtiene el ID externo del hallazgo de firewall almacenado en el marcador técnico."""
+    if entry is None or (getattr(entry, "herramienta", "") or "").strip().lower() != THREAT_MODEL_FIREWALL_SOURCE:
+        return None
+    for value in (
+        getattr(entry, "descripcion", None),
+        getattr(entry, "impacto", None),
+        getattr(entry, "vulnerabilidad", None),
+    ):
+        match = THREAT_MODEL_FIREWALL_MARKER_RE.search(str(value or ""))
+        if match:
+            try:
+                return int(match.group(1))
+            except Exception:
+                return None
+    return None
+
+
+def tm_firewall_finding_url(entry):
+    """Construye un enlace trazable desde Modelamiento hacia el hallazgo original."""
+    finding_id = tm_firewall_finding_id(entry)
+    finding_model = globals().get("FirewallGovFinding")
+    if finding_id is None or finding_model is None:
+        return ""
+    try:
+        finding = db.session.get(finding_model, int(finding_id))
+    except Exception:
+        finding = finding_model.query.get(int(finding_id))
+    if not finding:
+        return ""
+    return url_for(
+        "cumplimiento_continuo_firewall",
+        device_id=finding.device_id,
+        q=finding.finding_code or finding.id,
+    )
+
+
+def sincronizar_firewall_con_modelamiento():
+    """
+    Incorpora los hallazgos activos de Gobierno de Firewall como entradas
+    trazables de Modelamiento de Amenazas y mantiene su mapeo MITRE ATT&CK.
+
+    La sincronización es idempotente: actualiza cambios, elimina duplicados
+    y retira los registros cuya fuente ya no está activa.
+    """
+    collector = globals().get("attack_auto_collect_firewall")
+    finding_model = globals().get("FirewallGovFinding")
+    if not callable(collector) or finding_model is None:
+        return 0
+
+    records = collector() or []
+    source_findings = {
+        int(item.id): item
+        for item in finding_model.query.filter_by(active=True).order_by(finding_model.id.asc()).all()
+    }
+    existing = (
+        ThreatModelEntry.query
+        .options(selectinload(ThreatModelEntry.tecnicas))
+        .filter(func.lower(ThreatModelEntry.herramienta) == THREAT_MODEL_FIREWALL_SOURCE)
+        .order_by(ThreatModelEntry.id.asc())
+        .all()
+    )
+
+    existing_by_id = defaultdict(list)
+    for entry in existing:
+        finding_id = tm_firewall_finding_id(entry)
+        if finding_id is not None:
+            existing_by_id[int(finding_id)].append(entry)
+
+    source_ids = set()
+    changes = 0
+
+    def update_attr(obj, attr, value):
+        nonlocal changes
+        if getattr(obj, attr) != value:
+            setattr(obj, attr, value)
+            changes += 1
+
+    for record in records:
+        source_ref = str(record.get("source_ref") or "")
+        match = re.search(r"(\d+)$", source_ref)
+        if not match:
+            continue
+
+        finding_id = int(match.group(1))
+        finding = source_findings.get(finding_id)
+        if finding is None:
+            continue
+
+        source_ids.add(finding_id)
+        candidates = existing_by_id.get(finding_id, [])
+        entry = candidates[0] if candidates else None
+
+        for duplicate in candidates[1:]:
+            db.session.delete(duplicate)
+            changes += 1
+
+        severity = attack_auto_normalize_severity(record.get("severity") or finding.severity)
+        asset = attack_auto_clean(record.get("asset_name") or "Firewall / Perímetro", 200)
+        vulnerability = attack_auto_clean(
+            record.get("vulnerability") or finding.title or "Hallazgo de Gobierno de Firewall",
+            500,
+        )
+        marker = tm_firewall_marker(finding_id)
+
+        description_parts = [
+            attack_auto_clean(record.get("description") or finding.description or vulnerability, 3500),
+            "Código: {}. Regla: {}. Estado: {}.".format(
+                attack_auto_clean(finding.finding_code or "N/D", 120),
+                attack_auto_clean(finding.rule_name or finding.rule_external_id or "N/D", 500),
+                attack_auto_clean(finding.status or "Abierto", 80),
+            ),
+        ]
+        if finding.control_mapping:
+            description_parts.append(
+                "Controles relacionados: {}".format(
+                    attack_auto_clean(finding.control_mapping, 1200)
+                )
+            )
+        if finding.recommendation:
+            description_parts.append(
+                "Tratamiento recomendado: {}".format(
+                    attack_auto_clean(finding.recommendation, 1500)
+                )
+            )
+        if finding.technical_detail:
+            description_parts.append(
+                "Detalle técnico: {}".format(
+                    attack_auto_clean(finding.technical_detail, 1200)
+                )
+            )
+        if record.get("evidence"):
+            description_parts.append(
+                "Evidencia: {}".format(attack_auto_clean(record.get("evidence"), 1200))
+            )
+        description_parts.append(marker)
+        description = "\n\n".join(part for part in description_parts if part)[:5000]
+
+        impact = attack_auto_clean(
+            record.get("consequences")
+            or "Acceso no autorizado, exposición del perímetro, evasión de controles, movimiento lateral o afectación de servicios.",
+            4000,
+        )
+
+        techniques = list(record.get("techniques") or [])
+        if not techniques:
+            techniques = [{
+                "technique_id": "T1562.004",
+                "technique_name": "Impair Defenses: Disable or Modify System Firewall",
+                "tactic_id": "TA0005",
+                "tactic_name": "Defense Evasion",
+                "rationale": "El hallazgo evidencia una debilidad de configuración o gobierno que puede reducir la eficacia del control perimetral.",
+                "confidence": 70,
+            }]
+
+        confidence = max([int(item.get("confidence") or 0) for item in techniques] or [70])
+
+        if entry is None:
+            entry = ThreatModelEntry(
+                activo=asset,
+                herramienta=THREAT_MODEL_FIREWALL_SOURCE,
+                vulnerabilidad=vulnerability,
+                descripcion=description,
+                impacto=impact,
+                severidad=severity,
+                confianza=confidence,
+            )
+            db.session.add(entry)
+            db.session.flush()
+            changes += 1
+        else:
+            update_attr(entry, "activo", asset)
+            update_attr(entry, "herramienta", THREAT_MODEL_FIREWALL_SOURCE)
+            update_attr(entry, "vulnerabilidad", vulnerability)
+            update_attr(entry, "descripcion", description)
+            update_attr(entry, "impacto", impact)
+            update_attr(entry, "severidad", severity)
+            update_attr(entry, "confianza", confidence)
+
+        expected = []
+        base_score = tm_score_from_severity(severity)
+        seen_techniques = set()
+        for item in techniques:
+            technique_id = attack_auto_clean(item.get("technique_id"), 20)
+            if not technique_id or technique_id in seen_techniques:
+                continue
+            seen_techniques.add(technique_id)
+            expected.append((
+                technique_id,
+                attack_auto_clean(item.get("technique_name") or technique_id, 255),
+                attack_auto_clean(item.get("tactic_id"), 20) or None,
+                attack_auto_clean(item.get("tactic_name") or "Other", 100),
+                attack_auto_clean(item.get("rationale") or "Mapeo desde Gobierno de Firewall", 4000),
+                max(base_score, int(item.get("confidence") or confidence or 60)),
+            ))
+
+        actual = [
+            (
+                tech.mitre_technique_id,
+                tech.mitre_technique_name,
+                tech.mitre_tactic_id,
+                tech.mitre_tactic_name,
+                tech.rationale or "",
+                int(tech.score or 0),
+            )
+            for tech in (entry.tecnicas or [])
+        ]
+
+        if actual != expected:
+            entry.tecnicas.clear()
+            db.session.flush()
+            for technique_id, technique_name, tactic_id, tactic_name, rationale, score in expected:
+                entry.tecnicas.append(ThreatModelTechnique(
+                    mitre_technique_id=technique_id,
+                    mitre_technique_name=technique_name,
+                    mitre_tactic_id=tactic_id,
+                    mitre_tactic_name=tactic_name,
+                    rationale=rationale,
+                    score=score,
+                ))
+            changes += 1
+
+    for entry in existing:
+        finding_id = tm_firewall_finding_id(entry)
+        if finding_id is None or int(finding_id) not in source_ids:
+            db.session.delete(entry)
+            changes += 1
+
+    if changes:
+        db.session.commit()
+    return changes
+
+
+def asegurar_sincronizacion_firewall_modelamiento():
+    """Sincroniza Gobierno de Firewall sin bloquear el acceso ante un error externo."""
+    try:
+        return sincronizar_firewall_con_modelamiento()
+    except Exception as exc:
+        db.session.rollback()
+        print("No fue posible sincronizar Gobierno de Firewall con Modelamiento de Amenazas:", repr(exc))
+        return 0
+
+
+# ===================
+# Helper
+# ===================
+
+
+def build_attack_layer_from_entries(entries, asset_name="Activo"):
+    agg = OrderedDict()
+
+    for entry in entries:
+        for tech in entry.tecnicas:
+            tid = tech.mitre_technique_id
+            current = agg.get(tid)
+
+            score = max(
+                int(tech.score or 0),
+                tm_score_from_severity(entry.severidad)
+            )
+
+            comment = f"[{entry.herramienta}] {entry.vulnerabilidad}"
+            if entry.impacto:
+                comment += f" | Impacto: {entry.impacto}"
+
+            if not current:
+                agg[tid] = {
+                    "techniqueID": tid,
+                    "score": score,
+                    "color": tm_color_from_score(score),
+                    "comment": comment[:900],
+                    "enabled": True
+                }
+            else:
+                if score > current["score"]:
+                    current["score"] = score
+                    current["color"] = tm_color_from_score(score)
+                if comment not in current["comment"]:
+                    current["comment"] = (current["comment"] + " || " + comment)[:900]
+
+    layer = {
+        "name": f"Threat Model - {asset_name}",
+        "domain": ATTACK_DOMAIN,
+        "description": f"Capa MITRE ATT&CK generada automáticamente para {asset_name}",
+        "versions": {
+            "layer": "4.4",
+            "navigator": "4.9.1",
+            "attack": "18"
+        },
+        "layout": {
+            "layout": "side",
+            "showID": True,
+            "showName": True,
+            "showAggregateScores": True,
+            "countUnscored": False
+        },
+        "sorting": 3,
+        "hideDisabled": False,
+        "gradient": {
+            "colors": ["#15803d", "#ca8a04", "#ea580c", "#b91c1c"],
+            "minValue": 0,
+            "maxValue": 100
+        },
+        "legendItems": [
+            {"label": "Bajo", "color": "#15803d"},
+            {"label": "Medio", "color": "#ca8a04"},
+            {"label": "Alto", "color": "#ea580c"},
+            {"label": "Crítico", "color": "#b91c1c"}
+        ],
+        "techniques": list(agg.values())
+    }
+    return layer
+
+
+def build_attack_matrix_view(entries):
+    matrix = {t: [] for t in ATTACK_TACTIC_ORDER}
+    matrix[MITRE_PENDING_TACTIC] = []
+
+    vulnerabilidades_representadas = set()
+
+    # Primero agrega todas las técnicas MITRE reales.
+    for entry in entries:
+        tecnicas = list(entry.tecnicas or [])
+        if not tecnicas:
+            continue
+
+        if entry.vulnerabilidad_registro_id is not None:
+            vulnerabilidades_representadas.add(int(entry.vulnerabilidad_registro_id))
+
+        for tech in tecnicas:
+            tactic = tech.mitre_tactic_name or "Other"
+            matrix.setdefault(tactic, [])
+            matrix[tactic].append({
+                "entry_id": entry.id,
+                "vulnerabilidad_registro_id": entry.vulnerabilidad_registro_id,
+                "tool": entry.herramienta,
+                "severity": entry.severidad,
+                "vulnerability": entry.vulnerabilidad,
+                "impacto": entry.impacto,
+                "technique_id": tech.mitre_technique_id,
+                "technique_name": tech.mitre_technique_name,
+                "score": tech.score,
+                "rationale": tech.rationale,
+                "pending": False,
+            })
+
+    # Después incorpora una sola tarjeta pendiente por vulnerabilidad no representada.
+    pendientes_vistos = set()
+    for entry in entries:
+        if entry.tecnicas:
+            continue
+
+        vuln_id = entry.vulnerabilidad_registro_id
+        if vuln_id is not None:
+            vuln_id = int(vuln_id)
+            if vuln_id in vulnerabilidades_representadas:
+                continue
+            clave = ("vulnerabilidad", vuln_id)
+        else:
+            clave = ("entrada", int(entry.id))
+
+        if clave in pendientes_vistos:
+            continue
+        pendientes_vistos.add(clave)
+
+        matrix[MITRE_PENDING_TACTIC].append({
+            "entry_id": entry.id,
+            "vulnerabilidad_registro_id": entry.vulnerabilidad_registro_id,
+            "tool": entry.herramienta,
+            "severity": entry.severidad,
+            "vulnerability": entry.vulnerabilidad,
+            "impacto": entry.impacto,
+            "technique_id": "PENDIENTE",
+            "technique_name": "Pendiente de mapeo MITRE ATT&CK",
+            "score": tm_score_from_severity(entry.severidad),
+            "rationale": (
+                "La vulnerabilidad está registrada y visible, pero aún no existe una "
+                "correspondencia técnica confiable con una técnica MITRE ATT&CK."
+            ),
+            "pending": True,
+        })
+
+    for tactic in matrix:
+        matrix[tactic] = sorted(
+            matrix[tactic],
+            key=lambda x: (-(x.get("score") or 0), x.get("technique_id") or "")
+        )
+
+    return matrix
+
+def tm_detect_context(haystack: str) -> dict:
+    return {
+        "web": any(x in haystack for x in [
+            "http", "https", "apache", "nginx", "iis", "tomcat",
+            "php", "wordpress", "drupal", "joomla", "web", "login", "admin panel"
+        ]),
+        "tls": any(x in haystack for x in [
+            "tls", "ssl", "cipher", "certificate", "renegotiation"
+        ]),
+        "auth": any(x in haystack for x in [
+            "login", "password", "credential", "authentication", "anonymous", "guest"
+        ]),
+        "file": any(x in haystack for x in [
+            "directory", "file", "upload", "traversal", "lfi", "rfi", "../"
+        ]),
+        "code_exec": any(x in haystack for x in [
+            "rce", "remote code execution", "command injection", "code execution"
+        ])
+    }
+
+def guardar_threat_model_unmapped(run, hallazgo, finding_rec=None):
+    rec = ThreatModelUnmapped(
+        run_id=run.id if run else None,
+        finding_id=finding_rec.id if finding_rec else None,
+        activo=(run.target if run else hallazgo.get("activo") or "Activo"),
+        herramienta=(hallazgo.get("fuente") or "scanner").lower(),
+        severidad=hallazgo.get("severidad"),
+        titulo=(hallazgo.get("titulo") or "Hallazgo técnico")[:500],
+        descripcion=(hallazgo.get("descripcion") or "")[:5000],
+        evidencia=(hallazgo.get("evidencia") or "")[:5000]
+    )
+    db.session.add(rec)
+    db.session.flush()
+
+# ===================
+# Dashboard
+# ===================
+
+@app.route('/modelamiento_amenazas')
+@login_required
+def threat_model_dashboard():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Modelamiento de Amenazas"):
+        flash("No tiene permiso para acceder al modelamiento de amenazas.", "danger")
+        return redirect(url_for('menu'))
+
+    read_only = True if user.role == 'auditor' else False
+
+    # Incluye automáticamente todas las vulnerabilidades existentes de la matriz.
+    asegurar_sincronizacion_vulnerabilidades_modelamiento()
+    asegurar_sincronizacion_active_directory_modelamiento()
+    asegurar_sincronizacion_firewall_modelamiento()
+
+    mapped_count = (
+        db.session.query(func.count(func.distinct(ThreatModelEntry.id)))
+        .join(ThreatModelTechnique, ThreatModelTechnique.threat_entry_id == ThreatModelEntry.id)
+        .scalar() or 0
+    )
+    pendientes_mitre = ThreatModelEntry.query.filter(~ThreatModelEntry.tecnicas.any()).count()
+    unmapped_count = ThreatModelUnmapped.query.count()
+    coverage_pct = round((mapped_count / (mapped_count + unmapped_count) * 100), 1) if (mapped_count + unmapped_count) else 0
+
+    filtro_activo = (request.args.get('activo') or '').strip()
+    filtro_herramienta = (request.args.get('herramienta') or '').strip()
+    filtro_severidad = (request.args.get('severidad') or '').strip()
+    filtro_tecnica = (request.args.get('tecnica') or '').strip()
+
+    tecnicas_disponibles = (
+        db.session.query(
+            ThreatModelTechnique.mitre_technique_id,
+            ThreatModelTechnique.mitre_technique_name
+        )
+        .distinct()
+        .order_by(
+            ThreatModelTechnique.mitre_technique_id.asc(),
+            ThreatModelTechnique.mitre_technique_name.asc()
+        )
+        .all()
+    )
+
+    q = ThreatModelEntry.query.options(selectinload(ThreatModelEntry.tecnicas))
+
+    if filtro_activo:
+        q = q.filter(ThreatModelEntry.activo.ilike(f"%{filtro_activo}%"))
+
+    if filtro_herramienta:
+        q = q.filter(ThreatModelEntry.herramienta == filtro_herramienta)
+
+    if filtro_severidad:
+        q = q.filter(ThreatModelEntry.severidad == filtro_severidad)
+
+    if filtro_tecnica:
+        q = q.join(ThreatModelTechnique).filter(
+            ThreatModelTechnique.mitre_technique_id == filtro_tecnica
+        )
+
+    items = q.distinct().order_by(ThreatModelEntry.id.desc()).all()
+
+    body = """
+    <div class="glass-card p-4 mt-2 threat-dashboard-card">
+      <div class="section-title threat-dashboard-heading">🎯 Dashboard de Modelamiento de Amenazas</div>
+
+      <!-- Acciones siempre DEBAJO del título, sin superposiciones. -->
+      <div class="threat-dashboard-actions-panel">
+        <div class="threat-dashboard-actions-label">Acciones del módulo</div>
+        <div class="threat-main-actions">
+        <a href="{{ url_for('threat_model_asset_view') }}"
+           class="btn btn-primary rounded-pill px-4">
+          🧭 Matriz MITRE ATT&CK
+        </a>
+
+        <a href="{{ url_for('threat_model_dashboard', herramienta='active_directory') }}"
+           class="btn btn-outline-dark rounded-pill px-4">
+          <i class="bi bi-person-lock"></i> Hallazgos Active Directory
+        </a>
+
+        <a href="{{ url_for('threat_model_dashboard', herramienta='firewall_governance') }}"
+           class="btn btn-outline-primary rounded-pill px-4">
+          <i class="bi bi-shield-lock"></i> Hallazgos Gobierno de Firewall
+        </a>
+
+        <a href="{{ url_for('threat_model_unmapped_view') }}"
+           class="btn btn-outline-danger rounded-pill px-4">
+          🧩 Ver No Mapeados
+        </a>
+
+        <a href="{{ url_for('threat_model_unmapped_complementary_view') }}"
+           class="btn btn-outline-success rounded-pill px-4">
+          🧠 Clasificación Complementaria
+        </a>
+
+        {% if not read_only %}
+          <a href="{{ url_for('threat_model_export_navigator', activo=filtro_activo) }}"
+             class="btn btn-outline-primary rounded-pill px-4">
+            ⬇️ Exportar Navigator JSON
+          </a>
+        {% else %}
+          <button type="button"
+                  class="btn btn-secondary rounded-pill px-4"
+                  disabled
+                  title="Auditor: solo lectura. No puede exportar Navigator JSON.">
+            ⬇️ Exportar Navigator JSON
+          </button>
+        {% endif %}
+
+        {% if user.role != 'auditor' %}
+          <a href="{{ url_for('threat_model_nessus_import') }}"
+             class="btn btn-warning rounded-pill px-4">
+            📥 Importar Nessus
+          </a>
+        {% endif %}
+        </div>
+      </div>
+
+      <form method="get" class="row g-3 mb-3" id="threatFiltroForm">
+        <div class="col-md-3">
+          <label class="form-label">Activo</label>
+          <input type="text"
+                 name="activo"
+                 class="form-control"
+                 value="{{ filtro_activo }}"
+                 placeholder="Servidor, portal, dominio, IP...">
+        </div>
+
+        <div class="col-md-2">
+          <label class="form-label">Herramienta</label>
+          <select name="herramienta" class="form-select">
+            <option value="">-- Todas --</option>
+            {% for op in ['active_directory','firewall_governance','registro_vulnerabilidades','nikto','nessus','nuclei','nmap','testssl','owasp_zap','zap'] %}
+              <option value="{{ op }}" {% if filtro_herramienta == op %}selected{% endif %}>{{ op|upper }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-md-2">
+          <label class="form-label">Severidad</label>
+          <select name="severidad" class="form-select">
+            <option value="">-- Todas --</option>
+            {% for op in ['Crítica', 'Alta', 'Media', 'Baja'] %}
+              <option value="{{ op }}" {% if filtro_severidad == op %}selected{% endif %}>{{ op }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label">Técnica MITRE</label>
+          <select name="tecnica" class="form-select">
+            <option value="">-- Todas --</option>
+            {% for tid, tname in tecnicas_disponibles %}
+              <option value="{{ tid }}" {% if filtro_tecnica == tid %}selected{% endif %}>
+                {{ tid }} - {{ tname }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-md-2">
+          <label class="form-label d-block">&nbsp;</label>
+          <div class="tm-filter-actions">
+            <button class="btn btn-primary rounded-pill px-3" type="submit">
+              Filtrar
+            </button>
+
+            <a href="{{ url_for('threat_model_dashboard') }}"
+               class="btn btn-outline-secondary rounded-pill px-3">
+              Limpiar
+            </a>
+
+            {% if not read_only %}
+              <button type="button"
+                      class="btn btn-danger rounded-pill px-3"
+                      onclick="eliminarThreatModelFiltrados()">
+                Eliminar filtrados
+              </button>
+            {% else %}
+              <button type="button"
+                      class="btn btn-secondary rounded-pill px-3"
+                      disabled
+                      title="Auditor: solo lectura">
+                Eliminar filtrados
+              </button>
+            {% endif %}
+          </div>
+        </div>
+      </form>
+
+      <form method="post"
+            id="threatDeleteFiltradosForm"
+            action="{{ url_for('threat_model_delete_filtrados') }}"
+            style="display:none;">
+        <input type="hidden" name="activo" value="{{ filtro_activo }}">
+        <input type="hidden" name="herramienta" value="{{ filtro_herramienta }}">
+        <input type="hidden" name="severidad" value="{{ filtro_severidad }}">
+        <input type="hidden" name="tecnica" value="{{ filtro_tecnica }}">
+      </form>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-4">
+          <div class="metric-box">
+            <div class="metric-label">Hallazgos mapeados</div>
+            <div class="metric-value">{{ mapped_count }}</div>
+          </div>
+        </div>
+
+        <div class="col-md-4">
+          <div class="metric-box">
+            <div class="metric-label">Hallazgos no mapeados</div>
+            <div class="metric-value">{{ unmapped_count }}</div>
+          </div>
+        </div>
+
+        <div class="col-md-4">
+          <div class="metric-box">
+            <div class="metric-label">Cobertura MITRE</div>
+            <div class="metric-value">{{ coverage_pct }}%</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="soft-table-wrap">
+        <div class="table-responsive px-3 pb-3 pt-3">
+          <table class="table table-hover align-middle soft-table mb-0">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Activo</th>
+                <th>Herramienta</th>
+                <th>Vulnerabilidad</th>
+                <th>Severidad</th>
+                <th>Técnicas MITRE</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {% for it in items %}
+              <tr>
+                <td class="text-center fw-bold">{{ it.id }}</td>
+                <td>{{ it.activo }}</td>
+                <td class="text-center">{% if it.herramienta == 'active_directory' %}<span class="badge bg-dark">ACTIVE DIRECTORY</span>{% elif it.herramienta == 'firewall_governance' %}<span class="badge bg-primary">GOBIERNO FIREWALL</span>{% else %}{{ it.herramienta|upper }}{% endif %}</td>
+                <td class="small">{{ it.vulnerabilidad }}</td>
+                <td class="text-center">{{ badge_severidad_html(it.severidad) }}</td>
+
+                <td class="small">
+                  {% if it.tecnicas %}
+                    {% for t in it.tecnicas %}
+                      <div>
+                        <b>{{ t.mitre_technique_id }}</b> - {{ t.mitre_technique_name }}
+                      </div>
+                    {% endfor %}
+                  {% else %}
+                    <span class="badge bg-warning text-dark">Pendiente de mapeo MITRE</span>
+                  {% endif %}
+                </td>
+
+                <td class="text-center">
+                  <div class="tm-actions-wrap">
+                    {% set ad_finding_id = tm_ad_finding_id(it) %}
+                    {% if ad_finding_id %}
+                      <a href="{{ url_for('adgov.finding_detail', finding_id=ad_finding_id) }}"
+                         class="btn btn-outline-dark btn-sm rounded-pill px-3">
+                        Ver hallazgo AD
+                      </a>
+                    {% endif %}
+                    {% set firewall_finding_url = tm_firewall_finding_url(it) %}
+                    {% if firewall_finding_url %}
+                      <a href="{{ firewall_finding_url }}"
+                         class="btn btn-outline-primary btn-sm rounded-pill px-3">
+                        Ver hallazgo Firewall
+                      </a>
+                    {% endif %}
+                    {% if not read_only %}
+                      <a href="{{ url_for('threat_model_delete', id=it.id) }}"
+                         class="btn btn-danger btn-sm rounded-pill px-3"
+                         onclick="return confirmarEliminarThreatModel();">
+                        Eliminar
+                      </a>
+                    {% else %}
+                      <button class="btn btn-secondary btn-sm rounded-pill px-3"
+                              disabled
+                              title="Auditor: solo lectura">
+                        Eliminar
+                      </button>
+                    {% endif %}
+                  </div>
+                </td>
+              </tr>
+
+              {% else %}
+              <tr>
+                <td colspan="7" class="text-center text-muted py-4">
+                  No hay modelamientos generados.
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      .tm-filter-actions{
+        display:flex;
+        flex-direction:column;
+        gap:7px;
+        align-items:stretch;
+      }
+
+      .tm-filter-actions .btn{
+        width:100%;
+        min-height:36px;
+        font-size:.68rem;
+        font-weight:900;
+      }
+
+      /* Presentación uniforme del módulo, igual al orden título > acciones > contenido.
+         Las posiciones están en el flujo normal: los botones NO se montan sobre el título. */
+      .threat-dashboard-card > .threat-dashboard-heading{
+        display:block;
+        position:relative;
+        z-index:1;
+        clear:both;
+        width:100%;
+        margin-bottom:16px !important;
+      }
+
+      .threat-dashboard-card .threat-dashboard-actions-panel{
+        display:block;
+        position:relative !important;
+        inset:auto !important;
+        float:none !important;
+        transform:none !important;
+        clear:both;
+        width:100%;
+        margin:0 0 20px 0;
+        padding:14px 16px 16px;
+        background:#f8fbff;
+        border:1px solid #d9eaff;
+        border-radius:14px;
+      }
+
+      .threat-dashboard-card .threat-dashboard-actions-label{
+        color:#0b4a8f;
+        font-size:.79rem;
+        font-weight:900;
+        margin-bottom:12px;
+      }
+
+      .threat-dashboard-card .threat-main-actions{
+        display:grid !important;
+        grid-template-columns:repeat(3,minmax(0,1fr));
+        align-items:stretch;
+        justify-items:stretch;
+        gap:10px;
+        position:static !important;
+        float:none !important;
+        transform:none !important;
+        width:100%;
+      }
+
+      .threat-dashboard-card .threat-main-actions .btn{
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        width:100%;
+        min-width:0;
+        min-height:42px;
+        margin:0;
+        padding:9px 12px !important;
+        white-space:normal;
+        text-align:center;
+        overflow-wrap:anywhere;
+        font-weight:900;
+        font-size:.79rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.10);
+      }
+
+      @media (max-width:1100px){
+        .threat-dashboard-card .threat-main-actions{
+          grid-template-columns:repeat(2,minmax(0,1fr));
+        }
+      }
+
+      @media (max-width:650px){
+        .threat-dashboard-card .threat-main-actions{
+          grid-template-columns:minmax(0,1fr);
+        }
+        .threat-dashboard-card .threat-dashboard-actions-panel{
+          padding:12px;
+        }
+      }
+
+      .tm-actions-wrap{
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+        align-items:center;
+      }
+
+      .tm-actions-wrap .btn{
+        min-width:120px;
+        font-size:.74rem;
+        font-weight:900;
+      }
+
+      @media (max-width:768px){
+        .tm-filter-actions .btn,
+        .tm-actions-wrap .btn,
+        .threat-main-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+
+    <script>
+      function confirmarEliminarThreatModel(){
+        if(typeof hideLoader === 'function'){
+          hideLoader();
+        }
+
+        return confirm(
+          '¿Está seguro de eliminar este registro de modelamiento de amenazas?\\n\\n' +
+          'También se eliminarán sus técnicas MITRE asociadas.\\n' +
+          'Esta acción no se puede deshacer.'
+        );
+      }
+
+      function eliminarThreatModelFiltrados(){
+        const total = {{ items|length }};
+
+        if(total <= 0){
+          alert('No hay registros para eliminar con los filtros aplicados.');
+          return false;
+        }
+
+        const activo = "{{ filtro_activo }}";
+        const herramienta = "{{ filtro_herramienta }}";
+        const severidad = "{{ filtro_severidad }}";
+        const tecnica = "{{ filtro_tecnica }}";
+
+        let mensaje = '¿Está seguro de eliminar los registros filtrados de modelamiento de amenazas?\\n\\n';
+        mensaje += 'Total registros a eliminar: ' + total + '\\n';
+
+        if(activo){ mensaje += 'Activo contiene: ' + activo + '\\n'; }
+        if(herramienta){ mensaje += 'Herramienta: ' + herramienta + '\\n'; }
+        if(severidad){ mensaje += 'Severidad: ' + severidad + '\\n'; }
+        if(tecnica){ mensaje += 'Técnica MITRE: ' + tecnica + '\\n'; }
+
+        if(!activo && !herramienta && !severidad && !tecnica){
+          mensaje += '\\nADVERTENCIA: No hay filtros aplicados. Se eliminarán TODOS los registros de modelamiento de amenazas.\\n';
+        }
+
+        mensaje += '\\nTambién se eliminarán las técnicas MITRE asociadas.\\n';
+        mensaje += 'Esta acción no se puede deshacer.';
+
+        if(confirm(mensaje)){
+          const form = document.getElementById('threatDeleteFiltradosForm');
+          if(form){ form.submit(); }
+        }
+
+        return false;
+      }
+    </script>
+    """
+
+    return vuln_scan_shell(
+        "Modelamiento de Amenazas",
+        render_template_string(
+            body,
+            items=items,
+            filtro_activo=filtro_activo,
+            filtro_herramienta=filtro_herramienta,
+            filtro_severidad=filtro_severidad,
+            filtro_tecnica=filtro_tecnica,
+            tecnicas_disponibles=tecnicas_disponibles,
+            user=user,
+            read_only=read_only,
+            mapped_count=mapped_count,
+            unmapped_count=unmapped_count,
+            coverage_pct=coverage_pct,
+            badge_severidad_html=badge_severidad_html,
+            tm_ad_finding_id=tm_ad_finding_id,
+            tm_firewall_finding_url=tm_firewall_finding_url
+        )
+    )
+
+
+# =================================
+# Vista No Mapeados Mittre & Attack 
+# =================================
+
+@app.route('/modelamiento_amenazas/no_mapeados')
+@login_required
+def threat_model_unmapped_view():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Modelamiento de Amenazas"):
+        flash("No tiene permiso para acceder a los hallazgos no mapeados.", "danger")
+        return redirect(url_for('menu'))
+
+    read_only = True if user.role == 'auditor' else False
+
+    filtro_herramienta = (request.args.get('herramienta') or '').strip()
+    filtro_severidad = (request.args.get('severidad') or '').strip()
+    filtro_texto = (request.args.get('texto') or '').strip()
+
+    q = ThreatModelUnmapped.query
+
+    if filtro_herramienta:
+        q = q.filter(ThreatModelUnmapped.herramienta == filtro_herramienta)
+
+    if filtro_severidad:
+        q = q.filter(ThreatModelUnmapped.severidad == filtro_severidad)
+
+    if filtro_texto:
+        q = q.filter(
+            db.or_(
+                ThreatModelUnmapped.titulo.ilike(f"%{filtro_texto}%"),
+                ThreatModelUnmapped.descripcion.ilike(f"%{filtro_texto}%"),
+                ThreatModelUnmapped.evidencia.ilike(f"%{filtro_texto}%")
+            )
+        )
+
+    items = q.order_by(ThreatModelUnmapped.id.desc()).all()
+
+    body = """
+    <div class="glass-card p-4 mt-2">
+
+      <div class="unmapped-topbar">
+        <div>
+          <div class="section-title mb-1">🧩 Hallazgos no mapeados MITRE</div>
+          <div class="text-muted small">
+            Consulta y gestión de hallazgos técnicos que aún no fueron asociados a tácticas o técnicas MITRE ATT&CK.
+          </div>
+        </div>
+
+        <div class="unmapped-extra-actions">
+          {% if not read_only %}
+            <form method="post"
+                  action="{{ url_for('threat_model_unmapped_classify') }}"
+                  class="d-inline">
+              <input type="hidden" name="herramienta" value="{{ filtro_herramienta }}">
+              <input type="hidden" name="severidad" value="{{ filtro_severidad }}">
+              <input type="hidden" name="texto" value="{{ filtro_texto }}">
+
+              <button type="submit"
+                      class="btn btn-success rounded-pill px-4"
+                      onclick="return confirmarClasificacionComplementaria();">
+                🧠 Clasificar No Mapeados
+              </button>
+            </form>
+          {% else %}
+            <button type="button"
+                    class="btn btn-secondary rounded-pill px-4"
+                    disabled
+                    title="Auditor: solo lectura. No puede clasificar hallazgos.">
+              🧠 Clasificar No Mapeados
+            </button>
+          {% endif %}
+
+          <a href="{{ url_for('threat_model_unmapped_complementary_view') }}"
+             class="btn btn-outline-success rounded-pill px-4">
+            Ver Clasificación
+          </a>
+
+          <a href="{{ url_for('threat_model_dashboard') }}"
+             class="btn btn-outline-primary rounded-pill px-4 unmapped-back-btn">
+            ← Volver al Dashboard
+          </a>
+        </div>
+      </div>
+
+      <form method="get" class="row g-3 mb-3" id="unmappedFiltroForm">
+        <div class="col-md-3">
+          <label class="form-label">Herramienta</label>
+          <select name="herramienta" class="form-select">
+            <option value="">-- Todas --</option>
+            {% for op in ['registro_vulnerabilidades','nikto','nessus','nuclei','nmap','testssl','owasp_zap','zap'] %}
+              <option value="{{ op }}" {% if filtro_herramienta == op %}selected{% endif %}>
+                {{ op|upper }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label">Severidad</label>
+          <select name="severidad" class="form-select">
+            <option value="">-- Todas --</option>
+            {% for op in ['Crítica', 'Alta', 'Media', 'Baja'] %}
+              <option value="{{ op }}" {% if filtro_severidad == op %}selected{% endif %}>
+                {{ op }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label">Texto</label>
+          <input type="text"
+                 name="texto"
+                 class="form-control"
+                 value="{{ filtro_texto }}"
+                 placeholder="Buscar palabra o patrón...">
+        </div>
+
+        <div class="col-md-2">
+          <label class="form-label d-block">&nbsp;</label>
+          <div class="unmapped-filter-actions">
+            <button class="btn btn-primary rounded-pill px-3" type="submit">
+              Filtrar
+            </button>
+
+            <a href="{{ url_for('threat_model_unmapped_view') }}"
+               class="btn btn-outline-secondary rounded-pill px-3">
+              Limpiar
+            </a>
+
+            {% if not read_only %}
+              <button type="button"
+                      class="btn btn-danger rounded-pill px-3"
+                      onclick="eliminarUnmappedFiltrados()">
+                Eliminar filtrados
+              </button>
+            {% else %}
+              <button type="button"
+                      class="btn btn-secondary rounded-pill px-3"
+                      disabled
+                      title="Auditor: solo lectura">
+                Eliminar filtrados
+              </button>
+            {% endif %}
+          </div>
+        </div>
+      </form>
+
+      <form method="post"
+            id="unmappedDeleteFiltradosForm"
+            action="{{ url_for('threat_model_unmapped_delete_filtrados') }}"
+            style="display:none;">
+        <input type="hidden" name="herramienta" value="{{ filtro_herramienta }}">
+        <input type="hidden" name="severidad" value="{{ filtro_severidad }}">
+        <input type="hidden" name="texto" value="{{ filtro_texto }}">
+      </form>
+
+      <div class="soft-table-wrap">
+        <div class="table-responsive px-3 pb-3 pt-3">
+          <table class="table table-hover align-middle soft-table mb-0">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Herramienta</th>
+                <th>Severidad</th>
+                <th>Título</th>
+                <th>Descripción</th>
+                <th>Evidencia</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {% for it in items %}
+              <tr>
+                <td class="text-center fw-bold">{{ it.id }}</td>
+                <td class="text-center">{{ it.herramienta|upper }}</td>
+                <td class="text-center">{{ badge_severidad_html(it.severidad) }}</td>
+                <td class="small">{{ it.titulo }}</td>
+                <td class="small">{{ it.descripcion or '—' }}</td>
+                <td class="small">{{ it.evidencia or '—' }}</td>
+
+                <td class="text-center">
+                  {% if not read_only %}
+                    <a href="{{ url_for('threat_model_unmapped_delete', id=it.id) }}"
+                       class="btn btn-danger btn-sm rounded-pill px-3"
+                       onclick="return confirmarEliminarUnmapped();">
+                      Eliminar
+                    </a>
+                  {% else %}
+                    <button class="btn btn-secondary btn-sm rounded-pill px-3"
+                            disabled
+                            title="Auditor: solo lectura">
+                      Eliminar
+                    </button>
+                  {% endif %}
+                </td>
+              </tr>
+
+              {% else %}
+              <tr>
+                <td colspan="7" class="text-center text-muted py-4">
+                  No hay hallazgos no mapeados.
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      .unmapped-topbar{
+        display:flex;
+        justify-content:space-between;
+        align-items:flex-start;
+        gap:14px;
+        flex-wrap:wrap;
+        margin-bottom:18px;
+        padding-bottom:14px;
+        border-bottom:1px solid rgba(15,23,42,.08);
+      }
+
+      .unmapped-extra-actions{
+        display:flex;
+        flex-wrap:wrap;
+        justify-content:flex-end;
+        gap:6px;
+      }
+
+      .unmapped-extra-actions .btn,
+      .unmapped-extra-actions form .btn{
+        font-size:.82rem;
+        font-weight:900;
+        min-height:32px;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        white-space:nowrap;
+        box-shadow:0 8px 18px rgba(37,99,235,.12);
+      }
+
+      .unmapped-back-btn:hover{
+        transform:translateY(-1px);
+      }
+
+      .unmapped-filter-actions{
+        display:flex;
+        flex-direction:column;
+        gap:7px;
+        align-items:stretch;
+      }
+
+      .unmapped-filter-actions .btn{
+        width:100%;
+        min-height:36px;
+        font-size:.68rem;
+        font-weight:900;
+      }
+
+      @media (max-width:768px){
+        .unmapped-topbar{
+          align-items:stretch;
+        }
+
+        .unmapped-extra-actions,
+        .unmapped-extra-actions .btn,
+        .unmapped-extra-actions form,
+        .unmapped-extra-actions form .btn,
+        .unmapped-filter-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+
+    <script>
+      function confirmarClasificacionComplementaria(){
+        if(typeof hideLoader === 'function'){
+          hideLoader();
+        }
+
+        return confirm(
+          '¿Desea clasificar los hallazgos no mapeados con OWASP, CWE, CAPEC, ISO 27001 y NIST CSF?\\n\\n' +
+          'Se tomarán en cuenta los filtros actuales de herramienta, severidad y texto.'
+        );
+      }
+
+      function confirmarEliminarUnmapped(){
+        if(typeof hideLoader === 'function'){
+          hideLoader();
+        }
+
+        return confirm(
+          '¿Está seguro de eliminar este hallazgo no mapeado?\\n\\n' +
+          'Esta acción no se puede deshacer.'
+        );
+      }
+
+      function eliminarUnmappedFiltrados(){
+        const total = {{ items|length }};
+
+        if(total <= 0){
+          alert('No hay hallazgos no mapeados para eliminar con los filtros aplicados.');
+          return false;
+        }
+
+        const herramienta = "{{ filtro_herramienta }}";
+        const severidad = "{{ filtro_severidad }}";
+        const texto = "{{ filtro_texto }}";
+
+        let mensaje = '¿Está seguro de eliminar los hallazgos no mapeados filtrados?\\n\\n';
+        mensaje += 'Total registros a eliminar: ' + total + '\\n';
+
+        if(herramienta){ mensaje += 'Herramienta: ' + herramienta + '\\n'; }
+        if(severidad){ mensaje += 'Severidad: ' + severidad + '\\n'; }
+        if(texto){ mensaje += 'Texto contiene: ' + texto + '\\n'; }
+
+        if(!herramienta && !severidad && !texto){
+          mensaje += '\\nADVERTENCIA: No hay filtros aplicados. Se eliminarán TODOS los hallazgos no mapeados.\\n';
+        }
+
+        mensaje += '\\nEsta acción no se puede deshacer.';
+
+        if(confirm(mensaje)){
+          const form = document.getElementById('unmappedDeleteFiltradosForm');
+          if(form){ form.submit(); }
+        }
+
+        return false;
+      }
+    </script>
+    """
+
+    return vuln_scan_shell(
+        "No mapeados MITRE",
+        render_template_string(
+            body,
+            items=items,
+            filtro_herramienta=filtro_herramienta,
+            filtro_severidad=filtro_severidad,
+            filtro_texto=filtro_texto,
+            read_only=read_only,
+            badge_severidad_html=badge_severidad_html
+        )
+    )
+
+# =====================
+# Vista Mittre & Attack 
+# =====================
+
+@app.route('/modelamiento_amenazas/matriz_mitre')
+@login_required
+def threat_model_asset_view():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Modelamiento de Amenazas"):
+        flash("No tiene permiso para acceder al modelamiento de amenazas.", "danger")
+        return redirect(url_for('menu'))
+
+    read_only = True if user.role == 'auditor' else False
+
+    asegurar_sincronizacion_vulnerabilidades_modelamiento()
+    asegurar_sincronizacion_active_directory_modelamiento()
+    asegurar_sincronizacion_firewall_modelamiento()
+
+    activo = (request.args.get('activo') or '').strip()
+
+    q = ThreatModelEntry.query.options(selectinload(ThreatModelEntry.tecnicas))
+
+    if activo:
+        q = q.filter(ThreatModelEntry.activo.ilike(f"%{activo}%"))
+
+    entries = q.order_by(ThreatModelEntry.id.desc()).all()
+    matrix = build_attack_matrix_view(entries)
+
+    total_tecnicas = sum(len(list(entry.tecnicas or [])) for entry in entries)
+    pendientes_mitre = len(matrix.get(MITRE_PENDING_TACTIC, []))
+    tacticas_con_hallazgos = sum(
+        1 for tactic in ATTACK_TACTIC_ORDER if matrix.get(tactic)
+    )
+    total_tacticas_attack = len(ATTACK_TACTIC_ORDER)
+    vulnerabilidades_representadas = len({
+        int(entry.vulnerabilidad_registro_id)
+        for entry in entries
+        if entry.vulnerabilidad_registro_id is not None
+    })
+
+    scores = []
+    for tactic, items in matrix.items():
+        if tactic == MITRE_PENDING_TACTIC:
+            continue
+        for item in items:
+            try:
+                scores.append(int(item.get("score") or 0))
+            except Exception:
+                pass
+
+    score_maximo = max(scores) if scores else 0
+
+    body = """
+    <div class="glass-card p-4 mt-2 mitre-shell">
+
+      <div class="mitre-topbar">
+        <div>
+          <div class="section-title mb-1">🧭 Matriz MITRE ATT&CK</div>
+          <div class="small text-muted">
+            Visualización completa por táctica. Todas las vulnerabilidades registradas aparecen en la matriz; las que aún no tengan una correspondencia confiable se muestran en la columna Pendiente de mapeo MITRE.
+          </div>
+        </div>
+
+        <div class="mitre-actions">
+          <a href="{{ url_for('threat_model_dashboard') }}"
+             class="btn btn-outline-secondary rounded-pill px-4">
+            ⬅ Volver
+          </a>
+
+          {% if not read_only %}
+            <a href="{{ url_for('threat_model_export_navigator') }}{% if activo %}?activo={{ activo|urlencode }}{% endif %}"
+               class="btn btn-success rounded-pill px-4 no-progress"
+               data-no-progress="true"
+               download
+               onclick="if(typeof hideSGSIProgress === 'function'){ hideSGSIProgress(); } if(typeof hideLoader === 'function'){ hideLoader(); }">
+              ⬇ Exportar Navigator JSON
+            </a>
+          {% else %}
+            <button type="button"
+                    class="btn btn-secondary rounded-pill px-4 no-progress"
+                    data-no-progress="true"
+                    disabled
+                    title="Auditor: solo lectura. No puede exportar Navigator JSON.">
+              ⬇ Exportar Navigator JSON
+            </button>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="mitre-summary-grid">
+        <div class="mitre-summary-card">
+          <div class="mitre-summary-label">Tácticas con hallazgos</div>
+          <div class="mitre-summary-value">{{ tacticas_con_hallazgos }}</div>
+          <div class="mitre-summary-help">de {{ total_tacticas_attack }} tácticas ATT&CK</div>
+        </div>
+
+        <div class="mitre-summary-card">
+          <div class="mitre-summary-label">Técnicas identificadas</div>
+          <div class="mitre-summary-value">{{ total_tecnicas }}</div>
+          <div class="mitre-summary-help">mapeadas automáticamente</div>
+        </div>
+
+        <div class="mitre-summary-card">
+          <div class="mitre-summary-label">Vulnerabilidades visibles</div>
+          <div class="mitre-summary-value">{{ vulnerabilidades_representadas }}</div>
+          <div class="mitre-summary-help">sincronizadas desde el registro</div>
+        </div>
+
+        <div class="mitre-summary-card">
+          <div class="mitre-summary-label">Pendientes de mapeo</div>
+          <div class="mitre-summary-value">{{ pendientes_mitre }}</div>
+          <div class="mitre-summary-help">visibles sin asignación ATT&CK falsa</div>
+        </div>
+
+        <div class="mitre-summary-card">
+          <div class="mitre-summary-label">Score máximo</div>
+          <div class="mitre-summary-value">{{ score_maximo }}</div>
+          <div class="mitre-summary-help">prioridad técnica más alta</div>
+        </div>
+      </div>
+
+      <form method="get" class="mitre-filter-card row g-3 mb-3">
+        <div class="col-lg-9 col-md-8">
+          <label class="form-label">Activo</label>
+          <input type="text"
+                 name="activo"
+                 value="{{ activo }}"
+                 class="form-control"
+                 placeholder="Servidor, dominio, web server...">
+        </div>
+
+        <div class="col-lg-3 col-md-4">
+          <label class="form-label d-block">&nbsp;</label>
+          <button class="btn btn-primary rounded-pill px-4 w-100">
+            Aplicar filtro
+          </button>
+        </div>
+      </form>
+
+      <div class="mitre-legend">
+        <span><i class="mitre-dot mitre-low"></i>Bajo</span>
+        <span><i class="mitre-dot mitre-medium"></i>Medio</span>
+        <span><i class="mitre-dot mitre-high"></i>Alto</span>
+        <span><i class="mitre-dot mitre-critical"></i>Crítico</span>
+        <span><i class="mitre-dot mitre-pending"></i>Pendiente de mapeo</span>
+        <span class="ms-auto text-muted small">Tip: desplázate horizontalmente para ver todas las tácticas.</span>
+      </div>
+
+      <div class="mitre-board-wrap">
+        <div class="mitre-board">
+          {% for tactic, items in matrix.items() %}
+            <div class="mitre-tactic-col {% if not items %}mitre-tactic-empty{% endif %} {% if tactic == pending_tactic_label %}mitre-tactic-pending{% endif %}">
+              <div class="mitre-tactic-head">
+                <div class="mitre-tactic-title">{{ tactic }}</div>
+                <span class="mitre-tactic-count">{{ items|length }}</span>
+              </div>
+
+              <div class="mitre-tech-list">
+                {% if items %}
+                  {% for item in items %}
+                    {% set score = item.score or 0 %}
+                    {% if item.pending %}
+                      {% set sev_class = 'pending' %}
+                    {% elif score >= 90 %}
+                      {% set sev_class = 'critical' %}
+                    {% elif score >= 70 %}
+                      {% set sev_class = 'high' %}
+                    {% elif score >= 40 %}
+                      {% set sev_class = 'medium' %}
+                    {% else %}
+                      {% set sev_class = 'low' %}
+                    {% endif %}
+
+                    <div class="mitre-tech-card {{ sev_class }}">
+                      <div class="mitre-tech-id">{{ item.technique_id }}</div>
+                      <div class="mitre-tech-name">{{ item.technique_name }}</div>
+
+                      <div class="mitre-tech-meta">
+                        <span>{{ item.tool|upper }}</span>
+                        <span>{{ item.severity or '—' }}</span>
+                        <span>Score {{ item.score or 0 }}</span>
+                      </div>
+
+                      <div class="mitre-tech-vuln">
+                        {{ item.vulnerability }}
+                      </div>
+
+                      {% if item.impacto %}
+                        <details class="mitre-impact">
+                          <summary>Ver impacto</summary>
+                          <div>{{ item.impacto }}</div>
+                        </details>
+                      {% endif %}
+
+                      {% if item.pending and item.rationale %}
+                        <div class="mitre-pending-note">{{ item.rationale }}</div>
+                      {% endif %}
+                    </div>
+                  {% endfor %}
+                {% else %}
+                  <div class="mitre-empty-state">
+                    Sin técnicas mapeadas
+                  </div>
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
+    </div>
+
+    <style>
+      .mitre-shell{
+        overflow:hidden;
+      }
+
+      .mitre-topbar{
+        display:flex;
+        align-items:flex-start;
+        justify-content:space-between;
+        gap:14px;
+        flex-wrap:wrap;
+        margin-bottom:14px;
+      }
+
+      .mitre-actions{
+        display:flex;
+        flex-wrap:wrap;
+        justify-content:flex-end;
+        gap:6px;
+      }
+
+      .mitre-actions .btn{
+        font-weight:900;
+        box-shadow:0 8px 18px rgba(0,0,0,.10);
+      }
+
+      .mitre-actions button[disabled]{
+        cursor:not-allowed;
+        opacity:.70;
+      }
+
+      .mitre-summary-grid{
+        display:grid;
+        grid-template-columns:repeat(5,minmax(0,1fr));
+        gap:12px;
+        margin-bottom:14px;
+      }
+
+      .mitre-summary-card{
+        background:rgba(255,255,255,.92);
+        border:1px solid rgba(63,134,214,.22);
+        border-radius:18px;
+        padding:14px 16px;
+        box-shadow:0 10px 24px rgba(0,0,0,.10);
+      }
+
+      .mitre-summary-label{
+        font-size:.78rem;
+        font-weight:900;
+        color:#5c6b7d;
+        text-transform:uppercase;
+        letter-spacing:.04em;
+      }
+
+      .mitre-summary-value{
+        font-size:1.85rem;
+        font-weight:950;
+        color:#1d4f8f;
+        line-height:1;
+        margin-top:6px;
+      }
+
+      .mitre-summary-help{
+        color:#7c8898;
+        font-size:.82rem;
+        margin-top:5px;
+      }
+
+      .mitre-filter-card{
+        background:rgba(248,251,255,.94);
+        border:1px solid rgba(63,134,214,.18);
+        border-radius:18px;
+        padding:12px 12px 14px 12px;
+        box-shadow:0 8px 20px rgba(0,0,0,.08);
+      }
+
+      .mitre-legend{
+        display:flex;
+        align-items:center;
+        gap:14px;
+        flex-wrap:wrap;
+        background:rgba(255,255,255,.86);
+        border:1px solid rgba(0,0,0,.06);
+        border-radius:16px;
+        padding:10px 14px;
+        margin-bottom:12px;
+        font-weight:800;
+        font-size:.82rem;
+      }
+
+      .mitre-dot{
+        display:inline-block;
+        width:11px;
+        height:11px;
+        border-radius:999px;
+        margin-right:6px;
+        vertical-align:middle;
+      }
+
+      .mitre-low{ background:#15803d; }
+      .mitre-medium{ background:#ca8a04; }
+      .mitre-high{ background:#ea580c; }
+      .mitre-critical{ background:#b91c1c; }
+      .mitre-pending{ background:#64748b; }
+
+      .mitre-board-wrap{
+        width:100%;
+        overflow-x:auto;
+        overflow-y:hidden;
+        padding-bottom:10px;
+        border-radius:20px;
+        background:linear-gradient(180deg,rgba(255,255,255,.70),rgba(245,248,252,.78));
+        border:1px solid rgba(63,134,214,.18);
+        box-shadow:inset 0 0 0 1px rgba(255,255,255,.55);
+      }
+
+      .mitre-board{
+        display:grid;
+        grid-template-columns:repeat(15, minmax(245px, 1fr));
+        gap:12px;
+        min-width:3775px;
+        padding:8px 7px;
+      }
+
+      .mitre-tactic-col{
+        background:rgba(248,252,255,.96);
+        border:1px solid rgba(31,73,125,.13);
+        border-radius:18px;
+        box-shadow:0 10px 24px rgba(0,0,0,.10);
+        overflow:hidden;
+        min-height:420px;
+      }
+
+      .mitre-tactic-empty{
+        opacity:.78;
+      }
+
+      .mitre-tactic-pending{
+        border-color:rgba(100,116,139,.38);
+      }
+
+      .mitre-tactic-pending .mitre-tactic-head{
+        background:linear-gradient(135deg,#475569 0%,#64748b 100%);
+      }
+
+      .mitre-tactic-head{
+        position:sticky;
+        top:0;
+        z-index:2;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:6px;
+        padding:12px 12px;
+        background:linear-gradient(135deg,#243b53 0%,#304f72 100%);
+        color:#fff;
+      }
+
+      .mitre-tactic-title{
+        font-size:.84rem;
+        font-weight:950;
+        line-height:1.15;
+      }
+
+      .mitre-tactic-count{
+        min-width:28px;
+        height:24px;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        border-radius:999px;
+        background:#3f86d6;
+        color:#fff;
+        font-weight:950;
+        font-size:.78rem;
+      }
+
+      .mitre-tech-list{
+        padding:10px;
+        max-height:680px;
+        overflow-y:auto;
+      }
+
+      .mitre-tech-card{
+        position:relative;
+        background:#fff;
+        border:1px solid rgba(0,0,0,.08);
+        border-left:6px solid #15803d;
+        border-radius:16px;
+        padding:10px 10px 11px 10px;
+        margin-bottom:10px;
+        box-shadow:0 8px 18px rgba(0,0,0,.08);
+      }
+
+      .mitre-tech-card.low{ border-left-color:#15803d; }
+      .mitre-tech-card.medium{ border-left-color:#ca8a04; }
+      .mitre-tech-card.high{ border-left-color:#ea580c; }
+      .mitre-tech-card.critical{ border-left-color:#b91c1c; }
+      .mitre-tech-card.pending{ border-left-color:#64748b; background:#f8fafc; }
+
+      .mitre-tech-id{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        font-size:.68rem;
+        font-weight:950;
+        color:#1d4f8f;
+        background:#eaf3ff;
+        border:1px solid rgba(63,134,214,.24);
+        border-radius:999px;
+        padding:2px 9px;
+        margin-bottom:6px;
+      }
+
+      .mitre-tech-name{
+        font-size:.83rem;
+        font-weight:950;
+        color:#24364b;
+        line-height:1.2;
+        margin-bottom:6px;
+      }
+
+      .mitre-tech-meta{
+        display:flex;
+        flex-wrap:wrap;
+        gap:5px;
+        margin-bottom:7px;
+      }
+
+      .mitre-tech-meta span{
+        background:#f1f5f9;
+        border:1px solid rgba(0,0,0,.05);
+        color:#536274;
+        border-radius:999px;
+        padding:2px 7px;
+        font-size:.68rem;
+        font-weight:900;
+      }
+
+      .mitre-tech-vuln{
+        font-size:.74rem;
+        color:#5d6877;
+        line-height:1.25;
+        max-height:54px;
+        overflow:auto;
+      }
+
+      .mitre-impact{
+        margin-top:8px;
+        font-size:.72rem;
+        color:#536274;
+      }
+
+      .mitre-impact summary{
+        cursor:pointer;
+        font-weight:900;
+        color:#1d4f8f;
+      }
+
+      .mitre-impact div{
+        margin-top:6px;
+        background:#f8fafc;
+        border-radius:12px;
+        padding:8px;
+        line-height:1.25;
+      }
+
+      .mitre-pending-note{
+        margin-top:8px;
+        padding:8px;
+        border-radius:12px;
+        background:#eef2f7;
+        color:#475569;
+        font-size:.70rem;
+        font-weight:750;
+        line-height:1.3;
+      }
+
+      .mitre-empty-state{
+        min-height:120px;
+        border:1px dashed rgba(63,134,214,.32);
+        border-radius:16px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        text-align:center;
+        color:#8a96a8;
+        background:#f8fbff;
+        font-size:.8rem;
+        font-weight:850;
+        padding:12px;
+      }
+
+      @media (max-width:992px){
+        .mitre-summary-grid{
+          grid-template-columns:1fr;
+        }
+
+        .mitre-actions{
+          width:100%;
+          justify-content:flex-start;
+        }
+
+        .mitre-actions .btn{
+          width:100%;
+        }
+
+        .mitre-board{
+          grid-template-columns:repeat(15, minmax(230px, 1fr));
+          min-width:3575px;
+        }
+      }
+    </style>
+    """
+
+    return vuln_scan_shell(
+        "Matriz MITRE ATT&CK",
+        render_template_string(
+            body,
+            activo=activo,
+            matrix=matrix,
+            total_tecnicas=total_tecnicas,
+            pendientes_mitre=pendientes_mitre,
+            vulnerabilidades_representadas=vulnerabilidades_representadas,
+            tacticas_con_hallazgos=tacticas_con_hallazgos,
+            total_tacticas_attack=total_tacticas_attack,
+            pending_tactic_label=MITRE_PENDING_TACTIC,
+            score_maximo=score_maximo,
+            read_only=read_only,
+            user=user
+        )
+    )
+
+
+# =====================
+# Export Navigator JSON
+# =====================
+
+@app.route('/modelamiento_amenazas/navigator.json')
+@app.route('/vulnerabilidades/threat_model/navigator.json')
+@login_required
+def threat_model_export_navigator():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede exportar Navigator JSON.", "danger")
+        return redirect(url_for('threat_model_dashboard'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Modelamiento de Amenazas"):
+        flash("No tiene permiso para exportar la capa Navigator.", "danger")
+        return redirect(url_for('menu'))
+
+    asegurar_sincronizacion_vulnerabilidades_modelamiento()
+    asegurar_sincronizacion_active_directory_modelamiento()
+    asegurar_sincronizacion_firewall_modelamiento()
+
+    activo = (request.args.get('activo') or '').strip()
+
+    q = ThreatModelEntry.query.options(selectinload(ThreatModelEntry.tecnicas))
+
+    if activo:
+        q = q.filter(ThreatModelEntry.activo.ilike(f"%{activo}%"))
+
+    entries = q.order_by(ThreatModelEntry.id.desc()).all()
+
+    layer = build_attack_layer_from_entries(entries, asset_name=activo or "Activos")
+
+    bio = BytesIO()
+    bio.write(json.dumps(layer, ensure_ascii=False, indent=2).encode("utf-8"))
+    bio.seek(0)
+
+    safe_name = safe_scan_slug(activo or "activos")
+
+    return send_file(
+        bio,
+        mimetype="application/json",
+        as_attachment=True,
+        download_name=f"mitre_attack_navigator_{safe_name}.json"
+    )
+
+# ==========================
+# Eliminar entrada individual — Modelamiento de Amenazas
+# ==========================
+
+@app.route('/modelamiento_amenazas/<int:id>/delete')
+@app.route('/vulnerabilidades/threat_model/<int:id>/delete')
+@login_required
+def threat_model_delete(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar registros.", "danger")
+        return redirect(url_for('threat_model_dashboard'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Modelamiento de Amenazas"):
+        flash("No tiene permiso para eliminar registros de modelamiento de amenazas.", "danger")
+        return redirect(url_for('threat_model_dashboard'))
+
+    db.session.rollback()
+
+    item = ThreatModelEntry.query.get_or_404(id)
+
+    try:
+        if existe_vulnerabilidad_asociada_a_threat_model(item):
+            flash(
+                "No se puede eliminar este registro de modelamiento de amenazas porque existe una vulnerabilidad asociada. "
+                "Primero elimine la vulnerabilidad desde la matriz de vulnerabilidades.",
+                "warning"
+            )
+            return redirect(url_for('threat_model_dashboard'))
+
+        db.session.delete(item)
+        db.session.commit()
+        flash("Registro de modelamiento de amenazas eliminado correctamente.", "success")
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f"No fue posible eliminar el registro: {str(e)}", "danger")
+
+    return redirect(url_for('threat_model_dashboard'))
+
+# ==========================
+# Eliminar por filtros — Modelamiento de Amenazas
+# ==========================
+
+@app.route('/modelamiento_amenazas/delete_filtrados', methods=['POST'])
+@app.route('/vulnerabilidades/threat_model/delete_filtrados', methods=['POST'])
+@login_required
+def threat_model_delete_filtrados():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar registros.", "danger")
+        return redirect(url_for('threat_model_dashboard'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Modelamiento de Amenazas"):
+        flash("No tiene permiso para eliminar registros de modelamiento de amenazas.", "danger")
+        return redirect(url_for('threat_model_dashboard'))
+
+    db.session.rollback()
+
+    filtro_activo = (request.form.get('activo') or '').strip()
+    filtro_herramienta = (request.form.get('herramienta') or '').strip()
+    filtro_severidad = (request.form.get('severidad') or '').strip()
+    filtro_tecnica = (request.form.get('tecnica') or '').strip()
+
+    q = ThreatModelEntry.query
+
+    if filtro_activo:
+        q = q.filter(ThreatModelEntry.activo.ilike(f"%{filtro_activo}%"))
+
+    if filtro_herramienta:
+        q = q.filter(ThreatModelEntry.herramienta == filtro_herramienta)
+
+    if filtro_severidad:
+        q = q.filter(ThreatModelEntry.severidad == filtro_severidad)
+
+    if filtro_tecnica:
+        q = q.join(ThreatModelTechnique).filter(
+            ThreatModelTechnique.mitre_technique_id == filtro_tecnica
+        )
+
+    registros = q.distinct().all()
+
+    if not registros:
+        flash("No se encontraron registros para eliminar con los filtros aplicados.", "warning")
+        return redirect(url_for(
+            'threat_model_dashboard',
+            activo=filtro_activo,
+            herramienta=filtro_herramienta,
+            severidad=filtro_severidad,
+            tecnica=filtro_tecnica
+        ))
+
+    try:
+        eliminables = []
+        bloqueados = 0
+
+        for item in registros:
+            if existe_vulnerabilidad_asociada_a_threat_model(item):
+                bloqueados += 1
+            else:
+                eliminables.append(item)
+
+        if not eliminables:
+            flash(
+                "No se eliminó ningún registro de modelamiento porque todos tienen vulnerabilidades asociadas. "
+                "Primero elimine las vulnerabilidades desde la matriz de vulnerabilidades.",
+                "warning"
+            )
+            return redirect(url_for(
+                'threat_model_dashboard',
+                activo=filtro_activo,
+                herramienta=filtro_herramienta,
+                severidad=filtro_severidad,
+                tecnica=filtro_tecnica
+            ))
+
+        for item in eliminables:
+            db.session.delete(item)
+
+        db.session.commit()
+
+        if bloqueados:
+            flash(
+                f"Se eliminaron {len(eliminables)} registro(s) de modelamiento sin vulnerabilidad asociada. "
+                f"No se eliminaron {bloqueados} porque tienen vulnerabilidades asociadas.",
+                "warning"
+            )
+        else:
+            flash(f"Se eliminaron {len(eliminables)} registros de modelamiento de amenazas correctamente.", "success")
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f"No fue posible eliminar los registros filtrados: {str(e)}", "danger")
+
+    return redirect(url_for('threat_model_dashboard'))
+
+# ==========================
+# Eliminar individual — No Mapeados MITRE
+# ==========================
+

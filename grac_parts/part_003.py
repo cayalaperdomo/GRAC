@@ -1,3 +1,3633 @@
+@app.after_request
+def inject_sgsi_global_vertical_menu(response):
+    try:
+        content_type = response.headers.get("Content-Type", "")
+
+        if "text/html" not in content_type:
+            return response
+
+        user_id = session.get("user_id")
+        if not user_id:
+            return response
+
+        endpoint = request.endpoint or ""
+
+        rutas_excluidas = {
+            "login",
+            "logout",
+            "static",
+            "dashboard_status",
+            "menu",
+            "verificar_otp",
+            "configurar_otp"
+        }
+
+        # Las pantallas de autenticación y OTP deben mostrarse
+        # completamente aisladas del menú, encabezado y navegación interna de GRAC.
+        rutas_sin_menu = (
+            "/verificar_otp",
+            "/configurar_otp",
+            "/otp/"
+        )
+
+        if endpoint in rutas_excluidas or request.path.startswith(rutas_sin_menu):
+            return response
+
+        html = response.get_data(as_text=True)
+
+        if not html or "sgsiGlobalMenu" in html:
+            return response
+
+        menu_html = _sgsi_build_global_menu_html()
+        if not menu_html:
+            return response
+
+        if "</header>" in html:
+            html = html.replace("</header>", "</header>\n" + menu_html, 1)
+        elif "<body>" in html:
+            html = html.replace("<body>", "<body>\n" + menu_html, 1)
+        elif "</body>" in html:
+            html = html.replace("</body>", menu_html + "\n</body>", 1)
+        else:
+            html = menu_html + html
+
+        response.set_data(html)
+        response.headers["Content-Length"] = str(len(response.get_data()))
+
+    except Exception as e:
+        print("No se pudo inyectar menú global SGSI:", repr(e))
+
+    return response
+
+
+
+
+# ============================================================
+# ADMINISTRACIÓN: DISEÑO SENCILLO DEL CENTRO DE CONTROL
+# ============================================================
+@app.route('/admin/dashboard_config', methods=['GET', 'POST'])
+@login_required
+def dashboard_config():
+    usuario_actual = User.query.get(session.get('user_id'))
+    if not usuario_actual:
+        flash("No fue posible identificar el usuario autenticado.", "danger")
+        return redirect(url_for('login'))
+
+    if request.method == 'POST':
+        action = (request.form.get('action') or 'save').strip().lower()
+        try:
+            if action in {'create_custom', 'update_custom'}:
+                data, error = _dashboard_custom_widget_form_data(request.form)
+                if error:
+                    flash(error, "danger")
+                    return redirect(url_for('dashboard_config'))
+
+                if action == 'create_custom':
+                    existing = DashboardCustomWidget.query.filter_by(
+                        user_id=usuario_actual.id,
+                        source_key=data['source_key'],
+                        widget_type=data['widget_type'],
+                    ).first()
+                    if existing:
+                        _dashboard_add_key_to_selection(usuario_actual.id, _dashboard_custom_key(existing.id))
+                        flash("Esa fuente ya estaba creada con la misma presentación. Se dejó visible en el Centro de Control.", "info")
+                    else:
+                        widget = DashboardCustomWidget(user_id=usuario_actual.id, **data)
+                        db.session.add(widget)
+                        db.session.commit()
+                        _dashboard_add_key_to_selection(usuario_actual.id, _dashboard_custom_key(widget.id))
+                        flash("Visualización creada y agregada al Centro de Control.", "success")
+                else:
+                    widget_id = int(request.form.get('custom_id') or 0)
+                    widget = DashboardCustomWidget.query.filter_by(id=widget_id, user_id=usuario_actual.id).first()
+                    if not widget:
+                        flash("La visualización no existe o no pertenece al usuario.", "danger")
+                        return redirect(url_for('dashboard_config'))
+                    duplicate = DashboardCustomWidget.query.filter(
+                        DashboardCustomWidget.user_id == usuario_actual.id,
+                        DashboardCustomWidget.source_key == data['source_key'],
+                        DashboardCustomWidget.widget_type == data['widget_type'],
+                        DashboardCustomWidget.id != widget.id,
+                    ).first()
+                    if duplicate:
+                        flash("Ya existe otra visualización con esa fuente y presentación.", "warning")
+                        return redirect(url_for('dashboard_config', edit_widget=widget.id))
+                    for field, value in data.items():
+                        setattr(widget, field, value)
+                    widget.updated_at = datetime.utcnow()
+                    db.session.commit()
+                    flash("Visualización actualizada correctamente.", "success")
+
+            elif action == 'delete_custom':
+                widget_id = int(request.form.get('custom_id') or 0)
+                widget = DashboardCustomWidget.query.filter_by(id=widget_id, user_id=usuario_actual.id).first()
+                if not widget:
+                    flash("La visualización no existe o no pertenece al usuario.", "danger")
+                    return redirect(url_for('dashboard_config'))
+                key = _dashboard_custom_key(widget.id)
+                _dashboard_remove_key_from_selection(usuario_actual.id, key)
+                db.session.delete(widget)
+                db.session.commit()
+                flash("Visualización eliminada.", "success")
+
+            elif action == 'reset':
+                _dashboard_reset_selected_keys(usuario_actual.id)
+                flash("El Centro de Control volvió a su diseño inicial.", "success")
+
+            else:
+                available = _dashboard_available_widget_map(usuario_actual.id)
+                default_position = {}
+                kind_order = {"kpi": 0, "chart": 1}
+                kind_counters = {"kpi": 0, "chart": 0}
+                for key, item in available.items():
+                    kind = item.get("kind", "chart")
+                    kind_counters[kind] = kind_counters.get(kind, 0) + 1
+                    default_position[key] = kind_counters[kind]
+
+                seen = set()
+                sortable = []
+                for key in request.form.getlist('widgets'):
+                    key = str(key or '').strip()
+                    if key not in available or key in seen:
+                        continue
+                    seen.add(key)
+                    meta = available[key]
+                    kind = meta.get("kind", "chart")
+                    try:
+                        order_value = int(request.form.get(f'order_{key}', default_position.get(key, 1)))
+                    except Exception:
+                        order_value = default_position.get(key, 1)
+                    sortable.append((kind_order.get(kind, 99), max(1, min(order_value, 999)), default_position.get(key, 999), key))
+
+                sortable.sort(key=lambda row: (row[0], row[1], row[2]))
+                _dashboard_save_selected_keys(usuario_actual.id, [row[3] for row in sortable])
+                flash("Elementos visibles y orden guardados correctamente.", "success")
+
+            try:
+                registrar_log(usuario_actual.username, "Actualizó el diseño de su Centro de Control personal.")
+            except Exception:
+                pass
+            return redirect(url_for('dashboard_config'))
+
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"No se pudo aplicar la configuración: {exc}", "danger")
+
+    selected_keys = _dashboard_get_selected_keys(usuario_actual.id)
+    selected_set = set(selected_keys)
+    available = _dashboard_available_widget_map(usuario_actual.id)
+
+    position_map = {}
+    selected_kind_counters = {"kpi": 0, "chart": 0}
+    for key in selected_keys:
+        meta = available.get(key)
+        if not meta:
+            continue
+        kind = meta.get("kind", "chart")
+        selected_kind_counters[kind] = selected_kind_counters.get(kind, 0) + 1
+        position_map[key] = selected_kind_counters[kind]
+
+    group_order = [
+        "Indicadores superiores", "Madurez y cumplimiento", "Métricas operativas",
+        "Gráficas de madurez y cumplimiento", "Gráficas operativas",
+        "Visualizaciones creadas por el usuario", "Elementos creados por el usuario",
+    ]
+    widget_groups = []
+    for group_name in group_order:
+        widgets = []
+        group_position = 0
+        for key, item in available.items():
+            if item.get("group") != group_name:
+                continue
+            group_position += 1
+            widget = dict(item)
+            widget["key"] = key
+            widget["dom_id"] = widget.get("dom_id") or _dashboard_dom_id(key)
+            widget["default_order"] = group_position
+            widget["presentation_label"] = widget.get("presentation_label") or ("Indicador" if widget.get("kind") == "kpi" else "Gráfica original")
+            widgets.append(widget)
+        if widgets:
+            widget_groups.append({"title": group_name, "widgets": widgets})
+
+    custom_widgets = _dashboard_custom_widgets_for_user(usuario_actual.id)
+    custom_rows = []
+    for widget in custom_widgets:
+        source = DASHBOARD_DATA_SOURCE_MAP.get(widget.source_key, {})
+        custom_rows.append({
+            "id": widget.id,
+            "key": _dashboard_custom_key(widget.id),
+            "source_label": source.get("label", widget.source_key),
+            "type_label": DASHBOARD_VISUALIZATION_LABELS.get(widget.widget_type, widget.widget_type),
+            "visible": _dashboard_custom_key(widget.id) in selected_set,
+        })
+
+    edit_widget = None
+    edit_id = request.args.get('edit_widget', type=int)
+    if edit_id:
+        edit_widget = DashboardCustomWidget.query.filter_by(id=edit_id, user_id=usuario_actual.id).first()
+
+    first_source = DASHBOARD_DATA_SOURCE_CATALOG[0]
+    if edit_widget:
+        edit_source = DASHBOARD_DATA_SOURCE_MAP.get(edit_widget.source_key, first_source)
+        allowed = edit_source.get("allowed_views", [])
+        current_view = edit_widget.widget_type if edit_widget.widget_type in allowed else (allowed[0] if allowed else "gauge")
+        builder_values = {"custom_id": edit_widget.id, "source_key": edit_widget.source_key, "widget_type": current_view}
+    else:
+        builder_values = {"custom_id": "", "source_key": first_source["key"], "widget_type": first_source.get("allowed_views", ["gauge"])[0]}
+
+    source_groups = []
+    names = []
+    for source in DASHBOARD_DATA_SOURCE_CATALOG:
+        name = source.get("group", "Otras fuentes")
+        if name not in names:
+            names.append(name)
+    for name in names:
+        source_groups.append({"title": name, "sources": [dict(item) for item in DASHBOARD_DATA_SOURCE_CATALOG if item.get("group") == name]})
+
+    content = render_template_string("""
+    <div class="dashsimple-shell">
+      <div class="dashsimple-header">
+        <div class="dashsimple-header-icon"><i class="bi bi-grid-1x2-fill"></i></div>
+        <div>
+          <div class="dashsimple-eyebrow">SGSI · Administración</div>
+          <h3>Diseñar Centro de Control</h3>
+          <p>Seleccione una fuente de datos y la forma en que desea verla. Nada más.</p>
+        </div>
+        <a href="{{ url_for('menu') }}" class="btn btn-light rounded-pill px-4 fw-bold ms-auto">
+          <i class="bi bi-speedometer2 me-1"></i> Ver Centro de Control
+        </a>
+      </div>
+
+      <section class="dashsimple-builder" id="customBuilder">
+        <div class="dashsimple-builder-title">
+          <div>
+            <h4>{{ 'Editar visualización' if edit_widget else 'Agregar una visualización' }}</h4>
+            <p>Los niveles de madurez permiten araña o velocímetro. Las demás fuentes muestran únicamente las opciones compatibles.</p>
+          </div>
+          {% if edit_widget %}
+            <a href="{{ url_for('dashboard_config') }}#customBuilder" class="btn btn-outline-secondary rounded-pill btn-sm">Cancelar</a>
+          {% endif %}
+        </div>
+
+        <form method="post" class="dashsimple-two-fields">
+          <input type="hidden" name="action" value="{{ 'update_custom' if edit_widget else 'create_custom' }}">
+          <input type="hidden" name="custom_id" value="{{ builder.custom_id }}">
+
+          <div class="dashsimple-field">
+            <label>1. Fuente de datos</label>
+            <select name="source_key" id="dashsimpleSource" class="form-select" required>
+              {% for group in source_groups %}
+                <optgroup label="{{ group.title }}">
+                  {% for source in group.sources %}
+                    <option value="{{ source.key }}"
+                            data-views="{{ source.allowed_views|join(',') }}"
+                            data-kind="{{ source.data_kind }}"
+                            data-description="{{ source.description }}"
+                            {% if builder.source_key == source.key %}selected{% endif %}>
+                      {{ source.label }}
+                    </option>
+                  {% endfor %}
+                </optgroup>
+              {% endfor %}
+            </select>
+            <small id="dashsimpleSourceHelp"></small>
+          </div>
+
+          <div class="dashsimple-field">
+            <label>2. ¿Cómo lo quiere presentar?</label>
+            <select name="widget_type" id="dashsimpleView" class="form-select" required>
+              {% for key, label in visualization_options.items() %}
+                {% if key != 'kpi' %}
+                  <option value="{{ key }}" {% if builder.widget_type == key %}selected{% endif %}>{{ label }}</option>
+                {% endif %}
+              {% endfor %}
+            </select>
+            <small id="dashsimpleViewHelp"></small>
+          </div>
+
+          <div class="dashsimple-submit">
+            <button type="submit" class="btn btn-primary rounded-pill px-4 fw-bold">
+              <i class="bi {{ 'bi-save2' if edit_widget else 'bi-plus-circle' }} me-1"></i>
+              {{ 'Guardar cambio' if edit_widget else 'Agregar al Centro de Control' }}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {% if custom_rows %}
+        <section class="dashsimple-created">
+          <div class="dashsimple-section-head">
+            <div><h4>Visualizaciones creadas</h4><p>Fuente y presentación seleccionadas por el usuario.</p></div>
+            <span class="badge rounded-pill text-bg-primary">{{ custom_rows|length }}</span>
+          </div>
+          <div class="dashsimple-created-grid">
+            {% for row in custom_rows %}
+              <div class="dashsimple-created-row">
+                <div>
+                  <strong>{{ row.source_label }}</strong>
+                  <span>{{ row.type_label }}</span>
+                  <span class="badge rounded-pill {{ 'text-bg-success' if row.visible else 'text-bg-secondary' }}">{{ 'Visible' if row.visible else 'Oculta' }}</span>
+                </div>
+                <div class="dashsimple-row-actions">
+                  <a href="{{ url_for('dashboard_config', edit_widget=row.id) }}#customBuilder" class="btn btn-outline-primary rounded-pill btn-sm"><i class="bi bi-pencil-square"></i> Editar</a>
+                  <form method="post" class="m-0" onsubmit="return confirm('¿Eliminar esta visualización?');">
+                    <input type="hidden" name="action" value="delete_custom">
+                    <input type="hidden" name="custom_id" value="{{ row.id }}">
+                    <button type="submit" class="btn btn-outline-danger rounded-pill btn-sm"><i class="bi bi-trash3"></i> Eliminar</button>
+                  </form>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
+
+      <form method="post" id="dashboardConfigForm">
+        <section class="dashsimple-current">
+          <div class="dashsimple-section-head">
+            <div><h4>Qué aparece en el inicio</h4><p>Active, desactive y ordene las visualizaciones del Centro de Control.</p></div>
+            <div class="dashsimple-quick-actions">
+              <button type="button" id="dashsimpleSelectAll" class="btn btn-outline-primary rounded-pill btn-sm">Seleccionar todo</button>
+              <button type="button" id="dashsimpleClearAll" class="btn btn-outline-secondary rounded-pill btn-sm">Desmarcar todo</button>
+            </div>
+          </div>
+
+          {% for group in widget_groups %}
+            <details class="dashsimple-group" {% if group.title in ['Visualizaciones creadas por el usuario','Elementos creados por el usuario'] %}open{% endif %}>
+              <summary>{{ group.title }} <span>{{ group.widgets|length }}</span></summary>
+              <div class="dashsimple-options">
+                {% for widget in group.widgets %}
+                  <div class="dashsimple-option">
+                    <div class="form-check form-switch">
+                      <input class="form-check-input dashboard-widget-check" type="checkbox" role="switch"
+                             name="widgets" value="{{ widget.key }}" id="widget_{{ widget.dom_id }}"
+                             data-order-id="order_{{ widget.dom_id }}" data-kind="{{ widget.kind }}"
+                             {% if widget.key in selected_set %}checked{% endif %}>
+                      <label class="form-check-label" for="widget_{{ widget.dom_id }}">
+                        <strong>{{ widget.label }}</strong>
+                        <span>{{ widget.presentation_label }}</span>
+                      </label>
+                    </div>
+                    <div class="dashsimple-order">
+                      <label>Orden</label>
+                      <input type="number" min="1" max="99" name="order_{{ widget.key }}"
+                             id="order_{{ widget.dom_id }}" class="form-control"
+                             value="{{ position_map.get(widget.key, widget.default_order) }}">
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+            </details>
+          {% endfor %}
+        </section>
+
+        <div class="dashsimple-savebar">
+          <button type="submit" name="action" value="reset" class="btn btn-outline-danger rounded-pill"
+                  onclick="return confirm('¿Restablecer el Centro de Control al diseño inicial?');">
+            <i class="bi bi-arrow-counterclockwise me-1"></i> Restablecer
+          </button>
+          <button type="submit" name="action" value="save" class="btn btn-success rounded-pill px-4 fw-bold">
+            <i class="bi bi-save2 me-1"></i> Guardar lo que aparece
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <style>
+      body{background-image:url('/static/img/ccsgsi.jpg');background-size:cover;background-position:center;background-attachment:fixed;background-repeat:no-repeat;}
+      .dashsimple-shell{width:96%;max-width:1450px;margin:22px auto 36px;}
+      .dashsimple-header{display:flex;align-items:center;gap:15px;background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);border-radius:20px;padding:17px 22px;color:#fff;box-shadow:0 16px 32px rgba(15,23,42,.24);margin-bottom:14px;}
+      .dashsimple-header-icon{width:54px;height:54px;min-width:54px;border-radius:16px;background:#fff;color:#0b4a8f;display:flex;align-items:center;justify-content:center;font-size:1.35rem;}
+      .dashsimple-eyebrow{font-size:.67rem;font-weight:900;text-transform:uppercase;letter-spacing:.06em;opacity:.88;}.dashsimple-header h3{margin:2px 0 3px;color:#fff!important;font-size:1.36rem;font-weight:950;}.dashsimple-header p{margin:0;font-size:.79rem;opacity:.95;}
+      .dashsimple-builder,.dashsimple-created,.dashsimple-current,.dashsimple-savebar{background:rgba(255,255,255,.98);border:1px solid #bdd7ee;border-radius:18px;box-shadow:0 12px 28px rgba(15,55,95,.12);}
+      .dashsimple-builder{padding:18px 20px;margin-bottom:14px;}.dashsimple-builder-title,.dashsimple-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding-bottom:12px;border-bottom:1px solid #d7e6f3;margin-bottom:14px;}.dashsimple-builder-title h4,.dashsimple-section-head h4{margin:0;color:#123f72;font-size:1rem;font-weight:950;}.dashsimple-builder-title p,.dashsimple-section-head p{margin:4px 0 0;color:#637991;font-size:.73rem;}
+      .dashsimple-two-fields{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) auto;gap:14px;align-items:end;}.dashsimple-field label{display:block;color:#294d72;font-size:.74rem;font-weight:950;margin-bottom:6px;}.dashsimple-field .form-select{min-height:44px;font-size:.82rem;}.dashsimple-field small{display:block;min-height:18px;margin-top:5px;color:#6a7d91;font-size:.66rem;}.dashsimple-submit .btn{min-height:44px;white-space:nowrap;font-size:.80rem;}
+      .dashsimple-created{padding:18px 20px;margin-bottom:14px;}.dashsimple-created-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}.dashsimple-created-row{border:1px solid #d4e4f1;border-radius:14px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px;background:#fff;}.dashsimple-created-row strong{display:block;color:#173d69;font-size:.81rem;}.dashsimple-created-row span:not(.badge){display:block;color:#6b7f94;font-size:.69rem;margin:3px 0 6px;}.dashsimple-row-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap;justify-content:flex-end;}
+      .dashsimple-current{padding:18px 20px;}.dashsimple-quick-actions{display:flex;gap:8px;flex-wrap:wrap;}.dashsimple-group{border:1px solid #d6e4f0;border-radius:14px;margin-bottom:10px;background:#fbfdff;overflow:hidden;}.dashsimple-group summary{cursor:pointer;padding:12px 14px;color:#173d69;font-size:.80rem;font-weight:950;display:flex;justify-content:space-between;align-items:center;}.dashsimple-group summary span{font-size:.67rem;background:#dcecff;color:#0b4a8f;padding:3px 9px;border-radius:999px;}.dashsimple-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;padding:0 12px 12px;}.dashsimple-option{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #dbe7f1;border-radius:12px;padding:10px 12px;background:#fff;}.dashsimple-option .form-check{display:flex;align-items:flex-start;gap:9px;min-width:0;}.dashsimple-option .form-check-input{width:2.2em;height:1.18em;margin-top:2px;}.dashsimple-option label{min-width:0;}.dashsimple-option strong{display:block;color:#173d69;font-size:.76rem;line-height:1.2;}.dashsimple-option label span{display:block;color:#75869a;font-size:.65rem;margin-top:2px;}.dashsimple-order{width:68px;flex:0 0 68px;text-align:center;}.dashsimple-order label{display:block;font-size:.60rem;font-weight:900;color:#687b90;margin-bottom:3px;}.dashsimple-order input{text-align:center;min-height:34px;padding:4px;font-size:.75rem;font-weight:850;}
+      .dashsimple-savebar{margin-top:14px;padding:14px 18px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;}
+      @media(max-width:1050px){.dashsimple-two-fields{grid-template-columns:1fr 1fr;}.dashsimple-submit{grid-column:span 2;}.dashsimple-submit .btn{width:100%;}.dashsimple-options,.dashsimple-created-grid{grid-template-columns:1fr;}}
+      @media(max-width:700px){.dashsimple-shell{width:98%;margin-top:8px;}.dashsimple-header{flex-direction:column;text-align:center;}.dashsimple-header .btn{margin-left:0!important;width:100%;}.dashsimple-two-fields{grid-template-columns:1fr;}.dashsimple-submit{grid-column:span 1;}.dashsimple-builder-title,.dashsimple-section-head{flex-direction:column;text-align:center;align-items:center;}.dashsimple-created-row{flex-direction:column;text-align:center;}.dashsimple-row-actions{justify-content:center;}.dashsimple-option{align-items:flex-start;}.dashsimple-savebar .btn{width:100%;}}
+    </style>
+
+    <script>
+      (function(){
+        const source = document.getElementById('dashsimpleSource');
+        const view = document.getElementById('dashsimpleView');
+        const sourceHelp = document.getElementById('dashsimpleSourceHelp');
+        const viewHelp = document.getElementById('dashsimpleViewHelp');
+        const checks = Array.from(document.querySelectorAll('.dashboard-widget-check'));
+        const selectAll = document.getElementById('dashsimpleSelectAll');
+        const clearAll = document.getElementById('dashsimpleClearAll');
+
+        function refreshViews(){
+          if(!source || !view) return;
+          const option = source.options[source.selectedIndex];
+          if(!option) return;
+          const allowed = (option.dataset.views || '').split(',').filter(Boolean);
+          Array.from(view.options).forEach(function(item){item.disabled = !allowed.includes(item.value);});
+          if(!allowed.includes(view.value)){view.value = allowed[0] || '';}
+          if(sourceHelp) sourceHelp.textContent = option.dataset.description || '';
+          if(viewHelp){
+            const kind = option.dataset.kind || '';
+            viewHelp.textContent = kind === 'maturity' ? 'Disponible: araña o velocímetro.' : (kind === 'timeline' ? 'Disponible: línea en el tiempo o barras.' : 'Se muestran únicamente las presentaciones compatibles.');
+          }
+        }
+
+        function renumber(){
+          const counters = {kpi:1, chart:1};
+          checks.forEach(function(check){
+            if(!check.checked) return;
+            const kind = check.dataset.kind || 'chart';
+            const input = document.getElementById(check.dataset.orderId);
+            if(input){input.value = counters[kind] || 1;}
+            counters[kind] = (counters[kind] || 1) + 1;
+          });
+        }
+
+        if(source) source.addEventListener('change', refreshViews);
+        if(selectAll) selectAll.addEventListener('click', function(){checks.forEach(function(check){check.checked=true;});renumber();});
+        if(clearAll) clearAll.addEventListener('click', function(){checks.forEach(function(check){check.checked=false;});});
+        refreshViews();
+      })();
+    </script>
+    """,
+    usuario=usuario_actual,
+    widget_groups=widget_groups,
+    selected_set=selected_set,
+    position_map=position_map,
+    source_groups=source_groups,
+    custom_rows=custom_rows,
+    edit_widget=edit_widget,
+    builder=builder_values,
+    visualization_options=DASHBOARD_VISUALIZATION_LABELS)
+
+    return render_template_string(BASE, content=content, current_user=usuario_actual)
+
+
+# =========================
+# API JSON TABLERO PRINCIPAL
+# =========================
+@app.route('/dashboard/status', methods=['GET'])
+@login_required
+def dashboard_status():
+    try:
+        user_id = session.get("user_id")
+        selected_keys = _dashboard_get_selected_keys(user_id)
+        payload = _dashboard_build_payload(selected_keys, user_id)
+        return jsonify({
+            "ok": True,
+            "iso_radar_b64": payload.get("iso_radar_b64", ""),
+            "iso_pct": float(payload.get("iso_pct", 0) or 0),
+            "nist_radar_b64": payload.get("nist_radar_b64", ""),
+            "nist_pct": float(payload.get("nist_pct", 0) or 0),
+            "datos_gauge_b64": payload.get("datos_gauge_b64", ""),
+            "datos_pct": float(payload.get("datos_pct", 0) or 0),
+            "scorecard_terceros_pct": float(payload.get("scorecard_terceros_pct", 0) or 0),
+            "pci_pct": float(payload.get("pci_pct", 0) or 0),
+            "pci_gauge_b64": payload.get("pci_gauge_b64", ""),
+            "soc2_pct": float(payload.get("soc2_pct", 0) or 0),
+            "soc2_radar_b64": payload.get("soc2_radar_b64", ""),
+            "ai_maturity_pct": float(payload.get("ai_maturity_pct", 0) or 0),
+            "ai_radar_b64": payload.get("ai_radar_b64", ""),
+            "risks_active_count": float(payload.get("risks_active_count", 0) or 0),
+            "risks_outside_appetite_count": float(payload.get("risks_outside_appetite_count", 0) or 0),
+            "incidents_open_count": float(payload.get("incidents_open_count", 0) or 0),
+            "incidents_compliance_pct": float(payload.get("incidents_compliance_pct", 0) or 0),
+            "vulnerabilities_open_count": float(payload.get("vulnerabilities_open_count", 0) or 0),
+            "vulnerabilities_critical_count": float(payload.get("vulnerabilities_critical_count", 0) or 0),
+            "plans_open_count": float(payload.get("plans_open_count", 0) or 0),
+            "plans_overdue_count": float(payload.get("plans_overdue_count", 0) or 0),
+            "legal_noncompliant_count": float(payload.get("legal_noncompliant_count", 0) or 0),
+            "providers_high_count": float(payload.get("providers_high_count", 0) or 0),
+            "security_culture_pct": float(payload.get("security_culture_pct", 0) or 0),
+            "riesgos_b64": payload.get("riesgos_b64", ""),
+            "incidentes_b64": payload.get("incidentes_b64", ""),
+            "vulnerabilidades_b64": payload.get("vulnerabilidades_b64", ""),
+            "proveedores_criticidad_b64": payload.get("proveedores_criticidad_b64", ""),
+            "planes_accion_estado_b64": payload.get("planes_accion_estado_b64", ""),
+            "requisitos_legales_estado_b64": payload.get("requisitos_legales_estado_b64", ""),
+            "custom_widgets": payload.get("custom_widgets", {}),
+            "selected_widgets": selected_keys,
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+# ====================
+# Menú principal con tablero compacto
+# ====================
+
+
+# ============================================================================
+# GRAC MOBILE — DISTRIBUCIÓN DESDE ADMINISTRACIÓN (ANDROID + IOS TESTFLIGHT)
+# ============================================================================
+# Android: el APK se almacena fuera de /static y se entrega únicamente a
+# usuarios autenticados con permiso "Aplicación móvil".
+# iOS: se publica el enlace de invitación de TestFlight (no se almacena IPA).
+# El historial se conserva en una DB independiente para no modificar sgsi.db.
+
+MOBILE_RELEASE_DB_PATH = os.path.join(app.instance_path, "mobile_app.db")
+MOBILE_RELEASE_DIR = os.path.join(app.instance_path, "mobile_releases")
+os.makedirs(MOBILE_RELEASE_DIR, exist_ok=True)
+
+# Un APK release puede superar los 50 MB. La ruta valida además un máximo propio.
+app.config["MAX_CONTENT_LENGTH"] = max(
+    int(app.config.get("MAX_CONTENT_LENGTH") or 0),
+    300 * 1024 * 1024,
+)
+
+
+def get_mobile_release_db_connection():
+    os.makedirs(app.instance_path, exist_ok=True)
+    conn = sqlite3.connect(MOBILE_RELEASE_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_mobile_release_db():
+    conn = get_mobile_release_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS mobile_releases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            platform TEXT NOT NULL,
+            version TEXT NOT NULL,
+            build_number INTEGER NOT NULL DEFAULT 1,
+            min_version TEXT,
+            min_build INTEGER NOT NULL DEFAULT 1,
+            mandatory INTEGER NOT NULL DEFAULT 0,
+            release_notes TEXT,
+            file_name TEXT,
+            stored_name TEXT,
+            distribution_url TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            published_at TEXT NOT NULL,
+            published_by TEXT
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_mobile_releases_platform_active
+        ON mobile_releases(platform, is_active, id DESC)
+    """)
+    conn.commit()
+    conn.close()
+
+
+def _mobile_release_row(release_id):
+    conn = get_mobile_release_db_connection()
+    row = conn.execute(
+        "SELECT * FROM mobile_releases WHERE id = ?",
+        (int(release_id),),
+    ).fetchone()
+    conn.close()
+    return row
+
+
+def _mobile_release_active(platform):
+    init_mobile_release_db()
+    conn = get_mobile_release_db_connection()
+    row = conn.execute("""
+        SELECT *
+        FROM mobile_releases
+        WHERE platform = ? AND is_active = 1
+        ORDER BY id DESC
+        LIMIT 1
+    """, ((platform or "").strip().lower(),)).fetchone()
+    conn.close()
+    return row
+
+
+def _mobile_release_history(limit=50):
+    init_mobile_release_db()
+    conn = get_mobile_release_db_connection()
+    rows = conn.execute("""
+        SELECT *
+        FROM mobile_releases
+        ORDER BY published_at DESC, id DESC
+        LIMIT ?
+    """, (int(limit),)).fetchall()
+    conn.close()
+    return rows
+
+
+def _mobile_release_version_tuple(value):
+    """Convierte 1.2.3 / 1.2 / v1.2.3 en una tupla comparable."""
+    raw = str(value or "0").strip().lower().lstrip("v")
+    nums = re.findall(r"\d+", raw)
+    parts = [int(x) for x in nums[:4]]
+    while len(parts) < 4:
+        parts.append(0)
+    return tuple(parts)
+
+
+def _mobile_release_is_newer(latest_version, latest_build, current_version, current_build):
+    latest_v = _mobile_release_version_tuple(latest_version)
+    current_v = _mobile_release_version_tuple(current_version)
+    if latest_v != current_v:
+        return latest_v > current_v
+    return int(latest_build or 0) > int(current_build or 0)
+
+
+def _mobile_release_is_below_min(current_version, current_build, min_version, min_build):
+    min_v = _mobile_release_version_tuple(min_version or "0")
+    current_v = _mobile_release_version_tuple(current_version)
+    if current_v != min_v:
+        return current_v < min_v
+    return int(current_build or 0) < int(min_build or 0)
+
+
+def _mobile_release_qr_data_uri(value):
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        img = qrcode.make(value)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        return None
+
+
+def _mobile_release_allowed(user):
+    if not user:
+        return False
+    return user.role == "admin" or verificar_permiso(user, "Aplicación móvil")
+
+
+def _mobile_release_external_download_url(row):
+    if not row:
+        return None
+    if row["platform"] == "ios":
+        return (row["distribution_url"] or "").strip() or None
+    return url_for("mobile_app_user_download", release_id=row["id"], _external=True)
+
+
+def _mobile_release_publish(
+    *, platform, version, build_number, min_version, min_build,
+    mandatory, release_notes, published_by, file_name=None,
+    stored_name=None, distribution_url=None,
+):
+    init_mobile_release_db()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_mobile_release_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE mobile_releases SET is_active = 0 WHERE platform = ?",
+        (platform,),
+    )
+    cur.execute("""
+        INSERT INTO mobile_releases (
+            platform, version, build_number, min_version, min_build,
+            mandatory, release_notes, file_name, stored_name,
+            distribution_url, is_active, published_at, published_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    """, (
+        platform,
+        version,
+        int(build_number),
+        min_version or version,
+        int(min_build),
+        1 if mandatory else 0,
+        release_notes,
+        file_name,
+        stored_name,
+        distribution_url,
+        now,
+        published_by,
+    ))
+    release_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return release_id
+
+
+init_mobile_release_db()
+
+
+
+# ============================================================================
+# GRAC MOBILE — MÓDULO DE CONSULTA Y DESCARGA (WEB / ON-PREMISE)
+# Independiente de Administración. Solo lectura, sin publicar ni eliminar.
+# Acceso por el permiso individual "Aplicación móvil".
+# ============================================================================
+@app.route("/aplicacion_movil", methods=["GET"])
+@login_required
+def aplicacion_movil():
+    usuario = User.query.get(session.get("user_id"))
+    if not _mobile_release_allowed(usuario):
+        abort(403, description="No tiene permiso para acceder al módulo Aplicación móvil.")
+
+    android = _mobile_release_active("android")
+    ios = _mobile_release_active("ios")
+    android_url = _mobile_release_external_download_url(android)
+    ios_url = _mobile_release_external_download_url(ios)
+    android_qr = _mobile_release_qr_data_uri(android_url)
+    ios_qr = _mobile_release_qr_data_uri(ios_url)
+
+    # Las tarjetas reproducen la información de descarga visible en
+    # Administración, SIN formularios de publicación, historial ni edición.
+    contenido = render_template_string(r"""
+    <div class="grac-mobile-user-shell">
+      <div class="grac-mobile-user-hero">
+        <div class="grac-mobile-user-icon"><i class="bi bi-phone"></i></div>
+        <div>
+          <h2>Aplicación móvil</h2>
+          <p>Distribución controlada de GRAC Mobile para Android y iOS mediante TestFlight.</p>
+        </div>
+      </div>
+      <div class="row g-3">
+        <div class="col-xl-6">
+          <div class="card border-0 shadow-sm h-100 grac-mobile-user-card">
+            <div class="card-body p-4">
+              <div class="d-flex align-items-center gap-3 mb-3">
+                <div class="grac-mobile-platform android"><i class="bi bi-android2"></i></div>
+                <div><h4 class="mb-0 fw-bold">Android</h4>
+                  <div class="text-muted small">Descarga directa del APK publicado en GRAC</div>
+                </div>
+              </div>
+              {% if android %}
+              <div class="grac-mobile-version mb-3">
+                <div><b>Versión:</b> {{ android['version'] }} · Build {{ android['build_number'] }}</div>
+                <div><b>Publicada:</b> {{ android['published_at'] }}</div>
+                <div><b>Por:</b> {{ android['published_by'] or '—' }}</div>
+                <div><b>Mínima:</b> {{ android['min_version'] or android['version'] }} · Build {{ android['min_build'] }}</div>
+                <div><b>Actualización:</b> {% if android['mandatory'] %}<span class="badge bg-danger">Obligatoria</span>{% else %}<span class="badge bg-success">Opcional</span>{% endif %}</div>
+              </div>
+              <div class="d-flex flex-wrap align-items-center gap-3">
+                <a href="{{ android_url }}" class="btn btn-primary rounded-pill px-4" data-no-progress="true"><i class="bi bi-download me-1"></i> Descargar APK</a>
+                {% if android_qr %}<img class="grac-mobile-qr" src="{{ android_qr }}" alt="Código QR para descargar Android">{% endif %}
+              </div>
+              {% else %}<div class="alert alert-warning">Todavía no hay una versión Android publicada en este servidor.</div>{% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="col-xl-6">
+          <div class="card border-0 shadow-sm h-100 grac-mobile-user-card">
+            <div class="card-body p-4">
+              <div class="d-flex align-items-center gap-3 mb-3">
+                <div class="grac-mobile-platform ios"><i class="bi bi-apple"></i></div>
+                <div><h4 class="mb-0 fw-bold">iOS / iPadOS</h4>
+                  <div class="text-muted small">Instalación mediante Apple TestFlight</div>
+                </div>
+              </div>
+              {% if ios %}
+              <div class="grac-mobile-version mb-3">
+                <div><b>Versión:</b> {{ ios['version'] }} · Build {{ ios['build_number'] }}</div>
+                <div><b>Publicada:</b> {{ ios['published_at'] }}</div>
+                <div><b>Por:</b> {{ ios['published_by'] or '—' }}</div>
+                <div><b>Mínima:</b> {{ ios['min_version'] or ios['version'] }} · Build {{ ios['min_build'] }}</div>
+                <div><b>Actualización:</b> {% if ios['mandatory'] %}<span class="badge bg-danger">Obligatoria</span>{% else %}<span class="badge bg-success">Opcional</span>{% endif %}</div>
+              </div>
+              <div class="d-flex flex-wrap align-items-center gap-3">
+                <a href="{{ ios_url }}" class="btn btn-dark rounded-pill px-4" target="_blank" rel="noopener noreferrer" data-no-progress="true"><i class="bi bi-apple me-1"></i> Abrir en TestFlight</a>
+                {% if ios_qr %}<img class="grac-mobile-qr" src="{{ ios_qr }}" alt="Código QR TestFlight">{% endif %}
+              </div>
+              {% else %}<div class="alert alert-warning">Todavía no hay un enlace de TestFlight publicado en este servidor.</div>{% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <style>
+      .grac-mobile-user-shell{width:96%;max-width:1200px;margin:24px auto 28px;}
+      .grac-mobile-user-hero{display:flex;align-items:center;gap:16px;min-height:94px;padding:18px 25px;margin-bottom:18px;color:white;border-radius:20px;background:linear-gradient(115deg,#062b55,#0b4a8f,#226ab5);box-shadow:0 12px 26px rgba(20,60,110,.21);}
+      .grac-mobile-user-hero h2{font-size:1.55rem!important;font-weight:850;margin:0 0 4px!important;color:#fff!important;}
+      .grac-mobile-user-hero p{font-size:.92rem;margin:0;color:rgba(255,255,255,.94);}
+      .grac-mobile-user-icon{width:56px;height:56px;min-width:56px;border-radius:14px;background:white;color:#0b4a8f;display:flex;align-items:center;justify-content:center;font-size:1.6rem;}
+      .grac-mobile-user-card{border-radius:22px;overflow:hidden;}
+      .grac-mobile-platform{width:60px;height:60px;min-width:60px;border-radius:17px;display:flex;align-items:center;justify-content:center;font-size:2rem;}
+      .grac-mobile-platform.android{background:#e7f7ee;color:#198754;}
+      .grac-mobile-platform.ios{background:#edf1f5;color:#111827;}
+      .grac-mobile-version{background:#f8fafc;border:1px solid #e7edf4;border-radius:16px;padding:16px 20px;line-height:1.85;}
+      .grac-mobile-qr{width:135px;height:135px;border-radius:16px;border:1px solid #e3e8ef;padding:8px;background:white;object-fit:contain;}
+      @media(max-width:768px){.grac-mobile-user-hero{padding:16px;gap:12px}.grac-mobile-user-hero h2{font-size:1.3rem!important}.grac-mobile-user-shell{width:98%}}
+    </style>
+    """, android=android, ios=ios,
+         android_url=android_url, ios_url=ios_url,
+         android_qr=android_qr, ios_qr=ios_qr)
+    return render_template_string(BASE, content=Markup(contenido))
+
+
+@app.route("/aplicacion_movil/descargar/<int:release_id>", methods=["GET"])
+@login_required
+def mobile_app_user_download(release_id):
+    usuario = User.query.get(session.get("user_id"))
+    if not _mobile_release_allowed(usuario):
+        abort(403, description="No tiene permiso para descargar GRAC Mobile.")
+
+    release = _mobile_release_row(release_id)
+    # Solo la versión Android actualmente publicada está disponible al usuario.
+    if (not release or release["platform"] != "android"
+            or not release["is_active"] or not release["stored_name"]):
+        abort(404)
+    archivo = safe_join(MOBILE_RELEASE_DIR, release["stored_name"])
+    if not archivo or not os.path.isfile(archivo):
+        abort(404)
+
+    registrar_log(usuario.username, f"Descargó GRAC Mobile Android versión {release['version']} build {release['build_number']}.")
+    return send_file(
+        archivo,
+        mimetype="application/vnd.android.package-archive",
+        as_attachment=True,
+        download_name=f"GRAC-Mobile-{release['version']}-build-{release['build_number']}.apk",
+        conditional=True,
+    )
+
+
+@app.route("/admin/mobile-app", methods=["GET", "POST"])
+@login_required
+def admin_mobile_app():
+    user = User.query.get(session.get("user_id"))
+    if not _mobile_release_allowed(user):
+        registrar_log(
+            user.username if user else "Desconocido",
+            "Intento de acceso no autorizado al módulo Aplicación móvil.",
+        )
+        flash("No tiene permiso para acceder a Aplicación móvil.", "danger")
+        return redirect(url_for("menu"))
+
+    if request.method == "POST":
+        # La consulta/descarga es permitida a usuarios con permiso, pero toda
+        # publicación, activación o eliminación es exclusiva del administrador.
+        if user.role != "admin":
+            flash("Solo el administrador puede publicar o modificar versiones.", "danger")
+            return redirect(url_for("admin_mobile_app"))
+
+        action = (request.form.get("action") or "").strip().lower()
+
+        if action in {"publish_android", "publish_ios"}:
+            platform = "android" if action == "publish_android" else "ios"
+            version = (request.form.get("version") or "").strip()
+            min_version = (request.form.get("min_version") or version).strip() or version
+            notes = (request.form.get("release_notes") or "").strip()
+            mandatory = request.form.get("mandatory") == "1"
+
+            try:
+                build_number = max(1, int(request.form.get("build_number") or 1))
+                min_build = max(1, int(request.form.get("min_build") or 1))
+            except Exception:
+                flash("El número de build debe ser un entero mayor a cero.", "warning")
+                return redirect(url_for("admin_mobile_app"))
+
+            if not version:
+                flash("La versión es obligatoria.", "warning")
+                return redirect(url_for("admin_mobile_app"))
+
+            file_name = None
+            stored_name = None
+            distribution_url = None
+
+            if platform == "android":
+                if request.content_length and request.content_length > 260 * 1024 * 1024:
+                    flash("El APK supera el máximo permitido de 260 MB.", "danger")
+                    return redirect(url_for("admin_mobile_app"))
+
+                apk = request.files.get("apk_file")
+                if not apk or not apk.filename:
+                    flash("Debes seleccionar el archivo APK de Android.", "warning")
+                    return redirect(url_for("admin_mobile_app"))
+
+                original = secure_filename(apk.filename)
+                if not original.lower().endswith(".apk"):
+                    flash("Solo se permite publicar archivos .apk.", "danger")
+                    return redirect(url_for("admin_mobile_app"))
+
+                safe_version = re.sub(r"[^0-9A-Za-z._-]+", "-", version).strip("-") or "version"
+                stored_name = f"GRAC-Mobile-{safe_version}-{build_number}-{uuid.uuid4().hex[:10]}.apk"
+                target = os.path.join(MOBILE_RELEASE_DIR, stored_name)
+                apk.save(target)
+
+                if not os.path.isfile(target) or os.path.getsize(target) <= 0:
+                    try:
+                        if os.path.isfile(target):
+                            os.remove(target)
+                    except Exception:
+                        pass
+                    flash("No fue posible guardar el APK.", "danger")
+                    return redirect(url_for("admin_mobile_app"))
+
+                file_name = original
+
+            else:
+                distribution_url = (request.form.get("testflight_url") or "").strip()
+                try:
+                    parsed = urlparse(distribution_url)
+                except Exception:
+                    parsed = None
+                if (
+                    not parsed
+                    or parsed.scheme != "https"
+                    or (parsed.netloc or "").lower() != "testflight.apple.com"
+                ):
+                    flash(
+                        "Ingresa un enlace válido de TestFlight, por ejemplo https://testflight.apple.com/join/XXXXXXXX.",
+                        "warning",
+                    )
+                    return redirect(url_for("admin_mobile_app"))
+
+            release_id = _mobile_release_publish(
+                platform=platform,
+                version=version,
+                build_number=build_number,
+                min_version=min_version,
+                min_build=min_build,
+                mandatory=mandatory,
+                release_notes=notes,
+                published_by=user.username,
+                file_name=file_name,
+                stored_name=stored_name,
+                distribution_url=distribution_url,
+            )
+            registrar_log(
+                user.username,
+                f"Publicó GRAC Mobile {platform.upper()} versión {version} build {build_number} (release #{release_id}).",
+            )
+            flash(
+                f"GRAC Mobile {platform.upper()} {version} (build {build_number}) publicado correctamente.",
+                "success",
+            )
+            return redirect(url_for("admin_mobile_app"))
+
+        if action == "activate":
+            release_id = request.form.get("release_id", type=int)
+            row = _mobile_release_row(release_id)
+            if not row:
+                flash("La versión indicada no existe.", "warning")
+                return redirect(url_for("admin_mobile_app"))
+            conn = get_mobile_release_db_connection()
+            conn.execute(
+                "UPDATE mobile_releases SET is_active = 0 WHERE platform = ?",
+                (row["platform"],),
+            )
+            conn.execute(
+                "UPDATE mobile_releases SET is_active = 1 WHERE id = ?",
+                (release_id,),
+            )
+            conn.commit()
+            conn.close()
+            registrar_log(
+                user.username,
+                f"Activó GRAC Mobile {row['platform'].upper()} versión {row['version']} build {row['build_number']}.",
+            )
+            flash("Versión activada correctamente.", "success")
+            return redirect(url_for("admin_mobile_app"))
+
+        if action == "delete":
+            release_id = request.form.get("release_id", type=int)
+            row = _mobile_release_row(release_id)
+            if not row:
+                flash("La versión indicada no existe.", "warning")
+                return redirect(url_for("admin_mobile_app"))
+            if row["stored_name"]:
+                target = safe_join(MOBILE_RELEASE_DIR, row["stored_name"])
+                try:
+                    if target and os.path.isfile(target):
+                        os.remove(target)
+                except Exception as exc:
+                    print("No se pudo eliminar APK histórico:", repr(exc))
+            conn = get_mobile_release_db_connection()
+            conn.execute("DELETE FROM mobile_releases WHERE id = ?", (release_id,))
+            conn.commit()
+            conn.close()
+            registrar_log(
+                user.username,
+                f"Eliminó release GRAC Mobile #{release_id} ({row['platform']} {row['version']}).",
+            )
+            flash("Versión eliminada del historial.", "success")
+            return redirect(url_for("admin_mobile_app"))
+
+        flash("Acción no reconocida.", "warning")
+        return redirect(url_for("admin_mobile_app"))
+
+    android = _mobile_release_active("android")
+    ios = _mobile_release_active("ios")
+    history = _mobile_release_history(100) if user.role == "admin" else []
+
+    android_url = _mobile_release_external_download_url(android)
+    ios_url = _mobile_release_external_download_url(ios)
+    android_qr = _mobile_release_qr_data_uri(android_url)
+    ios_qr = _mobile_release_qr_data_uri(ios_url)
+
+    inner = render_template_string(r"""
+    <div class="container-fluid mobile-admin-shell">
+      <!-- CABECERA alineada con los demás módulos de Administración -->
+      <div class="mobile-admin-header-card">
+        <div class="mobile-admin-header-overlay">
+          <div class="mobile-admin-header-icon"><i class="bi bi-phone"></i></div>
+          <div class="mobile-admin-header-text">
+            <div class="mobile-admin-header-badge">SGSI · Administración</div>
+            <h2 class="mobile-admin-title">Aplicación móvil</h2>
+            <div class="mobile-admin-subtitle">Distribución controlada de GRAC Mobile para Android y iOS mediante TestFlight.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-xl-6">
+          <div class="card border-0 shadow-sm h-100">
+            <div class="card-body p-4">
+              <div class="d-flex align-items-center gap-3 mb-3">
+                <div class="mobile-platform-icon android"><i class="bi bi-android2"></i></div>
+                <div>
+                  <h4 class="mb-0 fw-bold">Android</h4>
+                  <div class="text-muted small">Descarga directa del APK publicado en GRAC</div>
+                </div>
+              </div>
+              {% if android %}
+                <div class="mobile-version-box mb-3">
+                  <div><b>Versión:</b> {{ android['version'] }} · Build {{ android['build_number'] }}</div>
+                  <div><b>Publicada:</b> {{ android['published_at'] }}</div>
+                  <div><b>Por:</b> {{ android['published_by'] or '—' }}</div>
+                  <div><b>Mínima:</b> {{ android['min_version'] or android['version'] }} · Build {{ android['min_build'] }}</div>
+                  <div><b>Actualización:</b> {% if android['mandatory'] %}<span class="badge bg-danger">Obligatoria</span>{% else %}<span class="badge bg-success">Opcional</span>{% endif %}</div>
+                </div>
+                {% if android['release_notes'] %}<div class="alert alert-light border"><b>Novedades:</b><br>{{ android['release_notes'] }}</div>{% endif %}
+                <div class="d-flex flex-wrap gap-3 align-items-center">
+                  <a class="btn btn-primary rounded-pill px-4" href="{{ android_url }}" data-no-progress="true">
+                    <i class="bi bi-download me-1"></i> Descargar APK
+                  </a>
+                  {% if android_qr %}<img src="{{ android_qr }}" class="mobile-qr" alt="QR Android">{% endif %}
+                </div>
+              {% else %}
+                <div class="alert alert-warning mb-0">Todavía no hay una versión Android publicada.</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="col-xl-6">
+          <div class="card border-0 shadow-sm h-100">
+            <div class="card-body p-4">
+              <div class="d-flex align-items-center gap-3 mb-3">
+                <div class="mobile-platform-icon ios"><i class="bi bi-apple"></i></div>
+                <div>
+                  <h4 class="mb-0 fw-bold">iOS / iPadOS</h4>
+                  <div class="text-muted small">Instalación mediante Apple TestFlight</div>
+                </div>
+              </div>
+              {% if ios %}
+                <div class="mobile-version-box mb-3">
+                  <div><b>Versión:</b> {{ ios['version'] }} · Build {{ ios['build_number'] }}</div>
+                  <div><b>Publicada:</b> {{ ios['published_at'] }}</div>
+                  <div><b>Por:</b> {{ ios['published_by'] or '—' }}</div>
+                  <div><b>Mínima:</b> {{ ios['min_version'] or ios['version'] }} · Build {{ ios['min_build'] }}</div>
+                  <div><b>Actualización:</b> {% if ios['mandatory'] %}<span class="badge bg-danger">Obligatoria</span>{% else %}<span class="badge bg-success">Opcional</span>{% endif %}</div>
+                </div>
+                {% if ios['release_notes'] %}<div class="alert alert-light border"><b>Novedades:</b><br>{{ ios['release_notes'] }}</div>{% endif %}
+                <div class="d-flex flex-wrap gap-3 align-items-center">
+                  <a class="btn btn-dark rounded-pill px-4" href="{{ ios_url }}" target="_blank" rel="noopener" data-no-progress="true">
+                    <i class="bi bi-apple me-1"></i> Abrir en TestFlight
+                  </a>
+                  {% if ios_qr %}<img src="{{ ios_qr }}" class="mobile-qr" alt="QR TestFlight">{% endif %}
+                </div>
+              {% else %}
+                <div class="alert alert-warning mb-0">Todavía no hay un enlace de TestFlight publicado.</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {% if is_admin %}
+      <div class="row g-3 mt-1">
+        <div class="col-xl-6">
+          <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-0 pt-4 px-4"><h5 class="fw-bold mb-0">Publicar Android</h5></div>
+            <div class="card-body px-4 pb-4">
+              <form method="post" enctype="multipart/form-data" data-progress-text="Publicando APK de GRAC Mobile...">
+                <input type="hidden" name="action" value="publish_android">
+                <div class="row g-3">
+                  <div class="col-md-6"><label class="form-label">Versión</label><input class="form-control" name="version" placeholder="0.2.0" required></div>
+                  <div class="col-md-6"><label class="form-label">Build</label><input class="form-control" type="number" min="1" name="build_number" value="3" required></div>
+                  <div class="col-md-6"><label class="form-label">Versión mínima</label><input class="form-control" name="min_version" placeholder="0.2.0"></div>
+                  <div class="col-md-6"><label class="form-label">Build mínimo</label><input class="form-control" type="number" min="1" name="min_build" value="1"></div>
+                  <div class="col-12"><label class="form-label">APK</label><input class="form-control" type="file" accept=".apk,application/vnd.android.package-archive" name="apk_file" required></div>
+                  <div class="col-12"><label class="form-label">Notas de versión</label><textarea class="form-control" rows="3" name="release_notes" placeholder="Cambios incluidos en esta versión..."></textarea></div>
+                  <div class="col-12 form-check ms-2"><input class="form-check-input" type="checkbox" value="1" name="mandatory" id="androidMandatory"><label class="form-check-label" for="androidMandatory">Actualización obligatoria</label></div>
+                  <div class="col-12"><button class="btn btn-primary rounded-pill px-4" type="submit"><i class="bi bi-cloud-arrow-up me-1"></i> Publicar Android</button></div>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-xl-6">
+          <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-0 pt-4 px-4"><h5 class="fw-bold mb-0">Publicar iOS / TestFlight</h5></div>
+            <div class="card-body px-4 pb-4">
+              <form method="post">
+                <input type="hidden" name="action" value="publish_ios">
+                <div class="row g-3">
+                  <div class="col-md-6"><label class="form-label">Versión</label><input class="form-control" name="version" placeholder="0.2.0" required></div>
+                  <div class="col-md-6"><label class="form-label">Build</label><input class="form-control" type="number" min="1" name="build_number" value="3" required></div>
+                  <div class="col-md-6"><label class="form-label">Versión mínima</label><input class="form-control" name="min_version" placeholder="0.2.0"></div>
+                  <div class="col-md-6"><label class="form-label">Build mínimo</label><input class="form-control" type="number" min="1" name="min_build" value="1"></div>
+                  <div class="col-12"><label class="form-label">Enlace público TestFlight</label><input class="form-control" type="url" name="testflight_url" placeholder="https://testflight.apple.com/join/XXXXXXXX" required></div>
+                  <div class="col-12"><label class="form-label">Notas de versión</label><textarea class="form-control" rows="3" name="release_notes" placeholder="Cambios incluidos en esta versión..."></textarea></div>
+                  <div class="col-12 form-check ms-2"><input class="form-check-input" type="checkbox" value="1" name="mandatory" id="iosMandatory"><label class="form-check-label" for="iosMandatory">Actualización obligatoria</label></div>
+                  <div class="col-12"><button class="btn btn-dark rounded-pill px-4" type="submit"><i class="bi bi-apple me-1"></i> Publicar TestFlight</button></div>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card border-0 shadow-sm mt-3">
+        <div class="card-header bg-white border-0 pt-4 px-4 d-flex justify-content-between align-items-center">
+          <h5 class="fw-bold mb-0">Historial de versiones</h5>
+          <span class="badge bg-light text-dark">{{ history|length }} registros</span>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead class="table-light"><tr><th>Plataforma</th><th>Versión</th><th>Build</th><th>Publicación</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <tbody>
+            {% for r in history %}
+              <tr>
+                <td>{% if r['platform']=='ios' %}<i class="bi bi-apple me-1"></i> iOS{% else %}<i class="bi bi-android2 me-1"></i> Android{% endif %}</td>
+                <td>{{ r['version'] }}</td>
+                <td>{{ r['build_number'] }}</td>
+                <td>{{ r['published_at'] }}<br><small class="text-muted">{{ r['published_by'] or '' }}</small></td>
+                <td>{% if r['is_active'] %}<span class="badge bg-success">Activa</span>{% else %}<span class="badge bg-secondary">Histórica</span>{% endif %}</td>
+                <td class="text-nowrap">
+                  {% if not r['is_active'] %}
+                  <form method="post" class="d-inline">
+                    <input type="hidden" name="action" value="activate"><input type="hidden" name="release_id" value="{{ r['id'] }}">
+                    <button class="btn btn-sm btn-outline-primary rounded-pill" type="submit">Activar</button>
+                  </form>
+                  {% endif %}
+                  <form method="post" class="d-inline" onsubmit="return confirm('¿Eliminar esta versión del historial?');">
+                    <input type="hidden" name="action" value="delete"><input type="hidden" name="release_id" value="{{ r['id'] }}">
+                    <button class="btn btn-sm btn-outline-danger rounded-pill" type="submit">Eliminar</button>
+                  </form>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="6" class="text-center text-muted py-4">No hay versiones publicadas todavía.</td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <style>
+      .mobile-admin-shell{
+        width:96%;
+        max-width:1100px;
+        margin:26px auto 24px auto;
+        overflow:hidden;
+      }
+      .mobile-admin-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+      .mobile-admin-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+      .mobile-admin-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        position:relative;
+        z-index:1;
+        min-width:0;
+      }
+      .mobile-admin-header-icon{
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.4rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+      .mobile-admin-header-text{
+        max-width:900px;
+        min-width:0;
+      }
+      .mobile-admin-header-badge{
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }
+      .mobile-admin-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem !important;
+        line-height:1.1 !important;
+        margin:0 !important;
+        text-shadow:0 4px 14px rgba(0,0,0,.45);
+        overflow-wrap:break-word;
+      }
+      .mobile-admin-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem !important;
+        line-height:1.25 !important;
+        margin-top:3px;
+        overflow-wrap:break-word;
+      }
+      .mobile-platform-icon{width:54px;height:54px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:1.65rem;}
+      .mobile-platform-icon.android{background:#e7f7ee;color:#198754;}
+      .mobile-platform-icon.ios{background:#edf1f5;color:#111827;}
+      .mobile-version-box{background:#f8fafc;border:1px solid #e7edf4;border-radius:16px;padding:14px 16px;line-height:1.75;}
+      .mobile-qr{width:118px;height:118px;border-radius:14px;border:1px solid #e3e8ef;padding:6px;background:#fff;}
+      .mobile-admin-shell .card{border-radius:20px;overflow:hidden;}
+    </style>
+    """,
+        android=android,
+        ios=ios,
+        history=history,
+        android_url=android_url,
+        ios_url=ios_url,
+        android_qr=android_qr,
+        ios_qr=ios_qr,
+        is_admin=(user.role == "admin"),
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+
+@app.route("/admin/mobile-app/download/<int:release_id>")
+@login_required
+def admin_mobile_app_download(release_id):
+    user = User.query.get(session.get("user_id"))
+    if not _mobile_release_allowed(user):
+        flash("No tiene permiso para descargar GRAC Mobile.", "danger")
+        return redirect(url_for("menu"))
+
+    row = _mobile_release_row(release_id)
+    if not row or row["platform"] != "android" or not row["stored_name"]:
+        abort(404)
+
+    full_path = safe_join(MOBILE_RELEASE_DIR, row["stored_name"])
+    if not full_path or not os.path.isfile(full_path):
+        abort(404)
+
+    registrar_log(
+        user.username,
+        f"Descargó GRAC Mobile Android versión {row['version']} build {row['build_number']}.",
+    )
+    return send_file(
+        full_path,
+        mimetype="application/vnd.android.package-archive",
+        as_attachment=True,
+        download_name=f"GRAC-Mobile-{row['version']}-build-{row['build_number']}.apk",
+        conditional=True,
+    )
+
+
+@app.route('/')
+@login_required
+def menu():
+    usuario_actual = User.query.get(session.get('user_id'))
+    selected_widget_keys = _dashboard_get_selected_keys(session.get('user_id'))
+    dashboard = _dashboard_build_payload(selected_widget_keys, session.get('user_id'))
+    dashboard_kpis, dashboard_charts = _dashboard_prepare_view(
+        selected_widget_keys,
+        dashboard,
+        session.get('user_id'),
+    )
+
+    if usuario_actual and usuario_actual.role == "admin":
+        sections = MENU_SECTIONS
+    else:
+        sections = []
+        for sec in MENU_SECTIONS:
+            allowed_items = filtrar_items_menu(
+                sec.get("items", []), usuario_actual,
+                seccion_admin=(sec.get("title") == "Administración")
+            )
+            if allowed_items:
+                sec2 = dict(sec)
+                sec2["items"] = allowed_items
+                sections.append(sec2)
+
+    content = render_template_string("""
+    <div class="soa-shell">
+
+      <div class="sgsi-layout">
+
+        <!-- MENÚ LATERAL COMPLETO -->
+        <aside id="sgsiLocalMenu" class="sgsi-leftnav-wrap">
+
+<div class="sgsi-leftnav-card">
+
+            <div class="sgsi-leftnav-list">
+
+              <a class="sgsi-leftnav-link sgsi-panel-control-btn" href="/">
+                <i class="bi bi-speedometer2"></i>
+                <span>Centro de Control</span>
+              </a>
+
+              {% macro render_menu_items(items, prefix) %}
+                {% for it in items %}
+                  {% set item_id = prefix ~ "_item_" ~ loop.index %}
+
+                  {% if it.get("children") %}
+                    <li class="sgsi-node">
+                      <a class="sgsi-dropdown-item sgsi-node-toggle"
+                         href="javascript:void(0);"
+                         data-target="{{ item_id }}">
+                        <i class="bi {{ it.get('icon','bi-box') }}"></i>
+                        <span>{{ it["label"] }}</span>
+                      </a>
+
+                      <ul class="sgsi-panel sgsi-subpanel" id="{{ item_id }}">
+                        {{ render_menu_items(it["children"], item_id) }}
+                      </ul>
+                    </li>
+                  {% else %}
+                    <li>
+                      <a class="sgsi-dropdown-item" href="{{ it.get('href', '#') }}">
+                        <i class="bi {{ it.get('icon','bi-dot') }}"></i>
+                        <span>{{ it["label"] }}</span>
+                      </a>
+                    </li>
+                  {% endif %}
+                {% endfor %}
+              {% endmacro %}
+
+              {% for sec in sections %}
+                {% set sid = "sgsi_root_" ~ loop.index %}
+
+                <div class="sgsi-root-item">
+                  <button class="sgsi-leftnav-link sgsi-root-toggle"
+                          type="button"
+                          data-target="{{ sid }}">
+                    <i class="bi {{ sec.get('icon', 'bi-grid-1x2') }}"></i>
+                    <span>{{ sec["title"] }}</span>
+                  </button>
+
+                  <ul class="sgsi-panel" id="{{ sid }}">
+                    {{ render_menu_items(sec["items"], sid) }}
+                  </ul>
+                </div>
+              {% endfor %}
+
+            </div>
+          </div>
+        </aside>
+
+        <!-- TABLERO -->
+        <main class="sgsi-dashboard-zone">
+
+          {% if dashboard_kpis %}
+            <section class="sgsi-stats-grid">
+              {% for item in dashboard_kpis %}
+                <div class="sgsi-stat-card">
+                  <div class="sgsi-stat-icon {{ item.color }}">
+                    <i class="bi {{ item.icon }}"></i>
+                  </div>
+                  <div class="sgsi-stat-text">
+                    <div class="sgsi-stat-title">{{ item.title }}</div>
+                    <div class="sgsi-stat-value {{ item.color }}-text" id="{{ item.element_id }}">
+                      {{ item.display_value }}
+                    </div>
+                    <div class="sgsi-stat-link">{{ item.subtitle }}</div>
+                  </div>
+                </div>
+              {% endfor %}
+            </section>
+          {% endif %}
+
+          {% if dashboard_charts %}
+            <section class="sgsi-dashboard-grid">
+              {% for item in dashboard_charts %}
+                <div class="sgsi-chart-card">
+                  <div class="sgsi-chart-head">
+                    <h3>{{ item.title }}</h3>
+                    <span>{{ item.display_value }}</span>
+                  </div>
+                  <div class="sgsi-chart-body">
+                    <img id="{{ item.image_id }}"
+                         src="data:image/png;base64,{{ item.image }}"
+                         class="sgsi-chart-img"
+                         alt="{{ item.title }}">
+                  </div>
+                </div>
+              {% endfor %}
+            </section>
+          {% endif %}
+
+          {% if not dashboard_kpis and not dashboard_charts %}
+            <section class="sgsi-dashboard-empty">
+              <div class="sgsi-dashboard-empty-icon"><i class="bi bi-layout-wtf"></i></div>
+              <h3>Tu Centro de Control no tiene elementos seleccionados</h3>
+              <p>Ingresa al diseñador, selecciona una fuente de datos y elige cómo presentarla.</p>
+              <a href="{{ url_for('dashboard_config') }}" class="btn btn-primary rounded-pill px-4 fw-bold">
+                Construir Centro de Control
+              </a>
+            </section>
+          {% endif %}
+
+        </main>
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      :root{
+        --sgsi-sidebar-w:245px;
+        --sgsi-card:#ffffff;
+        --sgsi-purple:#074883;
+        --sgsi-purple-2:#1d5fae;
+        --sgsi-lav:#dcecff;
+        --sgsi-lav-2:#c9e3ff;
+        --sgsi-border:#a9cdeb;
+        --sgsi-text:#0f3766;
+        --sgsi-muted:#425f7f;
+      }
+
+      .soa-shell{
+        width:100%;
+        margin:0 0 34px 0;
+      }
+
+      .sgsi-layout{
+        display:grid;
+        grid-template-columns:var(--sgsi-sidebar-w) minmax(0,1fr);
+        gap:16px;
+        align-items:start;
+        transition:all .22s ease;
+      }
+
+      .sgsi-leftnav-wrap{
+        position:sticky;
+        top:var(--arky-topbar-h, 86px);
+        align-self:start;
+        z-index:30;
+      }
+
+      .sgsi-leftnav-card{
+        background:linear-gradient(180deg,rgba(238,247,255,.97) 0%,rgba(213,234,255,.95) 48%,rgba(198,222,245,.94) 100%);
+        border:1px solid var(--sgsi-border);
+        border-radius:0 18px 18px 0;
+        box-shadow:10px 0 30px rgba(28,91,160,.18), inset -1px 0 rgba(255,255,255,.65);
+        padding:8px 7px;
+        max-height:calc(100vh - var(--arky-topbar-h, 86px)) !important;
+        overflow-y:auto !important;
+        overflow-x:hidden !important;
+        backdrop-filter:blur(14px);
+        -webkit-backdrop-filter:blur(14px);
+      }
+
+      .sgsi-leftnav-card::-webkit-scrollbar{ width:7px; }
+      .sgsi-leftnav-card::-webkit-scrollbar-thumb{ background:#b8a3d8; border-radius:999px; }
+      .sgsi-leftnav-card::-webkit-scrollbar-track{ background:#eef4ff; border-radius:999px; }
+
+      .sgsi-leftnav-header{
+        display:flex;
+        align-items:center;
+        gap:10px;
+        padding:10px 10px 14px;
+        border-bottom:1px solid var(--sgsi-border);
+        margin-bottom:12px;
+      }
+
+      .sgsi-leftnav-header-icon{
+        width:40px;
+        height:40px;
+        border-radius:14px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        background:linear-gradient(135deg,var(--sgsi-purple),var(--sgsi-purple-2));
+        color:#fff;
+        box-shadow:0 10px 22px rgba(75,11,130,.22);
+        flex:0 0 auto;
+      }
+
+      .sgsi-leftnav-title{
+        font-size:.94rem;
+        font-weight:950;
+        color:var(--sgsi-text);
+        line-height:1.1;
+      }
+
+      .sgsi-leftnav-subtitle{
+        margin-top:3px;
+        font-size:.72rem;
+        color:var(--sgsi-muted);
+        font-weight:750;
+        line-height:1.2;
+      }
+
+      .sgsi-leftnav-list{
+        display:flex;
+        flex-direction:column;
+        gap:7px;
+      }
+
+      .sgsi-leftnav-link{
+        width:100%;
+        display:flex !important;
+        align-items:center;
+        justify-content:flex-start;
+        gap:7px;
+        border:1px solid transparent !important;
+        border-radius:14px !important;
+        background:transparent !important;
+        color:#26384f !important;
+        padding:8px 9px !important;
+        font-size:.72rem !important;
+        font-weight:850 !important;
+        white-space:normal !important;
+        text-align:left;
+        line-height:1.15 !important;
+        min-height:36px !important;
+        text-decoration:none !important;
+        transition:all .18s ease;
+      }
+
+      .sgsi-leftnav-link:hover,
+      .sgsi-leftnav-link.sgsi-active{
+        background:var(--sgsi-lav) !important;
+        color:var(--sgsi-purple) !important;
+        border-color:var(--sgsi-border) !important;
+      }
+
+      .sgsi-panel-control-btn{
+        background:linear-gradient(135deg,var(--sgsi-purple) 0%,#1d5fae 58%,#3f8fd6 100%) !important;
+        color:#ffffff !important;
+        border:1px solid rgba(255,255,255,.40) !important;
+        box-shadow:0 12px 26px rgba(75,11,130,.24) !important;
+      }
+
+      .sgsi-root-toggle::after,
+      .sgsi-node-toggle::after{
+        content:"⌄";
+        margin-left:auto;
+        font-size:13px;
+        font-weight:950;
+        transition:transform .18s ease;
+      }
+
+      .sgsi-root-toggle.sgsi-active::after,
+      .sgsi-node-toggle.sgsi-active::after{
+        transform:rotate(180deg);
+      }
+
+      .sgsi-panel{
+        display:none;
+        list-style:none;
+        margin:6px 0 0 0 !important;
+        padding:6px 0 6px 9px !important;
+        background:var(--sgsi-lav) !important;
+        border:1px solid var(--sgsi-border) !important;
+        border-radius:15px !important;
+        overflow:visible !important;
+      }
+
+      .sgsi-panel.sgsi-open{ display:block !important; }
+
+      .sgsi-subpanel{
+        margin-left:5px !important;
+        padding-left:8px !important;
+        border-left:2px solid #a88fd3 !important;
+      }
+
+      .sgsi-dropdown-item{
+        display:flex;
+        align-items:center;
+        gap:6px;
+        padding:6px 7px;
+        border-radius:12px;
+        font-size:.68rem;
+        font-weight:800;
+        color:#26384f !important;
+        white-space:normal;
+        line-height:1.16;
+        text-decoration:none;
+        margin:3px 4px;
+        background:rgba(241,247,255,.74);
+        border:1px solid rgba(181,205,230,.78);
+        transition:all .18s ease;
+      }
+
+      .sgsi-dropdown-item:hover,
+      .sgsi-dropdown-item.sgsi-active{
+        background:#ffffff !important;
+        color:var(--sgsi-purple) !important;
+        box-shadow:0 8px 16px rgba(43,0,79,.08);
+      }
+
+      .sgsi-leftnav-arrow{
+        position:absolute;
+        right:-13px;
+        top:22px;
+        width:26px;
+        height:58px;
+        border-radius:999px;
+        background:linear-gradient(135deg,var(--sgsi-purple),#1d5fae);
+        color:#ffffff;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        cursor:pointer;
+        box-shadow:0 10px 22px rgba(43,0,79,.22);
+        border:2px solid #fff;
+        z-index:20;
+      }
+
+      .sgsi-arrow-icon{
+        font-size:26px;
+        font-weight:950;
+        line-height:1;
+        position:relative;
+        top:-1px;
+      }
+
+      body.sgsi-menu-collapsed .sgsi-layout{
+        grid-template-columns:0 minmax(0,1fr);
+        gap:0;
+      }
+
+      body.sgsi-menu-collapsed .sgsi-leftnav-card{
+        opacity:0;
+        pointer-events:none;
+        transform:translateX(-245px);
+      }
+
+      body.sgsi-menu-collapsed .sgsi-leftnav-arrow{
+        right:-44px;
+      }
+
+      body.sgsi-menu-collapsed .sgsi-arrow-icon{ transform:rotate(180deg); }
+
+      .sgsi-dashboard-zone{ min-width:0; overflow:hidden; }
+
+      .sgsi-dashboard-toolbar{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+        margin:0 0 14px;
+        padding:10px 14px;
+        border:1px solid var(--sgsi-border);
+        border-radius:16px;
+        background:rgba(248,252,255,.93);
+        box-shadow:0 10px 22px rgba(43,0,79,.07);
+      }
+      .sgsi-dashboard-toolbar-text{font-size:.74rem;font-weight:900;color:#355777;}
+      .sgsi-dashboard-config-btn{font-size:.70rem!important;font-weight:900!important;padding:6px 14px!important;}
+      .sgsi-dashboard-empty{
+        max-width:760px;
+        margin:30px auto;
+        padding:42px 24px;
+        text-align:center;
+        background:rgba(248,252,255,.96);
+        border:1px solid var(--sgsi-border);
+        border-radius:24px;
+        box-shadow:0 18px 34px rgba(43,0,79,.10);
+      }
+      .sgsi-dashboard-empty-icon{width:64px;height:64px;border-radius:20px;margin:0 auto 14px;display:flex;align-items:center;justify-content:center;background:#eaf3ff;color:#0b4a8f;font-size:1.7rem;}
+      .sgsi-dashboard-empty h3{font-size:1.05rem;font-weight:950;color:#173a61;margin-bottom:7px;}
+      .sgsi-dashboard-empty p{font-size:.78rem;color:#64788e;margin-bottom:18px;}
+
+      .sgsi-stats-grid{
+        width:100%;
+        max-width:1160px;
+        margin:0 auto 20px auto;
+        display:grid;
+        grid-template-columns:repeat(auto-fit, minmax(230px, 1fr));
+        justify-content:center;
+        align-items:stretch;
+        gap:14px;
+      }
+
+      .sgsi-stat-card{
+        width:100%;
+        min-width:0;
+        min-height:104px;
+        padding:16px 14px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        gap:12px;
+        background:rgba(248,252,255,.96);
+        border:1px solid var(--sgsi-border);
+        border-radius:22px;
+        box-shadow:0 18px 34px rgba(43,0,79,.10);
+        text-align:center;
+        overflow:hidden;
+        transition:all .20s ease;
+      }
+
+      .sgsi-stat-card:hover{ transform:translateY(-3px); box-shadow:0 24px 42px rgba(43,0,79,.14); }
+
+      .sgsi-stat-icon{
+        width:48px;
+        height:48px;
+        min-width:48px;
+        flex:0 0 48px;
+        border-radius:16px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.18rem;
+      }
+
+      .sgsi-stat-icon.blue{background:#eef4ff;color:#0f56b3;}
+      .sgsi-stat-icon.orange{background:#fff3e8;color:#c95508;}
+      .sgsi-stat-icon.green{background:#ecfdf3;color:#087c3d;}
+      .sgsi-stat-icon.purple{background:#f2eaff;color:#5521a8;}
+      .blue-text{color:#0f56b3 !important;} .orange-text{color:#c95508 !important;} .green-text{color:#087c3d !important;} .purple-text{color:#5521a8 !important;}
+
+      .sgsi-stat-text{ min-width:0; flex:1 1 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; overflow:hidden; }
+      .sgsi-stat-title{ width:100%; font-size:.72rem; font-weight:950; color:#17263b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .sgsi-stat-value{ width:100%; margin-top:3px; font-size:1.25rem; line-height:1.05; font-weight:950; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .sgsi-stat-link{ width:100%; margin-top:5px; color:var(--sgsi-muted); font-size:.65rem; font-weight:850; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+      .sgsi-dashboard-grid{ display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:18px; }
+      .sgsi-chart-card{ grid-column:span 4; background:rgba(248,252,255,.96); border:1px solid var(--sgsi-border); border-radius:24px; box-shadow:0 18px 34px rgba(43,0,79,.11); min-height:360px; overflow:hidden; }
+      .sgsi-chart-head{ padding:16px 18px 10px 18px; display:flex; justify-content:space-between; gap:10px; border-bottom:1px solid var(--sgsi-border); background:linear-gradient(180deg,#fff 0%,#f2f7ff 100%); }
+      .sgsi-chart-head h3{ margin:0; font-size:.92rem; font-weight:950; color:#17263b; }
+      .sgsi-chart-head span{ font-size:.72rem; font-weight:900; color:var(--sgsi-purple-2); }
+      .sgsi-chart-body{ min-height:295px; display:flex; align-items:center; justify-content:center; padding:10px 14px 16px; }
+      .sgsi-chart-img{ width:100%; height:295px; object-fit:contain; }
+
+      @media(max-width:1200px){
+        .sgsi-layout{ grid-template-columns:1fr; }
+        .sgsi-leftnav-wrap{ position:relative; top:auto; }
+        .sgsi-leftnav-card{ max-height:560px !important; }
+        .sgsi-stats-grid{ max-width:740px; grid-template-columns:repeat(2, minmax(260px, 1fr)); gap:14px; }
+        .sgsi-chart-card{ grid-column:span 6; }
+      }
+
+      @media(max-width:991px){
+        .sgsi-stats-grid{ max-width:340px; grid-template-columns:minmax(260px, 320px); }
+        .sgsi-chart-card{ grid-column:span 12; }
+      }
+    
+      /* Compactar menú local de Centro de Control */
+      .sgsi-leftnav-card{
+        padding:8px 7px !important;
+        border-radius:0 16px 16px 0 !important;
+      }
+      .sgsi-leftnav-link{
+        font-size:.70rem !important;
+        min-height:35px !important;
+        padding:7px 8px !important;
+        border-radius:11px !important;
+        gap:6px !important;
+      }
+      .sgsi-dropdown-item{
+        font-size:.66rem !important;
+        padding:6px 7px !important;
+        border-radius:10px !important;
+        gap:6px !important;
+      }
+      .sgsi-panel{
+        margin-top:4px !important;
+        padding:4px 0 4px 6px !important;
+        border-radius:12px !important;
+      }
+      .sgsi-leftnav-arrow{
+        top:16px !important;
+        width:22px !important;
+        height:50px !important;
+      }
+
+
+      /* GRAC v10 — Centro de Control: misma barra de iconos y expansión que el menú global. */
+      :root {
+        --grac-rail-width:64px;
+        --grac-menu-expanded-width:245px;
+        --sgsi-sidebar-w:var(--grac-rail-width);
+      }
+      .sgsi-layout,
+      body.sgsi-menu-collapsed .sgsi-layout {
+        grid-template-columns:var(--grac-rail-width) minmax(0,1fr) !important;
+        gap:16px !important;
+      }
+      body.grac-menu-pinned .sgsi-layout {
+        grid-template-columns:var(--grac-menu-expanded-width) minmax(0,1fr) !important;
+      }
+      #sgsiLocalMenu {
+        box-sizing:border-box !important;
+        position:sticky !important;
+        top:var(--arky-topbar-h,58px) !important;
+        width:var(--grac-rail-width) !important;
+        height:calc(100vh - var(--arky-topbar-h,58px)) !important;
+        z-index:150 !important;
+        transition:width .22s ease !important;
+      }
+      #sgsiLocalMenu .sgsi-leftnav-card,
+      body.sgsi-menu-collapsed #sgsiLocalMenu .sgsi-leftnav-card {
+        box-sizing:border-box !important;
+        width:var(--grac-rail-width) !important;
+        height:100% !important;
+        max-height:100% !important;
+        padding:8px 5px !important;
+        opacity:1 !important;
+        transform:none !important;
+        pointer-events:auto !important;
+        overflow-y:auto !important;
+        overflow-x:hidden !important;
+        scrollbar-width:none;
+        transition:width .22s ease !important;
+      }
+      #sgsiLocalMenu:is(:hover, :has(:focus-visible)),
+      body.grac-menu-pinned #sgsiLocalMenu,
+      #sgsiLocalMenu:is(:hover, :has(:focus-visible)) .sgsi-leftnav-card,
+      body.grac-menu-pinned #sgsiLocalMenu .sgsi-leftnav-card {
+        width:var(--grac-menu-expanded-width) !important;
+      }
+      #sgsiLocalMenu:is(:hover, :has(:focus-visible)) .sgsi-leftnav-card,
+      body.grac-menu-pinned #sgsiLocalMenu .sgsi-leftnav-card {
+        scrollbar-width:thin;
+      }
+      #sgsiLocalMenu .sgsi-leftnav-card::-webkit-scrollbar {width:0 !important;}
+      #sgsiLocalMenu:is(:hover, :has(:focus-visible)) .sgsi-leftnav-card::-webkit-scrollbar,
+      body.grac-menu-pinned #sgsiLocalMenu .sgsi-leftnav-card::-webkit-scrollbar {width:6px !important;}
+      #sgsiLocalMenu .sgsi-leftnav-link,
+      #sgsiLocalMenu a.sgsi-panel-control-btn,
+      #sgsiLocalMenu button.sgsi-root-toggle {
+        box-sizing:border-box !important;
+        width:46px !important;
+        max-width:46px !important;
+        min-width:46px !important;
+        min-height:38px !important;
+        height:38px !important;
+        margin:0 auto !important;
+        padding:0 !important;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:0 !important;
+        overflow:hidden !important;
+      }
+      #sgsiLocalMenu .sgsi-leftnav-link > i {
+        box-sizing:border-box !important;
+        flex:0 0 20px !important;
+        width:20px !important;
+        text-align:center !important;
+        font-size:1.05rem !important;
+      }
+      #sgsiLocalMenu .sgsi-leftnav-link > span,
+      #sgsiLocalMenu .sgsi-dropdown-item > span {
+        display:none !important;
+      }
+      #sgsiLocalMenu .sgsi-root-toggle::after,
+      #sgsiLocalMenu .sgsi-node-toggle::after {
+        display:none !important;
+      }
+      #sgsiLocalMenu .sgsi-panel.sgsi-open {
+        display:none !important;
+      }
+      #sgsiLocalMenu:is(:hover, :has(:focus-visible)) .sgsi-panel.sgsi-open,
+      body.grac-menu-pinned #sgsiLocalMenu .sgsi-panel.sgsi-open {
+        display:block !important;
+      }
+      #sgsiLocalMenu:is(:hover, :has(:focus-visible)) .sgsi-leftnav-link,
+      #sgsiLocalMenu:is(:hover, :has(:focus-visible)) a.sgsi-panel-control-btn,
+      body.grac-menu-pinned #sgsiLocalMenu .sgsi-leftnav-link,
+      body.grac-menu-pinned #sgsiLocalMenu a.sgsi-panel-control-btn {
+        width:100% !important;
+        max-width:100% !important;
+        min-width:0 !important;
+        margin:0 !important;
+        padding:0 8px !important;
+        justify-content:flex-start !important;
+        gap:7px !important;
+      }
+      #sgsiLocalMenu:is(:hover, :has(:focus-visible)) .sgsi-leftnav-link > span,
+      #sgsiLocalMenu:is(:hover, :has(:focus-visible)) .sgsi-dropdown-item > span,
+      body.grac-menu-pinned #sgsiLocalMenu .sgsi-leftnav-link > span,
+      body.grac-menu-pinned #sgsiLocalMenu .sgsi-dropdown-item > span {
+        display:block !important;
+        min-width:0 !important;
+        flex:1 1 auto !important;
+        white-space:normal !important;
+      }
+      #sgsiLocalMenu:is(:hover, :has(:focus-visible)) .sgsi-root-toggle::after,
+      #sgsiLocalMenu:is(:hover, :has(:focus-visible)) .sgsi-node-toggle::after,
+      body.grac-menu-pinned #sgsiLocalMenu .sgsi-root-toggle::after,
+      body.grac-menu-pinned #sgsiLocalMenu .sgsi-node-toggle::after {
+        display:block !important;
+      }
+      #sgsiLocalMenu .sgsi-leftnav-arrow,
+      body.sgsi-menu-collapsed #sgsiLocalMenu .sgsi-leftnav-arrow {
+        right:-11px !important;
+        pointer-events:auto !important;
+        transition:right .22s ease !important;
+      }
+      #sgsiLocalMenu:is(:hover, :has(:focus-visible)) .sgsi-leftnav-arrow,
+      body.grac-menu-pinned #sgsiLocalMenu .sgsi-leftnav-arrow {
+        right:-12px !important;
+      }
+      #sgsiLocalMenu .sgsi-arrow-icon {transform:none !important;}
+      body.grac-menu-pinned #sgsiLocalMenu .sgsi-arrow-icon {transform:rotate(180deg) !important;}
+      @media(max-width:1200px) {
+        .sgsi-layout,
+        body.sgsi-menu-collapsed .sgsi-layout {
+          grid-template-columns:var(--grac-rail-width) minmax(0,1fr) !important;
+        }
+        body.grac-menu-pinned .sgsi-layout {
+          grid-template-columns:var(--grac-rail-width) minmax(0,1fr) !important;
+        }
+      }
+
+</style>
+
+    <script>
+      function sgsiTogglePanel(trigger){
+        const id = trigger.getAttribute("data-target");
+        const panel = id ? document.getElementById(id) : null;
+        if(!panel) return;
+
+        const isOpen = panel.classList.contains("sgsi-open");
+
+        if(isOpen){
+          panel.classList.remove("sgsi-open");
+          trigger.classList.remove("sgsi-active");
+        }else{
+          panel.classList.add("sgsi-open");
+          trigger.classList.add("sgsi-active");
+        }
+      }
+
+      document.addEventListener("click", function(e){
+        const trigger = e.target.closest(".sgsi-root-toggle, .sgsi-node-toggle");
+
+        if(trigger){
+          e.preventDefault();
+          e.stopPropagation();
+          sgsiTogglePanel(trigger);
+          return;
+        }
+
+      });
+    </script>
+
+    <script id="grac-hover-menu-v11">
+      (function(){
+        // El menú se controla únicamente con hover/foco: sin flecha de fijación.
+        var menu = document.getElementById('sgsiGlobalMenu') || document.getElementById('sgsiLocalMenu');
+        if (!menu) return;
+        document.body.classList.remove('grac-menu-pinned', 'sgsi-menu-collapsed');
+        // Elimina cualquier preferencia previa de fijación de la versión anterior.
+        try {sessionStorage.removeItem('grac_menu_pinned_v10');} catch(e) {}
+        // Conserva los nombres accesibles de los iconos cuando está contraído.
+        menu.querySelectorAll('a,button').forEach(function(control){
+          var labelNode = control.querySelector('span');
+          var name = labelNode ? labelNode.textContent.trim() : '';
+          if(name){
+            control.setAttribute('aria-label',name);
+            control.setAttribute('title',name);
+          }
+        });
+      })();
+    </script>
+    """,
+    sections=sections,
+    dashboard=dashboard,
+    dashboard_kpis=dashboard_kpis,
+    dashboard_charts=dashboard_charts,
+    selected_widget_keys=selected_widget_keys)
+
+    return render_template_string(
+        BASE,
+        content=content,
+        current_user=usuario_actual
+    )
+
+# ============================================================================================================================================
+#                                                               Fin del Menu Principal
+# ============================================================================================================================================
+
+
+# ============================================================================================================================================
+#                                                               Módulo de Áreas de la Empresa
+# ============================================================================================================================================
+
+
+
+
+# =========================
+# Areas - area
+# =========================
+
+@app.route('/areas_area', methods=['GET', 'POST'])
+@login_required
+def areas_area():
+    user = User.query.filter_by(username=session['username']).first()
+
+    if user.role == 'auditor':
+        flash("El auditor solo puede consultar información.", "warning")
+        return redirect(url_for('areas'))
+
+    # Crear / Editar Área
+    if request.method == 'POST':
+        rid = request.form.get('id', type=int)
+
+        area = (request.form.get('area') or "").strip()
+        responsable_nombre = (request.form.get('responsable_nombre') or "").strip()
+        responsable_cargo = (request.form.get('responsable_cargo') or "").strip()
+
+        if not all([area, responsable_nombre, responsable_cargo]):
+            flash("Todos los campos del área son obligatorios.", "danger")
+            return redirect(url_for('areas_area'))
+
+        if rid:
+            item = AreaEmpresa.query.get(rid)
+            if not item:
+                flash("Área no encontrada.", "danger")
+                return redirect(url_for('areas_area'))
+        else:
+            item = AreaEmpresa()
+
+        item.area = area
+        item.responsable_nombre = responsable_nombre
+        item.responsable_cargo = responsable_cargo
+
+        db.session.add(item)
+        db.session.commit()
+        flash("Área guardada correctamente.", "success")
+        return redirect(url_for('areas_area'))
+
+    # GET
+    edit_id = request.args.get('edit', type=int)
+    edit_item = AreaEmpresa.query.get(edit_id) if edit_id else None
+    items = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
+
+    html = """
+    <div class="areas-shell">
+
+      <!-- CABECERA -->
+      <div class="areas-header-card">
+        <div class="areas-header-overlay">
+          <div class="areas-header-text">
+            <h3 class="areas-title m-0">Áreas de la Empresa</h3>
+            <div class="areas-subtitle">
+              Administra las áreas organizacionales y asigna el responsable
+              principal de cada una junto con su cargo.
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- FORMULARIO -->
+      <div class="areas-card p-4 mb-3">
+        <div class="areas-section-title">
+          {% if edit_item %}Editar área{% else %}Registrar nueva área{% endif %}
+        </div>
+
+        <form method="post" action="{{ url_for('areas_area') }}">
+          {% if edit_item %}
+            <input type="hidden" name="id" value="{{ edit_item.id }}">
+          {% endif %}
+
+          <div class="row g-3">
+
+            <div class="col-md-4">
+              <label class="form-label">Área</label>
+              <input type="text"
+                     name="area"
+                     class="form-control"
+                     required
+                     value="{{ edit_item.area if edit_item else '' }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">Nombre responsable del área</label>
+              <input type="text"
+                     name="responsable_nombre"
+                     class="form-control"
+                     required
+                     value="{{ edit_item.responsable_nombre if edit_item else '' }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">Cargo (Responsable de área)</label>
+              <input type="text"
+                     name="responsable_cargo"
+                     class="form-control"
+                     required
+                     value="{{ edit_item.responsable_cargo if edit_item else '' }}">
+            </div>
+
+          </div>
+
+          <div class="mt-4 d-flex justify-content-center gap-2">
+            <button type="submit" class="btn btn-success rounded-pill px-4">
+              {% if edit_item %}Guardar cambios{% else %}Agregar área{% endif %}
+            </button>
+
+            {% if edit_item %}
+              <a href="{{ url_for('areas_area') }}"
+                 class="btn btn-outline-secondary rounded-pill px-4">
+                Cancelar
+              </a>
+            {% endif %}
+          </div>
+        </form>
+      </div>
+
+      <!-- TABLA -->
+      <div class="areas-card p-3">
+        <div class="areas-section-title">
+          Listado de áreas registradas
+        </div>
+
+        <div class="table-responsive areas-table-wrap">
+          <table class="table table-bordered table-sm align-middle mb-0">
+            <thead class="areas-table-head">
+              <tr class="text-center">
+                <th>Área</th>
+                <th>Responsable del área</th>
+                <th>Cargo (Resp.)</th>
+                <th style="width:16%; min-width:170px;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for it in items %}
+              <tr>
+                <td><b>{{ it.area }}</b></td>
+                <td>{{ it.responsable_nombre }}</td>
+                <td>{{ it.responsable_cargo }}</td>
+                <td class="text-center">
+                  <a href="{{ url_for('areas_area', edit=it.id) }}"
+                     class="btn btn-warning btn-sm rounded-pill px-3">
+                    Editar
+                  </a>
+
+                  <a href="{{ url_for('areas_delete', id=it.id) }}"
+                     class="btn btn-danger btn-sm rounded-pill px-3"
+                     onclick="return confirm('¿Eliminar este registro?');">
+                    Eliminar
+                  </a>
+                </td>
+              </tr>
+              {% endfor %}
+
+              {% if items|length == 0 %}
+                <tr>
+                  <td colspan="4" class="text-center text-muted">
+                    Sin registros
+                  </td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .areas-shell{
+        width:96%;
+        max-width:1200px;
+        margin:26px auto 24px auto;
+        overflow:hidden;
+      }
+
+      .areas-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .areas-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .areas-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        position:relative;
+        z-index:1;
+        min-width:0;
+      }
+
+      .areas-header-overlay::before{
+        content:"📦";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.4rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .areas-header-text{
+        max-width:1000px;
+        min-width:0;
+      }
+
+      .areas-header-text::before{
+        content:"SGSI · Gestión de Áreas";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }
+
+      .areas-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        margin:0 !important;
+        text-shadow:0 4px 14px rgba(0,0,0,.45);
+        overflow-wrap:break-word;
+      }
+
+      .areas-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        line-height:1.25;
+        margin-top:3px;
+        overflow-wrap:break-word;
+      }
+
+      .areas-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .btn{
+        border-radius:10px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+        max-width:100%;
+      }
+
+      .areas-btn-main{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .areas-btn-main:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+      }
+
+      .areas-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+        width:100%;
+        max-width:100%;
+      }
+
+      .areas-card .card-body{
+        padding:22px;
+        overflow:hidden;
+      }
+
+      .areas-section-title{
+        font-weight:950;
+        font-size:.95rem;
+        color:#0b4a8f;
+        margin-bottom:16px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+        padding-bottom:8px;
+        overflow-wrap:break-word;
+      }
+
+      .areas-table-wrap{
+        border:1px solid #e2ebf5;
+        border-radius:14px;
+        background:#ffffff;
+        overflow-x:auto;
+        overflow-y:hidden;
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.35);
+        width:100%;
+        max-width:100%;
+      }
+
+      .areas-table-wrap .table{
+        margin-bottom:0;
+        min-width:780px;
+      }
+
+      .areas-table-wrap thead th,
+      .areas-table-head th{
+        background:#eef5ff !important;
+        font-weight:950;
+        color:#0b4a8f;
+        border-bottom:1px solid #d7dee7 !important;
+        vertical-align:middle !important;
+        white-space:nowrap;
+        font-size:.82rem;
+      }
+
+      .areas-table-wrap tbody td{
+        vertical-align:middle;
+        font-size:.85rem;
+        color:#334155;
+      }
+
+      .areas-table-wrap tbody tr:last-child td{
+        border-bottom:none;
+      }
+
+      .areas-table-wrap tbody tr:hover{
+        background:#f8fbff;
+      }
+
+      .form-control,
+      .form-select{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        max-width:100%;
+      }
+
+      .form-control:focus,
+      .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
+        background:#ffffff;
+      }
+
+      .input-group-text{
+        border-radius:0 10px 10px 0;
+        background:#eef5ff;
+        border-color:#d9e3f0;
+        color:#0b4a8f;
+        font-weight:900;
+      }
+
+      .areas-soft-box{
+        background:#f8fbff;
+        border:1px solid #e2ebf5;
+        border-radius:14px;
+        padding:14px 16px;
+        min-width:0;
+        max-width:100%;
+        overflow:hidden;
+        overflow-wrap:break-word;
+      }
+
+      h3{
+        color:#ffffff;
+        margin:0;
+      }
+
+      @media (max-width:992px){
+        .areas-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .areas-title{
+          font-size:1.20rem;
+        }
+
+        .areas-subtitle{
+          font-size:.68rem;
+        }
+
+        .areas-card .card-body{
+          padding:16px;
+        }
+      }
+
+      @media (max-width:768px){
+        .areas-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .areas-header-overlay::before{
+          margin:0;
+        }
+
+        .areas-title,
+        .areas-subtitle{
+          text-align:center;
+        }
+
+        .areas-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+    inner = render_template_string(html, edit_item=edit_item, items=items)
+    return render_template_string(BASE, content=Markup(inner))
+
+# =========================
+# División
+# =========================
+
+@app.route('/areas_division', methods=['GET', 'POST'])
+@login_required
+def areas_division():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El auditor solo puede consultar información.", "warning")
+        return redirect(url_for('areas'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Configuración Parámetros de la Empresa"):
+        flash("No tiene permiso para gestionar Divisiones.", "danger")
+        return redirect(url_for('areas'))
+    
+    # Crear / Editar División
+    if request.method == 'POST':
+        rid = request.form.get('id', type=int)
+
+        area_id = request.form.get('area_id', type=int)
+        nombre_division = (request.form.get('nombre_division') or "").strip()
+        encargado_nombre = (request.form.get('encargado_nombre') or "").strip()
+        encargado_cargo = (request.form.get('encargado_cargo') or "").strip()
+
+        if not all([area_id, nombre_division, encargado_nombre, encargado_cargo]):
+            flash("Todos los campos de la división son obligatorios.", "danger")
+            return redirect(url_for('areas_division'))
+
+        if not AreaEmpresa.query.get(area_id):
+            flash("El área seleccionada no existe.", "danger")
+            return redirect(url_for('areas_division'))
+
+        if rid:
+            div = DivisionEmpresa.query.get(rid)
+            if not div:
+                flash("División no encontrada.", "danger")
+                return redirect(url_for('areas_division'))
+        else:
+            div = DivisionEmpresa()
+
+        div.area_id = area_id
+        div.nombre_division = nombre_division
+        div.encargado_nombre = encargado_nombre
+        div.encargado_cargo = encargado_cargo
+
+        db.session.add(div)
+        db.session.commit()
+        flash("División guardada correctamente.", "success")
+        return redirect(url_for('areas_division'))
+
+    # GET
+    edit_id = request.args.get('edit', type=int)
+    edit_item = DivisionEmpresa.query.get(edit_id) if edit_id else None
+
+    areas_list = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
+    divisiones_list = DivisionEmpresa.query.join(AreaEmpresa).order_by(
+        AreaEmpresa.area.asc(), DivisionEmpresa.nombre_division.asc()
+    ).all()
+
+    html = """
+    <div class="divisiones-shell">
+
+      <!-- CABECERA -->
+      <div class="divisiones-header-card">
+        <div class="divisiones-header-overlay">
+          <div class="divisiones-header-text">
+            <h3 class="divisiones-title m-0">Divisiones de la Empresa</h3>
+            <div class="divisiones-subtitle">
+              Administra las divisiones organizacionales, asociándolas a su área
+              y definiendo el encargado principal con su respectivo cargo.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FORMULARIO -->
+      <div class="divisiones-card p-4 mb-3">
+        <div class="divisiones-section-title">
+          {% if edit_item %}Editar división{% else %}Registrar nueva división{% endif %}
+        </div>
+
+        <form method="post" action="{{ url_for('areas_division') }}">
+          {% if edit_item %}
+            <input type="hidden" name="id" value="{{ edit_item.id }}">
+          {% endif %}
+
+          <div class="row g-3">
+
+            <div class="col-md-4">
+              <label class="form-label">Área</label>
+              <select name="area_id" class="form-select" required>
+                <option value="">-- Seleccione un área --</option>
+                {% for a in areas_list %}
+                  <option value="{{ a.id }}"
+                    {% if edit_item and edit_item.area_id == a.id %}selected{% endif %}>
+                    {{ a.area }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">Nombre de la división</label>
+              <input type="text"
+                     name="nombre_division"
+                     class="form-control"
+                     required
+                     value="{{ edit_item.nombre_division if edit_item else '' }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">Nombre del encargado de la división</label>
+              <input type="text"
+                     name="encargado_nombre"
+                     class="form-control"
+                     required
+                     value="{{ edit_item.encargado_nombre if edit_item else '' }}">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">Cargo (Encargado de división)</label>
+              <input type="text"
+                     name="encargado_cargo"
+                     class="form-control"
+                     required
+                     value="{{ edit_item.encargado_cargo if edit_item else '' }}">
+            </div>
+
+          </div>
+
+          <div class="mt-4 d-flex justify-content-center gap-2">
+            <button type="submit" class="btn btn-success rounded-pill px-4">
+              {% if edit_item %}Guardar cambios{% else %}Agregar división{% endif %}
+            </button>
+
+            {% if edit_item %}
+              <a href="{{ url_for('areas_division') }}"
+                 class="btn btn-outline-secondary rounded-pill px-4">
+                Cancelar
+              </a>
+            {% endif %}
+          </div>
+        </form>
+      </div>
+
+      <!-- TABLA -->
+      <div class="divisiones-card p-3">
+        <div class="divisiones-section-title">
+          Listado de divisiones registradas
+        </div>
+
+        <div class="table-responsive divisiones-table-wrap">
+          <table class="table table-bordered table-sm align-middle mb-0">
+            <thead class="divisiones-table-head">
+              <tr class="text-center">
+                <th>Área</th>
+                <th>División</th>
+                <th>Encargado</th>
+                <th>Cargo (Enc. Div.)</th>
+                <th style="width:16%; min-width:170px;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for d in divisiones_list %}
+              <tr>
+                <td>{{ d.area.area if d.area else '' }}</td>
+                <td><b>{{ d.nombre_division }}</b></td>
+                <td>{{ d.encargado_nombre }}</td>
+                <td>{{ d.encargado_cargo }}</td>
+                <td class="text-center">
+                  <a href="{{ url_for('areas_division', edit=d.id) }}"
+                     class="btn btn-warning btn-sm rounded-pill px-3">
+                    Editar
+                  </a>
+
+                  <a href="{{ url_for('division_delete', id=d.id) }}"
+                     class="btn btn-danger btn-sm rounded-pill px-3"
+                     onclick="return confirm('¿Eliminar esta división?');">
+                    Eliminar
+                  </a>
+                </td>
+              </tr>
+              {% endfor %}
+
+              {% if divisiones_list|length == 0 %}
+                <tr>
+                  <td colspan="5" class="text-center text-muted">
+                    Sin registros
+                  </td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+   <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .divisiones-shell{
+        width:96%;
+        max-width:1200px;
+        margin:26px auto 24px auto;
+        overflow:hidden;
+      }
+
+      .divisiones-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .divisiones-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .divisiones-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        position:relative;
+        z-index:1;
+        min-width:0;
+      }
+
+      .divisiones-header-overlay::before{
+        content:"🏛️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.4rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .divisiones-header-text{
+        max-width:1000px;
+        min-width:0;
+      }
+
+      .divisiones-header-text::before{
+        content:"SGSI · Gestión de Divisiones";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }
+
+      .divisiones-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        margin:0 !important;
+        text-shadow:0 4px 14px rgba(0,0,0,.45);
+        overflow-wrap:break-word;
+      }
+
+      .divisiones-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        line-height:1.25;
+        margin-top:3px;
+        overflow-wrap:break-word;
+      }
+
+      .divisiones-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .btn{
+        border-radius:10px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+        max-width:100%;
+      }
+
+      .divisiones-btn-main{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .divisiones-btn-main:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+      }
+
+      .divisiones-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+        width:100%;
+        max-width:100%;
+      }
+
+      .divisiones-card .card-body{
+        padding:22px;
+        overflow:hidden;
+      }
+
+      .divisiones-section-title{
+        font-weight:950;
+        font-size:.95rem;
+        color:#0b4a8f;
+        margin-bottom:16px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+        padding-bottom:8px;
+        overflow-wrap:break-word;
+      }
+
+      .divisiones-table-wrap{
+        border:1px solid #e2ebf5;
+        border-radius:14px;
+        background:#ffffff;
+        overflow-x:auto;
+        overflow-y:hidden;
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.35);
+        width:100%;
+        max-width:100%;
+      }
+
+      .divisiones-table-wrap .table{
+        margin-bottom:0;
+        min-width:780px;
+      }
+
+      .divisiones-table-wrap thead th,
+      .divisiones-table-head th{
+        background:#eef5ff !important;
+        font-weight:950;
+        color:#0b4a8f;
+        border-bottom:1px solid #d7dee7 !important;
+        vertical-align:middle !important;
+        white-space:nowrap;
+        font-size:.82rem;
+      }
+
+      .divisiones-table-wrap tbody td{
+        vertical-align:middle;
+        font-size:.85rem;
+        color:#334155;
+      }
+
+      .divisiones-table-wrap tbody tr:last-child td{
+        border-bottom:none;
+      }
+
+      .divisiones-table-wrap tbody tr:hover{
+        background:#f8fbff;
+      }
+
+      .form-control,
+      .form-select{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        max-width:100%;
+      }
+
+      .form-control:focus,
+      .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
+        background:#ffffff;
+      }
+
+      .input-group-text{
+        border-radius:0 10px 10px 0;
+        background:#eef5ff;
+        border-color:#d9e3f0;
+        color:#0b4a8f;
+        font-weight:900;
+      }
+
+      .divisiones-soft-box{
+        background:#f8fbff;
+        border:1px solid #e2ebf5;
+        border-radius:14px;
+        padding:14px 16px;
+        min-width:0;
+        max-width:100%;
+        overflow:hidden;
+        overflow-wrap:break-word;
+      }
+
+      h3{
+        color:#ffffff;
+        margin:0;
+      }
+
+      @media (max-width:992px){
+        .divisiones-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .divisiones-title{
+          font-size:1.20rem;
+        }
+
+        .divisiones-subtitle{
+          font-size:.68rem;
+        }
+
+        .divisiones-card .card-body{
+          padding:16px;
+        }
+      }
+
+      @media (max-width:768px){
+        .divisiones-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .divisiones-header-overlay::before{
+          margin:0;
+        }
+
+        .divisiones-title,
+        .divisiones-subtitle{
+          text-align:center;
+        }
+
+        .divisiones-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+    inner = render_template_string(
+        html,
+        edit_item=edit_item,
+        areas_list=areas_list,
+        divisiones_list=divisiones_list
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+
+@app.route('/areas/<int:area_id>/info', methods=['GET'])
+@login_required
+def areas_info(area_id):
+    a = AreaEmpresa.query.get_or_404(area_id)
+    # OJO: aquí usamos los nombres reales de tu modelo:
+    resp  = getattr(a, 'responsable_nombre', '') or ''
+    cargo = getattr(a, 'responsable_cargo', '') or ''
+    return jsonify({"responsable": resp, "cargo": cargo})
+
+@app.route('/areas/<int:area_id>/divisiones_json')
+@login_required
+def areas_divisiones_json(area_id):
+    divs = (
+        DivisionEmpresa.query
+        .filter_by(area_id=area_id)
+        .order_by(DivisionEmpresa.nombre_division.asc())
+        .all()
+    )
+
+    return jsonify({
+        "divisiones": [
+            {
+                "id": d.id,
+                "nombre": d.nombre_division
+            }
+            for d in divs
+        ]
+    })
+
+
+@app.route('/areas/delete')
+@login_required
+def areas_delete():
+    rid = request.args.get('id', type=int)
+    it = AreaEmpresa.query.get(rid)
+
+    if not it:
+        flash("Registro no encontrado.", "danger")
+        return redirect(url_for('areas'))
+
+    # 🔎 1) Verificar si el área tiene divisiones asociadas
+    divisiones_asociadas = DivisionEmpresa.query.filter_by(area_id=it.id).count()
+
+    if divisiones_asociadas > 0:
+        flash(
+            "No se puede eliminar el área porque tiene una o varias divisiones asociadas. "
+            "Elimina primero las divisiones o reasígnalas.",
+            "danger"
+        )
+        return redirect(url_for('areas'))
+
+    # ✅ 2) Si no tiene divisiones, intentar eliminar
+    try:
+        db.session.delete(it)
+        db.session.commit()
+        flash("Área eliminada correctamente.", "success")
+    except IntegrityError:
+        db.session.rollback()
+        flash(
+            "No se pudo eliminar el área porque está referenciada en otros módulos "
+            "(inventarios, proveedores, etc.).",
+            "danger"
+        )
+
+    return redirect(url_for('areas'))
+
+    # Si no es área con divisiones asociadas (o es una división), se puede eliminar
+    db.session.delete(it)
+    db.session.commit()
+    flash("Eliminado correctamente.", "success")
+    return redirect(url_for('areas'))
+
+@app.route('/divisiones/delete')
+@login_required
+def division_delete():
+    rid = request.args.get('id', type=int)
+    d = DivisionEmpresa.query.get(rid)
+    if d:
+        db.session.delete(d)
+        db.session.commit()
+        flash("División eliminada correctamente.", "success")
+    else:
+        flash("División no encontrada.", "danger")
+    return redirect(url_for('areas_division'))
+
+# =========================
+# Configuración de Correo
+# =========================
+
+@app.route("/config/email", methods=["GET", "POST"])
+@login_required
+@admin_or_access_manager_required
+def config_email():
+    cfg = EmailConfig.query.first()
+    if not cfg:
+        cfg = EmailConfig()
+        db.session.add(cfg)
+        db.session.commit()
+
+    if request.method == "POST":
+        cfg.smtp_host = (request.form.get("smtp_host") or "smtp.gmail.com").strip()
+        cfg.smtp_port = int(request.form.get("smtp_port") or 587)
+
+        cfg.smtp_user = (request.form.get("smtp_user") or "").strip() or None
+        cfg.smtp_pass = (request.form.get("smtp_pass") or "").strip() or None
+
+        cfg.smtp_from = (request.form.get("smtp_from") or "").strip() or None
+        cfg.app_name  = (request.form.get("app_name")  or "SGSI").strip()
+
+        if not cfg.smtp_from:
+            cfg.smtp_from = cfg.smtp_user
+
+        db.session.commit()
+        flash("Configuración SMTP guardada correctamente.", "success")
+
+        # ✅ CORREGIDO: antes decía url_for("areas") y ese endpoint no existe
+        return redirect(url_for("config_email"))
+
+    inner = render_template_string("""
+    <div class="smtp-shell">
+
+      <div class="smtp-header-card">
+        <div class="smtp-header-overlay">
+          <div class="smtp-header-text">
+            <h3 class="smtp-title m-0">Configuración de correo (SMTP)</h3>
+            <div class="smtp-subtitle">
+              Configura los parámetros del servidor SMTP para el envío de notificaciones,
+              alertas y comunicaciones automáticas del sistema.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="smtp-card p-4">
+        <div class="smtp-section-title">
+          Parámetros de conexión SMTP
+        </div>
+
+        <form method="POST" class="row g-3">
+
+          <div class="col-md-6">
+            <label class="form-label">SMTP Host</label>
+            <input name="smtp_host"
+                   class="form-control"
+                   value="{{ cfg.smtp_host or 'smtp.gmail.com' }}"
+                   required>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">SMTP Port</label>
+            <input name="smtp_port"
+                   type="number"
+                   class="form-control"
+                   value="{{ cfg.smtp_port or 587 }}"
+                   required>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">SMTP User (correo)</label>
+            <input name="smtp_user"
+                   type="email"
+                   class="form-control"
+                   value="{{ cfg.smtp_user or '' }}">
+            <div class="form-text">Ej: tu-cuenta@gmail.com</div>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">SMTP Pass (contraseña de app)</label>
+            <input name="smtp_pass"
+                   type="password"
+                   class="form-control"
+                   value="{{ cfg.smtp_pass or '' }}">
+            <div class="form-text">En Gmail usa “App Password”, no tu clave normal.</div>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">From (opcional)</label>
+            <input name="smtp_from"
+                   type="email"
+                   class="form-control"
+                   value="{{ cfg.smtp_from or '' }}">
+            <div class="form-text">Si queda vacío, se usa SMTP User.</div>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Nombre de la app</label>
+            <input name="app_name"
+                   class="form-control"
+                   value="{{ cfg.app_name or 'SGSI' }}"
+                   required>
+          </div>
+
+          <div class="col-12 d-flex justify-content-center mt-3">
+            <button class="btn btn-success rounded-pill px-4">
+              💾 Guardar
+            </button>
+          </div>
+
+        </form>
+      </div>
+
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .smtp-shell{
+        width:96%;
+        max-width:1200px;
+        margin:26px auto 24px auto;
+        overflow:hidden;
+      }
+
+      .smtp-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .smtp-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .smtp-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        position:relative;
+        z-index:1;
+        min-width:0;
+      }
+
+      .smtp-header-overlay::before{
+        content:"✉️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.4rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .smtp-header-text{
+        max-width:1000px;
+        min-width:0;
+      }
+
+      .smtp-header-text::before{
+        content:"SGSI · Configuración SMTP";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }
+
+      .smtp-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        margin:0 !important;
+        text-shadow:0 4px 14px rgba(0,0,0,.45);
+        overflow-wrap:break-word;
+      }
+
+      .smtp-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        line-height:1.25;
+        margin-top:3px;
+        overflow-wrap:break-word;
+      }
+
+      .btn{
+        border-radius:10px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+        max-width:100%;
+      }
+
+      .smtp-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+        width:100%;
+        max-width:100%;
+      }
+
+      .smtp-section-title{
+        font-weight:950;
+        font-size:.95rem;
+        color:#0b4a8f;
+        margin-bottom:16px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+        padding-bottom:8px;
+      }
+
+      .form-control,
+      .form-select{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        max-width:100%;
+      }
+
+      .form-control:focus,
+      .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
+        background:#ffffff;
+      }
+
+      h3{
+        color:#ffffff;
+        margin:0;
+      }
+
+      @media (max-width:992px){
+        .smtp-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .smtp-title{
+          font-size:1.20rem;
+        }
+
+        .smtp-subtitle{
+          font-size:.68rem;
+        }
+      }
+
+      @media (max-width:768px){
+        .smtp-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .smtp-header-overlay::before{
+          margin:0;
+        }
+
+        .smtp-title,
+        .smtp-subtitle{
+          text-align:center;
+        }
+      }
+    </style>
+    """, cfg=cfg)
+
+    return render_template_string(BASE, content=Markup(inner))
+
+
+# ============================================================================
+# CENTRO DE ALERTAS - CONFIGURACIÓN, EVALUACIÓN Y CORREO
+# ============================================================================
+
+ALERT_DEFAULT_RULES = [
+    {
+        "code": "risks_outside_appetite", "name": "Riesgos fuera del apetito",
+        "module": "Riesgos", "metric_key": "risks_outside_appetite_inclusive",
+        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
+        "description": "Riesgos activos cuyo nivel residual es mayor o igual al apetito configurado.",
+        "url": "/riesgos",
+    },
+    {
+        "code": "vulnerabilities_critical", "name": "Vulnerabilidades críticas abiertas",
+        "module": "Vulnerabilidades", "metric_key": "vulnerabilities_critical_count",
+        "operator": ">", "threshold": 0, "severity": "crítica", "enabled": True,
+        "description": "Vulnerabilidades críticas que permanecen abiertas.",
+        "url": "/vulnerabilidades_menu",
+    },
+    {
+        "code": "vulnerabilities_overdue", "name": "Vulnerabilidades abiertas vencidas (fuera de SLA)",
+        "module": "Vulnerabilidades", "metric_key": "vulnerabilities_overdue_count",
+        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
+        "description": "Backlog de vulnerabilidades abiertas que superó el SLA configurado por clasificación.",
+        "url": "/vulnerabilidades_menu",
+    },
+    {
+        "code": "incidents_open", "name": "Incidentes abiertos",
+        "module": "Incidentes", "metric_key": "incidents_open_count",
+        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
+        "description": "Incidentes cuyo estado todavía no está cerrado o resuelto.",
+        "url": "/incidentes",
+    },
+    {
+        "code": "incidents_compliance", "name": "Cumplimiento de incidentes inferior a la meta",
+        "module": "Incidentes", "metric_key": "incidents_compliance_pct",
+        "operator": "<", "threshold": 90, "severity": "media", "enabled": False,
+        "description": "Cumplimiento promedio MTCD/MTIR inferior al porcentaje definido en esta regla.",
+        "url": "/metricas/incidentes/matriz",
+    },
+    {
+        "code": "plans_overdue", "name": "Planes de acción vencidos",
+        "module": "Planes de acción", "metric_key": "plans_overdue_count",
+        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
+        "description": "Planes cuya fecha objetivo venció y todavía no están cerrados.",
+        "url": "/planes_accion",
+    },
+    {
+        "code": "legal_noncompliant", "name": "Requisitos legales incumplidos",
+        "module": "Requisitos legales", "metric_key": "legal_noncompliant_count",
+        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
+        "description": "Requisitos legales o contractuales registrados como no cumplidos.",
+        "url": "/requisitos_menu",
+    },
+    {
+        "code": "providers_high", "name": "Proveedores de criticidad alta",
+        "module": "Proveedores", "metric_key": "providers_high_count",
+        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
+        "description": "Proveedores cuya evaluación presenta criticidad alta.",
+        "url": "/proveedores_menu",
+    },
+    {
+        "code": "documents_overdue", "name": "Documentos con revisión vencida",
+        "module": "Documentación", "metric_key": "documents_overdue_count",
+        "operator": ">", "threshold": 0, "severity": "media", "enabled": True,
+        "description": "Documentos vigentes que el Listado Maestro clasifica con estado de revisión Vencido.",
+        "url": "/docs/matriz?estado_revision=Vencido",
+    },
+    {
+        "code": "documents_due_soon", "name": "Documentos próximos a vencer",
+        "module": "Documentación", "metric_key": "documents_due_soon_count",
+        "operator": ">", "threshold": 0, "severity": "media", "enabled": True,
+        "description": "Documentos vigentes que el Listado Maestro clasifica como Cercano según la periodicidad configurada para su tipo.",
+        "url": "/docs/matriz?estado_revision=Cercano",
+    },
+    {
+        "code": "wazuh_high", "name": "Alertas Wazuh altas o críticas",
+        "module": "Cumplimiento continuo", "metric_key": "wazuh_high_count",
+        "operator": ">", "threshold": 0, "severity": "crítica", "enabled": True,
+        "description": "Alertas Wazuh con nivel de regla igual o superior a 10.",
+        "url": "/cumplimiento_continuo/wazuh",
+    },
+    {
+        "code": "firewall_critical", "name": "Hallazgos críticos de firewall",
+        "module": "Gobierno de Firewall", "metric_key": "firewall_critical_count",
+        "operator": ">", "threshold": 0, "severity": "crítica", "enabled": True,
+        "description": "Hallazgos críticos activos y todavía no resueltos en Gobierno de Firewall.",
+        "url": "/cumplimiento_continuo/firewall",
+    },
+    {
+        "code": "bcp_backups_failed", "name": "Backups fallidos",
+        "module": "Continuidad", "metric_key": "bcp_backups_failed_count",
+        "operator": ">", "threshold": 0, "severity": "crítica", "enabled": True,
+        "description": "Respaldos fallidos registrados en el módulo BCP/DRP.",
+        "url": "/bcp/metricas",
+    },
+    {
+        "code": "bcp_systems_without_drp", "name": "Sistemas críticos sin DRP",
+        "module": "Continuidad", "metric_key": "bcp_systems_without_drp_count",
+        "operator": ">", "threshold": 0, "severity": "alta", "enabled": True,
+        "description": "Sistemas o procesos críticos sin cobertura de recuperación documentada.",
+        "url": "/bcp/metricas",
+    },
+    {
+        "code": "iso27001_below_target", "name": "Madurez ISO 27001 inferior a la meta",
+        "module": "Madurez", "metric_key": "maturity_iso_pct",
+        "operator": "<", "threshold": 60, "severity": "media", "enabled": False,
+        "description": "Porcentaje de madurez ISO 27001 inferior a la meta definida en la regla.",
+        "url": "/madurez",
+    },
+]
+
+ALERT_RULE_URLS = {item["code"]: item.get("url", "") for item in ALERT_DEFAULT_RULES}
+ALERT_OPERATORS = {">", ">=", "=", "<", "<="}
+ALERT_SEVERITIES = {"informativa", "baja", "media", "alta", "crítica"}
+
+
+def alert_get_config():
+    cfg = AlertConfig.query.first()
+    if not cfg:
+        cfg = AlertConfig()
+        db.session.add(cfg)
+        db.session.commit()
+    return cfg
+
+
+def alert_seed_defaults():
+    """Crea solo las reglas faltantes y conserva toda personalización existente."""
+    existing = {row.code for row in AlertRule.query.all()}
+    created = 0
+    for item in ALERT_DEFAULT_RULES:
+        if item["code"] in existing:
+            continue
+        db.session.add(AlertRule(
+            code=item["code"], name=item["name"], module=item["module"],
+            description=item["description"], metric_key=item["metric_key"],
+            operator=item["operator"], threshold=float(item["threshold"]),
+            severity=item["severity"], enabled=bool(item["enabled"]),
+            email_enabled=True, repeat_minutes=1440,
+        ))
+        created += 1
+    if created:
+        db.session.commit()
+    alert_get_config()
+    return created
+
+
+def alert_parse_recipients(raw):
+    values = re.split(r"[;,\n\r]+", str(raw or ""))
+    valid, invalid = [], []
+    pattern = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+    for value in values:
+        email = value.strip().lower()
+        if not email:
+            continue
+        if pattern.match(email):
+            if email not in valid:
+                valid.append(email)
+        else:
+            invalid.append(email)
+    return valid, invalid
+
+
+def alert_compare(value, operator, threshold):
+    value = float(value or 0)
+    threshold = float(threshold or 0)
+    return {
+        ">": value > threshold,
+        ">=": value >= threshold,
+        "=": value == threshold,
+        "<": value < threshold,
+        "<=": value <= threshold,
+    }.get(operator, False)
+
+
+def alert_plain(value):
+    text_value = unicodedata.normalize("NFKD", str(value or "").strip().lower())
+    return "".join(ch for ch in text_value if not unicodedata.combining(ch))
+
+
+def alert_vulnerabilities_overdue_count():
+    config = MetricasVulnerabilidadesConfig.query.first()
+    if not config:
+        return 0.0
+    sla_by_level = {}
+    for row in (config.clasificaciones or []):
+        days = getattr(row, "tiempo_max_cierre_dias", None)
+        if days is not None and int(days) >= 0:
+            sla_by_level[alert_plain(row.clasificacion)] = int(days)
+    if not sla_by_level:
+        return 0.0
+    today = date.today()
+    total = 0
+    for item in VulnerabilidadRegistro.query.all():
+        status = alert_plain(getattr(item, "estado", ""))
+        if status in {"cerrado", "cerrada", "closed", "resuelto", "resuelta"}:
+            continue
+        identified = getattr(item, "fecha_identificacion", None)
+        if isinstance(identified, datetime):
+            identified = identified.date()
+        if not identified:
+            continue
+        level = alert_plain(getattr(item, "clasificacion", ""))
+        sla_days = sla_by_level.get(level)
+        if sla_days is None:
+            for configured_level, configured_days in sla_by_level.items():
+                if configured_level in level or level in configured_level:
+                    sla_days = configured_days
+                    break
+        if sla_days is not None and identified + datetime_module.timedelta(days=sla_days) < today:
+            total += 1
+    return float(total)
+
+
+def alert_documents_by_review_status(status_text):
+    """Devuelve los documentos con el mismo estado mostrado en el Listado Maestro."""
+    expected = alert_plain(status_text)
+    matches = []
+    for document in DocMaestroDocumento.query.all():
+        # Una versión obsoleta no debe generar alertas de revisión o vigencia.
+        if "obsolet" in alert_plain(getattr(document, "estado", "")):
+            continue
+        try:
+            review_status = calcular_estado_revision(document, getattr(document, "tipo", None)) or {}
+            current = alert_plain(review_status.get("texto", ""))
+        except Exception:
+            current = ""
+        if current == expected:
+            matches.append(document)
+    return matches
+
+
+def alert_documents_overdue_count():
+    return float(len(alert_documents_by_review_status("Vencido")))
+
+
+def alert_documents_due_soon_count():
+    return float(len(alert_documents_by_review_status("Cercano")))
+
+
+def alert_documents_message(metric_key, value):
+    """Construye un mensaje identificable para la alerta en pantalla y por correo."""
+    if metric_key == "documents_overdue_count":
+        status_text = "Vencido"
+        summary_text = "con revisión vencida"
+    elif metric_key == "documents_due_soon_count":
+        status_text = "Cercano"
+        summary_text = "próximos a vencer"
+    else:
+        return None
+
+    documents = alert_documents_by_review_status(status_text)
+    labels = []
+    for document in documents[:10]:
+        code = (getattr(document, "codigo", "") or "").strip()
+        name = (getattr(document, "nombre_documento", "") or "Documento sin nombre").strip()
+        labels.append(f"{code} - {name}" if code else name)
+    detail = "; ".join(labels)
+    if len(documents) > 10:
+        detail += f"; y {len(documents) - 10} documento(s) adicional(es)"
+    base = f"Se detectaron {alert_format_number(value)} documento(s) {summary_text} en el Listado Maestro."
+    return f"{base} Documentos: {detail}." if detail else base
+
+
 def alert_metric_value(metric_key):
     """Obtiene datos de los módulos reales; no utiliza cifras escritas en la regla."""
     metric_key = str(metric_key or "").strip()
@@ -771,7 +4401,7 @@ def alert_center():
         {% for event in events %}<tr><td class="ps-3"><span class="badge bg-{{ 'danger' if event.severity in ['alta','crítica'] else 'warning text-dark' if event.severity=='media' else 'info text-dark' }}">{{ event.severity|upper }}</span></td>
           <td><b>{{ event.title }}</b><div class="small text-muted">{{ event.module }} · {{ event.message }}</div>{% if event.reference_url %}<a class="small" href="{{ event.reference_url }}">Abrir registro relacionado</a>{% endif %}</td>
           <td class="fw-bold">{{ format_number(event.value) }}</td><td><span class="badge bg-{{ badge(event.status) }}">{{ event.status }}</span></td><td>{{ event.last_seen_at.strftime('%Y-%m-%d %H:%M') }}</td>
-          <td><div class="d-flex flex-wrap gap-1">{% if event.status not in ['resuelta','descartada'] %}<form method="post"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="acknowledge"><button class="btn btn-sm btn-outline-warning" title="Reconocer"><i class="bi bi-eye"></i></button></form><form method="post"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="resolve"><button class="btn btn-sm btn-outline-success" title="Resolver"><i class="bi bi-check2-circle"></i></button></form><form method="post"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="discard"><button class="btn btn-sm btn-outline-secondary" title="Descartar"><i class="bi bi-x-circle"></i></button></form>{% endif %}</div></td></tr>
+          <td><div class="grac-alert-action-group">{% if event.status not in ['resuelta','descartada'] %}<form method="post"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="acknowledge"><button class="btn btn-sm btn-outline-warning" title="Reconocer" aria-label="Reconocer alerta"><i class="bi bi-eye" aria-hidden="true"></i><span>Reconocer</span></button></form><form method="post"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="resolve"><button class="btn btn-sm btn-outline-success" title="Resolver" aria-label="Resolver alerta"><i class="bi bi-check2-circle" aria-hidden="true"></i><span>Resolver</span></button></form><form method="post"><input type="hidden" name="event_id" value="{{ event.id }}"><input type="hidden" name="action" value="discard"><button class="btn btn-sm btn-outline-secondary" title="Descartar" aria-label="Descartar alerta"><i class="bi bi-x-circle" aria-hidden="true"></i><span>Descartar</span></button></form>{% endif %}</div></td></tr>
         {% else %}<tr><td colspan="6" class="text-center text-muted py-5"><i class="bi bi-bell-slash fs-1 d-block mb-2"></i>No hay alertas para los filtros seleccionados.</td></tr>{% endfor %}
         </tbody></table></div></div></div>
       {% if is_admin %}<div class="text-end mt-3"><a class="btn btn-outline-primary" href="{{ url_for('admin_alertas') }}"><i class="bi bi-gear"></i> Administrar alertas</a></div>{% endif %}
@@ -1986,10 +5616,10 @@ def declaracion_aplicabilidad():
                             </a>
 
                             {% if not read_only %}
-                            <button type="button"
-                                    title="Eliminar archivo"
+                            <button type="button" class="soa-evidence-delete grac-trash-button"
+                                    title="Eliminar archivo" aria-label="Eliminar archivo"
                                     onclick="deleteEvidence({{ r.id }}, '{{ file }}', 'file-{{ r.id }}-{{ loop.index }}')">
-                              🗑️
+                              <i class="bi bi-trash3-fill" aria-hidden="true"></i>
                             </button>
                             {% endif %}
                           </div>
@@ -2048,7 +5678,10 @@ def declaracion_aplicabilidad():
 
               const eliminarBtn = document.createElement('button');
               eliminarBtn.type = "button";
-              eliminarBtn.textContent = "❌";
+              eliminarBtn.className = "soa-evidence-delete grac-trash-button";
+              eliminarBtn.setAttribute("title", "Quitar archivo");
+              eliminarBtn.setAttribute("aria-label", "Quitar archivo");
+              eliminarBtn.innerHTML = '<i class="bi bi-trash3-fill" aria-hidden="true"></i>';
               eliminarBtn.onclick = () => {
                 div.remove();
 
@@ -5774,4008 +9407,4 @@ def gestion_riesgos():
 
 # ===========================
 # AGREGAR RIESGO (Versión completa + prellenado desde proveedores)
-# ===========================
-@app.route('/agregar_riesgo', methods=['GET', 'POST'])
-@login_required
-def agregar_riesgo():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede agregar registros.", "danger")
-        return redirect(url_for('riesgos_menu'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Riesgos"):
-        flash("No tiene permiso para agregar riesgos.", "danger")
-        return redirect(url_for('riesgos_menu'))
-
-    # =========================================================
-    # DATOS DE ORIGEN / PREFILL DESDE PROVEEDORES
-    # =========================================================
-    origen = (request.args.get('origen') or request.form.get('origen') or '').strip()
-    proveedor_id = request.args.get('proveedor_id', type=int) or request.form.get('proveedor_id', type=int)
-    proveedor_nombre_qs = (request.args.get('proveedor') or request.form.get('proveedor') or '').strip()
-    activo_qs = (request.args.get('activo') or request.form.get('activo') or '').strip()
-    descripcion_qs = (request.args.get('descripcion') or request.form.get('descripcion') or '').strip()
-    observacion_qs = (request.args.get('observacion') or request.form.get('observacion') or '').strip()
-
-    proveedor_obj = None
-    if origen.lower() == 'proveedor' and proveedor_id:
-        try:
-            proveedor_obj = ProveedorEvaluacion.query.get(proveedor_id)
-        except Exception:
-            proveedor_obj = None
-
-    fecha_hoy = datetime.now().strftime('%Y-%m-%d')
-
-    propietario_prefill = ''
-    riesgo_prefill = ''
-    amenaza_prefill = ''
-    vulnerabilidad_prefill = ''
-    tipo_activo_prefill = ''
-    nombre_activo_prefill = ''
-    dimension_prefill = ''
-    observaciones_prefill = ''
-    planes_accion_prefill = ''
-    responsable_prefill = ''
-
-    if proveedor_obj:
-        nombre_proveedor = (proveedor_obj.nombre_proveedor or '').strip()
-        responsable_area = (proveedor_obj.responsable_area_nombre or proveedor_obj.responsable_area_cargo or '').strip()
-        resultado_eval = (proveedor_obj.resultado_evaluacion or '').strip()
-        criticidad_txt = (proveedor_obj.criticidad_texto or '').strip()
-        criticidad_pct = proveedor_obj.criticidad_pct if proveedor_obj.criticidad_pct is not None else 0
-
-        if proveedor_obj.procesa_info_sensible == 'Sí' or proveedor_obj.procesa_datos_personales == 'Sí':
-            dimension_prefill = 'Confidencialidad'
-        elif proveedor_obj.es_esencial == 'Sí':
-            dimension_prefill = 'Disponibilidad'
-        else:
-            dimension_prefill = ''
-
-        propietario_prefill = responsable_area
-        responsable_prefill = responsable_area
-        riesgo_prefill = f"Dependencia y exposición de seguridad asociada al proveedor {nombre_proveedor}"
-        amenaza_prefill = "Incumplimiento, indisponibilidad o falla del proveedor"
-        vulnerabilidad_prefill = (
-            "Proveedor no aprobado por seguridad o con brechas en controles, continuidad, "
-            "recuperación, nube, datos personales o SLA"
-        )
-        tipo_activo_prefill = "Proveedor"
-        nombre_activo_prefill = nombre_proveedor
-
-        observaciones_prefill = (
-            "Riesgo generado automáticamente desde el módulo de proveedores.\n"
-            f"Proveedor: {nombre_proveedor}\n"
-            f"Resultado evaluación: {resultado_eval}\n"
-            f"Criticidad: {criticidad_txt} ({criticidad_pct}%)\n"
-            f"Descripción producto/servicio: {proveedor_obj.desc_producto_servicio or ''}\n"
-            f"Transversal: {proveedor_obj.es_transversal or ''}\n"
-            f"Esencial continuidad: {proveedor_obj.es_esencial or ''}\n"
-            f"Plan de continuidad: {proveedor_obj.tiene_plan_cont or ''}\n"
-            f"Plan de recuperación: {proveedor_obj.tiene_plan_rec or ''}\n"
-            f"Alternativas en el mercado: {proveedor_obj.existen_alternativas or ''}\n"
-            f"Plan de migración: {proveedor_obj.existe_plan_migracion or ''}\n"
-            f"Procesa info. sensible: {proveedor_obj.procesa_info_sensible or ''}\n"
-            f"Procesa datos personales: {proveedor_obj.procesa_datos_personales or ''}\n"
-            f"Procesa información en la nube: {proveedor_obj.procesa_info_nube or ''}\n"
-            f"Incluye SLA definidos: {proveedor_obj.incluye_sla or ''}\n"
-        )
-
-        planes_accion_prefill = (
-            "1. Definir tratamiento del riesgo del proveedor.\n"
-            "2. Validar controles de seguridad exigibles al tercero.\n"
-            "3. Revisar continuidad, recuperación y SLA.\n"
-            "4. Formalizar plan de seguimiento y remediación."
-        )
-
-    else:
-        riesgo_prefill = (descripcion_qs or '').strip()
-        amenaza_prefill = "Incumplimiento, indisponibilidad o falla del proveedor" if origen.lower() == 'proveedor' else ''
-        vulnerabilidad_prefill = (
-            "Proveedor no aprobado por seguridad o con brechas en controles, continuidad, recuperación, nube, datos personales o SLA"
-            if origen.lower() == 'proveedor' else ''
-        )
-        tipo_activo_prefill = 'Proveedor' if origen.lower() == 'proveedor' else ''
-        nombre_activo_prefill = (activo_qs or proveedor_nombre_qs or '').strip()
-        observaciones_prefill = (observacion_qs or '').strip()
-
-    # =========================================================
-    # POST
-    # =========================================================
-    if request.method == 'POST':
-
-        controles_formulario = riesgo_extraer_controles_formulario(request.form)
-        solidez_individual_calculada = (
-            controles_formulario[0]["solidez_individual"] if controles_formulario else 0.0
-        )
-        solidez_grupal_calculada = riesgo_calcular_solidez_grupal(controles_formulario)
-
-        resultado_residual = riesgo_calcular_resultados(
-            request.form.get('prob_inh'),
-            request.form.get('imp_inh'),
-            solidez_grupal_calculada,
-        )
-        prob_res_num = resultado_residual['prob_res_num']
-        impacto_res_num = resultado_residual['imp_res_num']
-        prob_res_label = resultado_residual['prob_res_label']
-        impacto_res_label = resultado_residual['imp_res_label']
-        cuadrante_prob = prob_res_label
-        prob_res = prob_res_label
-        cuadrante_imp = impacto_res_label
-        riesgo_residual_calc = resultado_residual['riesgo_residual']
-        riesgo_inherente_calc = resultado_residual['riesgo_inherente']
-
-        tipo_riesgo_id = request.form.get("tipo_riesgo_id")
-
-        obs_final = (request.form.get('observaciones') or '').strip()
-        if origen.lower() == 'proveedor':
-            traza = (
-                f"\n\n[TRAZABILIDAD]\n"
-                f"Origen: Proveedor\n"
-                f"Proveedor ID: {proveedor_id or ''}\n"
-                f"Proveedor: {proveedor_nombre_qs or nombre_activo_prefill or ''}"
-            )
-            if traza not in obs_final:
-                obs_final = (obs_final + traza).strip()
-
-        nuevo = Riesgo(
-            codigo_riesgo=request.form.get('codigo_riesgo'),
-            riesgo=request.form.get('riesgo'),
-            fecha_identificacion=request.form.get('fecha_identificacion'),
-            propietario_riesgo=request.form.get('propietario_riesgo'),
-            codigo_amenaza=request.form.get('cod_amenaza'),
-            amenaza=request.form.get('amenaza'),
-            codigo_vulnerabilidad=request.form.get('cod_vulnerabilidad'),
-            vulnerabilidad=request.form.get('vulnerabilidad'),
-            tipo_activo=request.form.get('tipo_activo'),
-            nombre_activo=request.form.get('nombre_activo'),
-            dimension_seguridad=request.form.get('dimension_seguridad'),
-            probabilidad=resultado_residual['prob_inh_num'],
-            impacto=resultado_residual['imp_inh_num'],
-            prob_inh=request.form.get('prob_inh'),
-            imp_inh=request.form.get('imp_inh'),
-            riesgo_inherente=riesgo_inherente_calc,
-            control_codigo=None,
-            codigo_anexo=None,
-            codigo_control_pci_dss=None,
-            codigo_control_nist_csf=None,
-            codigo_control_soc2=None,
-            descripcion_control=None,
-            plan_accion=request.form.get('plan_accion'),
-            asignacion=None,
-            cargo=None,
-            tipo_control=None,
-            forma_control=None,
-            frecuencia=None,
-            funcionalidad=None,
-            estado_control=None,
-            referencia_documental=None,
-            evidencia_control=None,
-            soporte_evidencia=None,
-            diseno_control=None,
-            ejecucion_control=None,
-            calificacion_asignacion=0.0,
-            calificacion_tipo_control=0.0,
-            calificacion_forma_control=0.0,
-            calificacion_funcionalidad=0.0,
-            calificacion_estado_control=0.0,
-            calificacion_soporte_evidencia=0.0,
-            valor_ejecucion_control=0.0,
-            valor=solidez_grupal_calculada,
-            solidez_individual=solidez_individual_calculada,
-            solidez_grupal=solidez_grupal_calculada,
-            cuadrante_prob=cuadrante_prob,
-            prob_res=prob_res,
-            cuadrante_imp=cuadrante_imp,
-            impacto_res=impacto_res_num,
-            impacto_res_label=impacto_res_label,
-            riesgo_residual=riesgo_residual_calc,
-            fecha_revision=request.form.get('fecha_revision'),
-            tratamiento_riesgo=request.form.get('tratamiento_riesgo'),
-            observaciones=obs_final,
-            planes_accion=request.form.get('planes_accion'),
-            responsable=request.form.get('responsable'),
-            fecha_implementacion=request.form.get('fecha_implementacion'),
-            tipo_riesgo_id=int(tipo_riesgo_id) if tipo_riesgo_id else None,
-        )
-
-        db.session.add(nuevo)
-        db.session.flush()
-        riesgo_reemplazar_controles(nuevo, controles_formulario)
-        riesgo_sincronizar_campos_legacy(nuevo, controles_formulario)
-        db.session.commit()
-        flash(
-            f"✅ Riesgo registrado con {len(controles_formulario)} control(es). "
-            f"Solidez grupal: {solidez_grupal_calculada * 100:.2f}%.",
-            "success",
-        )
-        return redirect(url_for('riesgos_menu'))
-
-    reglas = sorted(ConfigProbResidual.query.all(), key=lambda r: max(float(r.min), float(r.max)), reverse=True)
-    reglas_impacto = sorted(ConfigImpactoResidual.query.all(), key=lambda r: max(float(r.min), float(r.max)), reverse=True)
-    reglas_json = json.dumps([{'min': r.min, 'max': r.max, 'bajar': r.bajar} for r in reglas])
-    reglas_impacto_json = json.dumps([{'min': r.min, 'max': r.max, 'bajar': r.bajar} for r in reglas_impacto])
-
-    tipos_riesgo = TipoRiesgo.query.filter_by(
-        owner_user_id=user.id,
-        activo=True
-    ).order_by(TipoRiesgo.nombre.asc()).all()
-
-    reglas_prob_data = [{'min': r.min, 'max': r.max, 'bajar': r.bajar} for r in reglas]
-    reglas_imp_data = [{'min': r.min, 'max': r.max, 'bajar': r.bajar} for r in reglas_impacto]
-    controles_widget = riesgo_controles_widget_html(
-        controles_iniciales=[],
-        reglas_prob=reglas_prob_data,
-        reglas_imp=reglas_imp_data,
-        section_class="riskform-section-title",
-    )
-
-    riesgos_html_formulario = """
-    <div class="riskform-shell">
-
-      <div class="riskform-header-card">
-        <div class="riskform-header-overlay">
-          <div class="riskform-header-text">
-            <h3 class="riskform-title m-0">➕ Adición de Riesgos</h3>
-            <div class="riskform-subtitle">
-              Registro, análisis, valoración y tratamiento de riesgos del Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="riskform-top-actions">
-        <a href="{{ url_for('riesgos_menu') }}"
-           class="btn btn-light rounded-pill px-4 fw-semibold">
-          ⬅ Volver a Gestión de Riesgos
-        </a>
-      </div>
-
-      <form method="POST" class="riskform-card">
-        <input type="hidden" name="origen" value="{{ origen }}">
-        <input type="hidden" name="proveedor_id" value="{{ proveedor_id or '' }}">
-        <input type="hidden" name="proveedor" value="{{ proveedor_nombre_qs or '' }}">
-        <input type="hidden" name="activo" value="{{ nombre_activo_prefill or '' }}">
-        <input type="hidden" name="descripcion" value="{{ riesgo_prefill or '' }}">
-        <input type="hidden" name="observacion" value="{{ observaciones_prefill or '' }}">
-
-        <div class="riskform-card-body">
-          <div class="row g-3">
-
-            {% if origen|lower == 'proveedor' %}
-            <div class="col-12">
-              <div class="alert alert-danger rounded-4 shadow-sm mb-2">
-                <strong>Origen:</strong> este riesgo fue iniciado desde el módulo de proveedores.
-                {% if proveedor_nombre_qs %}<br><strong>Proveedor:</strong> {{ proveedor_nombre_qs }}{% endif %}
-              </div>
-            </div>
-            {% endif %}
-
-            <div class="col-12">
-              <div class="riskform-section-title">🧩 Identificación del Riesgo</div>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Código de Riesgo</label>
-              <input class="form-control" name="codigo_riesgo" required>
-            </div>
-            <div class="col-md-5">
-              <label class="form-label">Riesgo</label>
-              <input class="form-control" name="riesgo" value="{{ riesgo_prefill or '' }}" required>
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Tipo de Riesgo</label>
-              <select class="form-control" name="tipo_riesgo_id" required>
-                <option value="">Seleccione...</option>
-                {% for t in tipos_riesgo %}
-                  <option value="{{ t.id }}">{{ t.nombre }}</option>
-                {% endfor %}
-              </select>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Fecha de Identificación</label>
-              <input type="date" class="form-control" name="fecha_identificacion" value="{{ fecha_hoy }}">
-            </div>
-            <div class="col-md-5">
-              <label class="form-label">Propietario del Riesgo</label>
-              <input class="form-control" name="propietario_riesgo" value="{{ propietario_prefill or '' }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Responsable</label>
-              <input class="form-control" name="responsable" value="{{ responsable_prefill or '' }}">
-            </div>
-
-            <div class="col-12">
-              <div class="riskform-section-title">🧩 Análisis</div>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Código Amenaza</label>
-              <input class="form-control" name="cod_amenaza">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Amenaza</label>
-              <input class="form-control" name="amenaza" value="{{ amenaza_prefill or '' }}">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Código Vulnerabilidad</label>
-              <input class="form-control" name="cod_vulnerabilidad">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Vulnerabilidad</label>
-              <input class="form-control" name="vulnerabilidad" value="{{ vulnerabilidad_prefill or '' }}">
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Tipo de Activo</label>
-              <input class="form-control" name="tipo_activo" value="{{ tipo_activo_prefill or '' }}">
-            </div>
-            <div class="col-md-5">
-              <label class="form-label">Nombre del Activo</label>
-              <input class="form-control" name="nombre_activo" value="{{ nombre_activo_prefill or '' }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Principio de Seguridad</label>
-              <select class="form-control" name="dimension_seguridad">
-                <option value="">Seleccione...</option>
-                <option value="Confidencialidad" {% if dimension_prefill=='Confidencialidad' %}selected{% endif %}>Confidencialidad</option>
-                <option value="Integridad" {% if dimension_prefill=='Integridad' %}selected{% endif %}>Integridad</option>
-                <option value="Disponibilidad" {% if dimension_prefill=='Disponibilidad' %}selected{% endif %}>Disponibilidad</option>
-              </select>
-            </div>
-
-            <div class="col-12">
-              <div class="riskform-section-title">🧩 Valoración del Riesgo Inherente</div>
-            </div>
-
-            <div class="col-md-4">
-              <label class="form-label">Probabilidad Riesgo Inherente</label>
-              <select class="form-control" name="prob_inh" id="prob_inh" onchange="calcularRiesgoInherente();calcularRiesgoResidual();">
-                <option value="">Seleccione...</option>
-                <option>Rara vez o Muy baja</option>
-                <option>Eventualmente o baja</option>
-                <option>Puede ocurrir o Moderada</option>
-                <option>Probable o Alta</option>
-                <option>Muy frecuente o Muy Alta</option>
-              </select>
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Impacto Riesgo Inherente</label>
-              <select class="form-control" name="imp_inh" id="imp_inh" onchange="calcularRiesgoInherente();calcularRiesgoResidual();">
-                <option value="">Seleccione...</option>
-                <option>Insignificante o Inferior</option>
-                <option>Menor</option>
-                <option>Moderado o Importante</option>
-                <option>Mayor</option>
-                <option>Catastrófico o Crítico</option>
-              </select>
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Riesgo Inherente</label>
-              <input type="text" class="form-control" name="riesgo_inherente" id="riesgo_inherente" readonly>
-            </div>
-
-            {{ controles_widget|safe }}
-
-            <div class="col-12">
-              <div class="riskform-section-title">🧩 Tratamiento del Riesgo Inherente</div>
-            </div>
-            <div class="col-md-12">
-              <label class="form-label">Plan de Acción</label>
-              <textarea class="form-control" name="plan_accion"></textarea>
-            </div>
-
-            <div class="col-12">
-              <div class="riskform-section-title">🧩 Evaluación del Riesgo Residual</div>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Solidez Grupal (Promedio)</label>
-              <input class="form-control risk-control-result" id="solidez_grupal" name="solidez_grupal" readonly>
-              <input type="hidden" id="valor" name="valor">
-              <div class="form-text">Promedio de la solidez individual de todos los controles registrados.</div>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Probabilidad Residual</label>
-              <input class="form-control" id="cuadrante_prob" name="cuadrante_prob" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Impacto Residual</label>
-              <input class="form-control" id="cuadrante_imp" name="cuadrante_imp" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Riesgo Residual</label>
-              <input class="form-control" id="riesgo_residual" name="riesgo_residual" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Fecha de Revisión</label>
-              <input type="date" class="form-control" name="fecha_revision">
-            </div>
-
-            <div class="col-12">
-              <div class="riskform-section-title">🧩 Tratamiento del Riesgo Residual</div>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Tratamiento del Riesgo</label>
-              <select class="form-control" name="tratamiento_riesgo" required>
-                <option value="">Seleccione...</option>
-                <option value="Aceptación">Aceptación</option>
-                <option value="Rechazo">Rechazo</option>
-                <option value="Transferencia">Transferencia</option>
-                <option value="Mitigación">Mitigación</option>
-              </select>
-            </div>
-
-            <div class="col-md-12">
-              <label class="form-label">Observaciones</label>
-              <textarea class="form-control" name="observaciones" rows="8">{{ observaciones_prefill or '' }}</textarea>
-            </div>
-            <div class="col-md-12">
-              <label class="form-label">Planes de Acción</label>
-              <textarea class="form-control" name="planes_accion">{{ planes_accion_prefill or '' }}</textarea>
-            </div>
-
-          </div>
-
-          <div class="riskform-bottom-actions">
-            <button class="btn btn-success rounded-pill px-5 py-2 fw-bold" type="submit">
-              Guardar Riesgo
-            </button>
-            <a href="{{ url_for('riesgos_menu') }}" class="btn rounded-pill px-5 py-2 fw-bold riskform-cancel-btn">
-              Cancelar
-            </a>
-          </div>
-        </div>
-
-        <style>
-          body{
-            background-image:url('/static/img/ccsgsi.jpg');
-            background-size:cover;
-            background-position:center;
-            background-attachment:fixed;
-            background-repeat:no-repeat;
-          }
-
-          .riskform-shell{
-            width:96%;
-            max-width:1600px;
-            margin:10px auto 24px auto;
-          }
-
-          /* =========================
-             HEADER / HERO COMPACTO
-          ========================== */
-          .riskform-header-card{
-            background:
-              linear-gradient(135deg, rgba(11,58,110,.97), rgba(20,89,166,.95), rgba(44,123,229,.92));
-            border-radius:18px;
-            padding:16px 24px;
-            min-height:94px;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            box-shadow:0 12px 24px rgba(15,23,42,.24);
-            color:#ffffff;
-            position:relative;
-            overflow:hidden;
-            margin-bottom:10px;
-          }
-
-          .riskform-header-card::before{
-            content:"";
-            position:absolute;
-            inset:0;
-            background:
-              radial-gradient(circle at 92% 12%, rgba(255,255,255,.20), transparent 26%),
-              repeating-linear-gradient(
-                135deg,
-                rgba(255,255,255,.05) 0px,
-                rgba(255,255,255,.05) 1px,
-                transparent 1px,
-                transparent 15px
-              );
-            pointer-events:none;
-          }
-
-          .riskform-header-overlay{
-            width:100%;
-            height:100%;
-            display:flex;
-            align-items:center;
-            justify-content:flex-start;
-            text-align:left;
-            padding:0;
-            background:transparent;
-            position:relative;
-            z-index:1;
-          }
-
-          .riskform-header-overlay::before{
-            content:"⚠️";
-            width:54px;
-            height:54px;
-            min-width:54px;
-            border-radius:14px;
-            background:rgba(255,255,255,.96);
-            color:#0b4a8f;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            font-size:1.55rem;
-            box-shadow:0 8px 18px rgba(0,0,0,.20);
-            margin-right:14px;
-          }
-
-          .riskform-header-text{
-            max-width:1100px;
-            position:relative;
-            z-index:1;
-          }
-
-          .riskform-header-text::before{
-            content:"SGSI · Gestión de Riesgos";
-            display:inline-block;
-            background:rgba(255,255,255,.18);
-            border:1px solid rgba(255,255,255,.30);
-            border-radius:999px;
-            padding:3px 10px;
-            font-size:.66rem;
-            font-weight:800;
-            letter-spacing:.35px;
-            margin-bottom:4px;
-          }
-
-          .riskform-title{
-            color:#ffffff !important;
-            font-weight:950;
-            font-size:1.36rem;
-            line-height:1.08;
-            text-shadow:0 3px 10px rgba(0,0,0,.32);
-            margin:0;
-          }
-
-          .riskform-subtitle{
-            color:rgba(248,252,255,.96);
-            font-size:.78rem;
-            margin-top:4px;
-            line-height:1.25;
-            text-shadow:none;
-          }
-
-          /* =========================
-             ACCIONES SUPERIORES
-          ========================== */
-          .riskform-top-actions{
-            display:flex;
-            justify-content:center;
-            gap:10px;
-            flex-wrap:wrap;
-            margin:10px 0 12px 0;
-          }
-
-          .riskform-top-actions .btn{
-            border-radius:10px !important;
-            min-height:36px;
-            padding:7px 20px !important;
-            font-size:.80rem;
-            font-weight:900;
-            box-shadow:0 7px 14px rgba(15,23,42,.14);
-          }
-
-          /* =========================
-             CARD PRINCIPAL
-          ========================== */
-          .riskform-card{
-            background:rgba(255,255,255,.96);
-            border-radius:18px;
-            box-shadow:0 12px 24px rgba(15,23,42,.18);
-            overflow:hidden;
-            backdrop-filter:blur(8px);
-            border:1px solid rgba(219,230,244,.9);
-          }
-
-          .riskform-card-body{
-            padding:16px 18px;
-          }
-
-          /* =========================
-             SECCIONES
-          ========================== */
-          .riskform-section-title{
-            font-weight:950;
-            font-size:.78rem;
-            color:#0b4a8f;
-            padding:9px 12px;
-            border-radius:12px;
-            background:#eef5ff;
-            border:1px solid #d9eaff;
-            margin:10px 0 12px 0;
-          }
-
-          .riskform-section-title:first-child{
-            margin-top:0;
-          }
-
-          /* =========================
-             FORMULARIOS COMPACTOS
-          ========================== */
-          .riskform-card .form-label{
-            font-weight:800;
-            color:#25324a;
-            margin-bottom:4px;
-            font-size:.78rem;
-          }
-
-          .riskform-card .form-control,
-          .riskform-card .form-select{
-            border-radius:9px;
-            border:1px solid #d9e3f0;
-            min-height:37px;
-            font-size:.80rem;
-            box-shadow:none;
-            padding-top:5px;
-            padding-bottom:5px;
-          }
-
-          .riskform-card textarea.form-control{
-            min-height:68px;
-            resize:vertical;
-          }
-
-          .riskform-card .form-control:focus,
-          .riskform-card .form-select:focus{
-            border-color:#3f86d6;
-            box-shadow:0 0 0 .18rem rgba(63,134,214,.18);
-          }
-
-          .riskform-card .row{
-            row-gap:10px;
-          }
-
-          .riskform-card .mb-3{
-            margin-bottom:.70rem !important;
-          }
-
-          /* =========================
-             ACCIONES INFERIORES
-          ========================== */
-          .riskform-bottom-actions{
-            display:flex;
-            justify-content:center;
-            gap:10px;
-            flex-wrap:wrap;
-            margin-top:18px;
-          }
-
-          .riskform-bottom-actions .btn{
-            border-radius:10px !important;
-            min-height:32px;
-            padding:8px 24px !important;
-            font-size:.82rem;
-            font-weight:900;
-            box-shadow:0 8px 16px rgba(15,23,42,.14);
-          }
-
-          .riskform-bottom-actions .btn-primary,
-          .riskform-top-actions .btn-primary{
-            border:none;
-            background:linear-gradient(135deg,#086df0,#2487ff);
-            color:#fff;
-          }
-
-          .riskform-bottom-actions .btn-success,
-          .riskform-top-actions .btn-success{
-            border:none;
-            background:linear-gradient(135deg,#12844b,#16a05d);
-            color:#fff;
-          }
-
-          .riskform-cancel-btn{
-            background:#ffffff;
-            color:#0f172a;
-            border:1px solid #cfd8e3;
-            box-shadow:0 6px 14px rgba(0,0,0,.10);
-          }
-
-          .riskform-cancel-btn:hover{
-            background:#edf5ff;
-            color:#0b65d8;
-            border-color:#9ec5fe;
-          }
-
-          /* =========================
-             RESPONSIVE
-          ========================== */
-          @media (max-width:992px){
-            .riskform-shell{
-              width:98%;
-              margin:8px auto 22px auto;
-            }
-
-            .riskform-header-card{
-              min-height:88px;
-              padding:15px 18px;
-            }
-
-            .riskform-title{
-              font-size:1.22rem;
-            }
-
-            .riskform-subtitle{
-              font-size:.74rem;
-            }
-
-            .riskform-card-body{
-              padding:8px 7px;
-            }
-
-            .riskform-section-title{
-              font-size:.82rem;
-            }
-          }
-
-          @media (max-width:768px){
-            .riskform-header-overlay{
-              justify-content:center;
-              text-align:center;
-              flex-direction:column;
-              gap:10px;
-            }
-
-            .riskform-header-overlay::before{
-              margin-right:0;
-            }
-
-            .riskform-title{
-              font-size:1.12rem;
-            }
-
-            .riskform-subtitle{
-              font-size:.72rem;
-            }
-
-            .riskform-bottom-actions .btn,
-            .riskform-top-actions .btn{
-              width:100%;
-            }
-          }
-        </style>
-      </form>
-    </div>
-    """
-
-    form_rendered = render_template_string(
-        riesgos_html_formulario,
-        tipos_riesgo=tipos_riesgo,
-        reglas_json=reglas_json,
-        reglas_impacto_json=reglas_impacto_json,
-        fecha_hoy=fecha_hoy,
-        origen=origen,
-        proveedor_id=proveedor_id,
-        proveedor_nombre_qs=proveedor_nombre_qs,
-        riesgo_prefill=riesgo_prefill,
-        propietario_prefill=propietario_prefill,
-        amenaza_prefill=amenaza_prefill,
-        vulnerabilidad_prefill=vulnerabilidad_prefill,
-        tipo_activo_prefill=tipo_activo_prefill,
-        nombre_activo_prefill=nombre_activo_prefill,
-        dimension_prefill=dimension_prefill,
-        observaciones_prefill=observaciones_prefill,
-        planes_accion_prefill=planes_accion_prefill,
-        responsable_prefill=responsable_prefill,
-        controles_widget=Markup(controles_widget),
-        pci_options=construir_opciones_control(PCI_DSS_CONTROLES),
-        nist_options=construir_opciones_control(NIST_CSF_20_CONTROLES),
-        soc2_options=construir_opciones_control(SOC2_CONTROLES)
-    )
-
-    return render_template_string(BASE, content=Markup(form_rendered))
-
-# ===========================================================
-# CONFIGURAR PROBABILIDAD RESIDUAL
-# ===========================================================
-@app.route('/configurar_probabilidad_residual', methods=['GET', 'POST'])
-@login_required
-def configurar_probabilidad_residual():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede configurar parámetros.", "danger")
-        return redirect(url_for('gestion_riesgos'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Riesgos"):
-        flash("No tiene permiso para configurar parámetros.", "danger")
-        return redirect(url_for('gestion_riesgos'))
-
-    if request.method == 'POST':
-        reglas = []
-        for i in range(1, 5):
-            min_val = request.form.get(f'min_{i}')
-            max_val = request.form.get(f'max_{i}')
-            bajar = request.form.get(f'bajar_{i}')
-
-            if min_val not in (None, '') and max_val not in (None, '') and bajar not in (None, ''):
-                minimo = float(str(min_val).replace(',', '.'))
-                maximo = float(str(max_val).replace(',', '.'))
-                reglas.append({
-                    'min': min(minimo, maximo),
-                    'max': max(minimo, maximo),
-                    'bajar': max(0, min(4, int(bajar)))
-                })
-
-        db.session.query(ConfigProbResidual).delete()
-
-        for r in reglas:
-            nueva = ConfigProbResidual(
-                min=r['min'],
-                max=r['max'],
-                bajar=r['bajar']
-            )
-            db.session.add(nueva)
-
-        db.session.commit()
-        actualizados = riesgo_recalcular_matriz_existente(commit=True)
-        flash(
-            f"✅ Configuración de probabilidad residual guardada. {actualizados} riesgo(s) recalculado(s).",
-            "success",
-        )
-        return redirect(url_for('configurar_probabilidad_residual'))
-
-    reglas = sorted(ConfigProbResidual.query.all(), key=lambda r: max(float(r.min), float(r.max)), reverse=True)
-
-    html = render_template_string("""
-    <div class="prob-shell">
-
-      <div class="prob-header-card">
-        <div class="prob-header-overlay">
-          <div class="prob-header-text">
-            <h2 class="prob-title m-0">Configuración de Probabilidad Residual</h2>
-            <div class="prob-subtitle">
-              Definición de rangos y niveles de reducción para el cálculo de probabilidad residual del riesgo
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-          <div class="prob-alert-card">
-            {% for category, message in messages %}
-              <div class="alert alert-{{ category if category in ['success','danger','warning','info','primary','secondary'] else 'info' }} mb-0">
-                {{ message }}
-              </div>
-            {% endfor %}
-          </div>
-        {% endif %}
-      {% endwith %}
-
-      <form method="POST">
-        <div class="prob-table-card">
-          <div class="prob-table-card-body">
-
-            <div class="prob-table-wrap">
-              <div class="table-responsive">
-                <table class="table table-bordered align-middle text-center prob-table mb-0">
-                  <thead>
-                    <tr>
-                      <th>Rango mínimo (%)</th>
-                      <th>Rango máximo (%)</th>
-                      <th>Bajada de nivel</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% for i in range(1, 5) %}
-                    <tr>
-                      <td>
-                        <input type="number"
-                               step="0.01"
-                               class="form-control text-center"
-                               name="min_{{i}}"
-                               value="{{ reglas[i-1].min if reglas|length >= i else '' }}"
-                               required>
-                      </td>
-                      <td>
-                        <input type="number"
-                               step="0.01"
-                               class="form-control text-center"
-                               name="max_{{i}}"
-                               value="{{ reglas[i-1].max if reglas|length >= i else '' }}"
-                               required>
-                      </td>
-                      <td>
-                        <select class="form-select text-center" name="bajar_{{i}}">
-                          <option value="0" {% if reglas|length >= i and reglas[i-1].bajar == 0 %}selected{% endif %}>0 niveles</option>
-                          <option value="1" {% if reglas|length >= i and reglas[i-1].bajar == 1 %}selected{% endif %}>1 nivel</option>
-                          <option value="2" {% if reglas|length >= i and reglas[i-1].bajar == 2 %}selected{% endif %}>2 niveles</option>
-                          <option value="3" {% if reglas|length >= i and reglas[i-1].bajar == 3 %}selected{% endif %}>3 niveles</option>
-                          <option value="4" {% if reglas|length >= i and reglas[i-1].bajar == 4 %}selected{% endif %}>4 niveles</option>
-                        </select>
-                      </td>
-                    </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div class="prob-bottom-actions">
-              <button type="submit" class="btn btn-success rounded-pill px-5 py-2 fw-bold">
-                💾 Guardar configuración
-              </button>
-
-              <a href="{{ url_for('gestion_riesgos') }}"
-                 class="btn rounded-pill px-5 py-2 fw-bold prob-back-btn">
-                ⬅ Volver a Gestión de Riesgos
-              </a>
-            </div>
-
-          </div>
-        </div>
-      </form>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg') !important;
-        background-size:cover !important;
-        background-position:center !important;
-        background-attachment:fixed !important;
-        background-repeat:no-repeat !important;
-        background-color:transparent !important;
-      }
-
-      .prob-shell{
-        width:96%;
-        max-width:1300px;
-        margin:10px auto 24px auto;
-      }
-
-      /* =========================
-         HEADER / HERO COMPACTO
-      ========================== */
-      .prob-header-card{
-        background:
-          linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.24);
-        color:#ffffff;
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .prob-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
-          repeating-linear-gradient(
-            135deg,
-            rgba(255,255,255,.05) 0px,
-            rgba(255,255,255,.05) 1px,
-            transparent 1px,
-            transparent 15px
-          );
-        pointer-events:none;
-      }
-
-      .prob-header-overlay{
-        width:100%;
-        height:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        padding:0;
-        background:transparent;
-        position:relative;
-        z-index:1;
-      }
-
-      .prob-header-overlay::before{
-        content:"📈";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:rgba(255,255,255,.96);
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.55rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.20);
-        margin-right:14px;
-      }
-
-      .prob-header-text{
-        max-width:1000px;
-        position:relative;
-        z-index:1;
-      }
-
-      .prob-header-text::before{
-        content:"SGSI · Parámetros de Riesgo";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border:1px solid rgba(255,255,255,.30);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.66rem;
-        font-weight:800;
-        letter-spacing:.35px;
-        margin-bottom:4px;
-      }
-
-      .prob-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.36rem;
-        line-height:1.08;
-        text-shadow:0 3px 10px rgba(0,0,0,.32);
-        margin:0;
-      }
-
-      .prob-subtitle{
-        color:rgba(248,252,255,.96);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-        text-shadow:none;
-      }
-
-      /* =========================
-         ALERTAS
-      ========================== */
-      .prob-alert-card{
-        margin-bottom:12px;
-      }
-
-      .prob-alert-card .alert{
-        border-radius:14px;
-        font-size:.82rem;
-        font-weight:700;
-        box-shadow:0 8px 18px rgba(15,23,42,.12);
-      }
-
-      /* =========================
-         CARD / TABLA
-      ========================== */
-      .prob-table-card{
-        background:rgba(255,255,255,.96);
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        overflow:hidden;
-        border:1px solid rgba(219,230,244,.9);
-      }
-
-      .prob-table-card-body{
-        padding:8px 7px;
-      }
-
-      .prob-table-wrap{
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:rgba(255,255,255,.98);
-        overflow:auto;
-      }
-
-      .prob-table{
-        margin-bottom:0;
-        font-size:.80rem;
-      }
-
-      .prob-table thead th{
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#ffffff;
-        font-weight:900;
-        text-align:center;
-        vertical-align:middle;
-        padding:11px 9px;
-        font-size:.78rem;
-        border-right:1px solid rgba(255,255,255,.28);
-      }
-
-      .prob-table thead th:first-child{
-        border-top-left-radius:12px;
-      }
-
-      .prob-table thead th:last-child{
-        border-top-right-radius:12px;
-      }
-
-      .prob-table td{
-        vertical-align:middle;
-        padding:9px 8px;
-        font-size:.78rem;
-        border-right:1px solid #dce6f3;
-        border-bottom:1px solid #dce6f3;
-        background:rgba(255,255,255,.98);
-      }
-
-      .prob-table tbody tr:nth-child(even) td{
-        background:#f8fbff;
-      }
-
-      .prob-table tbody tr:hover td{
-        background:#eef6ff;
-      }
-
-      .prob-table .form-control,
-      .prob-table .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:36px;
-        font-size:.78rem;
-        box-shadow:none;
-        padding-top:5px;
-        padding-bottom:5px;
-      }
-
-      .prob-table .form-control:focus,
-      .prob-table .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .18rem rgba(63,134,214,.18);
-      }
-
-      /* =========================
-         BOTONES
-      ========================== */
-      .prob-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin-top:16px;
-      }
-
-      .prob-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 24px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.14);
-      }
-
-      .prob-bottom-actions .btn-primary,
-      .prob-bottom-actions .btn-success{
-        border:none;
-        background:linear-gradient(135deg,#086df0,#2487ff);
-        color:#fff;
-      }
-
-      .prob-bottom-actions .btn-danger{
-        border:none;
-        background:linear-gradient(135deg,#b91c1c,#ef4444);
-        color:#fff;
-      }
-
-      .prob-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-        box-shadow:0 6px 14px rgba(0,0,0,.10);
-      }
-
-      .prob-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      /* =========================
-         SCROLLBAR
-      ========================== */
-      .prob-table-wrap::-webkit-scrollbar{
-        height:11px;
-        width:11px;
-      }
-
-      .prob-table-wrap::-webkit-scrollbar-track{
-        background:#dbe4f0;
-        border-radius:12px;
-      }
-
-      .prob-table-wrap::-webkit-scrollbar-thumb{
-        background:linear-gradient(180deg,#5aa3ea 0%,#3f86d6 100%);
-        border-radius:12px;
-        border:2px solid #dbe4f0;
-      }
-
-      .prob-table-wrap{
-        scrollbar-width:thin;
-        scrollbar-color:#3f86d6 #dbe4f0;
-      }
-
-      /* =========================
-         RESPONSIVE
-      ========================== */
-      @media (max-width:992px){
-        .prob-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .prob-header-card{
-          min-height:88px;
-          padding:15px 18px;
-        }
-
-        .prob-title{
-          font-size:1.22rem;
-        }
-
-        .prob-subtitle{
-          font-size:.74rem;
-        }
-
-        .prob-table-card-body{
-          padding:12px;
-        }
-
-        .prob-table thead th,
-        .prob-table td{
-          padding:8px 7px;
-          font-size:.74rem;
-        }
-      }
-
-      @media (max-width:768px){
-        .prob-header-overlay{
-          justify-content:center;
-          text-align:center;
-          flex-direction:column;
-          gap:10px;
-        }
-
-        .prob-header-overlay::before{
-          margin-right:0;
-        }
-
-        .prob-title{
-          font-size:1.12rem;
-        }
-
-        .prob-subtitle{
-          font-size:.72rem;
-        }
-
-        .prob-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """, reglas=reglas)
-
-    return render_template_string(BASE, content=Markup(html))
-
-# ===========================================================
-# CONFIGURAR IMPACTO RESIDUAL
-# ===========================================================
-@app.route('/configurar_impacto_residual', methods=['GET', 'POST'])
-@login_required
-def configurar_impacto_residual():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede configurar parámetros.", "danger")
-        return redirect(url_for('gestion_riesgos'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Riesgos"):
-        flash("No tiene permiso para configurar parámetros.", "danger")
-        return redirect(url_for('gestion_riesgos'))
-
-    if request.method == 'POST':
-        reglas = []
-        for i in range(1, 5):
-            min_val = request.form.get(f'min_{i}')
-            max_val = request.form.get(f'max_{i}')
-            bajar = request.form.get(f'bajar_{i}')
-
-            if min_val not in (None, '') and max_val not in (None, '') and bajar not in (None, ''):
-                minimo = float(str(min_val).replace(',', '.'))
-                maximo = float(str(max_val).replace(',', '.'))
-                reglas.append({
-                    'min': min(minimo, maximo),
-                    'max': max(minimo, maximo),
-                    'bajar': max(0, min(4, int(bajar)))
-                })
-
-        db.session.query(ConfigImpactoResidual).delete()
-
-        for r in reglas:
-            nueva = ConfigImpactoResidual(
-                min=r['min'],
-                max=r['max'],
-                bajar=r['bajar']
-            )
-            db.session.add(nueva)
-
-        db.session.commit()
-        actualizados = riesgo_recalcular_matriz_existente(commit=True)
-        flash(
-            f"✅ Configuración de impacto residual guardada. {actualizados} riesgo(s) recalculado(s).",
-            "success",
-        )
-        return redirect(url_for('configurar_impacto_residual'))
-
-    reglas = sorted(ConfigImpactoResidual.query.all(), key=lambda r: max(float(r.min), float(r.max)), reverse=True)
-
-    html = render_template_string("""
-    <div class="imp-shell">
-
-      <div class="imp-header-card">
-        <div class="imp-header-overlay">
-          <div class="imp-header-text">
-            <h2 class="imp-title m-0">Configuración de Impacto Residual</h2>
-            <div class="imp-subtitle">
-              Definición de rangos y niveles de reducción para el cálculo de impacto residual del riesgo
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-          <div class="imp-alert-card">
-            {% for category, message in messages %}
-              <div class="alert alert-{{ category if category in ['success','danger','warning','info','primary','secondary'] else 'info' }} mb-0">
-                {{ message }}
-              </div>
-            {% endfor %}
-          </div>
-        {% endif %}
-      {% endwith %}
-
-      <form method="POST">
-        <div class="imp-table-card">
-          <div class="imp-table-card-body">
-
-            <div class="imp-table-wrap">
-              <div class="table-responsive">
-                <table class="table table-bordered align-middle text-center imp-table mb-0">
-                  <thead>
-                    <tr>
-                      <th>Rango mínimo (%)</th>
-                      <th>Rango máximo (%)</th>
-                      <th>Bajada de nivel</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% for i in range(1, 5) %}
-                    <tr>
-                      <td>
-                        <input type="number"
-                               step="0.01"
-                               class="form-control text-center"
-                               name="min_{{i}}"
-                               value="{{ reglas[i-1].min if reglas|length >= i else '' }}"
-                               required>
-                      </td>
-                      <td>
-                        <input type="number"
-                               step="0.01"
-                               class="form-control text-center"
-                               name="max_{{i}}"
-                               value="{{ reglas[i-1].max if reglas|length >= i else '' }}"
-                               required>
-                      </td>
-                      <td>
-                        <select class="form-select text-center" name="bajar_{{i}}">
-                          <option value="0" {% if reglas|length >= i and reglas[i-1].bajar == 0 %}selected{% endif %}>0 niveles</option>
-                          <option value="1" {% if reglas|length >= i and reglas[i-1].bajar == 1 %}selected{% endif %}>1 nivel</option>
-                          <option value="2" {% if reglas|length >= i and reglas[i-1].bajar == 2 %}selected{% endif %}>2 niveles</option>
-                          <option value="3" {% if reglas|length >= i and reglas[i-1].bajar == 3 %}selected{% endif %}>3 niveles</option>
-                          <option value="4" {% if reglas|length >= i and reglas[i-1].bajar == 4 %}selected{% endif %}>4 niveles</option>
-                        </select>
-                      </td>
-                    </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div class="imp-bottom-actions">
-              <button type="submit" class="btn btn-success rounded-pill px-5 py-2 fw-bold">
-                💾 Guardar configuración
-              </button>
-
-              <a href="{{ url_for('gestion_riesgos') }}"
-                 class="btn rounded-pill px-5 py-2 fw-bold imp-back-btn">
-                ⬅ Volver a Gestión de Riesgos
-              </a>
-            </div>
-
-          </div>
-        </div>
-      </form>
-
-    </div>
-
-    <style>
-
-      body{
-        background-image:url('/static/img/ccsgsi.jpg') !important;
-        background-size:cover !important;
-        background-position:center !important;
-        background-attachment:fixed !important;
-        background-repeat:no-repeat !important;
-        background-color:transparent !important;
-      }
-
-      .imp-shell{
-        width:96%;
-        max-width:1300px;
-        margin:10px auto 24px auto;
-      }
-
-      /* =========================
-         HERO SGSI COMPACTO
-      ========================== */
-      .imp-header-card{
-        background:
-          linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.24);
-        color:#ffffff;
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .imp-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
-          repeating-linear-gradient(
-            135deg,
-            rgba(255,255,255,.05) 0px,
-            rgba(255,255,255,.05) 1px,
-            transparent 1px,
-            transparent 15px
-          );
-        pointer-events:none;
-      }
-
-      .imp-header-overlay{
-        width:100%;
-        height:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        padding:0;
-        background:transparent;
-        position:relative;
-        z-index:1;
-      }
-
-      .imp-header-overlay::before{
-        content:"📉";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:rgba(255,255,255,.96);
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.55rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.20);
-        margin-right:14px;
-      }
-
-      .imp-header-text{
-        max-width:1000px;
-        position:relative;
-        z-index:1;
-      }
-
-      .imp-header-text::before{
-        content:"SGSI · Impacto Residual";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border:1px solid rgba(255,255,255,.30);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.66rem;
-        font-weight:800;
-        letter-spacing:.35px;
-        margin-bottom:4px;
-      }
-
-      .imp-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.36rem;
-        line-height:1.08;
-        text-shadow:0 3px 10px rgba(0,0,0,.32);
-        margin:0;
-      }
-
-      .imp-subtitle{
-        color:rgba(248,252,255,.96);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }
-
-      /* =========================
-         ALERTAS
-      ========================== */
-      .imp-alert-card{
-        margin-bottom:12px;
-      }
-
-      .imp-alert-card .alert{
-        border-radius:14px;
-        font-size:.82rem;
-        font-weight:700;
-        box-shadow:0 8px 18px rgba(15,23,42,.12);
-      }
-
-      /* =========================
-         CARD TABLA
-      ========================== */
-      .imp-table-card{
-        background:rgba(255,255,255,.96);
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        overflow:hidden;
-        border:1px solid rgba(219,230,244,.9);
-      }
-
-      .imp-table-card-body{
-        padding:8px 7px;
-      }
-
-      .imp-table-wrap{
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:rgba(255,255,255,.98);
-        overflow:auto;
-      }
-
-      .imp-table{
-        margin-bottom:0;
-        font-size:.80rem;
-      }
-
-      .imp-table thead th{
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#ffffff;
-        font-weight:900;
-        text-align:center;
-        vertical-align:middle;
-        padding:11px 9px;
-        font-size:.78rem;
-        border-right:1px solid rgba(255,255,255,.28);
-      }
-
-      .imp-table td{
-        vertical-align:middle;
-        padding:9px 8px;
-        font-size:.78rem;
-        border-right:1px solid #dce6f3;
-        border-bottom:1px solid #dce6f3;
-        background:rgba(255,255,255,.98);
-      }
-
-      .imp-table tbody tr:nth-child(even) td{
-        background:#f8fbff;
-      }
-
-      .imp-table tbody tr:hover td{
-        background:#eef6ff;
-      }
-
-      .imp-table .form-control,
-      .imp-table .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:36px;
-        font-size:.78rem;
-        box-shadow:none;
-      }
-
-      .imp-table .form-control:focus,
-      .imp-table .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .18rem rgba(63,134,214,.18);
-      }
-
-      /* =========================
-         BOTONES
-      ========================== */
-      .imp-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin-top:16px;
-      }
-
-      .imp-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 24px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.14);
-      }
-
-      .imp-bottom-actions .btn-primary{
-        border:none;
-        background:linear-gradient(135deg,#086df0,#2487ff);
-        color:#fff;
-      }
-
-      .imp-bottom-actions .btn-success{
-        border:none;
-        background:linear-gradient(135deg,#12844b,#16a05d);
-        color:#fff;
-      }
-
-      .imp-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-        box-shadow:0 6px 14px rgba(0,0,0,.10);
-      }
-
-      .imp-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      /* =========================
-         SCROLL
-      ========================== */
-      .imp-table-wrap::-webkit-scrollbar{
-        height:11px;
-        width:11px;
-      }
-
-      .imp-table-wrap::-webkit-scrollbar-track{
-        background:#dbe4f0;
-        border-radius:12px;
-      }
-
-      .imp-table-wrap::-webkit-scrollbar-thumb{
-        background:linear-gradient(180deg,#5aa3ea,#3f86d6);
-        border-radius:12px;
-      }
-
-      /* =========================
-         RESPONSIVE
-      ========================== */
-      @media(max-width:992px){
-        .imp-shell{width:98%;}
-        .imp-title{font-size:1.2rem;}
-        .imp-subtitle{font-size:.74rem;}
-        .imp-table-card-body{padding:12px;}
-      }
-
-      @media(max-width:768px){
-        .imp-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .imp-header-overlay::before{
-          margin-right:0;
-        }
-
-        .imp-bottom-actions .btn{
-          width:100%;
-        }
-      }
-
-    </style>
-    """, reglas=reglas)
-
-    return render_template_string(BASE, content=Markup(html))
-
-
-# ===========================================================
-# CONFIGURAR EVALUACIÓN Y EFICACIA DEL CONTROL
-# ===========================================================
-@app.route('/configurar_evaluacion_control', methods=['GET', 'POST'])
-@login_required
-def configurar_evaluacion_control():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede configurar parámetros.", "danger")
-        return redirect(url_for('gestion_riesgos'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Riesgos"):
-        flash("No tiene permiso para configurar parámetros.", "danger")
-        return redirect(url_for('gestion_riesgos'))
-
-    riesgo_asegurar_config_evaluacion_control()
-
-    if request.method == 'POST':
-        accion = (request.form.get('accion') or 'guardar').strip().lower()
-
-        if accion == 'restablecer':
-            db.session.query(ConfigEvaluacionControl).delete()
-            db.session.commit()
-            riesgo_asegurar_config_evaluacion_control()
-            actualizados = riesgo_recalcular_matriz_existente(commit=True)
-            flash(
-                f"✅ Valores predeterminados restablecidos. {actualizados} riesgo(s) recalculado(s).",
-                "success",
-            )
-            return redirect(url_for('configurar_evaluacion_control'))
-
-        definiciones = {item['clave']: item for item in RISK_CONTROL_PARAMETER_DEFINITIONS}
-        valores = {}
-        errores = []
-        for clave, definicion in definiciones.items():
-            raw = request.form.get(f'pct_{clave}')
-            numero = riesgo_float(raw, None)
-            if numero is None:
-                errores.append(f"Debe diligenciar el porcentaje de {definicion['grupo']} - {definicion['opcion']}.")
-                continue
-            if numero < 0 or numero > 100:
-                errores.append(f"El porcentaje de {definicion['opcion']} debe estar entre 0 y 100.")
-                continue
-            valores[clave] = round(float(numero), 4)
-
-        # El máximo alcanzable por el diseño debe representar exactamente 100 %.
-        if not errores:
-            maximo_diseno = sum(
-                max(valores[clave] for clave in claves)
-                for claves in RISK_CONTROL_DESIGN_GROUP_KEYS.values()
-            )
-            if abs(maximo_diseno - 100.0) > 0.01:
-                errores.append(
-                    f"La suma de los máximos de Diseño debe ser 100 %. Actualmente es {maximo_diseno:.2f} %."
-                )
-
-            total_formula = valores['formula_peso_diseno'] + valores['formula_peso_ejecucion']
-            if abs(total_formula - 100.0) > 0.01:
-                errores.append(
-                    f"Los pesos de Diseño y Ejecución deben sumar 100 %. Actualmente suman {total_formula:.2f} %."
-                )
-
-        if errores:
-            for error in errores:
-                flash(error, 'danger')
-        else:
-            filas = {fila.clave: fila for fila in ConfigEvaluacionControl.query.all()}
-            for clave, numero in valores.items():
-                definicion = definiciones[clave]
-                fila = filas.get(clave)
-                if fila is None:
-                    fila = ConfigEvaluacionControl(**definicion)
-                    db.session.add(fila)
-                fila.porcentaje = numero
-                fila.grupo = definicion['grupo']
-                fila.opcion = definicion['opcion']
-                fila.orden = definicion['orden']
-
-            db.session.commit()
-            actualizados = riesgo_recalcular_matriz_existente(commit=True)
-            flash(
-                f"✅ Parámetros de Evaluación y Eficacia del Control guardados. "
-                f"{actualizados} riesgo(s) recalculado(s).",
-                'success',
-            )
-            return redirect(url_for('configurar_evaluacion_control'))
-
-    filas_db = {fila.clave: fila for fila in ConfigEvaluacionControl.query.all()}
-    grupos = []
-    nombres_grupo = [
-        'Asignación', 'Tipo de Control', 'Forma de Control', 'Funcionalidad',
-        'Estado del Control', 'Evidencia del Control', 'Ejecución'
-    ]
-    for nombre in nombres_grupo:
-        filas = []
-        for definicion in RISK_CONTROL_PARAMETER_DEFINITIONS:
-            if definicion['grupo'] != nombre:
-                continue
-            fila_db = filas_db.get(definicion['clave'])
-            filas.append({
-                **definicion,
-                'porcentaje_actual': (
-                    float(fila_db.porcentaje)
-                    if fila_db is not None
-                    else float(definicion['porcentaje'])
-                ),
-            })
-        grupos.append({'nombre': nombre, 'filas': filas})
-
-    formula = []
-    for definicion in RISK_CONTROL_PARAMETER_DEFINITIONS:
-        if definicion['grupo'] != 'Fórmula de Solidez Individual':
-            continue
-        fila_db = filas_db.get(definicion['clave'])
-        formula.append({
-            **definicion,
-            'porcentaje_actual': (
-                float(fila_db.porcentaje)
-                if fila_db is not None
-                else float(definicion['porcentaje'])
-            ),
-        })
-
-    maximo_diseno_actual = sum(
-        max(
-            float(filas_db[clave].porcentaje) if clave in filas_db else next(
-                float(item['porcentaje']) for item in RISK_CONTROL_PARAMETER_DEFINITIONS if item['clave'] == clave
-            )
-            for clave in claves
-        )
-        for claves in RISK_CONTROL_DESIGN_GROUP_KEYS.values()
-    )
-
-    html = render_template_string("""
-    <div class="ctrlcfg-shell">
-      <div class="ctrlcfg-header-card">
-        <div class="ctrlcfg-header-overlay">
-          <div class="ctrlcfg-header-icon">🧩</div>
-          <div>
-            <div class="ctrlcfg-kicker">SGSI · Parámetros de Riesgo</div>
-            <h2 class="ctrlcfg-title">Evaluación y Eficacia del Control</h2>
-            <div class="ctrlcfg-subtitle">
-              Configure la puntuación de cada opción y los pesos utilizados para calcular la solidez individual y grupal.
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-          <div class="mb-3">
-            {% for category, message in messages %}
-              <div class="alert alert-{{ category if category in ['success','danger','warning','info'] else 'info' }} mb-2">{{ message }}</div>
-            {% endfor %}
-          </div>
-        {% endif %}
-      {% endwith %}
-
-      <div class="ctrlcfg-info-card">
-        <div><strong>Regla de validación:</strong> la suma de la mejor opción de cada componente de Diseño debe ser 100 %.</div>
-        <div><strong>Diseño máximo actual:</strong> {{ '%.2f'|format(maximo_diseno_actual) }} %.</div>
-        <div><strong>Campos informativos:</strong> Cargo, Frecuencia, Referencia Documental y Soporte de Evidencia no agregan puntuación.</div>
-      </div>
-
-      <form method="POST" id="controlParamsForm">
-        <input type="hidden" name="accion" value="guardar">
-
-        <div class="row g-3">
-          {% for grupo in grupos %}
-          <div class="col-lg-6">
-            <div class="ctrlcfg-card h-100">
-              <div class="ctrlcfg-card-title">{{ grupo.nombre }}</div>
-              <div class="table-responsive">
-                <table class="table align-middle mb-0 ctrlcfg-table">
-                  <thead><tr><th>Opción</th><th class="text-center">Puntuación (%)</th></tr></thead>
-                  <tbody>
-                    {% for fila in grupo.filas %}
-                    <tr>
-                      <td class="fw-semibold">{{ fila.opcion }}</td>
-                      <td style="width:180px">
-                        <div class="input-group input-group-sm">
-                          <input type="number" min="0" max="100" step="0.01"
-                                 class="form-control text-end ctrlcfg-score"
-                                 name="pct_{{ fila.clave }}"
-                                 value="{{ '%.2f'|format(fila.porcentaje_actual) }}" required>
-                          <span class="input-group-text">%</span>
-                        </div>
-                      </td>
-                    </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-
-        <div class="ctrlcfg-card mt-3">
-          <div class="ctrlcfg-card-title">Fórmula de Solidez Individual</div>
-          <div class="ctrlcfg-formula">
-            {% for fila in formula %}
-            <div class="ctrlcfg-formula-item">
-              <label class="form-label fw-semibold">{{ fila.opcion }}</label>
-              <div class="input-group">
-                <input type="number" min="0" max="100" step="0.01"
-                       class="form-control text-end ctrlcfg-formula-score"
-                       name="pct_{{ fila.clave }}"
-                       value="{{ '%.2f'|format(fila.porcentaje_actual) }}" required>
-                <span class="input-group-text">%</span>
-              </div>
-            </div>
-            {% endfor %}
-          </div>
-          <div class="ctrlcfg-formula-preview mt-3" id="formulaPreview">
-            Solidez Individual = Diseño × 60 % + Ejecución × 40 %
-          </div>
-        </div>
-
-        <div class="ctrlcfg-actions">
-          <a href="{{ url_for('gestion_riesgos', ver='activos') }}" class="btn btn-outline-secondary rounded-pill px-4">⬅ Volver</a>
-          <button type="button" class="btn btn-outline-danger rounded-pill px-4" onclick="restablecerParametrosControl()">↺ Restablecer valores</button>
-          <button type="submit" class="btn btn-primary rounded-pill px-5 fw-bold">💾 Guardar y recalcular riesgos</button>
-        </div>
-      </form>
-
-      <form method="POST" id="resetControlParamsForm" class="d-none">
-        <input type="hidden" name="accion" value="restablecer">
-      </form>
-    </div>
-
-    <style>
-      body{background-image:url('/static/img/ccsgsi.jpg');background-size:cover;background-position:center;background-attachment:fixed}
-      .ctrlcfg-shell{width:96%;max-width:1280px;margin:22px auto 30px}
-      .ctrlcfg-header-card{background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);border-radius:20px;padding:18px 24px;color:#fff;box-shadow:0 14px 30px rgba(15,23,42,.25);margin-bottom:15px;position:relative;overflow:hidden}
-      .ctrlcfg-header-card:before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 90% 10%,rgba(255,255,255,.22),transparent 28%)}
-      .ctrlcfg-header-overlay{position:relative;display:flex;align-items:center;gap:15px;z-index:1}
-      .ctrlcfg-header-icon{width:56px;height:56px;min-width:56px;border-radius:16px;background:#fff;color:#0b4a8f;display:flex;align-items:center;justify-content:center;font-size:1.55rem;box-shadow:0 8px 20px rgba(0,0,0,.23)}
-      .ctrlcfg-kicker{display:inline-block;background:rgba(255,255,255,.17);padding:4px 10px;border-radius:999px;font-size:.68rem;font-weight:900;margin-bottom:4px}
-      .ctrlcfg-title{font-size:1.45rem;font-weight:950;margin:0;color:#fff!important}
-      .ctrlcfg-subtitle{font-size:.82rem;opacity:.92;margin-top:3px}
-      .ctrlcfg-info-card,.ctrlcfg-card{background:rgba(255,255,255,.97);border:1px solid #d7e5f5;border-radius:18px;box-shadow:0 10px 24px rgba(15,23,42,.12)}
-      .ctrlcfg-info-card{padding:13px 18px;margin-bottom:15px;display:flex;flex-wrap:wrap;gap:10px 24px;font-size:.78rem;color:#475569}
-      .ctrlcfg-card{padding:16px}
-      .ctrlcfg-card-title{font-weight:950;color:#0b4a8f;border-bottom:1px solid #dce8f5;padding-bottom:9px;margin-bottom:8px}
-      .ctrlcfg-table th{font-size:.70rem;color:#64748b;text-transform:uppercase;letter-spacing:.04em;background:#f4f8fd}
-      .ctrlcfg-table td{font-size:.78rem;padding:.50rem .55rem}
-      .ctrlcfg-formula{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}
-      .ctrlcfg-formula-preview{background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:11px 15px;color:#1d4f8f;font-weight:900;text-align:center}
-      .ctrlcfg-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:10px;margin-top:18px}
-      @media(max-width:768px){.ctrlcfg-formula{grid-template-columns:1fr}.ctrlcfg-actions .btn{width:100%}.ctrlcfg-header-overlay{align-items:flex-start}.ctrlcfg-title{font-size:1.20rem}}
-    </style>
-
-    <script>
-      (function(){
-        const designInput = document.querySelector('[name="pct_formula_peso_diseno"]');
-        const executionInput = document.querySelector('[name="pct_formula_peso_ejecucion"]');
-        const preview = document.getElementById('formulaPreview');
-        function actualizarFormula(){
-          const d = parseFloat(String(designInput?.value || 0).replace(',','.')) || 0;
-          const e = parseFloat(String(executionInput?.value || 0).replace(',','.')) || 0;
-          if(preview) preview.textContent = `Solidez Individual = Diseño × ${d.toFixed(2)} % + Ejecución × ${e.toFixed(2)} % · Total: ${(d+e).toFixed(2)} %`;
-        }
-        designInput?.addEventListener('input', actualizarFormula);
-        executionInput?.addEventListener('input', actualizarFormula);
-        actualizarFormula();
-      })();
-
-      function restablecerParametrosControl(){
-        if(confirm('¿Desea restablecer todos los porcentajes predeterminados y recalcular los riesgos existentes?')){
-          document.getElementById('resetControlParamsForm').submit();
-        }
-      }
-    </script>
-    """, grupos=grupos, formula=formula, maximo_diseno_actual=maximo_diseno_actual)
-
-    return render_template_string(BASE, content=Markup(html))
-
-
-# ==============================
-# CONFIGURACIÓN TIPOS DE RIESGO
-# ==============================
-@app.route('/configurar_tipos_riesgo', methods=['GET','POST'])
-@login_required
-def configurar_tipos_riesgo():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede configurar parámetros.", "danger")
-        return redirect(url_for('riesgos_menu'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Riesgos"):
-        flash("No tiene permiso para configurar parámetros.", "danger")
-        return redirect(url_for('riesgos_menu'))
-
-    if request.method == 'POST':
-        nombre = (request.form.get("nombre") or "").strip()
-        if not nombre:
-            flash("Debe ingresar un nombre para el Tipo de Riesgo.", "warning")
-        else:
-            existe = TipoRiesgo.query.filter(
-                TipoRiesgo.owner_user_id == user.id,
-                db.func.lower(TipoRiesgo.nombre) == nombre.lower()
-            ).first()
-
-            if existe:
-                flash("Ese tipo de riesgo ya existe.", "warning")
-            else:
-                tr = TipoRiesgo(
-                    nombre=nombre,
-                    activo=True,
-                    creado_por=session.get("username", "sistema"),
-                    owner_user_id=user.id
-                )
-                db.session.add(tr)
-                db.session.commit()
-                flash("✅ Tipo de riesgo creado.", "success")
-        return redirect(url_for("configurar_tipos_riesgo"))
-
-    tipos = TipoRiesgo.query.filter_by(owner_user_id=user.id)\
-        .order_by(TipoRiesgo.activo.desc(), TipoRiesgo.nombre.asc())\
-        .all()
-
-    html = """
-    <div class="tipo-shell">
-
-      <div class="tipo-header-card">
-        <div class="tipo-header-overlay">
-          <div class="tipo-header-text">
-            <h2 class="tipo-title m-0">Configuración de Tipos de Riesgo</h2>
-            <div class="tipo-subtitle">
-              Administración de categorías de riesgo utilizadas en la gestión del SGSI
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="tipo-form-card">
-        <div class="tipo-form-card-body">
-
-          <form method="POST" class="row g-3 align-items-end">
-            <div class="col-md-9">
-              <label class="form-label fw-semibold">Nuevo tipo de riesgo</label>
-              <input class="form-control"
-                     name="nombre"
-                     placeholder="Ej: Operacional, Tecnológico, Legal, Estratégico">
-            </div>
-
-            <div class="col-md-3">
-              <button class="btn btn-success w-100 rounded-pill fw-bold">
-                ➕ Guardar tipo
-              </button>
-            </div>
-          </form>
-
-        </div>
-      </div>
-
-      <div class="tipo-table-card">
-        <div class="tipo-table-card-body">
-
-          <h5 class="mb-3 fw-bold">Listado de Tipos de Riesgo</h5>
-
-          <div class="tipo-table-wrap">
-            <div class="table-responsive">
-              <table class="table table-bordered table-sm align-middle tipo-table mb-0">
-                <thead>
-                  <tr>
-                    <th>Nombre</th>
-                    <th style="width:160px;">Estado</th>
-                    <th style="width:260px;">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-
-                  {% for t in tipos %}
-                  <tr>
-                    <td>{{ t.nombre }}</td>
-
-                    <td class="text-center">
-                      {% if t.activo %}
-                        <span class="badge bg-success rounded-pill px-3 py-2">Activo</span>
-                      {% else %}
-                        <span class="badge bg-secondary rounded-pill px-3 py-2">Inactivo</span>
-                      {% endif %}
-                    </td>
-
-                    <td class="text-center">
-                      <a class="btn btn-warning btn-sm rounded-pill px-3"
-                         href="/editar_tipo_riesgo/{{ t.id }}">
-                         ✏️ Editar
-                      </a>
-
-                      {% if t.activo %}
-                        <form method="POST"
-                              action="/desactivar_tipo_riesgo/{{ t.id }}"
-                              class="d-inline"
-                              onsubmit="return confirm('¿Desactivar este tipo?');">
-                          <button class="btn btn-secondary btn-sm rounded-pill px-3">
-                            Desactivar
-                          </button>
-                        </form>
-                      {% else %}
-                        <form method="POST"
-                              action="/activar_tipo_riesgo/{{ t.id }}"
-                              class="d-inline"
-                              onsubmit="return confirm('¿Activar este tipo?');">
-                          <button class="btn btn-success btn-sm rounded-pill px-3">
-                            Activar
-                          </button>
-                        </form>
-                      {% endif %}
-                    </td>
-                  </tr>
-                  {% endfor %}
-
-                  {% if tipos|length == 0 %}
-                  <tr>
-                    <td colspan="3" class="text-center text-muted">
-                      Aún no hay tipos de riesgo configurados.
-                    </td>
-                  </tr>
-                  {% endif %}
-
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      <div class="tipo-bottom-actions">
-        <a href="/riesgos"
-           class="btn rounded-pill px-5 py-2 fw-bold tipo-back-btn">
-           ⬅ Volver a Gestión de Riesgos
-        </a>
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .tipo-shell{
-        width:96%;
-        max-width:1300px;
-        margin:10px auto 24px auto;
-      }
-
-      /* =========================
-         HERO SGSI COMPACTO
-      ========================== */
-      .tipo-header-card{
-        background:
-          linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.24);
-        color:#ffffff;
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .tipo-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
-          repeating-linear-gradient(
-            135deg,
-            rgba(255,255,255,.05) 0px,
-            rgba(255,255,255,.05) 1px,
-            transparent 1px,
-            transparent 15px
-          );
-        pointer-events:none;
-      }
-
-      .tipo-header-overlay{
-        width:100%;
-        height:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        padding:0;
-        background:transparent;
-        position:relative;
-        z-index:1;
-      }
-
-      .tipo-header-overlay::before{
-        content:"🏷️️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:rgba(255,255,255,.96);
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.55rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.20);
-        margin-right:14px;
-      }
-
-      .tipo-header-text{
-        max-width:1000px;
-        position:relative;
-        z-index:1;
-      }
-
-      .tipo-header-text::before{
-        content:"SGSI · Tipos de Riesgo";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border:1px solid rgba(255,255,255,.30);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.66rem;
-        font-weight:800;
-        letter-spacing:.35px;
-        margin-bottom:4px;
-      }
-
-      .tipo-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.36rem;
-        line-height:1.08;
-        text-shadow:0 3px 10px rgba(0,0,0,.32);
-        margin:0;
-      }
-
-      .tipo-subtitle{
-        color:rgba(248,252,255,.96);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-        text-shadow:none;
-      }
-
-      /* =========================
-         FORMULARIO / TABLA
-      ========================== */
-      .tipo-form-card,
-      .tipo-table-card{
-        background:rgba(255,255,255,.96);
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        margin-bottom:14px;
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .tipo-form-card-body,
-      .tipo-table-card-body{
-        padding:8px 7px;
-      }
-
-      .tipo-form-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .tipo-form-card .form-control{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:37px;
-        font-size:.80rem;
-        box-shadow:none;
-        padding-top:5px;
-        padding-bottom:5px;
-      }
-
-      .tipo-form-card .form-control:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .18rem rgba(63,134,214,.18);
-      }
-
-      .tipo-form-card .btn{
-        border-radius:10px !important;
-        min-height:37px;
-        padding:7px 20px !important;
-        font-size:.80rem;
-        font-weight:900;
-        box-shadow:0 7px 14px rgba(15,23,42,.14);
-      }
-
-      .tipo-form-card .btn-primary,
-      .tipo-form-card .btn-success{
-        border:none;
-        background:linear-gradient(135deg,#086df0,#2487ff);
-        color:#fff;
-      }
-
-      .tipo-table-wrap{
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:rgba(255,255,255,.98);
-        overflow:auto;
-      }
-
-      .tipo-table{
-        margin-bottom:0;
-        font-size:.80rem;
-      }
-
-      .tipo-table thead th{
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#ffffff;
-        font-weight:900;
-        text-align:center;
-        vertical-align:middle;
-        padding:11px 9px;
-        font-size:.78rem;
-        border-right:1px solid rgba(255,255,255,.28);
-      }
-
-      .tipo-table td{
-        vertical-align:middle;
-        padding:9px 8px;
-        font-size:.78rem;
-        border-right:1px solid #dce6f3;
-        border-bottom:1px solid #dce6f3;
-        background:rgba(255,255,255,.98);
-      }
-
-      .tipo-table tbody tr:nth-child(even) td{
-        background:#f8fbff;
-      }
-
-      .tipo-table tbody tr:hover td{
-        background:#eef6ff;
-      }
-
-      .tipo-table .btn{
-        border-radius:999px !important;
-        min-height:28px;
-        padding:4px 12px !important;
-        font-size:.70rem;
-        font-weight:900;
-      }
-
-      /* =========================
-         BOTÓN VOLVER
-      ========================== */
-      .tipo-bottom-actions{
-        text-align:center;
-        margin-top:16px;
-      }
-
-      .tipo-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 24px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.14);
-      }
-
-      .tipo-back-btn{
-        background:#ffffff;
-        border:1px solid #cfd8e3;
-        color:#0f172a;
-        box-shadow:0 6px 14px rgba(0,0,0,.10);
-      }
-
-      .tipo-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      /* =========================
-         SCROLL
-      ========================== */
-      .tipo-table-wrap::-webkit-scrollbar{
-        height:11px;
-        width:11px;
-      }
-
-      .tipo-table-wrap::-webkit-scrollbar-track{
-        background:#dbe4f0;
-        border-radius:12px;
-      }
-
-      .tipo-table-wrap::-webkit-scrollbar-thumb{
-        background:linear-gradient(180deg,#5aa3ea,#3f86d6);
-        border-radius:12px;
-        border:2px solid #dbe4f0;
-      }
-
-      .tipo-table-wrap{
-        scrollbar-width:thin;
-        scrollbar-color:#3f86d6 #dbe4f0;
-      }
-
-      /* =========================
-         RESPONSIVE
-      ========================== */
-      @media(max-width:992px){
-        .tipo-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .tipo-header-card{
-          min-height:88px;
-          padding:15px 18px;
-        }
-
-        .tipo-title{
-          font-size:1.22rem;
-        }
-
-        .tipo-subtitle{
-          font-size:.74rem;
-        }
-
-        .tipo-form-card-body,
-        .tipo-table-card-body{
-          padding:12px;
-        }
-      }
-
-      @media(max-width:768px){
-        .tipo-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .tipo-header-overlay::before{
-          margin-right:0;
-        }
-
-        .tipo-title{
-          font-size:1.12rem;
-        }
-
-        .tipo-subtitle{
-          font-size:.72rem;
-        }
-
-        .tipo-bottom-actions .btn,
-        .tipo-form-card .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    return render_template_string(BASE, content=Markup(render_template_string(html, tipos=tipos)))
-
-@app.route("/tipos_riesgo/agregar", methods=["POST"])
-@login_required
-def tipos_riesgo_agregar():
-    user_id = session.get("user_id")
-    if not user_id:
-        flash("Sesión inválida: falta user_id. Inicia sesión de nuevo.", "danger")
-        return redirect(url_for("login"))
-
-    nombre = (request.form.get("nombre") or "").strip()
-    if not nombre:
-        flash("Debe ingresar el nombre del tipo de riesgo.", "warning")
-        return redirect(url_for("gestion_riesgos"))
-
-    t = TipoRiesgo(
-        nombre=nombre,
-        creado_por=session.get("username"),
-        owner_user_id=user_id,   # ✅ ESTA ES LA LÍNEA CLAVE
-        activo=True
-    )
-    db.session.add(t)
-    db.session.commit()
-    flash("✅ Tipo de riesgo creado.", "success")
-    return redirect(url_for("gestion_riesgos"))
-
-@app.route('/editar_tipo_riesgo/<int:id>', methods=['GET','POST'])
-@login_required
-def editar_tipo_riesgo(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("No permitido.", "danger")
-        return redirect(url_for('riesgos_menu'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Riesgos"):
-        flash("No tiene permiso.", "danger")
-        return redirect(url_for('riesgos_menu'))
-
-    t = TipoRiesgo.query.get_or_404(id)
-
-    if request.method == 'POST':
-        nombre = (request.form.get("nombre") or "").strip()
-        if not nombre:
-            flash("Nombre requerido.", "warning")
-        else:
-            existe = TipoRiesgo.query.filter(
-                db.func.lower(TipoRiesgo.nombre) == nombre.lower(),
-                TipoRiesgo.id != t.id
-            ).first()
-
-            if existe:
-                flash("Ya existe otro tipo con ese nombre.", "warning")
-            else:
-                t.nombre = nombre
-                db.session.commit()
-                flash("✅ Actualizado.", "success")
-                return redirect(url_for("configurar_tipos_riesgo"))
-
-    html = """
-    <div class="tipoedit-shell">
-
-      <!-- =========================
-           CABECERA
-      ========================== -->
-      <div class="tipoedit-header-card">
-        <div class="tipoedit-header-overlay">
-          <div class="tipoedit-header-text">
-            <h2 class="tipoedit-title m-0">✏️ Editar Tipo de Riesgo</h2>
-            <div class="tipoedit-subtitle">
-              Actualización de la categoría de riesgo utilizada en la gestión del SGSI
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- =========================
-           FORMULARIO
-      ========================== -->
-      <div class="tipoedit-form-card">
-        <div class="tipoedit-form-card-body">
-
-          <form method="POST">
-            <div class="row g-3">
-              <div class="col-12">
-                <label class="form-label fw-semibold">Nombre</label>
-                <input class="form-control"
-                       name="nombre"
-                       value="{{ t.nombre }}"
-                       placeholder="Ej: Operacional, Tecnológico, Legal, Estratégico"
-                       required>
-              </div>
-            </div>
-
-            <div class="tipoedit-bottom-actions">
-              <button class="btn btn-primary rounded-pill px-5 py-2 fw-bold">
-                Guardar
-              </button>
-
-              <a href="{{ url_for('configurar_tipos_riesgo') }}"
-                 class="btn rounded-pill px-5 py-2 fw-bold tipoedit-back-btn">
-                Cancelar
-              </a>
-            </div>
-          </form>
-
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image: url('/static/img/ccsgsi.jpg');
-        background-size: cover;
-        background-position: center;
-        background-attachment: fixed;
-        background-repeat: no-repeat;
-      }
-
-      .tipoedit-shell{
-        width: 96%;
-        max-width: 1000px;
-        margin: 8px auto 30px auto;
-      }
-
-      .tipoedit-header-card{
-        background: linear-gradient(135deg, #2f6fb6 0%, #3f86d6 55%, #5aa3ea 100%);
-        height: 88px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 18px;
-        box-shadow: 0 12px 30px rgba(0,0,0,.30);
-        position: relative;
-        overflow: hidden;
-        margin-bottom: 14px;
-      }
-
-      .tipoedit-header-overlay{
-        width: 100%;
-        height: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        text-align: center;
-        padding: 8px 24px;
-        background: rgba(0,0,0,.08);
-      }
-
-      .tipoedit-header-text{
-        max-width: 900px;
-      }
-
-      .tipoedit-title{
-        color: #ffffff !important;
-        font-weight: 900;
-        font-size: 1.38rem;
-        line-height: 1.15;
-        text-shadow: 0 4px 14px rgba(0,0,0,.45);
-        margin: 0;
-      }
-
-      .tipoedit-subtitle{
-        color: rgba(255,255,255,.96);
-        font-size: .82rem;
-        margin-top: 4px;
-        text-shadow: 0 2px 8px rgba(0,0,0,.35);
-      }
-
-      .tipoedit-form-card{
-        background: rgba(248,252,255,.96);
-        border-radius: 18px;
-        backdrop-filter: blur(6px);
-        box-shadow: 0 10px 24px rgba(0,0,0,.18);
-        overflow: hidden;
-      }
-
-      .tipoedit-form-card-body{
-        padding: 22px;
-      }
-
-      .tipoedit-form-card .form-label{
-        color: #101827;
-        margin-bottom: 6px;
-      }
-
-      .tipoedit-form-card .form-control{
-        border-radius: 10px;
-        border: 1px solid #cfd8e3;
-        min-height: 44px;
-      }
-
-      .tipoedit-form-card .form-control:focus{
-        border-color: #3f86d6;
-        box-shadow: 0 0 0 0.2rem rgba(63,134,214,.18);
-      }
-
-      .tipoedit-bottom-actions{
-        display: flex;
-        justify-content: center;
-        gap: 12px;
-        flex-wrap: wrap;
-        margin-top: 22px;
-      }
-
-      .tipoedit-back-btn{
-        background: #ffffff;
-        color: #000000;
-        border: 2px solid #ffffff;
-        box-shadow: 0 4px 10px rgba(0,0,0,.10);
-      }
-
-      .tipoedit-back-btn:hover{
-        background: #f3f4f6;
-        color: #000000;
-        border-color: #f3f4f6;
-      }
-
-      @media (max-width: 992px){
-        .tipoedit-shell{
-          width: 98%;
-          margin: 6px auto 24px auto;
-        }
-
-        .tipoedit-header-card{
-          height: 84px;
-        }
-
-        .tipoedit-title{
-          font-size: 1.20rem;
-        }
-
-        .tipoedit-subtitle{
-          font-size: .76rem;
-        }
-
-        .tipoedit-form-card-body{
-          padding: 14px;
-        }
-      }
-    </style>
-    """
-    return render_template_string(BASE, content=Markup(render_template_string(html, t=t)))
-
-@app.post('/desactivar_tipo_riesgo/<int:id>')
-@login_required
-def desactivar_tipo_riesgo(id):
-    t = TipoRiesgo.query.get_or_404(id)
-    t.activo = False
-    db.session.commit()
-    flash("Tipo desactivado.", "success")
-    return redirect(url_for("configurar_tipos_riesgo"))
-
-@app.post('/activar_tipo_riesgo/<int:id>')
-@login_required
-def activar_tipo_riesgo(id):
-    t = TipoRiesgo.query.get_or_404(id)
-    t.activo = True
-    db.session.commit()
-    flash("Tipo activado.", "success")
-    return redirect(url_for("configurar_tipos_riesgo"))
-
-# ===========================
-# MAPA CALOR
-# ===========================
-@app.route('/mapa_calor')
-@login_required
-def mapa_calor():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        solo_lectura = True
-    else:
-        if user.role != 'admin' and not verificar_permiso(user, "Gestión de Riesgos"):
-            flash("No tiene permiso para ver la Gestión de Riesgos.", "danger")
-            return redirect(url_for('riesgos_menu'))
-        solo_lectura = False
-
-    try:
-        riesgos_db = Riesgo.query.filter_by(archivado=False).all()
-    except Exception:
-        riesgos_db = Riesgo.query.all()
-
-    niveles = [
-        "Rara vez o Muy baja",
-        "Eventualmente o Baja",
-        "Puede ocurrir o Moderada",
-        "Probable o Alta",
-        "Muy frecuente o Muy Alta"
-    ]
-
-    impacto_niveles = [
-        "Insignificante o Inferior",
-        "Menor",
-        "Moderado o Importante",
-        "Mayor",
-        "Catastrófico o Crítico"
-    ]
-
-    colorPorValor = [
-        {"min": 1,  "max": 4,  "class": "nivel1", "color": "#2ecc71"},
-        {"min": 5,  "max": 8,  "class": "nivel2", "color": "#f1c40f"},
-        {"min": 9,  "max": 12, "class": "nivel3", "color": "#ff69b4"},
-        {"min": 13, "max": 20, "class": "nivel4", "color": "#e74c3c"},
-        {"min": 21, "max": 25, "class": "nivel5", "color": "#8e44ad"},
-    ]
-
-    color_ranges = [
-        {
-            "min": c["min"],
-            "max": c["max"],
-            "class": c["class"],
-            "color": c["color"]
-        }
-        for c in colorPorValor
-    ]
-
-    def normalizar(etiqueta, tipo="prob"):
-        if not etiqueta:
-            return niveles[0] if tipo == "prob" else impacto_niveles[0]
-
-        e = str(etiqueta).strip().lower()
-
-        if tipo == "prob":
-            if "rara" in e or "muy baja" in e or e == "1":
-                return "Rara vez o Muy baja"
-            if "eventual" in e or "baja" in e or e == "2":
-                return "Eventualmente o Baja"
-            if "moderada" in e or "puede ocurrir" in e or e == "3":
-                return "Puede ocurrir o Moderada"
-            if "alta" in e or "probable" in e or e == "4":
-                return "Probable o Alta"
-            if "muy frecuente" in e or "muy alta" in e or e == "5":
-                return "Muy frecuente o Muy Alta"
-
-        if tipo == "imp":
-            if "insignificante" in e or "inferior" in e or e == "1":
-                return "Insignificante o Inferior"
-            if "menor" in e or e == "2":
-                return "Menor"
-            if "moderado" in e or "importante" in e or e == "3":
-                return "Moderado o Importante"
-            if "mayor" in e or e == "4":
-                return "Mayor"
-            if "catastrófico" in e or "catastrofico" in e or "crítico" in e or "critico" in e or e == "5":
-                return "Catastrófico o Crítico"
-
-        return niveles[0] if tipo == "prob" else impacto_niveles[0]
-
-    matriz = {p: {i: [] for i in impacto_niveles} for p in niveles}
-    riesgos_json = []
-
-    for r in riesgos_db:
-        prob_text = normalizar(
-            getattr(r, "prob_res", "") or getattr(r, "cuadrante_prob", ""),
-            "prob"
-        )
-
-        impacto_text = normalizar(
-            getattr(r, "impacto_res_label", "") or getattr(r, "cuadrante_imp", ""),
-            "imp"
-        )
-
-        detalle_url = url_for("riesgo_detalle", riesgo_id=r.id)
-
-        item = {
-            "id": r.id,
-            "codigo_riesgo": r.codigo_riesgo or "",
-            "riesgo": r.riesgo or "",
-            "nombre_activo": getattr(r, "nombre_activo", "") or "",
-            "riesgo_residual": getattr(r, "riesgo_residual", "") or "",
-            "propietario": getattr(r, "propietario_riesgo", "") or "",
-            "detalle_url": detalle_url
-        }
-
-        if prob_text in niveles and impacto_text in impacto_niveles:
-            matriz[prob_text][impacto_text].append(item)
-
-        riesgos_json.append({
-            "id": r.id,
-            "codigo_riesgo": r.codigo_riesgo or "",
-            "riesgo": r.riesgo or "",
-            "nombre_activo": getattr(r, "nombre_activo", "") or "",
-            "prob_res": prob_text,
-            "impacto_res": impacto_text,
-            "riesgo_residual": getattr(r, "riesgo_residual", "") or "",
-            "propietario": getattr(r, "propietario_riesgo", "") or "",
-            "detalle_url": detalle_url
-        })
-
-    html = render_template_string("""
-    <div class="heat-shell">
-
-      <div class="heat-header-card">
-        <div class="heat-header-overlay">
-          <div class="heat-header-text">
-            <h2 class="heat-title m-0">🌡️ Mapa de Calor</h2>
-            <div class="heat-subtitle">
-              Visualización de la distribución de riesgos residuales por probabilidad e impacto
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="heat-header-actions">
-        <a class="heat-back-btn" href="{{ url_for('gestion_riesgos') }}">
-          ⬅ Volver a Gestión de Riesgos
-        </a>
-      </div>
-
-      <div class="heat-card">
-        <div class="heat-card-body">
-          <div class="heat-table-wrap">
-
-            <table id="heatmap" class="heatmap-table">
-
-              <colgroup>
-                <col class="col-axis">
-                <col class="col-prob">
-                {% for imp in impacto_niveles %}
-                  <col class="col-impact">
-                {% endfor %}
-              </colgroup>
-
-              <thead>
-                <tr>
-                  <th class="heat-corner-fill" colspan="2" rowspan="2"></th>
-                  <th class="heat-axis-impacto" colspan="{{ impacto_niveles|length }}">
-                    IMPACTO
-                  </th>
-                </tr>
-
-                <tr>
-                  {% for imp in impacto_niveles %}
-                    <th class="heat-impact-header">{{ imp }}</th>
-                  {% endfor %}
-                </tr>
-              </thead>
-
-              <tbody>
-                {% for prob in niveles %}
-                <tr>
-                  {% if loop.first %}
-                    <th class="heat-axis-probabilidad" rowspan="{{ niveles|length }}">
-                      <span>PROBABILIDAD</span>
-                    </th>
-                  {% endif %}
-
-                  <th class="heat-prob-header">{{ prob }}</th>
-
-                  {% for imp in impacto_niveles %}
-                    <td class="cell"
-                        data-prob="{{ prob }}"
-                        data-imp="{{ imp }}"
-                        id="cell-{{ prob }}-{{ imp }}">
-                    </td>
-                  {% endfor %}
-                </tr>
-                {% endfor %}
-              </tbody>
-
-            </table>
-
-          </div>
-        </div>
-      </div>
-
-      <div class="heat-legend-card">
-        <div class="heat-legend-body">
-          <div class="heat-legend-title">Leyenda de niveles</div>
-
-          <div class="legend">
-            <span class="nivel1">Bajo (1-4)</span>
-            <span class="nivel2">Medio (5-8)</span>
-            <span class="nivel3">Alto (9-12)</span>
-            <span class="nivel4">Muy Alto (13-20)</span>
-            <span class="nivel5">Extremo (21-25)</span>
-          </div>
-        </div>
-      </div>
-
-    </div>
-
-    <div id="modal" class="modal">
-      <div class="box">
-        <button type="button" class="close" onclick="cerrarModal()" aria-label="Cerrar">✕</button>
-        <h3 id="modalTitle">Riesgos</h3>
-        <ul id="modalList" class="rlist"></ul>
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg') !important;
-        background-size:cover !important;
-        background-position:center !important;
-        background-attachment:fixed !important;
-        background-repeat:no-repeat !important;
-      }
-
-      .heat-shell{
-        width:96%;
-        max-width:1450px;
-        margin:10px auto 24px auto;
-      }
-
-      .heat-header-card{
-        background:linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.24);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-        color:#fff;
-      }
-
-      .heat-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
-          repeating-linear-gradient(
-            135deg,
-            rgba(255,255,255,.05) 0px,
-            rgba(255,255,255,.05) 1px,
-            transparent 1px,
-            transparent 15px
-          );
-      }
-
-      .heat-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        gap:14px;
-        position:relative;
-        z-index:1;
-      }
-
-      .heat-header-overlay::before{
-        content:"🌡️";
-        width:54px;
-        height:54px;
-        border-radius:14px;
-        background:#fff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.5rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.2);
-      }
-
-      .heat-header-text::before{
-        content:"SGSI · Análisis de Riesgo";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-      }
-
-      .heat-title{
-        font-size:1.32rem;
-        font-weight:950;
-        margin:0;
-      }
-
-      .heat-subtitle{
-        font-size:.78rem;
-        opacity:.9;
-      }
-
-      .heat-header-actions{
-        display:flex;
-        justify-content:center;
-        margin-bottom:12px;
-      }
-
-      .heat-back-btn{
-        border-radius:10px;
-        padding:8px 20px;
-        font-size:.8rem;
-        font-weight:900;
-        background:#fff;
-        border:1px solid #cfd8e3;
-        text-decoration:none;
-        color:#101827;
-      }
-
-      .heat-back-btn:hover{
-        background:#eef4ff;
-        color:#0b65d8;
-      }
-
-      .heat-card{
-        background:rgba(255,255,255,.96);
-        border-radius:18px;
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        margin-bottom:14px;
-      }
-
-      .heat-card-body{
-        padding:8px 7px;
-      }
-
-      .heat-table-wrap{
-        background:#fff;
-        border-radius:14px;
-        border:1px solid #dbe6f4;
-        padding:12px;
-        overflow:auto;
-      }
-
-      table.heatmap-table{
-        margin:auto;
-        border-collapse:separate;
-        border-spacing:4px;
-        table-layout:fixed;
-      }
-
-      .heatmap-table col.col-axis{
-        width:64px;
-      }
-
-      .heatmap-table col.col-prob{
-        width:140px;
-      }
-
-      .heatmap-table col.col-impact{
-        width:140px;
-      }
-
-      .heatmap-table th,
-      .heatmap-table td{
-        height:95px;
-        border-radius:10px;
-        text-align:center;
-        font-size:.78rem;
-      }
-
-      .heatmap-table th{
-        background:#eaf3ff;
-        font-weight:900;
-        color:#101827;
-      }
-
-      .heat-corner-fill{
-        background:linear-gradient(135deg,#2f6fb6 0%,#3f86d6 55%,#5aa3ea 100%) !important;
-        color:#fff !important;
-        border-radius:12px !important;
-        box-shadow:0 8px 18px rgba(47,111,182,.24);
-        border:none !important;
-        height:95px !important;
-      }
-
-      .heat-axis-impacto{
-        height:42px !important;
-        background:linear-gradient(135deg,#2f6fb6,#3f86d6,#5aa3ea) !important;
-        color:#fff !important;
-        font-size:.98rem !important;
-        letter-spacing:.08em;
-        text-transform:uppercase;
-        border-radius:12px !important;
-        box-shadow:0 8px 18px rgba(47,111,182,.24);
-      }
-
-      .heat-axis-probabilidad{
-        width:64px !important;
-        min-width:64px !important;
-        max-width:64px !important;
-        background:linear-gradient(180deg,#2f6fb6,#3f86d6,#5aa3ea) !important;
-        color:#fff !important;
-        border-radius:14px !important;
-        box-shadow:0 8px 18px rgba(47,111,182,.24);
-      }
-
-      .heat-axis-probabilidad span{
-        writing-mode:vertical-rl;
-        transform:rotate(180deg);
-        display:inline-block;
-        letter-spacing:.08em;
-        text-transform:uppercase;
-        font-size:.82rem;
-      }
-
-      .heat-impact-header{
-        background:#eaf3ff !important;
-        color:#101827 !important;
-        font-weight:950 !important;
-        line-height:1.25;
-      }
-
-      .heat-prob-header{
-        background:#eaf3ff !important;
-        color:#101827 !important;
-        font-weight:950 !important;
-        line-height:1.25;
-      }
-
-      .heatmap-table td.cell{
-        cursor:pointer;
-        font-weight:800;
-        transition:.2s;
-        background:#fff;
-      }
-
-      .heatmap-table td.cell:hover{
-        transform:scale(1.05);
-        box-shadow:0 6px 14px rgba(0,0,0,.2);
-      }
-
-      .nivel1{background:#2ecc71 !important;color:#fff;}
-      .nivel2{background:#f1c40f !important;color:#111;}
-      .nivel3{background:#ff69b4 !important;color:#111;}
-      .nivel4{background:#e74c3c !important;color:#fff;}
-      .nivel5{background:#8e44ad !important;color:#fff;}
-
-      .heat-legend-card{
-        background:#fff;
-        border-radius:18px;
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-      }
-
-      .heat-legend-body{
-        padding:8px 7px;
-        text-align:center;
-      }
-
-      .heat-legend-title{
-        font-size:.82rem;
-        font-weight:950;
-        color:#101827;
-        margin-bottom:8px;
-      }
-
-      .legend{
-        display:flex;
-        justify-content:center;
-        flex-wrap:wrap;
-        gap:6px;
-      }
-
-      .legend span{
-        padding:6px 10px;
-        border-radius:999px;
-        font-size:.78rem;
-        font-weight:800;
-      }
-
-      .modal{
-        display:none;
-        position:fixed;
-        inset:0;
-        background:rgba(0,0,0,.55);
-        z-index:99999;
-        padding:20px;
-        align-items:center;
-        justify-content:center;
-      }
-
-      .modal .box{
-        position:relative;
-        background:#fff;
-        width:min(760px,92vw);
-        padding:18px;
-        border-radius:16px;
-        box-shadow:0 20px 50px rgba(0,0,0,.3);
-        max-height:78vh;
-        overflow:auto;
-        margin:0 auto;
-      }
-
-      .modal h3{
-        font-size:1rem;
-        font-weight:900;
-        margin-bottom:12px;
-        color:#101827;
-      }
-
-      .close{
-        position:absolute;
-        top:10px;
-        right:10px;
-        border:none;
-        background:#eef2f7;
-        border-radius:50%;
-        width:30px;
-        height:30px;
-        cursor:pointer;
-        font-weight:900;
-      }
-
-      .close:hover{
-        background:#dbe6f4;
-      }
-
-      ul.rlist{
-        list-style:none;
-        padding:0;
-        margin:0;
-      }
-
-      ul.rlist li{
-        background:#f8fafc;
-        padding:10px;
-        border-radius:12px;
-        margin-bottom:8px;
-        font-size:.8rem;
-        border:1px solid #dbe6f4;
-        cursor:pointer;
-        transition:.18s ease;
-      }
-
-      ul.rlist li:hover{
-        background:#eef6ff;
-        transform:translateY(-2px);
-        box-shadow:0 8px 18px rgba(15,23,42,.12);
-      }
-
-      .risk-detail-link{
-        color:#1476ef;
-        font-weight:950;
-        display:inline-block;
-        margin-top:6px;
-      }
-
-      @media(max-width:992px){
-        .heat-shell{
-          width:98%;
-        }
-
-        .heat-title{
-          font-size:1.2rem;
-        }
-
-        .heatmap-table col.col-axis{
-          width:56px;
-        }
-
-        .heatmap-table col.col-prob,
-        .heatmap-table col.col-impact{
-          width:110px;
-        }
-
-        .heatmap-table th,
-        .heatmap-table td{
-          height:85px;
-        }
-
-        .heat-axis-probabilidad{
-          width:56px !important;
-          min-width:56px !important;
-          max-width:56px !important;
-        }
-      }
-    </style>
-
-    <script>
-      const riesgos = {{ riesgos_json|tojson }};
-      const matrizServidor = {{ matriz|tojson }};
-      const colorRanges = {{ color_ranges|tojson }};
-
-      function escapeHtml(text){
-        return String(text || "")
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;")
-          .replaceAll("'", "&#039;");
-      }
-
-      function clasePorValor(valor) {
-        for (let i = 0; i < colorRanges.length; i++) {
-          const r = colorRanges[i];
-          if (valor >= r.min && valor <= r.max) {
-            return r.class;
-          }
-        }
-        return "nivel5";
-      }
-
-      function pintarMapa(){
-        for (const prob of Object.keys(matrizServidor)) {
-          for (const imp of Object.keys(matrizServidor[prob])) {
-            const cell = document.getElementById(`cell-${prob}-${imp}`);
-            const lista = matrizServidor[prob][imp] || [];
-
-            if (!cell) continue;
-
-            if (lista.length === 0) {
-              cell.innerHTML = "<small style='color:#777'>-</small>";
-              continue;
-            }
-
-            const map = {
-              "Rara vez o Muy baja": 1,
-              "Eventualmente o Baja": 2,
-              "Puede ocurrir o Moderada": 3,
-              "Probable o Alta": 4,
-              "Muy frecuente o Muy Alta": 5,
-              "Insignificante o Inferior": 1,
-              "Menor": 2,
-              "Moderado o Importante": 3,
-              "Mayor": 4,
-              "Catastrófico o Crítico": 5
-            };
-
-            const valor = Number(map[prob] || 1) * Number(map[imp] || 1);
-            const clase = clasePorValor(valor);
-
-            cell.classList.add(clase);
-
-            cell.innerHTML = `
-              <div>${lista.length} riesgo(s)</div>
-              <div style="font-size:12px;margin-top:6px">
-                ${escapeHtml(lista[0].riesgo || lista[0].nombre_activo || '')}
-              </div>
-            `;
-
-            cell.addEventListener('click', () => abrirModal(prob, imp, lista));
-          }
-        }
-      }
-
-      function abrirModal(prob, imp, lista){
-        const modal = document.getElementById('modal');
-        const title = document.getElementById('modalTitle');
-        const list = document.getElementById('modalList');
-
-        title.innerText = `Riesgos — ${prob} / ${imp} (${lista.length})`;
-        list.innerHTML = '';
-
-        lista.forEach(it => {
-          const li = document.createElement('li');
-
-          li.onclick = function(){
-            window.location.href = it.detalle_url;
-          };
-
-          li.innerHTML = `
-            <b>${escapeHtml(it.codigo_riesgo || 'Sin código')}</b>
-            —
-            ${escapeHtml(it.riesgo || it.nombre_activo || 'Sin título')}
-            <br>
-            <small>
-              Activo: ${escapeHtml(it.nombre_activo || '—')}
-              |
-              Residual: ${escapeHtml(it.riesgo_residual || '—')}
-              |
-              Prop.: ${escapeHtml(it.propietario || '—')}
-            </small>
-            <br>
-            <span class="risk-detail-link">🔎 Ver detalle del riesgo →</span>
-          `;
-
-          list.appendChild(li);
-        });
-
-        modal.style.display = 'flex';
-      }
-
-      function cerrarModal(){
-        document.getElementById('modal').style.display = 'none';
-      }
-
-      window.onclick = (e) => {
-        if (e.target.id === 'modal') {
-          cerrarModal();
-        }
-      };
-
-      document.addEventListener("DOMContentLoaded", pintarMapa);
-    </script>
-    """,
-    niveles=niveles,
-    impacto_niveles=impacto_niveles,
-    matriz=matriz,
-    riesgos_json=riesgos_json,
-    color_ranges=color_ranges
-    )
-
-    return render_template_string(BASE, content=Markup(html))
-
-# ======================================
-# DETALLE DE RIESGO (MISMO ESTILO AGREGAR)
-# ======================================
-@app.route('/riesgos/detalle/<int:riesgo_id>')
-@login_required
-def riesgo_detalle(riesgo_id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role != 'auditor':
-        if user.role != 'admin' and not verificar_permiso(user, "Gestión de Riesgos"):
-            flash("No tiene permiso para ver el detalle del riesgo.", "danger")
-            return redirect(url_for('riesgos_menu'))
-
-    riesgo = Riesgo.query.get_or_404(riesgo_id)
-
-    tipo_riesgo_nombre = ""
-    try:
-        if hasattr(riesgo, "tipo_riesgo_rel") and riesgo.tipo_riesgo_rel:
-            tipo_riesgo_nombre = riesgo.tipo_riesgo_rel.nombre
-        elif hasattr(riesgo, "tipo_riesgo") and riesgo.tipo_riesgo:
-            tipo_riesgo_nombre = riesgo.tipo_riesgo
-        else:
-            tipo_riesgo_nombre = ""
-    except Exception:
-        tipo_riesgo_nombre = ""
-
-    def color_por_valor(valor):
-        if valor is None or str(valor).strip() == "":
-            return ""
-        s = str(valor).strip().lower()
-        if "extremo" in s:
-            return "nivel5"
-        if "muy alto" in s or "muyalto" in s:
-            return "nivel4"
-        if "alto" in s:
-            return "nivel3"
-        if "medio" in s or "moderado" in s:
-            return "nivel2"
-        if "bajo" in s:
-            return "nivel1"
-        return ""
-
-    detalle_html = """
-    <div class="riskform-shell">
-
-      <div class="riskform-header-card">
-        <div class="riskform-header-overlay">
-          <div class="riskform-header-text">
-            <h3 class="riskform-title m-0">📄 Detalle del Riesgo - Gestión de Riesgos</h3>
-            <div class="riskform-subtitle">
-              Consulta detallada del riesgo, análisis, valoración, controles y tratamiento del riesgo registrado
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <form class="riskform-card">
-        <div class="riskform-card-body">
-          <div class="row g-3">
-
-            <div class="col-12">
-              <div class="riskform-section-title">🧩 Identificación del Riesgo</div>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Código de Riesgo</label>
-              <input class="form-control" value="{{ riesgo.codigo_riesgo or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Riesgo</label>
-              <input class="form-control" value="{{ riesgo.riesgo or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Tipo de Riesgo</label>
-              <input class="form-control" value="{{ tipo_riesgo_nombre }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Fecha de Identificación</label>
-              <input class="form-control" value="{{ riesgo.fecha_identificacion or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Propietario del Riesgo</label>
-              <input class="form-control" value="{{ riesgo.propietario_riesgo or '' }}" readonly>
-            </div>
-
-            <div class="col-12">
-              <div class="riskform-section-title">🧩 Análisis</div>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Código Amenaza</label>
-              <input class="form-control" value="{{ riesgo.codigo_amenaza or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Amenaza</label>
-              <input class="form-control" value="{{ riesgo.amenaza or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Código Vulnerabilidad</label>
-              <input class="form-control" value="{{ riesgo.codigo_vulnerabilidad or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Vulnerabilidad</label>
-              <input class="form-control" value="{{ riesgo.vulnerabilidad or '' }}" readonly>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Tipo de Activo</label>
-              <input class="form-control" value="{{ riesgo.tipo_activo or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Nombre del Activo</label>
-              <input class="form-control" value="{{ riesgo.nombre_activo or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Principio de Seguridad</label>
-              <input class="form-control" value="{{ riesgo.dimension_seguridad or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Estado</label>
-              <input class="form-control" value="{{ riesgo.estado or '' }}" readonly>
-            </div>
-
-            <div class="col-12">
-              <div class="riskform-section-title">🧩 Valoración del Riesgo Inherente</div>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Probabilidad Riesgo Inherente</label>
-              <input class="form-control" value="{{ riesgo.prob_inh or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Impacto Riesgo Inherente</label>
-              <input class="form-control" value="{{ riesgo.imp_inh or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Riesgo Inherente</label>
-              <input class="form-control {{ color_por_valor(riesgo.riesgo_inherente) }}" value="{{ riesgo.riesgo_inherente or '' }}" readonly>
-            </div>
-
-            <div class="col-12">
-              <div class="riskform-section-title">🧩 Controles Actuales - Evaluación Individual</div>
-            </div>
-            {{ controles_detalle_html|safe }}
-
-            <div class="col-12">
-              <div class="riskform-section-title">🧩 Evaluación del Riesgo Residual</div>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Solidez Grupal (Promedio)</label>
-              <input class="form-control" value="{{ riesgo_formatear_porcentaje(riesgo.solidez_grupal or 0) }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Probabilidad Residual</label>
-              <input class="form-control" value="{{ riesgo.cuadrante_prob or riesgo.prob_res or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Impacto Residual</label>
-              <input class="form-control" value="{{ riesgo.cuadrante_imp or riesgo.impacto_res_label or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Riesgo Residual</label>
-              <input class="form-control" value="{{ riesgo.riesgo_residual or '' }}" readonly>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Fecha de Revisión</label>
-              <input class="form-control" value="{{ riesgo.fecha_revision or '' }}" readonly>
-            </div>
-
-            <div class="col-12">
-              <div class="riskform-section-title">🧩 Tratamiento del Riesgo Residual</div>
-            </div>
-
-            <div class="col-md-12">
-              <label class="form-label">Observaciones</label>
-              <textarea class="form-control" readonly>{{ riesgo.observaciones or '' }}</textarea>
-            </div>
-            <div class="col-md-12">
-              <label class="form-label">Planes de Acción</label>
-              <textarea class="form-control" readonly>{{ riesgo.planes_accion or '' }}</textarea>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Responsable</label>
-              <input class="form-control" value="{{ riesgo.responsable or '' }}" readonly>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Fecha de Implementación</label>
-              <input class="form-control" value="{{ riesgo.fecha_implementacion or '' }}" readonly>
-            </div>
-
-          </div>
-
-          <div class="riskform-bottom-actions">
-            <a href="{{ url_for('gestion_riesgos') }}" class="btn btn-primary rounded-pill px-5 py-2 fw-bold">
-              Volver a la Matriz
-            </a>
-            {% if not riesgo.archivado %}
-              <a href="/editar_riesgo/{{ riesgo.id }}" class="btn btn-warning rounded-pill px-5 py-2 fw-bold">
-                Editar Riesgo
-              </a>
-            {% endif %}
-          </div>
-        </div>
-
-        <style>
-          body{
-            background-image:url('/static/img/ccsgsi.jpg');
-            background-size:cover;
-            background-position:center;
-            background-attachment:fixed;
-            background-repeat:no-repeat;
-          }
-
-          .riskform-shell{
-            width:96%;
-            max-width:1600px;
-            margin:10px auto 24px auto;
-          }
-
-          /* =========================
-             HERO SGSI (MISMO DISEÑO)
-          ========================== */
-          .riskform-header-card{
-            background:
-              linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
-            border-radius:18px;
-            padding:16px 24px;
-            min-height:94px;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            box-shadow:0 12px 24px rgba(15,23,42,.24);
-            color:#ffffff;
-            position:relative;
-            overflow:hidden;
-            margin-bottom:10px;
-          }
-
-          .riskform-header-card::before{
-            content:"";
-            position:absolute;
-            inset:0;
-            background:
-              radial-gradient(circle at 92% 12%, rgba(255,255,255,.20), transparent 26%),
-              repeating-linear-gradient(
-                135deg,
-                rgba(255,255,255,.05) 0px,
-                rgba(255,255,255,.05) 1px,
-                transparent 1px,
-                transparent 15px
-              );
-            pointer-events:none;
-          }
-
-          .riskform-header-overlay{
-            width:100%;
-            height:100%;
-            display:flex;
-            align-items:center;
-            justify-content:flex-start;
-            text-align:left;
-            padding:0;
-            background:transparent;
-            position:relative;
-            z-index:1;
-          }
-
-          .riskform-header-overlay::before{
-            content:"⚠️";
-            width:54px;
-            height:54px;
-            min-width:54px;
-            border-radius:14px;
-            background:rgba(255,255,255,.96);
-            color:#0b4a8f;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            font-size:1.55rem;
-            box-shadow:0 8px 18px rgba(0,0,0,.20);
-            margin-right:14px;
-          }
-
-          .riskform-header-text{
-            max-width:1100px;
-            position:relative;
-            z-index:1;
-          }
-
-          .riskform-header-text::before{
-            content:"SGSI · Gestión de Riesgos";
-            display:inline-block;
-            background:rgba(255,255,255,.18);
-            border:1px solid rgba(255,255,255,.30);
-            border-radius:999px;
-            padding:3px 10px;
-            font-size:.66rem;
-            font-weight:800;
-            letter-spacing:.35px;
-            margin-bottom:4px;
-          }
-
-          .riskform-title{
-            color:#ffffff !important;
-            font-weight:950;
-            font-size:1.36rem;
-            line-height:1.08;
-            text-shadow:0 3px 10px rgba(0,0,0,.32);
-            margin:0;
-          }
-
-          .riskform-subtitle{
-            color:rgba(248,252,255,.96);
-            font-size:.78rem;
-            margin-top:4px;
-            line-height:1.25;
-          }
-
-          /* =========================
-             CARD PRINCIPAL
-          ========================== */
-          .riskform-card{
-            background:rgba(255,255,255,.96) !important;
-            border-radius:18px;
-            backdrop-filter:blur(8px);
-            box-shadow:0 12px 24px rgba(15,23,42,.18);
-            overflow:hidden;
-            border:1px solid rgba(219,230,244,.9);
-          }
-
-          .riskform-card-body{
-            padding:16px 18px;
-          }
-
-          /* =========================
-             SECCIONES
-          ========================== */
-          .riskform-section-title{
-            font-weight:950;
-            font-size:.78rem;
-            color:#0b4a8f;
-            padding:9px 12px;
-            border-radius:12px;
-            background:#eef5ff;
-            border:1px solid #d9eaff;
-            margin:10px 0 12px 0;
-          }
-
-          /* =========================
-             FORMULARIOS COMPACTOS
-          ========================== */
-          .riskform-card .form-label{
-            font-weight:800;
-            color:#25324a;
-            margin-bottom:4px;
-            font-size:.78rem;
-          }
-
-          .riskform-card .form-control,
-          .riskform-card .form-select{
-            border-radius:9px;
-            border:1px solid #d9e3f0;
-            min-height:37px;
-            font-size:.80rem;
-            background:#f8fafc;
-            box-shadow:none;
-            padding-top:5px;
-            padding-bottom:5px;
-          }
-
-          .riskform-card textarea.form-control{
-            min-height:70px;
-            resize:vertical;
-          }
-
-          .riskform-card .form-control:focus,
-          .riskform-card .form-select:focus{
-            border-color:#3f86d6;
-            box-shadow:0 0 0 .18rem rgba(63,134,214,.18);
-          }
-
-          .riskform-card .row{
-            row-gap:10px;
-          }
-
-          .riskform-card .mb-3{
-            margin-bottom:.70rem !important;
-          }
-
-          /* =========================
-             BOTONES
-          ========================== */
-          .riskform-bottom-actions{
-            display:flex;
-            justify-content:center;
-            gap:10px;
-            flex-wrap:wrap;
-            margin-top:18px;
-          }
-
-          .riskform-bottom-actions .btn{
-            border-radius:10px !important;
-            min-height:32px;
-            padding:8px 24px !important;
-            font-size:.82rem;
-            font-weight:900;
-            box-shadow:0 8px 16px rgba(15,23,42,.14);
-          }
-
-          .riskform-bottom-actions .btn-primary,
-          .riskform-bottom-actions .btn-success{
-            border:none;
-            background:linear-gradient(135deg,#086df0,#2487ff);
-            color:#fff;
-          }
-
-          .riskform-bottom-actions .btn-danger{
-            border:none;
-            background:linear-gradient(135deg,#b91c1c,#ef4444);
-            color:#fff;
-          }
-
-          .riskform-cancel-btn{
-            background:#ffffff;
-            color:#0f172a;
-            border:1px solid #cfd8e3;
-            box-shadow:0 6px 14px rgba(0,0,0,.10);
-          }
-
-          .riskform-cancel-btn:hover{
-            background:#edf5ff;
-            color:#0b65d8;
-            border-color:#9ec5fe;
-          }
-
-          /* =========================
-             COLORES DE NIVEL
-          ========================== */
-          .nivel1 { background:#2ecc71 !important; color:#fff !important; font-weight:800; }
-          .nivel2 { background:#f1c40f !important; color:#111 !important; font-weight:800; }
-          .nivel3 { background:#ff69b4 !important; color:#111 !important; font-weight:800; }
-          .nivel4 { background:#e74c3c !important; color:#fff !important; font-weight:800; }
-          .nivel5 { background:#8e44ad !important; color:#fff !important; font-weight:800; }
-
-          /* =========================
-             RESPONSIVE
-          ========================== */
-          @media (max-width:992px){
-            .riskform-shell{
-              width:98%;
-              margin:8px auto 22px auto;
-            }
-
-            .riskform-header-card{
-              min-height:88px;
-              padding:15px 18px;
-            }
-
-            .riskform-title{
-              font-size:1.22rem;
-            }
-
-            .riskform-subtitle{
-              font-size:.74rem;
-            }
-
-            .riskform-card-body{
-              padding:8px 7px;
-            }
-          }
-
-          @media (max-width:768px){
-            .riskform-header-overlay{
-              justify-content:center;
-              text-align:center;
-              flex-direction:column;
-              gap:10px;
-            }
-
-            .riskform-header-overlay::before{
-              margin-right:0;
-            }
-
-            .riskform-title{
-              font-size:1.12rem;
-            }
-
-            .riskform-subtitle{
-              font-size:.72rem;
-            }
-
-            .riskform-bottom-actions .btn{
-              width:100%;
-            }
-          }
-        </style>
-      </form>
-    </div>
-    """
-
-    return render_template_string(
-        BASE,
-        content=Markup(render_template_string(
-            detalle_html,
-            riesgo=riesgo,
-            tipo_riesgo_nombre=tipo_riesgo_nombre,
-            color_por_valor=color_por_valor,
-            controles_detalle_html=Markup(riesgo_controles_detalle_html(riesgo)),
-            riesgo_formatear_porcentaje=riesgo_formatear_porcentaje
-        ))
-    )
-
-# ===========================
-# EDITAR RIESGO COMPLETO
 # ===========================

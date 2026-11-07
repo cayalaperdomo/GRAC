@@ -1,3 +1,6421 @@
+def fmt_fecha(value) -> str:
+    d = parse_fecha_flexible(value)
+    return d.strftime("%Y-%m-%d") if d else "—"
+
+def calcular_estado_revision(doc: 'DocMaestroDocumento', tipo: 'DocTipoDocumento'):
+    d_rev = parse_fecha_flexible(doc.fecha_ultima_revision)
+    if not d_rev:
+        d_rev = parse_fecha_flexible(doc.fecha_creacion)
+
+    if not d_rev:
+        return {"texto": "Sin fecha", "badge": "bg-secondary"}
+
+    min_meses = getattr(tipo, 'min_meses_revision', 0) or 0
+    if min_meses <= 0:
+        return {"texto": "Sin config", "badge": "bg-secondary"}
+
+    hoy = date.today()
+    diff_meses = meses_entre(d_rev, hoy)
+    if diff_meses < 0:
+        diff_meses = 0
+
+    if diff_meses >= min_meses:
+        return {"texto": "Vencido", "badge": "bg-danger"}
+
+    if diff_meses == (min_meses - 1):
+        return {"texto": "Cercano", "badge": "bg-warning text-dark"}
+
+    return {"texto": "Adecuado", "badge": "bg-success"}
+
+
+# =========================
+# Matriz de documentos
+# =========================
+@app.route('/docs/matriz')
+@login_required
+def docs_matriz():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        read_only = True
+    else:
+        if user.role != 'admin' and not verificar_permiso(user, "Listado Maestro de Documentos"):
+            flash("No tiene permiso para ver el listado maestro de documentos.", "danger")
+            return redirect(url_for('menu'))
+        read_only = False
+
+    filtro_estado_revision = (request.args.get('estado_revision') or '').strip()
+    filtro_estado = (request.args.get('estado') or '').strip()
+    filtro_tipo_documento = (request.args.get('tipo_documento') or '').strip()
+
+    query = (
+        DocMaestroDocumento.query
+        .options(
+            selectinload(DocMaestroDocumento.evidencias),
+            selectinload(DocMaestroDocumento.tipo)
+        )
+    )
+
+    if filtro_estado:
+        query = query.filter(DocMaestroDocumento.estado == filtro_estado)
+
+    if filtro_tipo_documento:
+        query = query.filter(
+            DocMaestroDocumento.tipo.has(nombre=filtro_tipo_documento)
+        )
+
+    query = query.order_by(DocMaestroDocumento.item.asc())
+    items = query.all()
+
+    if filtro_estado_revision:
+        items = [
+            doc for doc in items
+            if (
+                calcular_estado_revision(doc, doc.tipo)
+                and (calcular_estado_revision(doc, doc.tipo).get('texto') or '').strip().lower() == filtro_estado_revision.lower()
+            )
+        ]
+
+    opciones_estado = [
+        x[0] for x in db.session.query(DocMaestroDocumento.estado)
+        .filter(DocMaestroDocumento.estado.isnot(None))
+        .filter(DocMaestroDocumento.estado != '')
+        .distinct()
+        .order_by(DocMaestroDocumento.estado.asc())
+        .all()
+    ]
+
+    opciones_tipo_documento = sorted({
+        doc.tipo.nombre.strip()
+        for doc in (
+            DocMaestroDocumento.query
+            .options(selectinload(DocMaestroDocumento.tipo))
+            .all()
+        )
+        if doc.tipo and doc.tipo.nombre and doc.tipo.nombre.strip()
+    })
+
+    estados_revision_detectados = []
+    for doc in (
+        DocMaestroDocumento.query
+        .options(selectinload(DocMaestroDocumento.tipo))
+        .all()
+    ):
+        est = calcular_estado_revision(doc, doc.tipo)
+        texto = (est.get('texto') or '').strip() if est else ''
+        if texto and texto not in estados_revision_detectados:
+            estados_revision_detectados.append(texto)
+
+    opciones_estado_revision = sorted(estados_revision_detectados)
+    total_filtrados = len(items)
+    total_general = DocMaestroDocumento.query.count()
+
+    html = """
+    <div class="docmat-shell">
+
+      <div class="docmat-header-card">
+        <div class="docmat-header-overlay">
+          <div class="docmat-header-text">
+            <h3 class="docmat-title m-0">Listado Maestro de Documentos</h3>
+            <div class="docmat-subtitle">
+              Visualización resumida del listado maestro documental del SGSI
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="docmat-header-actions">
+
+        {% if not read_only %}
+          <a href="{{ url_for('docs_new') }}"
+             class="btn btn-primary rounded-pill px-4 fw-bold">
+            ➕ Agregar Documento
+          </a>
+
+          <a href="{{ url_for('docs_tipos_config') }}"
+             class="btn btn-primary rounded-pill px-4 fw-bold">
+            🔩 Configurar Tipos de Documentos
+          </a>
+        {% else %}
+          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
+            ➕ Agregar Documento
+          </button>
+
+          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
+            🔩 Configurar Tipos de Documentos
+          </button>
+        {% endif %}
+      </div>
+
+      <div class="docmat-filter-card">
+        <div class="docmat-filter-body">
+          <form method="get" action="{{ url_for('docs_matriz') }}">
+            <div class="row g-2 align-items-end">
+
+              <div class="col-md-3">
+                <label class="form-label fw-bold">Estado revisión</label>
+                <select name="estado_revision" class="form-select rounded-3">
+                  <option value="">Todos</option>
+                  {% for op in opciones_estado_revision %}
+                    <option value="{{ op }}" {% if filtro_estado_revision == op %}selected{% endif %}>{{ op }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label fw-bold">Estado</label>
+                <select name="estado" class="form-select rounded-3">
+                  <option value="">Todos</option>
+                  {% for op in opciones_estado %}
+                    <option value="{{ op }}" {% if filtro_estado == op %}selected{% endif %}>{{ op }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label fw-bold">Tipo de documento</label>
+                <select name="tipo_documento" class="form-select rounded-3">
+                  <option value="">Todos</option>
+                  {% for op in opciones_tipo_documento %}
+                    <option value="{{ op }}" {% if filtro_tipo_documento == op %}selected{% endif %}>{{ op }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <div class="d-flex gap-2 flex-wrap">
+                  <button type="submit" class="btn btn-primary rounded-pill px-4 fw-bold">Filtrar</button>
+                  <a href="{{ url_for('docs_matriz') }}" class="btn btn-secondary rounded-pill px-4 fw-bold">Limpiar</a>
+                </div>
+              </div>
+
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="docmat-card">
+        <div class="docmat-topbar">
+          <div>
+            <h5 class="docmat-top-title mb-1">Resumen de documentos</h5>
+            <div class="docmat-top-note">
+              La matriz muestra los campos principales. Para consultar toda la información usa el botón <strong>Ver detalle</strong>.
+            </div>
+          </div>
+          <div class="docmat-counter-badge">
+            Registros filtrados: {{ total_filtrados }} | Total general: {{ total_general }}
+          </div>
+        </div>
+
+        <div class="docmat-card-body">
+          <div class="docmat-table-wrap">
+            <div class="table-responsive">
+              <table class="table table-bordered table-hover align-middle docmat-table mb-0">
+                <colgroup>
+                  <col style="width: 6%;">
+                  <col style="width: 15%;">
+                  <col style="width: 11%;">
+                  <col style="width: 30%;">
+                  <col style="width: 7%;">
+                  <col style="width: 11%;">
+                  <col style="width: 9%;">
+                  <col style="width: 9%;">
+                  <col style="width: 14%;">
+                </colgroup>
+
+                <thead>
+                  <tr>
+                    <th>Ítem</th>
+                    <th>Tipo de documento</th>
+                    <th>Código</th>
+                    <th>Nombre del documento</th>
+                    <th>Versión</th>
+                    <th>Última revisión</th>
+                    <th>Estado revisión</th>
+                    <th>Estado</th>
+                    <th class="docmat-col-acciones">Acciones</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {% for doc in items %}
+                    {% set tipo = doc.tipo %}
+                    {% set est = calcular_estado_revision(doc, tipo) %}
+                    <tr>
+                      <td class="text-center">{{ doc.item or '—' }}</td>
+                      <td>{{ tipo.nombre if tipo else '—' }}</td>
+                      <td>{{ doc.codigo or '—' }}</td>
+                      <td class="docmat-cell-main">
+                        <div class="docmat-main-text">{{ doc.nombre_documento or '—' }}</div>
+                      </td>
+                      <td class="text-center">{{ doc.version or '—' }}</td>
+                      <td class="text-center">{{ fmt_fecha(doc.fecha_ultima_revision) }}</td>
+
+                      <td class="text-center">
+                        {% if est and est.get('badge') and est.get('texto') %}
+                          <span class="badge {{ est.get('badge') }}">{{ est.get('texto') }}</span>
+                        {% else %}
+                          <span class="badge bg-secondary">—</span>
+                        {% endif %}
+                      </td>
+
+                      <td class="text-center">{{ doc.estado or '—' }}</td>
+
+                      <td class="text-center docmat-col-acciones">
+                        <div class="docmat-actions-wrap">
+                          <a href="{{ url_for('docs_detalle', id=doc.id) }}"
+                             class="btn btn-info btn-sm rounded-pill docmat-btn-action fw-bold text-white">
+                            Ver detalle
+                          </a>
+
+                          {% if not read_only %}
+                            <a href="{{ url_for('docs_edit', id=doc.id) }}"
+                               class="btn btn-warning btn-sm rounded-pill docmat-btn-action fw-bold">
+                              Editar
+                            </a>
+
+                            <a href="{{ url_for('docs_delete', id=doc.id) }}"
+                               class="btn btn-danger btn-sm rounded-pill docmat-btn-action fw-bold"
+                               onclick="return confirm('¿Eliminar este documento del listado maestro?');">
+                              Eliminar
+                            </a>
+                          {% else %}
+                            <span class="badge bg-secondary docmat-badge-readonly">Solo lectura</span>
+                          {% endif %}
+                        </div>
+                      </td>
+                    </tr>
+                  {% endfor %}
+
+                  {% if items|length == 0 %}
+                    <tr>
+                      <td colspan="9" class="text-center text-muted py-5">
+                        Sin registros
+                      </td>
+                    </tr>
+                  {% endif %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .docmat-shell{
+        width:96%;
+        max-width:1650px;
+        margin:10px auto 24px auto;
+      }
+
+      .docmat-header-card{
+        background:linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.24);
+        color:#fff;
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .docmat-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 15px);
+      }
+
+      .docmat-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        padding:0;
+        background:transparent;
+        position:relative;
+        z-index:1;
+      }
+
+      .docmat-header-overlay::before{
+        content:"📄";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#fff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.5rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.20);
+        margin-right:14px;
+      }
+
+      .docmat-header-text::before{
+        content:"SGSI · Matriz Documental";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+      }
+
+      .docmat-title{
+        color:#fff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        margin:0 !important;
+      }
+
+      .docmat-subtitle{
+        color:rgba(248,252,255,.96);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .docmat-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 12px;
+      }
+
+      .docmat-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .docmat-back-btn{
+        background:#fff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+        box-shadow:0 6px 14px rgba(0,0,0,.10);
+      }
+
+      .docmat-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .docmat-filter-card,
+      .docmat-card{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:visible;
+      }
+
+      .docmat-filter-card{
+        margin-bottom:14px;
+      }
+
+      .docmat-filter-body{
+        padding:14px 16px;
+      }
+
+      .docmat-filter-body .form-label{
+        color:#25324a;
+        margin-bottom:4px;
+        font-size:.78rem;
+        font-weight:800;
+      }
+
+      .docmat-filter-body .form-select,
+      .docmat-filter-body .form-control{
+        min-height:36px;
+        height:36px;
+        font-size:.80rem;
+        border:1px solid #d9e3f0;
+        border-radius:9px;
+        background:#f8fafc;
+        box-shadow:none;
+      }
+
+      .docmat-filter-body .btn{
+        border-radius:10px !important;
+        min-height:36px;
+        padding:7px 18px !important;
+        font-size:.80rem;
+        font-weight:900;
+      }
+
+      .docmat-filter-body .form-select:focus,
+      .docmat-filter-body .form-control:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .18rem rgba(63,134,214,.18);
+      }
+
+      .docmat-topbar{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:12px;
+        padding:14px 16px 0 16px;
+        flex-wrap:wrap;
+      }
+
+      .docmat-top-title{
+        color:#0f172a;
+        font-weight:950;
+        font-size:.94rem;
+      }
+
+      .docmat-top-note{
+        color:#475569;
+        font-size:.78rem;
+        margin-top:3px;
+      }
+
+      .docmat-counter-badge{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        color:#fff;
+        font-weight:900;
+        border-radius:999px;
+        padding:7px 14px;
+        font-size:.78rem;
+        box-shadow:0 8px 16px rgba(15,23,42,.16);
+      }
+
+      .docmat-card-body{
+        padding:12px 16px 16px 16px;
+      }
+
+      .docmat-table-wrap{
+        max-height:70vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#fff;
+      }
+
+      .docmat-table{
+        min-width:1500px;
+        table-layout:fixed;
+        margin-bottom:0;
+        border-collapse:separate;
+        border-spacing:0;
+      }
+
+      .docmat-table thead th{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#fff;
+        font-weight:900;
+        text-align:center;
+        vertical-align:middle;
+        border-right:1px solid rgba(255,255,255,.28);
+      }
+
+      .docmat-table th,
+      .docmat-table td{
+        vertical-align:top;
+        font-size:.68rem;
+        padding:9px 8px;
+        white-space:normal;
+        word-break:break-word;
+        overflow-wrap:anywhere;
+      }
+
+      .docmat-table td{
+        color:#101827;
+        border-right:1px solid #dce6f3;
+        border-bottom:1px solid #dce6f3;
+        background:#fff;
+      }
+
+      .docmat-table tbody tr:nth-child(even) td{
+        background:#f8fbff;
+      }
+
+      .docmat-table tbody tr:hover td{
+        background:#eef6ff;
+      }
+
+      .docmat-cell-main .docmat-main-text{
+        font-weight:900;
+        color:#0f172a;
+        line-height:1.35;
+      }
+
+      .docmat-col-acciones,
+      .docmat-table th.docmat-col-acciones,
+      .docmat-table td.docmat-col-acciones{
+        min-width:190px !important;
+        width:190px !important;
+        text-align:center;
+        vertical-align:middle;
+      }
+
+      .docmat-actions-wrap{
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+        align-items:center;
+        justify-content:center;
+      }
+
+      .docmat-btn-action{
+        min-width:110px;
+        max-width:125px;
+        padding:4px 12px !important;
+        font-size:.64rem !important;
+        line-height:1.2;
+        text-align:center;
+        white-space:nowrap;
+        border-radius:999px !important;
+        font-weight:900;
+      }
+
+      .docmat-badge-readonly{
+        font-size:.70rem;
+        padding:5px 10px;
+        border-radius:999px;
+        white-space:nowrap;
+        font-weight:900;
+      }
+
+      .docmat-table-wrap::-webkit-scrollbar{
+        height:11px;
+        width:11px;
+      }
+
+      .docmat-table-wrap::-webkit-scrollbar-track{
+        background:#dbe4f0;
+        border-radius:12px;
+      }
+
+      .docmat-table-wrap::-webkit-scrollbar-thumb{
+        background:linear-gradient(180deg,#5aa3ea,#3f86d6);
+        border-radius:12px;
+        border:2px solid #dbe4f0;
+      }
+
+      .docmat-table-wrap{
+        scrollbar-width:thin;
+        scrollbar-color:#3f86d6 #dbe4f0;
+      }
+
+      @media (max-width:992px){
+        .docmat-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .docmat-header-card{
+          min-height:88px;
+        }
+
+        .docmat-title{
+          font-size:1.2rem;
+        }
+
+        .docmat-filter-body,
+        .docmat-card-body{
+          padding:12px;
+        }
+
+        .docmat-topbar{
+          padding:12px 14px 0 14px;
+        }
+      }
+
+      @media (max-width:768px){
+        .docmat-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .docmat-header-overlay::before{
+          margin:0;
+        }
+
+        .docmat-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+
+    inner = render_template_string(
+        html,
+        items=items,
+        read_only=read_only,
+        calcular_estado_revision=calcular_estado_revision,
+        fmt_fecha=fmt_fecha,
+        opciones_estado_revision=opciones_estado_revision,
+        opciones_estado=opciones_estado,
+        opciones_tipo_documento=opciones_tipo_documento,
+        filtro_estado_revision=filtro_estado_revision,
+        filtro_estado=filtro_estado,
+        filtro_tipo_documento=filtro_tipo_documento,
+        total_filtrados=total_filtrados,
+        total_general=total_general
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+
+# =========================
+# Archivo real documento principal
+# =========================
+@app.route('/docs/file/<int:id>')
+@login_required
+def docs_file(id):
+    doc = DocMaestroDocumento.query.get_or_404(id)
+
+    if not doc.filename:
+        abort(404)
+
+    path = os.path.join(app.config['UPLOAD_DOCS_DIR'], doc.filename)
+    if not os.path.isfile(path):
+        abort(404)
+
+    return send_file(
+        path,
+        mimetype=doc.mime or 'application/octet-stream',
+        as_attachment=False,
+        download_name=doc.original_name or doc.filename,
+        conditional=True
+    )
+
+
+# =========================
+# Detalle documento maestro
+# =========================
+@app.route('/docs/detalle/<int:id>')
+@login_required
+def docs_detalle(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        read_only = True
+    else:
+        if user.role != 'admin' and not verificar_permiso(user, "Listado Maestro de Documentos"):
+            flash("No tiene permiso para ver el detalle del documento.", "danger")
+            return redirect(url_for('docs_matriz'))
+        read_only = False
+
+    doc = (
+        DocMaestroDocumento.query
+        .options(selectinload(DocMaestroDocumento.evidencias), selectinload(DocMaestroDocumento.tipo))
+        .get_or_404(id)
+    )
+
+    tipo = doc.tipo
+    est = calcular_estado_revision(doc, tipo)
+
+    html = """
+    <div class="docdet-shell">
+
+      <div class="docdet-header-card">
+        <div class="docdet-header-overlay">
+          <div class="docdet-header-text">
+            <h3 class="docdet-title m-0">Detalle del Documento Maestro</h3>
+            <div class="docdet-subtitle">
+              Consulta completa del registro en modo solo lectura
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="docdet-header-actions">
+        <a href="{{ url_for('docs_matriz') }}"
+           class="btn rounded-pill px-4 fw-bold docdet-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+
+        {% if not read_only %}
+          <a href="{{ url_for('docs_edit', id=doc.id) }}"
+             class="btn btn-warning rounded-pill px-4 fw-bold">
+            Editar registro
+          </a>
+        {% endif %}
+      </div>
+
+      <div class="docdet-card">
+        <div class="docdet-card-body">
+
+          <div class="docdet-section">
+            <div class="docdet-section-title">Información principal</div>
+            <div class="row g-3">
+              <div class="col-md-2">
+                <div class="docdet-field">
+                  <div class="docdet-label">Ítem</div>
+                  <div class="docdet-value">{{ doc.item or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="docdet-field">
+                  <div class="docdet-label">Tipo de documento</div>
+                  <div class="docdet-value">{{ tipo.nombre if tipo else '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-3">
+                <div class="docdet-field">
+                  <div class="docdet-label">Código</div>
+                  <div class="docdet-value">{{ doc.codigo or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-3">
+                <div class="docdet-field">
+                  <div class="docdet-label">Inicial</div>
+                  <div class="docdet-value">{{ doc.inicial or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="docdet-field">
+                  <div class="docdet-label">Tipo</div>
+                  <div class="docdet-value">{{ doc.tipo_texto or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-2">
+                <div class="docdet-field">
+                  <div class="docdet-label">#1</div>
+                  <div class="docdet-value">{{ doc.num1 if doc.num1 is not none else '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-2">
+                <div class="docdet-field">
+                  <div class="docdet-label">#2</div>
+                  <div class="docdet-value">{{ doc.num2 if doc.num2 is not none else '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-2">
+                <div class="docdet-field">
+                  <div class="docdet-label">#3</div>
+                  <div class="docdet-value">{{ doc.num3 if doc.num3 is not none else '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-12">
+                <div class="docdet-field">
+                  <div class="docdet-label">Nombre del documento</div>
+                  <div class="docdet-value docdet-value-lg">{{ doc.nombre_documento or '—' }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="docdet-section">
+            <div class="docdet-section-title">Control documental</div>
+
+            <div class="row g-3 mb-1">
+              <div class="col-md-2">
+                <div class="docdet-field docdet-field-mini">
+                  <div class="docdet-label">Versión</div>
+                  <div class="docdet-value docdet-value-compact">{{ doc.version or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-3">
+                <div class="docdet-field docdet-field-mini">
+                  <div class="docdet-label">Fecha creación</div>
+                  <div class="docdet-value docdet-value-compact">{{ fmt_fecha(doc.fecha_creacion) }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-3">
+                <div class="docdet-field docdet-field-mini">
+                  <div class="docdet-label">Última revisión</div>
+                  <div class="docdet-value docdet-value-compact">{{ fmt_fecha(doc.fecha_ultima_revision) }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="docdet-field docdet-field-mini">
+                  <div class="docdet-label">Tipo documental</div>
+                  <div class="docdet-value docdet-value-compact">{{ tipo.nombre if tipo else '—' }}</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="row g-3 justify-content-center">
+              <div class="col-md-3 col-lg-3">
+                <div class="docdet-field docdet-field-status">
+                  <div class="docdet-label">Estado</div>
+                  <div class="docdet-value docdet-value-compact">{{ doc.estado or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-3 col-lg-3">
+                <div class="docdet-field docdet-field-status">
+                  <div class="docdet-label">Estado revisión</div>
+                  <div class="docdet-value docdet-value-compact">
+                    {% if est and est.get('badge') and est.get('texto') %}
+                      <span class="badge {{ est.get('badge') }}">{{ est.get('texto') }}</span>
+                    {% else %}
+                      <span class="badge bg-secondary">—</span>
+                    {% endif %}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="row g-3 mt-1">
+              <div class="col-md-12">
+                <div class="docdet-field">
+                  <div class="docdet-label">Control de cambios</div>
+                  <div class="docdet-value">{{ doc.control_cambios or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-12">
+                <div class="docdet-field">
+                  <div class="docdet-label">Observaciones</div>
+                  <div class="docdet-value">{{ doc.observaciones or '—' }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="docdet-section">
+            <div class="docdet-section-title">Archivos asociados</div>
+
+            {% if doc.filename %}
+              <div class="docdet-ev-grid mb-3">
+                <div class="docdet-file-card">
+                  <div class="docdet-file-left">
+                    <div class="docdet-file-icon">DOC</div>
+                    <div class="docdet-file-meta">
+                      <div class="docdet-file-label">Documento principal</div>
+                      <a href="{{ url_for('docs_file', id=doc.id) }}"
+                         target="_blank"
+                         class="docdet-file-name">
+                        {{ doc.original_name or doc.filename }}
+                      </a>
+                      <div class="docdet-file-size">
+                        {{ fmt_kb(doc.size) }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            {% endif %}
+
+            {% if doc.evidencias %}
+              <div class="docdet-ev-grid">
+                {% for ev in doc.evidencias %}
+                  <div class="docdet-file-card">
+                    <div class="docdet-file-left">
+                      <div class="docdet-file-icon">PDF</div>
+                      <div class="docdet-file-meta">
+                        <div class="docdet-file-label">Evidencia</div>
+                        <a href="{{ url_for('docs_evidencia_view', evi_id=ev.id) }}"
+                           class="docdet-file-name">
+                          {{ ev.original_name or ev.filename }}
+                        </a>
+                        <div class="docdet-file-size">{{ fmt_kb(ev.size) }}</div>
+                      </div>
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+            {% elif not doc.filename %}
+              <div class="docdet-empty-box">
+                No hay archivos asociados para este documento.
+              </div>
+            {% endif %}
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .docdet-shell{
+        width:96%;
+        max-width:1250px;
+        margin:10px auto 24px auto;
+      }
+
+      .docdet-header-card{
+        background:linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.24);
+        color:#fff;
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .docdet-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 15px);
+      }
+
+      .docdet-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        padding:0;
+        background:transparent;
+        position:relative;
+        z-index:1;
+      }
+
+      .docdet-header-overlay::before{
+        content:"📄";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#fff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.5rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.20);
+        margin-right:14px;
+      }
+
+      .docdet-header-text::before{
+        content:"SGSI · Detalle Documental";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+      }
+
+      .docdet-title{
+        color:#fff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        margin:0 !important;
+      }
+
+      .docdet-subtitle{
+        color:rgba(248,252,255,.96);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .docdet-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 12px;
+      }
+
+      .docdet-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .docdet-back-btn{
+        background:#fff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+        box-shadow:0 6px 14px rgba(0,0,0,.10);
+      }
+
+      .docdet-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .docdet-card{
+        background:rgba(255,255,255,.96);
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        overflow:hidden;
+        border:1px solid rgba(219,230,244,.9);
+      }
+
+      .docdet-card-body{
+        padding:16px 18px;
+      }
+
+      .docdet-section{
+        margin-bottom:14px;
+        background:#fff;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        padding:8px 7px;
+        box-shadow:0 8px 18px rgba(15,23,42,.08);
+      }
+
+      .docdet-section:last-child{
+        margin-bottom:0;
+      }
+
+      .docdet-section-title{
+        font-weight:950;
+        font-size:.78rem;
+        color:#0b4a8f;
+        padding:9px 12px;
+        border-radius:12px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        margin:0 0 12px 0;
+      }
+
+      .docdet-field{
+        background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        padding:12px;
+        height:100%;
+        display:flex;
+        flex-direction:column;
+        justify-content:flex-start;
+      }
+
+      .docdet-field-mini{
+        min-height:76px;
+      }
+
+      .docdet-field-status{
+        min-height:44px;
+        max-width:220px;
+        margin:0 auto;
+        padding:10px 12px;
+        justify-content:center;
+        align-items:center;
+        text-align:center;
+      }
+
+      .docdet-label{
+        font-size:.70rem;
+        font-weight:900;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        color:#0b4a8f;
+        margin-bottom:6px;
+      }
+
+      .docdet-value{
+        color:#101827;
+        font-size:.82rem;
+        line-height:1.38;
+        word-break:break-word;
+      }
+
+      .docdet-value-lg{
+        font-size:.90rem;
+        font-weight:900;
+        color:#0f172a;
+        line-height:1.35;
+      }
+
+      .docdet-value-compact{
+        font-weight:900;
+        font-size:.78rem;
+        line-height:1.15;
+      }
+
+      .docdet-value .badge,
+      .docdet-value-compact .badge{
+        font-size:.70rem;
+        padding:4px 10px;
+        border-radius:999px;
+        white-space:nowrap;
+        display:inline-block;
+        font-weight:900;
+      }
+
+      .docdet-section .row.g-3{
+        --bs-gutter-x:.8rem;
+        --bs-gutter-y:.8rem;
+      }
+
+      .docdet-ev-grid{
+        display:grid;
+        gap:10px;
+      }
+
+      .docdet-file-card{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+        background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        padding:10px 12px;
+        box-shadow:0 6px 14px rgba(15,23,42,.08);
+        flex-wrap:wrap;
+      }
+
+      .docdet-file-left{
+        display:flex;
+        align-items:center;
+        gap:7px;
+        min-width:0;
+      }
+
+      .docdet-file-icon{
+        width:32px;
+        height:32px;
+        min-width:32px;
+        border-radius:11px;
+        background:linear-gradient(135deg,#1d4ed8,#60a5fa);
+        color:#fff;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:.72rem;
+        font-weight:900;
+        box-shadow:0 6px 14px rgba(29,78,216,.20);
+      }
+
+      .docdet-file-meta{
+        min-width:0;
+      }
+
+      .docdet-file-label{
+        font-size:.70rem;
+        color:#475569;
+        font-weight:900;
+      }
+
+      .docdet-file-name{
+        display:block;
+        font-size:.78rem;
+        font-weight:900;
+        color:#1d4ed8;
+        text-decoration:none;
+        word-break:break-word;
+      }
+
+      .docdet-file-name:hover{
+        text-decoration:underline;
+      }
+
+      .docdet-file-size{
+        font-size:.70rem;
+        color:#475569;
+        margin-top:2px;
+      }
+
+      .docdet-empty-box{
+        background:rgba(255,255,255,.75);
+        border:1px dashed #cfd8e3;
+        border-radius:14px;
+        padding:8px 7px;
+        text-align:center;
+        color:#475569;
+        font-size:.80rem;
+      }
+
+      @media (max-width:992px){
+        .docdet-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .docdet-header-card{
+          min-height:88px;
+        }
+
+        .docdet-title{
+          font-size:1.2rem;
+        }
+
+        .docdet-card-body{
+          padding:8px 7px;
+        }
+
+        .docdet-section{
+          padding:12px;
+        }
+      }
+
+      @media (max-width:768px){
+        .docdet-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .docdet-header-overlay::before{
+          margin:0;
+        }
+
+        .docdet-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+
+    inner = render_template_string(
+        html,
+        doc=doc,
+        tipo=tipo,
+        est=est,
+        read_only=read_only,
+        fmt_fecha=fmt_fecha,
+        fmt_kb=fmt_kb
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+# =========================
+# Editar documento
+# =========================
+@app.route('/docs/edit/<int:id>', methods=['GET', 'POST'])
+@login_required
+def docs_edit(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede editar registros.", "danger")
+        return redirect(url_for('docs_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Listado Maestro de Documentos"):
+        flash("No tiene permiso para editar documentos del listado maestro.", "danger")
+        return redirect(url_for('docs_matriz'))
+
+    doc = DocMaestroDocumento.query.get_or_404(id)
+    tipos = DocTipoDocumento.query.order_by(DocTipoDocumento.nombre.asc()).all()
+
+    if request.method == 'POST':
+        tipo_id  = request.form.get('tipo_id', type=int)
+        codigo   = (request.form.get('codigo') or '').strip()
+        inicial  = (request.form.get('inicial') or '').strip()
+        tipo_texto = (request.form.get('tipo_texto') or '').strip()
+        num1     = request.form.get('num1', type=int)
+        num2     = request.form.get('num2', type=int)
+        num3     = request.form.get('num3', type=int)
+        nombre_documento = (request.form.get('nombre_documento') or '').strip()
+        version  = request.form.get('version', type=int) or 1
+
+        fecha_creacion_raw = (request.form.get('fecha_creacion') or '').strip()
+        fecha_ultima_revision_raw = (request.form.get('fecha_ultima_revision') or '').strip()
+
+        fecha_creacion = parse_fecha_flexible(fecha_creacion_raw)
+        fecha_ultima_revision = parse_fecha_flexible(fecha_ultima_revision_raw)
+
+        estado = (request.form.get('estado') or '').strip()
+        control_cambios = (request.form.get('control_cambios') or '').strip()
+        observaciones = (request.form.get('observaciones') or '').strip()
+
+        quitar_archivo = (request.form.get('quitar_archivo') or '').strip() == '1'
+
+        if not tipo_id or not nombre_documento:
+            flash("Tipo de documento y nombre del documento son obligatorios.", "danger")
+            return redirect(url_for('docs_edit', id=id))
+
+        doc.tipo_id = tipo_id
+        doc.codigo = codigo
+        doc.inicial = inicial
+        doc.tipo_texto = tipo_texto
+        doc.num1 = num1
+        doc.num2 = num2
+        doc.num3 = num3
+        doc.nombre_documento = nombre_documento
+        doc.version = version
+        doc.fecha_creacion = fecha_creacion
+        doc.fecha_ultima_revision = fecha_ultima_revision
+        doc.estado = estado
+        doc.control_cambios = control_cambios
+        doc.observaciones = observaciones
+
+        os.makedirs(app.config['UPLOAD_DOCS_DIR'], exist_ok=True)
+
+        if quitar_archivo and doc.filename:
+            try:
+                ruta_actual = os.path.join(app.config['UPLOAD_DOCS_DIR'], doc.filename)
+                if os.path.exists(ruta_actual):
+                    os.remove(ruta_actual)
+            except Exception:
+                pass
+
+            doc.filename = None
+            doc.original_name = None
+            doc.mime = None
+            doc.size = None
+
+        fmain = request.files.get('archivo')
+        if fmain and fmain.filename:
+            orig = secure_filename(fmain.filename).strip()
+
+            if not docs_allowed_file(orig):
+                flash(f"Tipo de archivo no permitido: {orig}. Solo PDF, Word, Excel.", "danger")
+                return redirect(url_for('docs_edit', id=id))
+
+            if doc.filename:
+                try:
+                    ruta_anterior = os.path.join(app.config['UPLOAD_DOCS_DIR'], doc.filename)
+                    if os.path.exists(ruta_anterior):
+                        os.remove(ruta_anterior)
+                except Exception:
+                    pass
+
+            store_name = docs_unique_store_name(orig)
+            path = os.path.join(app.config['UPLOAD_DOCS_DIR'], store_name)
+            fmain.save(path)
+
+            doc.filename = store_name
+            doc.original_name = orig
+            doc.mime = fmain.mimetype or 'application/octet-stream'
+            doc.size = os.path.getsize(path)
+
+        db.session.commit()
+        flash("Documento actualizado correctamente.", "success")
+        return redirect(url_for('docs_matriz'))
+
+    html = """
+    <div class="docsedit-shell">
+
+      <div class="docsedit-header-card">
+        <div class="docsedit-header-overlay">
+          <div class="docsedit-header-text">
+            <h3 class="docsedit-title m-0">Editar Documento del Listado Maestro</h3>
+            <div class="docsedit-subtitle">
+              Actualización y control del documento registrado
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="docsedit-header-actions">
+        <a href="{{ url_for('docs_matriz') }}"
+           class="btn rounded-pill px-5 fw-bold docsedit-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+      </div>
+
+      <div class="docsedit-form-card">
+        <div class="docsedit-form-card-body">
+          <form method="post" enctype="multipart/form-data">
+
+            <div class="row g-3">
+
+              <div class="col-md-4">
+                <label class="form-label">Tipo de documento</label>
+                <select name="tipo_id" class="form-select" required>
+                  <option value="">-- Seleccione --</option>
+                  {% for t in tipos %}
+                    <option value="{{ t.id }}" {% if doc.tipo_id == t.id %}selected{% endif %}>{{ t.nombre }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Código</label>
+                <input type="text" name="codigo" class="form-control" value="{{ doc.codigo or '' }}">
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Inicial</label>
+                <input type="text" name="inicial" class="form-control" value="{{ doc.inicial or '' }}">
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Tipo</label>
+                <input type="text" name="tipo_texto" class="form-control" value="{{ doc.tipo_texto or '' }}">
+              </div>
+
+              <div class="col-md-2">
+                <label class="form-label">#1</label>
+                <input type="number" name="num1" class="form-control" value="{{ doc.num1 if doc.num1 is not none else '' }}">
+              </div>
+
+              <div class="col-md-2">
+                <label class="form-label">#2</label>
+                <input type="number" name="num2" class="form-control" value="{{ doc.num2 if doc.num2 is not none else '' }}">
+              </div>
+
+              <div class="col-md-2">
+                <label class="form-label">#3</label>
+                <input type="number" name="num3" class="form-control" value="{{ doc.num3 if doc.num3 is not none else '' }}">
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Nombre del documento</label>
+                <input type="text" name="nombre_documento" class="form-control" value="{{ doc.nombre_documento or '' }}" required>
+              </div>
+
+              <div class="col-md-2">
+                <label class="form-label">Versión</label>
+                <input type="number" name="version" class="form-control" min="1" value="{{ doc.version or 1 }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Fecha creación documento</label>
+                <input type="date" name="fecha_creacion" class="form-control" value="{{ fmt_fecha(doc.fecha_creacion) if fmt_fecha(doc.fecha_creacion) != '—' else '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Fecha última revisión</label>
+                <input type="date" name="fecha_ultima_revision" class="form-control" value="{{ fmt_fecha(doc.fecha_ultima_revision) if fmt_fecha(doc.fecha_ultima_revision) != '—' else '' }}">
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select">
+                  <option value="">-- Seleccione --</option>
+                  <option value="Vigente" {% if doc.estado == 'Vigente' %}selected{% endif %}>Vigente</option>
+                  <option value="Versión obsoleta" {% if doc.estado == 'Versión obsoleta' %}selected{% endif %}>Versión obsoleta</option>
+                </select>
+              </div>
+
+              <div class="col-md-12">
+                <label class="form-label">Control de cambios</label>
+                <textarea name="control_cambios" class="form-control" rows="2">{{ doc.control_cambios or '' }}</textarea>
+              </div>
+
+              <div class="col-md-12">
+                <label class="form-label">Observaciones</label>
+                <textarea name="observaciones" class="form-control" rows="2">{{ doc.observaciones or '' }}</textarea>
+              </div>
+
+              <div class="col-md-12">
+                <label class="form-label">Reemplazar archivo principal (PDF, Word, Excel)</label>
+                <input type="file" name="archivo" class="form-control" accept=".pdf,.doc,.docx,.xls,.xlsx">
+              </div>
+
+              <div class="col-md-12">
+                <div class="docsedit-file-box">
+                  <div><strong>Archivo actual:</strong>
+                    {% if doc.original_name %}
+                      {{ doc.original_name }}{% if doc.size %} ({{ fmt_kb(doc.size) }}){% endif %}
+                    {% else %}
+                      Sin archivo cargado
+                    {% endif %}
+                  </div>
+
+                  {% if doc.original_name %}
+                    <div class="form-check mt-2">
+                      <input class="form-check-input" type="checkbox" name="quitar_archivo" id="quitar_archivo" value="1">
+                      <label class="form-check-label" for="quitar_archivo">
+                        Quitar archivo actual
+                      </label>
+                    </div>
+                  {% endif %}
+                </div>
+              </div>
+
+            </div>
+
+            <div class="docsedit-bottom-actions">
+              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
+                Guardar cambios
+              </button>
+            </div>
+
+          </form>
+        </div>
+      </div>
+
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .docsedit-shell{
+        width:96%;
+        max-width:1450px;
+        margin:10px auto 24px auto;
+      }
+
+      /* =========================
+         HERO SGSI
+      ========================== */
+      .docsedit-header-card{
+        background:
+          linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.24);
+        color:#ffffff;
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .docsedit-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
+          repeating-linear-gradient(
+            135deg,
+            rgba(255,255,255,.05) 0px,
+            rgba(255,255,255,.05) 1px,
+            transparent 1px,
+            transparent 15px
+          );
+      }
+
+      .docsedit-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        padding:0;
+        background:transparent;
+        position:relative;
+        z-index:1;
+      }
+
+      .docsedit-header-overlay::before{
+        content:"✏️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.4rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.20);
+        margin-right:14px;
+      }
+
+      .docsedit-header-text::before{
+        content:"SGSI · Edición Documental";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+      }
+
+      .docsedit-title{
+        color:#ffffff!important;
+        font-weight:950;
+        font-size:1.32rem;
+        margin:0 !important;
+      }
+
+      .docsedit-subtitle{
+        color:rgba(248,252,255,.96);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      /* =========================
+         BOTONES HEADER
+      ========================== */
+      .docsedit-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 12px;
+      }
+
+      .docsedit-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .docsedit-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+        box-shadow:0 6px 14px rgba(0,0,0,.10);
+      }
+
+      .docsedit-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      /* =========================
+         FORM CARD
+      ========================== */
+      .docsedit-form-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .docsedit-form-card-body{
+        padding:16px 18px;
+      }
+
+      .docsedit-form-card .form-label{
+        font-weight:800;
+        color:#25324a;
+        margin-bottom:4px;
+        font-size:.78rem;
+      }
+
+      .docsedit-form-card .form-control,
+      .docsedit-form-card .form-select{
+        border-radius:9px;
+        border:1px solid #d9e3f0;
+        min-height:37px;
+        font-size:.80rem;
+        background:#f8fafc;
+      }
+
+      .docsedit-form-card textarea.form-control{
+        min-height:80px;
+      }
+
+      .docsedit-form-card .form-control:focus,
+      .docsedit-form-card .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .18rem rgba(63,134,214,.18);
+      }
+
+      /* =========================
+         FILE BOX
+      ========================== */
+      .docsedit-file-box{
+        border:1px solid #dbe6f4;
+        background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
+        border-radius:14px;
+        padding:12px 14px;
+        box-shadow:0 6px 14px rgba(15,23,42,.08);
+        font-size:.82rem;
+      }
+
+      /* =========================
+         BOTONES ABAJO
+      ========================== */
+      .docsedit-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin-top:18px;
+      }
+
+      .docsedit-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 24px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .docsedit-bottom-actions .btn-primary,
+      .docsedit-bottom-actions .btn-success{
+        border:none;
+        background:linear-gradient(135deg,#086df0,#2487ff);
+        color:#fff;
+      }
+
+      .docsedit-bottom-actions .btn-danger{
+        border:none;
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
+        color:#fff;
+      }
+
+      /* =========================
+         RESPONSIVE
+      ========================== */
+      @media (max-width:992px){
+        .docsedit-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .docsedit-header-card{
+          min-height:88px;
+        }
+
+        .docsedit-title{
+          font-size:1.2rem;
+        }
+
+        .docsedit-form-card-body{
+          padding:8px 7px;
+        }
+      }
+
+      @media (max-width:768px){
+        .docsedit-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .docsedit-header-overlay::before{
+          margin:0;
+        }
+
+        .docsedit-header-actions .btn,
+        .docsedit-bottom-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+
+    inner = render_template_string(
+        html,
+        doc=doc,
+        tipos=tipos,
+        fmt_fecha=fmt_fecha,
+        fmt_kb=fmt_kb
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+
+
+
+# ==========================================================================================================================================
+#                                                               Fin Módulo de Listado de Doucmentos Maestros
+# ==========================================================================================================================================
+
+# ==========================================================================================================================================
+#                                                               Módulo Registro de Comunicaciones
+# ==========================================================================================================================================
+
+def resumir_com_texto(valor, limite=120):
+    if not valor:
+        return '—'
+    txt = str(valor).strip()
+    if len(txt) <= limite:
+        return txt
+    return txt[:limite].rstrip() + '...'
+
+
+# =========================
+# ENTRADA DIRECTA — Registro de Comunicaciones
+# =========================
+@app.route('/comunicaciones_menu')
+@login_required
+def comunicaciones_menu():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role not in ('admin', 'auditor') and not verificar_permiso(user, "Registro de Comunicaciones"):
+        flash("No tiene permiso para acceder al registro de comunicaciones.", "danger")
+        return redirect(url_for('menu'))
+
+    return redirect(url_for('comunicaciones_matriz'))
+
+
+# =========================
+# Agregar / Editar Registro
+# =========================
+@app.route('/comunicaciones/new', methods=['GET', 'POST'])
+@app.route('/comunicaciones/<int:reg_id>/edit', methods=['GET', 'POST'])
+@login_required
+def comunicaciones_new(reg_id=None):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede agregar registros.", "danger")
+        return redirect(url_for('comunicaciones_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Registro de Comunicaciones"):
+        flash("No tiene permiso para agregar registro de comunicaciones.", "danger")
+        return redirect(url_for('comunicaciones_matriz'))
+
+    registro = MatrizComunicacionRegistro.query.get(reg_id) if reg_id else None
+
+    if request.method == 'POST':
+        proceso      = (request.form.get('proceso') or '').strip()
+        informacion  = (request.form.get('informacion') or '').strip()
+        remitente    = (request.form.get('remitente') or '').strip()
+        medio        = (request.form.get('medio') or '').strip()
+        frecuencia   = (request.form.get('frecuencia') or '').strip()
+        destinatario = (request.form.get('destinatario') or '').strip()
+        tipo_com     = (request.form.get('tipo_comunicacion') or '').strip()
+
+        if not all([proceso, informacion, remitente, medio, frecuencia, destinatario, tipo_com]):
+            flash("Todos los campos son obligatorios.", "danger")
+            return redirect(request.url)
+
+        if not registro:
+            registro = MatrizComunicacionRegistro()
+
+        registro.proceso           = proceso
+        registro.informacion       = informacion
+        registro.remitente         = remitente
+        registro.medio             = medio
+        registro.frecuencia        = frecuencia
+        registro.destinatario      = destinatario
+        registro.tipo_comunicacion = tipo_com
+
+        db.session.add(registro)
+        db.session.commit()
+        flash("Registro de matriz de comunicaciones guardado correctamente.", "success")
+        return redirect(url_for('comunicaciones_matriz'))
+
+    html = """
+    <div class="com-shell">
+
+      <div class="com-header-card">
+        <div class="com-header-overlay">
+          <div class="com-header-text">
+            <h3 class="com-title m-0">
+              {% if registro %}
+                Editar Registro de Comunicaciones
+              {% else %}
+                Agregar Registro de Comunicaciones
+              {% endif %}
+            </h3>
+            <div class="com-subtitle">
+              Gestión de comunicaciones internas y externas del SGSI
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="com-header-actions">
+        <a href="{{ url_for('comunicaciones_matriz') }}"
+           class="btn rounded-pill px-4 fw-bold com-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+
+      </div>
+
+      <div class="com-card">
+        <div class="com-card-body">
+
+          <form method="post">
+            <div class="row g-3">
+
+              <div class="col-md-4">
+                <label class="form-label fw-bold">Proceso</label>
+                <input type="text"
+                       name="proceso"
+                       class="form-control"
+                       value="{{ registro.proceso if registro else '' }}"
+                       required>
+              </div>
+
+              <div class="col-md-8">
+                <label class="form-label fw-bold">Información (¿Qué comunica?)</label>
+                <textarea name="informacion"
+                          class="form-control"
+                          rows="2"
+                          required>{{ registro.informacion if registro else '' }}</textarea>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label fw-bold">Remitente (¿Quién comunica?)</label>
+                <input type="text"
+                       name="remitente"
+                       class="form-control"
+                       value="{{ registro.remitente if registro else '' }}"
+                       required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label fw-bold">Medio (¿Cómo comunica?)</label>
+                <input type="text"
+                       name="medio"
+                       class="form-control"
+                       value="{{ registro.medio if registro else '' }}"
+                       required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label fw-bold">Frecuencia (¿Cuándo comunica?)</label>
+                <input type="text"
+                       name="frecuencia"
+                       class="form-control"
+                       value="{{ registro.frecuencia if registro else '' }}"
+                       required>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label fw-bold">Destinatario (¿A quién comunica?)</label>
+                <input type="text"
+                       name="destinatario"
+                       class="form-control"
+                       value="{{ registro.destinatario if registro else '' }}"
+                       required>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label fw-bold">Tipo de comunicación</label>
+                <select name="tipo_comunicacion" class="form-select" required>
+                  <option value="">-- Seleccione --</option>
+                  <option value="Interna"
+                    {% if registro and registro.tipo_comunicacion == 'Interna' %}selected{% endif %}>
+                    Interna
+                  </option>
+                  <option value="Externa"
+                    {% if registro and registro.tipo_comunicacion == 'Externa' %}selected{% endif %}>
+                    Externa
+                  </option>
+                </select>
+              </div>
+
+            </div>
+
+            <div class="com-bottom-actions">
+              <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold">
+                {% if registro %}Guardar Cambios{% else %}Guardar{% endif %}
+              </button>
+
+              <a href="{{ url_for('comunicaciones_matriz') }}"
+                 class="btn rounded-pill px-4 fw-bold com-cancel-btn">
+                Cancelar
+              </a>
+            </div>
+          </form>
+
+        </div>
+      </div>
+
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .com-shell{
+        width:96%;
+        max-width:1300px;
+        margin:10px auto 24px auto;
+      }
+
+      .com-header-card{
+        background:
+          linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.24);
+        color:#ffffff;
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .com-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
+          repeating-linear-gradient(
+            135deg,
+            rgba(255,255,255,.05) 0px,
+            rgba(255,255,255,.05) 1px,
+            transparent 1px,
+            transparent 15px
+          );
+      }
+
+      .com-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        padding:0;
+        background:transparent;
+        position:relative;
+        z-index:1;
+      }
+
+      .com-header-overlay::before{
+        content:"💬";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.20);
+        margin-right:14px;
+      }
+
+      .com-header-text::before{
+        content:"SGSI · Comunicaciones";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+      }
+
+      .com-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        margin:0 !important;
+      }
+
+      .com-subtitle{
+        color:rgba(248,252,255,.96);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .com-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 12px;
+      }
+
+      .com-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .com-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+        box-shadow:0 6px 14px rgba(0,0,0,.10);
+      }
+
+      .com-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .com-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .com-card-body{
+        padding:16px 18px;
+      }
+
+      .com-card .form-label{
+        font-weight:800;
+        color:#25324a;
+        margin-bottom:4px;
+        font-size:.78rem;
+      }
+
+      .com-card .form-control,
+      .com-card .form-select{
+        border-radius:9px;
+        border:1px solid #d9e3f0;
+        min-height:37px;
+        font-size:.80rem;
+        background:#f8fafc;
+        box-shadow:none;
+      }
+
+      .com-card textarea{
+        min-height:70px;
+        resize:vertical;
+      }
+
+      .com-card .form-control:focus,
+      .com-card .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .18rem rgba(63,134,214,.18);
+      }
+
+      .com-card .row{
+        row-gap:10px;
+      }
+
+      .com-card .mb-3{
+        margin-bottom:.70rem !important;
+      }
+
+      .com-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        margin-top:18px;
+        flex-wrap:wrap;
+      }
+
+      .com-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 24px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .com-bottom-actions .btn-primary,
+      .com-bottom-actions .btn-success{
+        border:none;
+        background:linear-gradient(135deg,#086df0,#2487ff);
+        color:#fff;
+      }
+
+      .com-bottom-actions .btn-danger{
+        border:none;
+        background:linear-gradient(135deg,#b91c1c,#ef4444);
+        color:#fff;
+      }
+
+      .com-cancel-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+        box-shadow:0 6px 14px rgba(0,0,0,.10);
+      }
+
+      .com-cancel-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      @media (max-width:992px){
+        .com-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .com-header-card{
+          min-height:88px;
+        }
+
+        .com-title{
+          font-size:1.2rem;
+        }
+
+        .com-card-body{
+          padding:8px 7px;
+        }
+      }
+
+      @media (max-width:768px){
+        .com-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .com-header-overlay::before{
+          margin:0;
+        }
+
+        .com-bottom-actions .btn,
+        .com-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+    inner = render_template_string(html, registro=registro)
+    return render_template_string(BASE, content=Markup(inner))
+
+
+# =========================
+# Matriz
+# =========================
+@app.route('/comunicaciones_matriz')
+@login_required
+def comunicaciones_matriz():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        read_only = True
+    else:
+        if user.role != 'admin' and not verificar_permiso(user, "Registro de Comunicaciones"):
+            flash("No tiene permiso para ver los registros de comunicaciones.", "danger")
+            return redirect(url_for('menu'))
+        read_only = False
+
+    registros = MatrizComunicacionRegistro.query.order_by(
+        MatrizComunicacionRegistro.proceso.asc()
+    ).all()
+
+    html = """
+    <div class="com-matrix-shell">
+
+      <div class="com-matrix-header-card">
+        <div class="com-matrix-header-overlay">
+          <div class="com-matrix-header-text">
+            <h3 class="com-matrix-title m-0">Registro de Comunicaciones</h3>
+            <div class="com-matrix-subtitle">
+              Visualización resumida de comunicaciones internas y externas del SGSI
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="com-matrix-header-actions">
+
+        {% if not read_only %}
+          <a href="{{ url_for('comunicaciones_new') }}"
+             class="btn btn-primary rounded-pill px-4 fw-bold">
+            ➕ Agregar Registro
+          </a>
+        {% else %}
+          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
+            ➕ Agregar Registro
+          </button>
+        {% endif %}
+      </div>
+
+      <div class="com-matrix-card">
+        <div class="com-matrix-topbar">
+          <div>
+            <h5 class="com-matrix-top-title mb-1">Resumen de registros</h5>
+            <div class="com-matrix-top-note">
+              La matriz presenta únicamente los campos más importantes. Para revisar el registro completo usa el botón <strong>Ver detalle</strong>.
+            </div>
+          </div>
+          <div class="com-matrix-counter-badge">
+            Total registros: {{ registros|length }}
+          </div>
+        </div>
+
+        <div class="com-matrix-card-body">
+          <div class="com-matrix-table-wrap">
+            <div class="table-responsive">
+              <table class="table table-bordered table-hover align-middle com-matrix-table mb-0">
+
+                <colgroup>
+                  <col style="width: 18%;">
+                  <col style="width: 28%;">
+                  <col style="width: 16%;">
+                  <col style="width: 14%;">
+                  <col style="width: 10%;">
+                  <col style="width: 14%;">
+                </colgroup>
+
+                <thead>
+                  <tr>
+                    <th>Proceso</th>
+                    <th>Información</th>
+                    <th>Remitente</th>
+                    <th>Frecuencia</th>
+                    <th>Tipo</th>
+                    <th class="com-col-acciones">Acciones</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {% for r in registros %}
+                  <tr>
+                    <td class="com-cell-main">
+                      <div class="com-main-text">{{ r.proceso or '—' }}</div>
+                    </td>
+
+                    <td>{{ resumir_com_texto(r.informacion, 150) }}</td>
+
+                    <td>{{ r.remitente or '—' }}</td>
+
+                    <td>{{ r.frecuencia or '—' }}</td>
+
+                    <td class="text-center">
+                      {% if r.tipo_comunicacion == 'Interna' %}
+                        <span class="badge bg-primary">Interna</span>
+                      {% else %}
+                        <span class="badge bg-success">Externa</span>
+                      {% endif %}
+                    </td>
+
+                    <td class="text-center com-col-acciones">
+                      <div class="com-actions-wrap">
+                        <a href="{{ url_for('comunicaciones_detalle', id=r.id) }}"
+                           class="btn btn-info btn-sm rounded-pill com-btn-action fw-bold text-white">
+                          Ver detalle
+                        </a>
+
+                        {% if not read_only %}
+                          <a href="{{ url_for('comunicaciones_new', reg_id=r.id) }}"
+                             class="btn btn-warning btn-sm rounded-pill com-btn-action fw-bold">
+                            Editar
+                          </a>
+
+                          <a href="{{ url_for('comunicaciones_delete', id=r.id) }}"
+                             class="btn btn-danger btn-sm rounded-pill com-btn-action fw-bold"
+                             onclick="return confirm('¿Eliminar este registro?');">
+                            Eliminar
+                          </a>
+                        {% else %}
+                          <span class="badge bg-secondary com-badge-readonly">Solo lectura</span>
+                        {% endif %}
+                      </div>
+                    </td>
+                  </tr>
+                  {% endfor %}
+
+                  {% if registros|length == 0 %}
+                  <tr>
+                    <td colspan="6" class="text-center text-muted py-5">
+                      Sin registros de comunicaciones
+                    </td>
+                  </tr>
+                  {% endif %}
+                </tbody>
+
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .com-matrix-shell{
+        width:96%;
+        max-width:1600px;
+        margin:10px auto 24px auto;
+      }
+
+      /* =========================
+         HERO SGSI
+      ========================== */
+      .com-matrix-header-card{
+        background:
+          linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.24);
+        color:#ffffff;
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .com-matrix-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
+          repeating-linear-gradient(
+            135deg,
+            rgba(255,255,255,.05) 0px,
+            rgba(255,255,255,.05) 1px,
+            transparent 1px,
+            transparent 15px
+          );
+      }
+
+      .com-matrix-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        padding:0;
+        background:transparent;
+        position:relative;
+        z-index:1;
+      }
+
+      .com-matrix-header-overlay::before{
+        content:"📊";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.5rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.20);
+        margin-right:14px;
+      }
+
+      .com-matrix-header-text::before{
+        content:"SGSI · Matriz de Comunicaciones";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+      }
+
+      .com-matrix-title{
+        color:#ffffff!important;
+        font-weight:950;
+        font-size:1.32rem;
+        margin:0 !important;
+      }
+
+      .com-matrix-subtitle{
+        color:rgba(248,252,255,.96);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      /* =========================
+         BOTONES HEADER
+      ========================== */
+      .com-matrix-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 12px;
+      }
+
+      .com-matrix-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .com-matrix-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+        box-shadow:0 6px 14px rgba(0,0,0,.10);
+      }
+
+      .com-matrix-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      /* =========================
+         CARD
+      ========================== */
+      .com-matrix-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .com-matrix-topbar{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:12px;
+        padding:14px 16px 0 16px;
+        flex-wrap:wrap;
+      }
+
+      .com-matrix-top-title{
+        color:#0f172a;
+        font-weight:950;
+        font-size:.92rem;
+      }
+
+      .com-matrix-top-note{
+        color:#475569;
+        font-size:.78rem;
+        margin-top:3px;
+      }
+
+      .com-matrix-counter-badge{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        color:#fff;
+        font-weight:900;
+        border-radius:999px;
+        padding:7px 14px;
+        font-size:.78rem;
+        box-shadow:0 8px 16px rgba(15,23,42,.16);
+      }
+
+      .com-matrix-card-body{
+        padding:12px 16px 16px 16px;
+      }
+
+      /* =========================
+         TABLA SGSI
+      ========================== */
+      .com-matrix-table-wrap{
+        max-height:70vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#ffffff;
+      }
+
+      .com-matrix-table{
+        min-width:1200px;
+        table-layout:fixed;
+        margin-bottom:0;
+      }
+
+      .com-matrix-table thead th{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff;
+        font-weight:900;
+        text-align:center;
+        vertical-align:middle;
+      }
+
+      .com-matrix-table th,
+      .com-matrix-table td{
+        vertical-align:top;
+        font-size:.78rem;
+        padding:9px 8px;
+        white-space:normal;
+        word-break:break-word;
+      }
+
+      .com-matrix-table tbody tr:nth-child(even){
+        background:#f8fbff;
+      }
+
+      .com-matrix-table tbody tr:hover{
+        background:#eef6ff;
+      }
+
+      .com-cell-main .com-main-text{
+        font-weight:900;
+        color:#0f172a;
+      }
+
+      /* =========================
+         ACCIONES
+      ========================== */
+      .com-col-acciones{
+        min-width:180px !important;
+        width:180px !important;
+        text-align:center;
+      }
+
+      .com-actions-wrap{
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+        align-items:center;
+        justify-content:center;
+      }
+
+      .com-btn-action{
+        min-width:105px;
+        max-width:120px;
+        padding:4px 12px !important;
+        font-size:.64rem !important;
+        font-weight:900;
+        border-radius:999px !important;
+      }
+
+      .com-badge-readonly{
+        font-size:.70rem;
+        padding:5px 10px;
+        border-radius:999px;
+        font-weight:900;
+      }
+
+      /* =========================
+         RESPONSIVE
+      ========================== */
+      @media (max-width:992px){
+        .com-matrix-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .com-matrix-header-card{
+          min-height:88px;
+        }
+
+        .com-matrix-title{
+          font-size:1.2rem;
+        }
+
+        .com-matrix-card-body{
+          padding:12px;
+        }
+
+        .com-matrix-topbar{
+          padding:12px 14px 0 14px;
+        }
+      }
+
+      @media (max-width:768px){
+        .com-matrix-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .com-matrix-header-overlay::before{
+          margin:0;
+        }
+
+        .com-matrix-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+    inner = render_template_string(
+        html,
+        registros=registros,
+        read_only=read_only,
+        resumir_com_texto=resumir_com_texto
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+
+# =========================
+# Eliminar documento
+# =========================
+@app.route('/docs/delete/<int:id>')
+@login_required
+def docs_delete(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar registros.", "danger")
+        return redirect(url_for('docs_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Listado Maestro de Documentos"):
+        flash("No tiene permiso para eliminar documentos del listado maestro.", "danger")
+        return redirect(url_for('docs_matriz'))
+
+    doc = DocMaestroDocumento.query.get_or_404(id)
+
+    if getattr(doc, 'evidencias', None):
+        for ev in doc.evidencias:
+            try:
+                if getattr(ev, 'filename', None):
+                    ruta_ev = os.path.join(app.config['UPLOAD_DOCS_DIR'], ev.filename)
+                    if os.path.exists(ruta_ev):
+                        os.remove(ruta_ev)
+            except Exception:
+                pass
+            db.session.delete(ev)
+
+    if doc.filename:
+        try:
+            ruta = os.path.join(app.config['UPLOAD_DOCS_DIR'], doc.filename)
+            if os.path.exists(ruta):
+                os.remove(ruta)
+        except Exception:
+            pass
+
+    db.session.delete(doc)
+    db.session.commit()
+
+    flash("Documento eliminado correctamente.", "success")
+    return redirect(url_for('docs_matriz'))
+
+
+# =========================
+# Detalle registro comunicaciones
+# =========================
+@app.route('/comunicaciones/detalle/<int:id>')
+@login_required
+def comunicaciones_detalle(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        read_only = True
+    else:
+        if user.role != 'admin' and not verificar_permiso(user, "Registro de Comunicaciones"):
+            flash("No tiene permiso para ver el detalle del registro.", "danger")
+            return redirect(url_for('comunicaciones_matriz'))
+        read_only = False
+
+    r = MatrizComunicacionRegistro.query.get_or_404(id)
+
+    html = """
+    <div class="comdet-shell">
+
+      <div class="comdet-header-card">
+        <div class="comdet-header-overlay">
+          <div class="comdet-header-text">
+            <h3 class="comdet-title m-0">Detalle del Registro de Comunicaciones</h3>
+            <div class="comdet-subtitle">
+              Consulta completa del registro en modo solo lectura
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="comdet-header-actions">
+        <a href="{{ url_for('comunicaciones_matriz') }}"
+           class="btn rounded-pill px-4 fw-bold comdet-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+
+        {% if not read_only %}
+          <a href="{{ url_for('comunicaciones_new', reg_id=r.id) }}"
+             class="btn btn-warning rounded-pill px-4 fw-bold">
+            Editar registro
+          </a>
+        {% endif %}
+      </div>
+
+      <div class="comdet-card">
+        <div class="comdet-card-body">
+
+          <div class="comdet-section">
+            <div class="comdet-section-title">Información principal</div>
+            <div class="row g-3">
+
+              <div class="col-md-6">
+                <div class="comdet-field">
+                  <div class="comdet-label">Proceso</div>
+                  <div class="comdet-value comdet-value-lg">{{ r.proceso or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="comdet-field">
+                  <div class="comdet-label">Tipo de comunicación</div>
+                  <div class="comdet-value">
+                    {% if r.tipo_comunicacion == 'Interna' %}
+                      <span class="badge bg-primary">Interna</span>
+                    {% else %}
+                      <span class="badge bg-success">Externa</span>
+                    {% endif %}
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-12">
+                <div class="comdet-field">
+                  <div class="comdet-label">Información (¿Qué comunica?)</div>
+                  <div class="comdet-value">{{ r.informacion or '—' }}</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <div class="comdet-section">
+            <div class="comdet-section-title">Flujo de comunicación</div>
+            <div class="row g-3">
+
+              <div class="col-md-6">
+                <div class="comdet-field">
+                  <div class="comdet-label">Remitente (¿Quién comunica?)</div>
+                  <div class="comdet-value">{{ r.remitente or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="comdet-field">
+                  <div class="comdet-label">Destinatario (¿A quién comunica?)</div>
+                  <div class="comdet-value">{{ r.destinatario or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="comdet-field">
+                  <div class="comdet-label">Medio (¿Cómo comunica?)</div>
+                  <div class="comdet-value">{{ r.medio or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <div class="comdet-field">
+                  <div class="comdet-label">Frecuencia (¿Cuándo comunica?)</div>
+                  <div class="comdet-value">{{ r.frecuencia or '—' }}</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .comdet-shell{
+        width:96%;
+        max-width:1250px;
+        margin:10px auto 24px auto;
+      }
+
+      .comdet-header-card{
+        background:linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.24);
+        color:#fff;
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .comdet-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 15px);
+      }
+
+      .comdet-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        padding:0;
+        background:transparent;
+        position:relative;
+        z-index:1;
+      }
+
+      .comdet-header-overlay::before{
+        content:"💬";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#fff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.20);
+        margin-right:14px;
+      }
+
+      .comdet-header-text::before{
+        content:"SGSI · Detalle de Comunicación";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+      }
+
+      .comdet-title{
+        color:#fff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        margin:0 !important;
+      }
+
+      .comdet-subtitle{
+        color:rgba(248,252,255,.96);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .comdet-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 12px;
+      }
+
+      .comdet-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .comdet-back-btn{
+        background:#fff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+        box-shadow:0 6px 14px rgba(0,0,0,.10);
+      }
+
+      .comdet-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .comdet-card{
+        background:rgba(255,255,255,.96);
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        overflow:hidden;
+        border:1px solid rgba(219,230,244,.9);
+      }
+
+      .comdet-card-body{
+        padding:16px 18px;
+      }
+
+      .comdet-section{
+        margin-bottom:14px;
+        background:#fff;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        padding:8px 7px;
+        box-shadow:0 8px 18px rgba(15,23,42,.08);
+      }
+
+      .comdet-section:last-child{
+        margin-bottom:0;
+      }
+
+      .comdet-section-title{
+        font-weight:950;
+        font-size:.78rem;
+        color:#0b4a8f;
+        padding:9px 12px;
+        border-radius:12px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        margin:0 0 12px 0;
+      }
+
+      .comdet-field{
+        background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        padding:12px;
+        height:100%;
+      }
+
+      .comdet-label{
+        font-size:.70rem;
+        font-weight:900;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        color:#0b4a8f;
+        margin-bottom:6px;
+      }
+
+      .comdet-value{
+        color:#101827;
+        font-size:.82rem;
+        line-height:1.38;
+        white-space:pre-wrap;
+        word-break:break-word;
+      }
+
+      .comdet-value-lg{
+        font-size:.90rem;
+        font-weight:900;
+        color:#0f172a;
+      }
+
+      @media (max-width:992px){
+        .comdet-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .comdet-header-card{
+          min-height:88px;
+        }
+
+        .comdet-title{
+          font-size:1.2rem;
+        }
+
+        .comdet-card-body{
+          padding:8px 7px;
+        }
+
+        .comdet-section{
+          padding:12px;
+        }
+      }
+
+      @media (max-width:768px){
+        .comdet-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .comdet-header-overlay::before{
+          margin:0;
+        }
+
+        .comdet-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+
+    inner = render_template_string(html, r=r, read_only=read_only)
+    return render_template_string(BASE, content=Markup(inner))
+
+
+# =========================
+# Eliminación Registro
+# =========================
+@app.route('/comunicaciones/delete')
+@login_required
+def comunicaciones_delete():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor' or (
+        user.role != 'admin' and not verificar_permiso(user, "Registro de Comunicaciones")
+    ):
+        flash("No tiene permiso para eliminar registros de comunicaciones.", "danger")
+        return redirect(url_for('comunicaciones_matriz'))
+
+    rid = request.args.get('id', type=int)
+    reg = MatrizComunicacionRegistro.query.get(rid)
+
+    if not reg:
+        flash("Registro no encontrado.", "danger")
+        return redirect(url_for('comunicaciones_matriz'))
+
+    db.session.delete(reg)
+    db.session.commit()
+    flash("Registro eliminado correctamente.", "success")
+    return redirect(url_for('comunicaciones_matriz'))
+
+
+# ==========================================================================================================================================
+#                                                               Fin Módulo Matriz de Comunicaciones
+# ==========================================================================================================================================
+
+# ==========================================================================================================================================
+#                                                               Módulo Requisitos Legales
+# ==========================================================================================================================================
+
+def resumir_texto_req(valor, limite=120):
+    if not valor:
+        return '—'
+    txt = str(valor).strip()
+    if len(txt) <= limite:
+        return txt
+    return txt[:limite].rstrip() + '...'
+
+
+# =========================
+# ENTRADA DIRECTA — Requisitos Legales
+# =========================
+@app.route('/requisitos_menu')
+@login_required
+def requisitos_menu():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role not in ('admin', 'auditor') and not verificar_permiso(user, "Requisitos Legales"):
+        flash("No tiene permiso para acceder al módulo de requisitos legales.", "danger")
+        return redirect(url_for('menu'))
+
+    return redirect(url_for('req_legal_matriz'))
+
+
+# ==========================
+# Agregar Requisitos legales
+# ==========================
+@app.route('/requisito_legal/new', methods=['GET', 'POST'])
+@login_required
+def requisito_legal_new():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede agregar registros.", "danger")
+        return redirect(url_for('req_legal_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Requisitos Legales"):
+        flash("No tiene permiso para agregar requisitos legales.", "danger")
+        return redirect(url_for('req_legal_matriz'))
+
+    if request.method == 'POST':
+        codigo = (request.form.get('codigo') or '').strip()
+        requisito = (request.form.get('requisito') or '').strip()
+        tipo_ley = (request.form.get('tipo_ley') or '').strip()
+        entidad_emisora = (request.form.get('entidad_emisora') or '').strip()
+        descripcion_alcance = (request.form.get('descripcion_alcance') or '').strip()
+        responsable = (request.form.get('responsable') or '').strip()
+        evidencia_cumplimiento = (request.form.get('evidencia_cumplimiento') or '').strip()
+        ESTADOS_PERMITIDOS = ["Cumple", "Parcial", "No cumple"]
+        estado = (request.form.get('estado') or '').strip()
+
+        fecha_str = (request.form.get('fecha_revision') or '').strip()
+        fecha_revision = None
+        if fecha_str:
+            try:
+                fecha_revision = datetime.strptime(fecha_str, '%Y-%m-%d').date()
+            except ValueError:
+                flash("Fecha de revisión inválida.", "danger")
+                return redirect(url_for('requisito_legal_new'))
+
+        if not all([codigo, requisito, tipo_ley, entidad_emisora, descripcion_alcance, responsable, estado]):
+            flash("Campos obligatorios: ID, Requisito, Tipo de Ley/Norma, Entidad Emisora, Descripción/Alcance, Responsable y Estado.", "danger")
+            return redirect(url_for('requisito_legal_new'))
+
+        if estado not in ESTADOS_PERMITIDOS:
+            flash("Estado inválido. Debe ser: Cumple, Parcial o No cumple.", "danger")
+            return redirect(url_for('requisito_legal_new'))
+
+        it = RequisitoLegal(
+            codigo=codigo,
+            requisito=requisito,
+            tipo_ley=tipo_ley,
+            entidad_emisora=entidad_emisora,
+            descripcion_alcance=descripcion_alcance,
+            responsable=responsable,
+            evidencia_cumplimiento=evidencia_cumplimiento,
+            estado=estado,
+            fecha_revision=fecha_revision
+        )
+        db.session.add(it)
+        db.session.commit()
+        flash("Requisito legal registrado.", "success")
+        return redirect(url_for('req_legal_matriz'))
+
+    html = """
+    <div class="reqadd-shell">
+
+      <div class="reqadd-header-card">
+        <div class="reqadd-header-overlay">
+          <div class="reqadd-header-text">
+            <h3 class="reqadd-title m-0">Agregar Requisito Legal</h3>
+            <div class="reqadd-subtitle">
+              Registro de requisitos legales, contractuales y regulatorios aplicables al SGSI
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="reqadd-header-actions">
+        <a href="{{ url_for('req_legal_matriz') }}"
+           class="btn rounded-pill px-4 fw-bold reqadd-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+      </div>
+
+      <div class="reqadd-card">
+        <div class="reqadd-card-body">
+          <form method="post">
+
+            <div class="row g-3">
+
+              <div class="col-md-3">
+                <label class="form-label">ID (alfanumérico)</label>
+                <input name="codigo" class="form-control" required>
+              </div>
+
+              <div class="col-md-9">
+                <label class="form-label">Requisito Legal / Contractual</label>
+                <textarea name="requisito" class="form-control" rows="2" required></textarea>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Tipo de Ley / Norma</label>
+                <input name="tipo_ley" class="form-control" required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Entidad Emisora</label>
+                <input name="entidad_emisora" class="form-control" required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Responsable</label>
+                <input name="responsable" class="form-control" required>
+              </div>
+
+              <div class="col-md-12">
+                <label class="form-label">Descripción / Alcance</label>
+                <textarea name="descripcion_alcance" class="form-control" rows="2" required></textarea>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Evidencia de Cumplimiento</label>
+                <textarea name="evidencia_cumplimiento" class="form-control" rows="2"></textarea>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select" required>
+                  <option value="">-- Seleccione --</option>
+                  <option value="Cumple">Cumple</option>
+                  <option value="Parcial">Parcial</option>
+                  <option value="No cumple">No cumple</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Fecha de Revisión</label>
+                <input type="date" name="fecha_revision" class="form-control">
+              </div>
+
+            </div>
+
+            <div class="reqadd-bottom-actions">
+              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
+                Guardar
+              </button>
+
+              <a href="{{ url_for('req_legal_matriz') }}"
+                 class="btn rounded-pill px-4 fw-bold reqadd-cancel-btn">
+                Cancelar
+              </a>
+            </div>
+
+          </form>
+        </div>
+      </div>
+
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .reqadd-shell{
+        width:96%;
+        max-width:1350px;
+        margin:10px auto 24px auto;
+      }
+
+      /* =========================
+         HERO SGSI
+      ========================== */
+      .reqadd-header-card{
+        background:linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.24);
+        color:#fff;
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .reqadd-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
+          repeating-linear-gradient(
+            135deg,
+            rgba(255,255,255,.05) 0px,
+            rgba(255,255,255,.05) 1px,
+            transparent 1px,
+            transparent 15px
+          );
+      }
+
+      .reqadd-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        padding:0;
+        background:transparent;
+        position:relative;
+        z-index:1;
+      }
+
+      .reqadd-header-overlay::before{
+        content:"📝";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.20);
+        margin-right:14px;
+      }
+
+      .reqadd-header-text::before{
+        content:"SGSI · Requerimiento";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+      }
+
+      .reqadd-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        margin:0 !important;
+      }
+
+      .reqadd-subtitle{
+        color:rgba(248,252,255,.96);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      /* =========================
+         BOTONES HEADER
+      ========================== */
+      .reqadd-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 12px;
+      }
+
+      .reqadd-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .reqadd-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+        box-shadow:0 6px 14px rgba(0,0,0,.10);
+      }
+
+      .reqadd-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      /* =========================
+         CARD
+      ========================== */
+      .reqadd-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .reqadd-card-body{
+        padding:16px 18px;
+      }
+
+      /* =========================
+         SECCIONES
+      ========================== */
+      .reqadd-section-title{
+        font-weight:950;
+        font-size:.78rem;
+        color:#0b4a8f;
+        padding:9px 12px;
+        border-radius:12px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        margin:10px 0 10px;
+      }
+
+      /* =========================
+         FORMULARIOS
+      ========================== */
+      .reqadd-card .form-label{
+        font-weight:800;
+        font-size:.78rem;
+        color:#101827;
+        margin-bottom:4px;
+      }
+
+      .reqadd-card .form-control,
+      .reqadd-card .form-select{
+        border-radius:10px;
+        border:1px solid #cfd8e3;
+        min-height:32px;
+        font-size:.82rem;
+        background:#f8fbff;
+      }
+
+      .reqadd-card textarea.form-control{
+        min-height:85px;
+      }
+
+      .reqadd-card .form-control:focus,
+      .reqadd-card .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 0.2rem rgba(63,134,214,.15);
+        background:#ffffff;
+      }
+
+      /* =========================
+         BOTONES INFERIORES
+      ========================== */
+      .reqadd-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin-top:20px;
+      }
+
+      .reqadd-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .reqadd-cancel-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .reqadd-cancel-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      /* =========================
+         RESPONSIVE
+      ========================== */
+      @media (max-width:992px){
+        .reqadd-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .reqadd-header-card{
+          min-height:88px;
+        }
+
+        .reqadd-title{
+          font-size:1.2rem;
+        }
+
+        .reqadd-card-body{
+          padding:8px 7px;
+        }
+      }
+
+      @media (max-width:768px){
+        .reqadd-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .reqadd-header-overlay::before{
+          margin:0;
+        }
+
+        .reqadd-header-actions .btn,
+        .reqadd-bottom-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+    inner = render_template_string(html)
+    return render_template_string(BASE, content=Markup(inner))
+
+
+# =========================
+# Matriz Requisitos legales
+# =========================
+@app.route('/req_legal_matriz')
+@login_required
+def req_legal_matriz():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        read_only = True
+    else:
+        if user.role != 'admin' and not verificar_permiso(user, "Requisitos Legales"):
+            flash("No tiene permiso para ver la matriz.", "danger")
+            return redirect(url_for('menu'))
+        read_only = False
+
+    items = RequisitoLegal.query.order_by(RequisitoLegal.codigo.asc()).all()
+
+    html = """
+    <div class="req-shell">
+
+      <div class="req-header-card">
+        <div class="req-header-overlay">
+          <div class="req-header-text">
+            <h3 class="req-title m-0">Requisitos Legales</h3>
+            <div class="req-subtitle">
+              Visualización resumida de requisitos legales y contractuales
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="req-header-actions">
+
+        {% if not read_only %}
+          <a href="{{ url_for('requisito_legal_new') }}"
+             class="btn btn-primary rounded-pill px-4 fw-bold">
+            ➕ Agregar Registro
+          </a>
+        {% else %}
+          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
+            ➕ Agregar Registro
+          </button>
+        {% endif %}
+      </div>
+
+      <div class="req-card">
+        <div class="req-topbar">
+          <div>
+            <h5 class="req-top-title mb-1">Resumen</h5>
+            <div class="req-top-note">
+              Usa <strong>Ver detalle</strong> para ver toda la información.
+            </div>
+          </div>
+          <div class="req-counter-badge">
+            Total: {{ items|length }}
+          </div>
+        </div>
+
+        <div class="req-card-body">
+          <div class="req-table-wrap">
+            <table class="table table-bordered table-hover align-middle req-table mb-0">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Requisito</th>
+                  <th>Tipo</th>
+                  <th>Responsable</th>
+                  <th>Estado</th>
+                  <th class="req-col-acciones">Acciones</th>
+                </tr>
+              </thead>
+
+              <tbody>
+              {% for it in items %}
+                <tr>
+                  <td>{{ it.codigo }}</td>
+                  <td>{{ resumir_texto_req(it.requisito, 140) }}</td>
+                  <td>{{ it.tipo_ley }}</td>
+                  <td>{{ it.responsable }}</td>
+                  <td class="text-center">
+                    {% if it.estado == 'Cumple' %}
+                      <span class="badge bg-success">Cumple</span>
+                    {% elif it.estado == 'Parcial' %}
+                      <span class="badge bg-warning text-dark">Parcial</span>
+                    {% elif it.estado == 'No cumple' %}
+                      <span class="badge bg-danger">No cumple</span>
+                    {% else %}
+                      <span class="badge bg-secondary">{{ it.estado or '—' }}</span>
+                    {% endif %}
+                  </td>
+
+                  <td class="text-center req-col-acciones">
+                    <div class="req-actions-wrap">
+                      <a href="{{ url_for('req_legal_detalle', id=it.id) }}"
+                         class="btn btn-info btn-sm rounded-pill req-btn-action text-white fw-bold">
+                        Ver detalle
+                      </a>
+
+                      {% if not read_only %}
+                        <a href="{{ url_for('requisito_legal_edit', id=it.id) }}"
+                           class="btn btn-warning btn-sm rounded-pill req-btn-action fw-bold">
+                          Editar
+                        </a>
+
+                        <a href="{{ url_for('requisito_legal_delete', id=it.id) }}"
+                           class="btn btn-danger btn-sm rounded-pill req-btn-action fw-bold"
+                           onclick="return confirm('¿Eliminar registro?');">
+                          Eliminar
+                        </a>
+                      {% else %}
+                        <span class="badge bg-secondary req-badge-readonly">Solo lectura</span>
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+
+              {% if items|length == 0 %}
+                <tr>
+                  <td colspan="6" class="text-center text-muted py-5">
+                    Sin registros
+                  </td>
+                </tr>
+              {% endif %}
+              </tbody>
+
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .req-shell{
+        width:96%;
+        max-width:1500px;
+        margin:10px auto 24px auto;
+      }
+
+      .req-header-card{
+        background:linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.24);
+        color:#fff;
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .req-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 15px);
+      }
+
+      .req-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        padding:0;
+        background:transparent;
+        position:relative;
+        z-index:1;
+      }
+
+      .req-header-overlay::before{
+        content:"⚖️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#fff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.20);
+        margin-right:14px;
+      }
+
+      .req-header-text::before{
+        content:"SGSI · Requerimientos";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+      }
+
+      .req-title{
+        color:#fff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        margin:0 !important;
+      }
+
+      .req-subtitle{
+        color:rgba(248,252,255,.96);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .req-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 12px;
+      }
+
+      .req-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .req-back-btn{
+        background:#fff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+        box-shadow:0 6px 14px rgba(0,0,0,.10);
+      }
+
+      .req-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .req-card{
+        background:rgba(255,255,255,.96);
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .req-topbar{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:12px;
+        padding:14px 16px 0 16px;
+        flex-wrap:wrap;
+      }
+
+      .req-top-title{
+        color:#0f172a;
+        font-weight:950;
+        font-size:.92rem;
+      }
+
+      .req-top-note{
+        color:#475569;
+        font-size:.78rem;
+        margin-top:3px;
+      }
+
+      .req-counter-badge{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        color:#fff;
+        font-weight:900;
+        border-radius:999px;
+        padding:7px 14px;
+        font-size:.78rem;
+        box-shadow:0 8px 16px rgba(15,23,42,.16);
+      }
+
+      .req-card-body{
+        padding:12px 16px 16px 16px;
+      }
+
+      .req-table-wrap{
+        max-height:70vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#fff;
+      }
+
+      .req-table{
+        min-width:1100px;
+        table-layout:fixed;
+        margin-bottom:0;
+      }
+
+      .req-table thead th{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#fff;
+        font-weight:900;
+        text-align:center;
+        vertical-align:middle;
+      }
+
+      .req-table th,
+      .req-table td{
+        vertical-align:top;
+        font-size:.78rem;
+        padding:9px 8px;
+        white-space:normal;
+        word-break:break-word;
+        overflow-wrap:anywhere;
+      }
+
+      .req-table td{
+        border-bottom:1px solid #e5edf7;
+      }
+
+      .req-table tbody tr:nth-child(even){
+        background:#f8fbff;
+      }
+
+      .req-table tbody tr:hover{
+        background:#eef6ff;
+      }
+
+      .req-col-acciones{
+        min-width:180px !important;
+        width:180px !important;
+      }
+
+      .req-table th.req-col-acciones,
+      .req-table td.req-col-acciones{
+        min-width:180px !important;
+        width:180px !important;
+        text-align:center;
+        vertical-align:middle;
+      }
+
+      .req-actions-wrap{
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+        align-items:center;
+        justify-content:center;
+      }
+
+      .req-btn-action{
+        min-width:105px;
+        max-width:120px;
+        font-size:.64rem !important;
+        padding:4px 12px !important;
+        line-height:1.2;
+        text-align:center;
+        white-space:nowrap;
+        border-radius:999px !important;
+        font-weight:900;
+      }
+
+      .req-badge-readonly{
+        font-size:.70rem;
+        padding:5px 10px;
+        border-radius:999px;
+        white-space:nowrap;
+        font-weight:900;
+      }
+
+      @media (max-width:992px){
+        .req-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .req-header-card{
+          min-height:88px;
+        }
+
+        .req-title{
+          font-size:1.2rem;
+        }
+
+        .req-card-body{
+          padding:12px;
+        }
+
+        .req-topbar{
+          padding:12px 14px 0 14px;
+        }
+      }
+
+      @media (max-width:768px){
+        .req-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .req-header-overlay::before{
+          margin:0;
+        }
+
+        .req-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+
+    inner = render_template_string(
+        html,
+        items=items,
+        read_only=read_only,
+        resumir_texto_req=resumir_texto_req
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+
+# =========================
+# Detalle Requisito legal
+# =========================
+@app.route('/req_legal_detalle/<int:id>')
+@login_required
+def req_legal_detalle(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        read_only = True
+    else:
+        if user.role != 'admin' and not verificar_permiso(user, "Requisitos Legales"):
+            flash("No tiene permiso para ver el detalle del requisito legal.", "danger")
+            return redirect(url_for('req_legal_matriz'))
+        read_only = False
+
+    it = RequisitoLegal.query.get_or_404(id)
+
+    def ffecha(v):
+        if not v:
+            return '—'
+        try:
+            return v.strftime('%Y-%m-%d')
+        except Exception:
+            return str(v)
+
+    html = """
+    <div class="reqdet-shell">
+
+      <div class="reqdet-header-card">
+        <div class="reqdet-header-overlay">
+          <div class="reqdet-header-text">
+            <h3 class="reqdet-title m-0">Detalle del Requisito Legal</h3>
+            <div class="reqdet-subtitle">
+              Consulta completa del registro en modo solo lectura
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="reqdet-header-actions">
+        <a href="{{ url_for('req_legal_matriz') }}"
+           class="btn rounded-pill px-4 fw-bold reqdet-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+
+        {% if not read_only %}
+          <a href="{{ url_for('requisito_legal_edit', id=it.id) }}"
+             class="btn btn-warning rounded-pill px-4 fw-bold">
+            Editar registro
+          </a>
+        {% endif %}
+      </div>
+
+      <div class="reqdet-card">
+        <div class="reqdet-card-body">
+
+          <div class="reqdet-section">
+            <div class="reqdet-section-title">Información general</div>
+            <div class="row g-3">
+
+              <div class="col-md-3">
+                <div class="reqdet-field">
+                  <div class="reqdet-label">ID</div>
+                  <div class="reqdet-value">{{ it.codigo or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-5">
+                <div class="reqdet-field">
+                  <div class="reqdet-label">Tipo de Ley / Norma</div>
+                  <div class="reqdet-value">{{ it.tipo_ley or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="reqdet-field">
+                  <div class="reqdet-label">Entidad Emisora</div>
+                  <div class="reqdet-value">{{ it.entidad_emisora or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-12">
+                <div class="reqdet-field">
+                  <div class="reqdet-label">Requisito Legal / Contractual</div>
+                  <div class="reqdet-value reqdet-value-lg">{{ it.requisito or '—' }}</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <div class="reqdet-section">
+            <div class="reqdet-section-title">Cumplimiento y seguimiento</div>
+            <div class="row g-3">
+
+              <div class="col-md-4">
+                <div class="reqdet-field">
+                  <div class="reqdet-label">Responsable</div>
+                  <div class="reqdet-value">{{ it.responsable or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="reqdet-field">
+                  <div class="reqdet-label">Estado</div>
+                  <div class="reqdet-value">
+                    {% if it.estado == 'Cumple' %}
+                      <span class="badge bg-success">Cumple</span>
+                    {% elif it.estado == 'Parcial' %}
+                      <span class="badge bg-warning text-dark">Parcial</span>
+                    {% elif it.estado == 'No cumple' %}
+                      <span class="badge bg-danger">No cumple</span>
+                    {% else %}
+                      <span class="badge bg-secondary">{{ it.estado or '—' }}</span>
+                    {% endif %}
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="reqdet-field">
+                  <div class="reqdet-label">Fecha de Revisión</div>
+                  <div class="reqdet-value">{{ ffecha(it.fecha_revision) }}</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <div class="reqdet-section">
+            <div class="reqdet-section-title">Descripción y evidencias</div>
+            <div class="row g-3">
+
+              <div class="col-md-12">
+                <div class="reqdet-field">
+                  <div class="reqdet-label">Descripción / Alcance</div>
+                  <div class="reqdet-value">{{ it.descripcion_alcance or '—' }}</div>
+                </div>
+              </div>
+
+              <div class="col-md-12">
+                <div class="reqdet-field">
+                  <div class="reqdet-label">Evidencia de Cumplimiento</div>
+                  <div class="reqdet-value">{{ it.evidencia_cumplimiento or '—' }}</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .reqdet-shell{
+        width:96%;
+        max-width:1250px;
+        margin:10px auto 24px auto;
+      }
+
+      .reqdet-header-card{
+        background:linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.24);
+        color:#fff;
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .reqdet-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 15px);
+      }
+
+      .reqdet-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        padding:0;
+        background:transparent;
+        position:relative;
+        z-index:1;
+      }
+
+      .reqdet-header-overlay::before{
+        content:"🔎";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#fff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.20);
+        margin-right:14px;
+      }
+
+      .reqdet-header-text::before{
+        content:"SGSI · Detalle de Requerimiento";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+      }
+
+      .reqdet-title{
+        color:#fff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        margin:0 !important;
+      }
+
+      .reqdet-subtitle{
+        color:rgba(248,252,255,.96);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .reqdet-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 12px;
+      }
+
+      .reqdet-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .reqdet-back-btn{
+        background:#fff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+        box-shadow:0 6px 14px rgba(0,0,0,.10);
+      }
+
+      .reqdet-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .reqdet-card{
+        background:rgba(255,255,255,.96);
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        overflow:hidden;
+        border:1px solid rgba(219,230,244,.9);
+      }
+
+      .reqdet-card-body{
+        padding:16px 18px;
+      }
+
+      .reqdet-section{
+        margin-bottom:14px;
+        background:#fff;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        padding:8px 7px;
+        box-shadow:0 8px 18px rgba(15,23,42,.08);
+      }
+
+      .reqdet-section:last-child{
+        margin-bottom:0;
+      }
+
+      .reqdet-section-title{
+        font-weight:950;
+        font-size:.78rem;
+        color:#0b4a8f;
+        padding:9px 12px;
+        border-radius:12px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        margin:0 0 12px 0;
+      }
+
+      .reqdet-field{
+        background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        padding:12px;
+        min-height:100%;
+      }
+
+      .reqdet-label{
+        font-size:.70rem;
+        font-weight:900;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        color:#0b4a8f;
+        margin-bottom:6px;
+      }
+
+      .reqdet-value{
+        color:#101827;
+        font-size:.82rem;
+        line-height:1.38;
+        white-space:pre-wrap;
+        word-break:break-word;
+      }
+
+      .reqdet-value-lg{
+        font-size:.90rem;
+        font-weight:900;
+        color:#0f172a;
+      }
+
+      .reqdet-value .badge{
+        font-size:.70rem;
+        padding:5px 10px;
+        border-radius:999px;
+        white-space:nowrap;
+        display:inline-block;
+        font-weight:900;
+      }
+
+      @media (max-width:992px){
+        .reqdet-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .reqdet-header-card{
+          min-height:88px;
+        }
+
+        .reqdet-title{
+          font-size:1.2rem;
+        }
+
+        .reqdet-card-body{
+          padding:8px 7px;
+        }
+
+        .reqdet-section{
+          padding:12px;
+        }
+      }
+
+      @media (max-width:768px){
+        .reqdet-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .reqdet-header-overlay::before{
+          margin:0;
+        }
+
+        .reqdet-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+
+    inner = render_template_string(html, it=it, read_only=read_only, ffecha=ffecha)
+    return render_template_string(BASE, content=Markup(inner))
+
+
+# =========================
+# Editar Requisitos legales
+# =========================
+@app.route('/requisito_legal/edit/<int:id>', methods=['GET', 'POST'])
+@login_required
+def requisito_legal_edit(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede editar.", "danger")
+        return redirect(url_for('req_legal_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Requisitos Legales"):
+        flash("No tiene permiso para editar requisitos legales.", "danger")
+        return redirect(url_for('req_legal_matriz'))
+
+    it = RequisitoLegal.query.get_or_404(id)
+
+    if request.method == 'POST':
+        it.codigo = (request.form.get('codigo') or '').strip()
+        it.requisito = (request.form.get('requisito') or '').strip()
+        it.tipo_ley = (request.form.get('tipo_ley') or '').strip()
+        it.entidad_emisora = (request.form.get('entidad_emisora') or '').strip()
+        it.descripcion_alcance = (request.form.get('descripcion_alcance') or '').strip()
+        it.responsable = (request.form.get('responsable') or '').strip()
+        it.evidencia_cumplimiento = (request.form.get('evidencia_cumplimiento') or '').strip()
+        it.estado = (request.form.get('estado') or '').strip()
+
+        fecha_str = (request.form.get('fecha_revision') or '').strip()
+        if fecha_str:
+            try:
+                it.fecha_revision = datetime.strptime(fecha_str, '%Y-%m-%d').date()
+            except ValueError:
+                flash("Fecha de revisión inválida.", "danger")
+                return redirect(url_for('requisito_legal_edit', id=id))
+        else:
+            it.fecha_revision = None
+
+        db.session.commit()
+        flash("Requisito legal actualizado.", "success")
+        return redirect(url_for('req_legal_matriz'))
+
+    html = """
+    <div class="reqedit-shell">
+
+      <div class="reqedit-header-card">
+        <div class="reqedit-header-overlay">
+          <div class="reqedit-header-text">
+            <h3 class="reqedit-title m-0">Editar Requisito Legal</h3>
+            <div class="reqedit-subtitle">
+              Actualización y seguimiento del cumplimiento de requisitos legales del SGSI
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="reqedit-header-actions">
+        <a href="{{ url_for('req_legal_matriz') }}"
+           class="btn rounded-pill px-4 fw-bold reqedit-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+
+      </div>
+
+      <div class="reqedit-card">
+        <div class="reqedit-card-body">
+
+          <form method="post">
+
+            <div class="row g-3">
+
+              <div class="col-md-3">
+                <label class="form-label">ID (alfanumérico)</label>
+                <input name="codigo" class="form-control" value="{{ it.codigo or '' }}" required>
+              </div>
+
+              <div class="col-md-9">
+                <label class="form-label">Requisito Legal / Contractual</label>
+                <textarea name="requisito" class="form-control" rows="2" required>{{ it.requisito or '' }}</textarea>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Tipo de Ley / Norma</label>
+                <input name="tipo_ley" class="form-control" value="{{ it.tipo_ley or '' }}" required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Entidad Emisora</label>
+                <input name="entidad_emisora" class="form-control" value="{{ it.entidad_emisora or '' }}" required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Responsable</label>
+                <input name="responsable" class="form-control" value="{{ it.responsable or '' }}" required>
+              </div>
+
+              <div class="col-md-12">
+                <label class="form-label">Descripción / Alcance</label>
+                <textarea name="descripcion_alcance" class="form-control" rows="2" required>{{ it.descripcion_alcance or '' }}</textarea>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Evidencia de Cumplimiento</label>
+                <textarea name="evidencia_cumplimiento" class="form-control" rows="2">{{ it.evidencia_cumplimiento or '' }}</textarea>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select" required>
+                  <option value="">-- Seleccione --</option>
+                  <option value="Cumple" {% if it.estado=='Cumple' %}selected{% endif %}>Cumple</option>
+                  <option value="Parcial" {% if it.estado=='Parcial' %}selected{% endif %}>Parcial</option>
+                  <option value="No cumple" {% if it.estado=='No cumple' %}selected{% endif %}>No cumple</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Fecha de Revisión</label>
+                <input type="date" name="fecha_revision" class="form-control"
+                       value="{{ it.fecha_revision.strftime('%Y-%m-%d') if it.fecha_revision else '' }}">
+              </div>
+
+            </div>
+
+            <div class="reqedit-bottom-actions">
+              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
+                Guardar cambios
+              </button>
+
+              <a href="{{ url_for('req_legal_matriz') }}"
+                 class="btn rounded-pill px-4 fw-bold reqedit-cancel-btn">
+                Cancelar
+              </a>
+            </div>
+
+          </form>
+
+        </div>
+      </div>
+
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .reqedit-shell{
+        width:96%;
+        max-width:1350px;
+        margin:10px auto 24px auto;
+      }
+
+      /* 🔷 HEADER SGSI UNIFICADO */
+      .reqedit-header-card{
+        background:linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.24);
+        color:#fff;
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .reqedit-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 15px);
+      }
+
+      .reqedit-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        padding:0;
+        background:transparent;
+        position:relative;
+        z-index:1;
+      }
+
+      .reqedit-header-overlay::before{
+        content:"✏️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#fff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.20);
+        margin-right:14px;
+      }
+
+      .reqedit-header-text::before{
+        content:"SGSI · Edición de Requerimiento";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+      }
+
+      .reqedit-title{
+        color:#ffffff!important;
+        font-weight:950;
+        font-size:1.32rem;
+        margin:0 !important;
+      }
+
+      .reqedit-subtitle{
+        color:rgba(248,252,255,.96);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      /* 🔘 BOTONES */
+      .reqedit-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 12px;
+      }
+
+      .reqedit-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .reqedit-back-btn{
+        background:#fff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .reqedit-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      /* 📦 CARD */
+      .reqedit-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        overflow:hidden;
+        border:1px solid rgba(219,230,244,.9);
+      }
+
+      .reqedit-card-body{
+        padding:16px 18px;
+      }
+
+      /* 🧾 FORM */
+      .reqedit-card .form-label{
+        font-weight:800;
+        color:#0b4a8f;
+        font-size:.78rem;
+        margin-bottom:4px;
+      }
+
+      .reqedit-card .form-control,
+      .reqedit-card .form-select{
+        border-radius:10px;
+        border:1px solid #dbe6f4;
+        min-height:40px;
+        font-size:.82rem;
+        background:#f8fbff;
+      }
+
+      .reqedit-card textarea.form-control{
+        min-height:90px;
+      }
+
+      .reqedit-card .form-control:focus,
+      .reqedit-card .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 0.15rem rgba(63,134,214,.18);
+        background:#fff;
+      }
+
+      /* 🔽 BOTONES INFERIORES */
+      .reqedit-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        margin-top:20px;
+        flex-wrap:wrap;
+      }
+
+      .reqedit-bottom-actions .btn{
+        border-radius:10px;
+        padding:8px 20px;
+        font-size:.82rem;
+        font-weight:900;
+      }
+
+      .reqedit-cancel-btn{
+        background:#fff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .reqedit-cancel-btn:hover{
+        background:#f1f5f9;
+      }
+
+      /* 📱 RESPONSIVE */
+      @media (max-width:992px){
+        .reqedit-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .reqedit-header-card{
+          min-height:88px;
+        }
+
+        .reqedit-title{
+          font-size:1.2rem;
+        }
+
+        .reqedit-card-body{
+          padding:8px 7px;
+        }
+      }
+
+      @media (max-width:768px){
+        .reqedit-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .reqedit-header-overlay::before{
+          margin:0;
+        }
+
+        .reqedit-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+    inner = render_template_string(html, it=it)
+    return render_template_string(BASE, content=Markup(inner))
+
+
+# =========================
+# Eliminar Requisito legal
+# =========================
+@app.route('/requisito_legal/delete/<int:id>')
+@login_required
+def requisito_legal_delete(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar.", "danger")
+        return redirect(url_for('req_legal_matriz'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Requisitos Legales"):
+        flash("No tiene permiso para eliminar requisitos legales.", "danger")
+        return redirect(url_for('req_legal_matriz'))
+
+    it = RequisitoLegal.query.get_or_404(id)
+    db.session.delete(it)
+    db.session.commit()
+    flash("Requisito legal eliminado.", "success")
+    return redirect(url_for('req_legal_matriz'))
+
+
+# ==========================================================================================================================================
+#                                                               Fin del Módulo Requisitos Legales
+# ==========================================================================================================================================
+
+
+# ============================================================================================================================================
+#                                                               Módulo Gestión de Activos
+# ============================================================================================================================================
+
+
+# =========================
+# Dueños de la Información (en Gestión de Activos)
+# =========================
+@app.route('/duenos_info', methods=['GET', 'POST'])
+@login_required
+def duenos_info():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        read_only = True
+    else:
+        if user.role != 'admin' and not verificar_permiso_activos(user, "Dueños de Información"):
+            flash("No tiene permiso para ver la gestión de activos.", "danger")
+            return redirect(url_for('proveedores_menu'))
+        read_only = False
+
+    # 3) Definir si es solo lectura (auditor)
+    solo_lectura = (user.role == 'auditor')
+    
+    # Listas para selects
+    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
+
+    # 🚫 Si es auditor, ignoramos cualquier POST (no puede crear/editar)
+    if request.method == 'POST' and solo_lectura:
+        flash("El rol Auditor no puede modificar los dueños de la información.", "danger")
+        return redirect(url_for('duenos_info'))
+
+    if request.method == 'POST':
+        rid = request.form.get('id', type=int)
+
+        area_id = request.form.get('area_id', type=int)
+        dueno_nombre = (request.form.get('dueno_nombre') or "").strip()
+        dueno_cargo  = (request.form.get('dueno_cargo')  or "").strip()
+        custodio_nombre = (request.form.get('custodio_nombre') or "").strip()
+        custodio_cargo  = (request.form.get('custodio_cargo')  or "").strip()
+
+        if not (area_id and dueno_nombre and dueno_cargo and custodio_nombre and custodio_cargo):
+            flash("Todos los campos son obligatorios.", "danger")
+            return redirect(url_for('duenos_info'))
+
+        if rid:
+            item = DuenoInformacion.query.get(rid)
+            if not item:
+                flash("Registro no encontrado.", "danger")
+                return redirect(url_for('duenos_info'))
+        else:
+            item = DuenoInformacion()
+            db.session.add(item)  # lo añadimos ya para poder hacer flush si hace falta (nuevo)
+
+        # Asignar campos base
+        item.area_id = area_id
+        item.dueno_nombre = dueno_nombre
+        item.dueno_cargo  = dueno_cargo
+        item.custodio_nombre = custodio_nombre
+        item.custodio_cargo  = custodio_cargo
+
+        # PDFs existentes
+        pdfs_guardados = [f for f in (item.acuerdos_pdf.split(',') if item.acuerdos_pdf else []) if f]
+
+        # Leer nuevos PDFs (múltiple) → el name del input es 'acuerdos_pdf'
+        files = request.files.getlist('acuerdos_pdf')
+
+        # Validar TODOS antes de guardar
+        for f in files:
+            if f and f.filename and not allowed_pdf(f.filename):
+                flash("Solo se permiten archivos PDF.", "danger")
+                return redirect(url_for('duenos_info'))
+
+        # Si es un registro nuevo y aún no tiene ID, hacemos flush para disponer de item.id
+        if not rid:
+            db.session.flush()  # NO commit aquí, solo flush asigna el ID
+
+        from werkzeug.utils import secure_filename
+        for f in files:
+            if f and f.filename:
+                raw = secure_filename(f.filename)
+                filename = f"owner_{item.id}_{raw}"  # prefijo con ID para evitar colisiones
+                dst = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                if filename not in pdfs_guardados:
+                    f.save(dst)
+                    pdfs_guardados.append(filename)
+
+        # Persistir lista final (existentes + nuevos)
+        item.acuerdos_pdf = ",".join(pdfs_guardados)
+
+        # Un solo commit al final
+        db.session.commit()
+
+        flash("Guardado correctamente.", "success")
+        return redirect(url_for('duenos_info'))
+    
+    # GET
+    edit_id = request.args.get('edit', type=int)
+    edit_item = DuenoInformacion.query.get(edit_id) if edit_id else None
+    items = DuenoInformacion.query.order_by(DuenoInformacion.id.desc()).all()
+
+    html = """
+    <div class="duenos-shell">
+
+      <!-- CABECERA -->
+      <div class="duenos-header-card">
+        <div class="duenos-header-overlay">
+          <div class="duenos-header-text">
+            <h3 class="duenos-title m-0">Dueños de la Información</h3>
+            <div class="duenos-subtitle">
+              Gestión de dueños, custodios y acuerdos de asignación y responsabilidad de la información
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FORMULARIO CREAR / EDITAR -->
+      {% if not solo_lectura %}
+      <div class="duenos-card mb-3">
+        <div class="duenos-card-body">
+
+          <form method="post" action="{{ url_for('duenos_info') }}" enctype="multipart/form-data">
+            {% if edit_item %}
+              <input type="hidden" name="id" value="{{ edit_item.id }}">
+            {% endif %}
+
+            <div class="row g-3">
+
+              <div class="col-md-4">
+                <label class="form-label">Área</label>
+                <select name="area_id" class="form-select" required>
+                  <option value="">-- Seleccione --</option>
+                  {% for a in areas %}
+                    <option value="{{ a.id }}" {% if edit_item and edit_item.area_id==a.id %}selected{% endif %}>
+                      {{ a.area }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Nombre del dueño de la información</label>
+                <input type="text"
+                       name="dueno_nombre"
+                       class="form-control"
+                       required
+                       value="{{ edit_item.dueno_nombre if edit_item else '' }}">
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Cargo del dueño de la información</label>
+                <input type="text"
+                       name="dueno_cargo"
+                       class="form-control"
+                       required
+                       value="{{ edit_item.dueno_cargo if edit_item else '' }}">
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Nombre del custodio</label>
+                <input type="text"
+                       name="custodio_nombre"
+                       class="form-control"
+                       required
+                       value="{{ edit_item.custodio_nombre if edit_item else '' }}">
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Cargo del custodio</label>
+                <input type="text"
+                       name="custodio_cargo"
+                       class="form-control"
+                       required
+                       value="{{ edit_item.custodio_cargo if edit_item else '' }}">
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Acuerdo de Asignación y Responsabilidad (PDF)</label>
+                <input
+                  type="file"
+                  id="acuerdos_pdf"
+                  name="acuerdos_pdf"
+                  accept=".pdf"
+                  multiple
+                  class="form-control"
+                  onchange="acumularArchivosPDF(this)"
+                >
+                <small class="text-muted">
+                  Puedes seleccionar varios a la vez o ir agregando en varias rondas.
+                </small>
+
+                <!-- Lista visual de archivos NUEVOS -->
+                <div id="lista_pdf_nuevos" class="mt-2"></div>
+
+                <input type="hidden" id="acuerdos_pdf_buffer_flag" value="1">
+              </div>
+
+            </div>
+
+            {% if edit_item and edit_item.acuerdos_pdf %}
+              <div class="row mt-3">
+                <div class="col-12">
+                  <label class="form-label">Archivos cargados</label>
+                  <div class="duenos-files-box">
+                    {% for file in edit_item.acuerdos_pdf.split(',') if file %}
+                      <div class="d-flex align-items-center justify-content-between mb-1"
+                           id="pdf-{{ edit_item.id }}-{{ loop.index }}">
+                        <a href="{{ url_for('vista_evidencia', filename=file, next='duenos_info') }}"
+                           class="text-truncate me-2"
+                           style="max-width:260px;"
+                           title="{{ file }}">
+                          📎 {{ file }}
+                        </a>
+
+                        <button type="button"
+                                class="btn btn-link text-danger p-0"
+                                onclick="deleteOwnerPdf({{ edit_item.id }}, '{{ file }}', 'pdf-{{ edit_item.id }}-{{ loop.index }}')">
+                          🗑️
+                        </button>
+                      </div>
+                    {% endfor %}
+                  </div>
+                </div>
+              </div>
+            {% endif %}
+
+            <div class="duenos-bottom-actions">
+              <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold">
+                {% if edit_item %}Guardar cambios{% else %}Agregar{% endif %}
+              </button>
+
+              {% if edit_item %}
+                <a href="{{ url_for('duenos_info') }}"
+                   class="btn rounded-pill px-4 fw-bold duenos-cancel-btn">
+                  Cancelar
+                </a>
+              {% endif %}
+            </div>
+
+          </form>
+
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- TABLA -->
+      <div class="duenos-card">
+        <div class="duenos-card-body">
+
+          <div class="duenos-table-wrap">
+            <div class="table-responsive">
+              <table class="table table-bordered table-sm align-middle duenos-table mb-0">
+                <thead class="table-secondary">
+                  <tr class="text-center">
+                    <th>Área</th>
+                    <th>Dueño de la información</th>
+                    <th>Cargo (Dueño)</th>
+                    <th>Custodio</th>
+                    <th>Cargo (Custodio)</th>
+                    <th>Acuerdos (PDF)</th>
+                    <th style="width:16%">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for it in items %}
+                  <tr>
+                    <td>{{ it.area.area if it.area else '—' }}</td>
+                    <td><b>{{ it.dueno_nombre }}</b></td>
+                    <td>{{ it.dueno_cargo }}</td>
+                    <td>{{ it.custodio_nombre }}</td>
+                    <td>{{ it.custodio_cargo }}</td>
+                    <td class="small">
+                      {% if it.acuerdos_pdf %}
+                        {% for file in it.acuerdos_pdf.split(',') if file %}
+                          <div>
+                            <a href="{{ url_for('vista_evidencia', filename=file, next='duenos_info') }}">
+                              📄 {{ file }}
+                            </a>
+                          </div>
+                        {% endfor %}
+                      {% else %}
+                        <span class="text-muted">—</span>
+                      {% endif %}
+                    </td>
+                    <td class="text-center">
+                      {% if not solo_lectura %}
+                        <a href="{{ url_for('duenos_info', edit=it.id) }}"
+                           class="btn btn-warning btn-sm rounded-pill px-3">
+                          Editar
+                        </a>
+                        <a href="{{ url_for('duenos_info_delete', id=it.id) }}"
+                           class="btn btn-danger btn-sm rounded-pill px-3"
+                           onclick="return confirm('¿Eliminar este registro?');">
+                          Eliminar
+                        </a>
+                      {% else %}
+                        <span class="text-muted small">Solo lectura</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+
+                  {% if items|length == 0 %}
+                    <tr>
+                      <td colspan="7" class="text-center text-muted py-4">
+                        Sin registros
+                      </td>
+                    </tr>
+                  {% endif %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {% with msgs = get_flashed_messages(with_categories=true) %}
+            {% if msgs %}
+              <div class="mt-3">
+                {% for cat, msg in msgs %}
+                  <div class="alert alert-{{ 'warning' if cat=='message' else cat }} alert-dismissible fade show" role="alert">
+                    {{ msg }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                  </div>
+                {% endfor %}
+              </div>
+            {% endif %}
+          {% endwith %}
+
+        </div>
+      </div>
+
+    </div>
+
+    <script>
+      let pdfBufferDT = new DataTransfer();
+
+      function renderListaNuevos() {
+        const cont = document.getElementById('lista_pdf_nuevos');
+        if (!cont) return;
+        cont.innerHTML = '';
+
+        for (let i = 0; i < pdfBufferDT.files.length; i++) {
+          const f = pdfBufferDT.files[i];
+          const row = document.createElement('div');
+          row.className = 'd-flex align-items-center justify-content-between mb-1';
+          row.innerHTML = `
+            <span class="text-truncate" style="max-width:260px;">📎 ${f.name}</span>
+            <button type="button" class="btn btn-link text-danger p-0" onclick="removeFromBuffer(${i})">🗑️</button>
+          `;
+          cont.appendChild(row);
+        }
+
+        if (pdfBufferDT.files.length === 0) {
+          cont.innerHTML = '<div class="text-muted small">No hay archivos nuevos seleccionados</div>';
+        }
+      }
+
+      function acumularArchivosPDF(inputEl) {
+        for (const f of inputEl.files) {
+          pdfBufferDT.items.add(f);
+        }
+        inputEl.files = pdfBufferDT.files;
+        renderListaNuevos();
+      }
+
+      function removeFromBuffer(index) {
+        const tmp = new DataTransfer();
+        for (let i = 0; i < pdfBufferDT.files.length; i++) {
+          if (i !== index) tmp.items.add(pdfBufferDT.files[i]);
+        }
+        pdfBufferDT = tmp;
+        const inputEl = document.getElementById('acuerdos_pdf');
+        if (inputEl) inputEl.files = pdfBufferDT.files;
+        renderListaNuevos();
+      }
+
+      async function deleteOwnerPdf(ownerId, filename, elementId) {
+        if (!confirm('¿Eliminar este PDF?')) return;
+
+        try {
+          const url = `/duenos_info/delete_file/${ownerId}/${encodeURIComponent(filename)}`;
+          const res = await fetch(url, { method: 'POST' });
+
+          if (res.ok) {
+            const row = document.getElementById(elementId);
+            if (row) row.remove();
+          } else {
+            alert('Error al eliminar el PDF.');
+          }
+        } catch (e) {
+          alert('Error de conexión al eliminar el PDF.');
+        }
+      }
+
+      window.addEventListener('DOMContentLoaded', renderListaNuevos);
+    </script>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .duenos-shell{
+        width:96%;
+        max-width:1600px;
+        margin:10px auto 24px auto;
+      }
+
+      .duenos-header-card{
+        background:linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.24);
+        color:#fff;
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .duenos-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 15px);
+      }
+
+      .duenos-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        padding:0;
+        background:transparent;
+        position:relative;
+        z-index:1;
+      }
+
+      .duenos-header-overlay::before{
+        content:"👤";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#fff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.20);
+        margin-right:14px;
+      }
+
+      .duenos-header-text{
+        max-width:1100px;
+        width:100%;
+        transform:none;
+      }
+
+      .duenos-header-text::before{
+        content:"SGSI · Dueños de Información";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+      }
+
+      .duenos-title{
+        color:#fff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.08;
+        text-shadow:0 3px 10px rgba(0,0,0,.32);
+        margin:0 !important;
+      }
+
+      .duenos-subtitle{
+        color:rgba(248,252,255,.96);
+        font-size:.78rem;
+        margin-top:4px;
+        line-height:1.25;
+      }
+
+      .duenos-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        margin:10px 0 12px;
+        flex-wrap:wrap;
+      }
+
+      .duenos-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .duenos-back-btn{
+        background:#fff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+        box-shadow:0 6px 14px rgba(0,0,0,.10);
+      }
+
+      .duenos-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .duenos-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        overflow:hidden;
+        border:1px solid rgba(219,230,244,.9);
+      }
+
+      .duenos-card-body{
+        padding:16px 18px;
+      }
+
+      .duenos-card .form-label{
+        font-weight:800;
+        color:#25324a;
+        margin-bottom:4px;
+        font-size:.78rem;
+      }
+
+      .duenos-card .form-control,
+      .duenos-card .form-select{
+        border-radius:9px;
+        border:1px solid #d9e3f0;
+        min-height:37px;
+        font-size:.80rem;
+        background:#f8fafc;
+        box-shadow:none;
+      }
+
+      .duenos-card .form-control:focus,
+      .duenos-card .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .18rem rgba(63,134,214,.18);
+        background:#fff;
+      }
+
+      .duenos-files-box{
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        padding:12px;
+        background:linear-gradient(180deg,#fff 0%,#f8fbff 100%);
+        box-shadow:0 6px 14px rgba(15,23,42,.08);
+      }
+
+      .duenos-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        margin-top:18px;
+        flex-wrap:wrap;
+      }
+
+      .duenos-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .duenos-cancel-btn{
+        background:#fff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .duenos-cancel-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .duenos-table-wrap{
+        max-height:70vh;
+        overflow:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#fff;
+      }
+
+      .duenos-table{
+        width:100%;
+        min-width:1200px;
+        table-layout:auto;
+        margin-bottom:0;
+      }
+
+      .duenos-table th,
+      .duenos-table td{
+        white-space:normal;
+        word-break:break-word;
+        vertical-align:top;
+        font-size:.78rem;
+        padding:9px 8px;
+      }
+
+      .duenos-table thead th{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#fff !important;
+        font-weight:900;
+        text-align:center;
+      }
+
+      .duenos-table td{
+        border-bottom:1px solid #e5edf7;
+      }
+
+      .duenos-table tbody tr:nth-child(even){
+        background:#f8fbff;
+      }
+
+      .duenos-table tbody tr:hover{
+        background:#eef6ff;
+      }
+
+      .badge{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }
+
+      .btn.rounded-pill{
+        border-radius:999px !important;
+      }
+
+      .duenos-card .btn{
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+        font-weight:900;
+        font-size:.78rem;
+      }
+
+      @media (max-width:992px){
+        .duenos-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .duenos-header-card{
+          min-height:88px;
+        }
+
+        .duenos-title{
+          font-size:1.2rem;
+        }
+
+        .duenos-card-body{
+          padding:8px 7px;
+        }
+      }
+
+      @media (max-width:768px){
+        .duenos-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .duenos-header-overlay::before{
+          margin:0;
+        }
+
+        .duenos-header-actions .btn,
+        .duenos-bottom-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+    inner = render_template_string(
+        html,
+        items=items,
+        edit_item=edit_item,
+        areas=areas,
+        solo_lectura=solo_lectura
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+
+@app.route('/duenos_info/delete')
+@login_required
+def duenos_info_delete():
+    if user.role == 'auditor' or (
+        user.role != 'admin'
+        and not verificar_permiso_activos(user, "Dueños de Información")
+    ):
+        flash("No tiene permiso para eliminar dueños de información.", "danger")
+        return redirect(url_for('activos_menu'))
+    
+    rid = request.args.get('id', type=int)
+    it = DuenoInformacion.query.get(rid)
+    if it:
+        # Borrar archivos físicos
+        if it.acuerdos_pdf:
+            for fname in it.acuerdos_pdf.split(','):
+                fp = os.path.join(app.config['UPLOAD_FOLDER'], fname)
+                try:
+                    if os.path.isfile(fp):
+                        os.remove(fp)
+                except Exception:
+                    pass
+        db.session.delete(it)
+        db.session.commit()
+        flash("Eliminado correctamente.", "success")
+    else:
+        flash("Registro no encontrado.", "danger")
+    return redirect(url_for('duenos_info'))
+
+@app.route('/vista_evidencia/<path:filename>')
+@login_required
+def vista_evidencia(filename):
+    ext = os.path.splitext(filename)[1].lower()
+    is_pdf = ext == '.pdf'
+    is_office = ext in {'.doc', '.docx', '.xls', '.xlsx'}
+
+    # 1) Determinar a dónde volver (lee ?next=...)
+    next_ep = request.args.get('next')  # p.ej. 'duenos_info', 'declaracion_aplicabilidad', etc.
+    # Opcional: etiqueta de botón
+    back_label_map = {
+        'duenos_info': '⬅ Volver a Dueños de la Información',
+        'declaracion_aplicabilidad': '⬅ Volver a SoA',
+        'soa': '⬅ Volver a SoA',
+        'activos_menu': '⬅ Volver a Gestión de Activos',
+        'menu': '⬅ Volver al menú principal',
+    }
+    # Whitelist de endpoints permitidos a los que volver:
+    allowed_back = set(back_label_map.keys())
+
+    if next_ep in allowed_back:
+        back_url = url_for(next_ep)
+        back_label = back_label_map[next_ep]
+    else:
+        # fallback: intentar referrer o menú
+        back_url = request.referrer or url_for('menu')
+        back_label = '⬅ Volver'
+
+    pdf_converted = None
+    if is_office:
+        # genera PDF si hace falta (asegúrate de tener CONVERTED_FOLDER y ensure_pdf_from_office)
+        pdf_converted = ensure_pdf_from_office(filename)
+
+    inner_html = """
+    <div class="container my-3">
+      <!-- Barra superior -->
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <a href="{{ back_url }}" class="btn btn-secondary rounded-pill px-4 py-2">
+          {{ back_label }}
+        </a>
+        <div class="small text-muted text-truncate">Archivo: {{ filename }}</div>
+      </div>
+
+      <!-- Contenedor del visor -->
+      <div class="card shadow-sm">
+        <div class="card-body p-2">
+          {% if is_pdf %}
+            <div class="pdf-container">
+              <iframe id="pdfFrame"
+                      src="{{ url_for('ver_evidencia', filename=filename) }}#zoom=page-width"
+                      title="Visor PDF"></iframe>
+            </div>
+
+          {% elif pdf_converted %}
+            <div class="pdf-container">
+              <iframe id="pdfFrame"
+                      src="{{ url_for('ver_evidencia_convertido', filename=pdf_converted) }}#zoom=page-width"
+                      title="Visor PDF (convertido)"></iframe>
+            </div>
+            <div class="mt-2 text-center">
+              <a class="btn btn-outline-primary rounded-pill px-4"
+                 href="{{ url_for('ver_evidencia', filename=filename) }}" target="_blank" rel="noopener">
+                Abrir archivo original
+              </a>
+            </div>
+
+          {% elif is_office %}
+            <div class="alert alert-warning m-2">
+              No fue posible generar una vista previa interna del archivo Office.
+              Verifica que LibreOffice esté instalado en el servidor.
+            </div>
+            <div class="text-center mb-2">
+              <a class="btn btn-outline-primary rounded-pill px-4"
+                 href="{{ url_for('ver_evidencia', filename=filename) }}" target="_blank" rel="noopener">
+                Abrir/descargar archivo original
+              </a>
+            </div>
+
+          {% else %}
+            <div class="alert alert-info m-2">
+              Este tipo de archivo (<b>{{ ext }}</b>) no se puede previsualizar. Puedes abrirlo/descargarlo.
+            </div>
+            <div class="text-center mb-2">
+              <a class="btn btn-outline-primary rounded-pill px-4"
+                 href="{{ url_for('ver_evidencia', filename=filename) }}" target="_blank" rel="noopener">
+                Abrir archivo
+              </a>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <style>
+      /* Altura razonable dentro del layout, sin salirse */
+      .pdf-container {
+        height: min(82vh, 1000px);
+        min-height: 600px;
+        width: 100%;
+      }
+      .pdf-container iframe {
+        width: 100%;
+        height: 100%;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        background: #fff;
+      }
+    </style>
+
+    <script>
+      function setZoom(z) {
+        var f = document.getElementById('pdfFrame');
+        if (!f) return;
+        var base = f.src.split('#')[0];
+        f.src = base + '#zoom=' + encodeURIComponent(z);
+      }
+    </script>
+    <style>
+          body {
+            background-image: url('/static/img/ccsgsi.jpg'); /* Usa tu imagen */
+            background-size: cover;       /* 🔹 ocupa toda la pantalla */
+            background-position: center;  /* 🔹 centrada */
+            background-attachment: fixed; /* 🔹 efecto de fondo fijo elegante */
+            background-repeat: no-repeat;
+          }
+
+          /* Fondo suave en las tarjetas para que se lean bien */
+          .card {
+            background: rgba(255, 255, 255, 0.85) !important;
+            backdrop-filter: blur(4px);
+          }
+        </style>
+    """
+
+    return render_template_string(
+        BASE,
+        content=Markup(render_template_string(
+            inner_html,
+            filename=filename,
+            ext=ext,
+            is_pdf=is_pdf,
+            is_office=is_office,
+            pdf_converted=pdf_converted,
+            back_url=back_url,
+            back_label=back_label
+        ))
+    )
+
+
+@app.route('/duenos_info/delete_file/<int:owner_id>/<path:filename>', methods=['POST'])
+@login_required
+def duenos_info_delete_file(owner_id, filename):
+    it = DuenoInformacion.query.get(owner_id)
+    if not it:
+        flash("Registro no encontrado.", "danger")
+        return redirect(url_for('duenos_info'))
+
+    lst = [f for f in (it.acuerdos_pdf.split(',') if it.acuerdos_pdf else []) if f]
+    if filename in lst:
+        # borrar físicamente
+        fp = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        try:
+            if os.path.isfile(fp):
+                os.remove(fp)
+        except Exception:
+            pass
+        # actualizar campo
+        lst.remove(filename)
+        it.acuerdos_pdf = ",".join(lst)
+        db.session.add(it)
+        db.session.commit()
+        flash("Archivo eliminado.", "success")
+    else:
+        flash("Archivo no encontrado en el registro.", "warning")
+
+    return redirect(url_for('duenos_info'))
+
+# =========================
+# ENTRADA DIRECTA — Inventario de Información
+# =========================
+@app.route('/inventario_informacion_menu')
+@login_required
+def inventario_informacion_menu():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role not in ('admin', 'auditor') and not verificar_permiso(user, "Gestión de Activos de Información"):
+        flash("No tiene permiso para acceder al módulo de inventarios de Información.", "danger")
+        return redirect(url_for('activos_menu'))
+
+    return redirect(url_for('inventario_informacion'))
+
+
+# =========================
+# Agregar — Inventario de Información
+# =========================
+@app.route('/inventario_informacion/new', methods=['GET', 'POST'])
+@login_required
+def inventario_informacion_new():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede agregar registros.", "danger")
+        return redirect(url_for('inventario_informacion'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
+        flash("No tiene permiso para agregar registros de activos.", "danger")
+        return redirect(url_for('inventario_informacion'))
+    
+    conf_opts = ValoracionConfidencialidad.query.order_by(ValoracionConfidencialidad.nivel_num.asc()).all()
+    inte_opts = ValoracionIntegridad.query.order_by(ValoracionIntegridad.nivel_num.asc()).all()
+    disp_opts = ValoracionDisponibilidad.query.order_by(ValoracionDisponibilidad.nivel_num.asc()).all()
+    crit_opts = ValoracionCriticidadActivo.query.order_by(ValoracionCriticidadActivo.nivel_num.asc()).all()
+    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
+
+    duenos_info_opts = (
+        DuenoInformacion.query
+        .order_by(DuenoInformacion.dueno_nombre.asc())
+        .all()
+    )
+
+    if request.method == 'POST':
+        area_id = request.form.get('area_id', type=int)
+        division = (request.form.get('division') or "").strip()
+        proceso = (request.form.get('proceso') or "").strip()
+        nombre_activo = (request.form.get('nombre_activo') or "").strip()
+        descripcion = (request.form.get('descripcion') or "").strip()
+
+        formato = request.form.get('formato') or "Digital"
+        ubicacion_digital = (request.form.get('ubicacion_digital') or "").strip()
+        accesos_autorizados = (request.form.get('accesos_autorizados') or "").strip()
+
+        lectura = request.form.get('lectura') or "No"
+        escritura = request.form.get('escritura') or "No"
+        eliminacion = request.form.get('eliminacion') or "No"
+
+        propietario = (request.form.get('propietario') or "").strip()
+
+        try:
+            c_nivel = int(request.form.get('c_nivel') or 0)
+            i_nivel = int(request.form.get('i_nivel') or 0)
+            d_nivel = int(request.form.get('d_nivel') or 0)
+        except ValueError:
+            c_nivel = i_nivel = d_nivel = 0
+
+        info_personal = request.form.get('info_personal') or "No"
+        info_regulada = request.form.get('info_regulada') or "No"
+        info_sensible = request.form.get('info_sensible') or "No"
+        info_sensible_clientes = request.form.get('info_sensible_clientes') or "No"
+
+        observaciones = (request.form.get('observaciones') or "").strip()
+
+        if not (area_id and proceso and nombre_activo and descripcion and propietario):
+            flash("Campos obligatorios: Área, Proceso, Nombre del Activo, Descripción y Propietario.", "danger")
+            return redirect(url_for('inventario_informacion_new'))
+
+        for n in (c_nivel, i_nivel, d_nivel):
+            if n < 1 or n > 5:
+                flash("Los niveles numéricos deben estar entre 1 y 5.", "danger")
+                return redirect(url_for('inventario_informacion_new'))
+
+        valor_activo = round((c_nivel + i_nivel + d_nivel) / 3)
+
+        conf_row = ValoracionConfidencialidad.query.filter_by(nivel_num=c_nivel).first()
+        etiqueta_conf_num = c_nivel
+        etiqueta_conf_texto = conf_row.clasificacion if conf_row else f"Nivel {c_nivel}"
+
+        crit_row = ValoracionCriticidadActivo.query.filter_by(nivel_num=valor_activo).first()
+        criticidad_num = valor_activo
+        criticidad_texto = crit_row.nivel_texto if crit_row else f"Nivel {valor_activo}"
+
+        it = InventarioInformacion(
+            area_id=area_id,
+            division=division,
+            proceso=proceso,
+            nombre_activo=nombre_activo,
+            descripcion=descripcion,
+            formato=formato,
+            ubicacion_digital=ubicacion_digital,
+            accesos_autorizados=accesos_autorizados,
+            lectura=lectura,
+            escritura=escritura,
+            eliminacion=eliminacion,
+            propietario=propietario,
+            c_nivel=c_nivel,
+            i_nivel=i_nivel,
+            d_nivel=d_nivel,
+            valor_activo=valor_activo,
+            criticidad_num=criticidad_num,
+            criticidad_texto=criticidad_texto,
+            etiqueta_conf_num=etiqueta_conf_num,
+            etiqueta_conf_texto=etiqueta_conf_texto,
+            info_personal=info_personal,
+            info_regulada=info_regulada,
+            info_sensible=info_sensible,
+            info_sensible_clientes=info_sensible_clientes,
+            observaciones=observaciones
+        )
+        db.session.add(it)
+        db.session.commit()
+        flash("Activo de información creado.", "success")
+        return redirect(url_for('inventario_informacion'))
+
+    html = """
+    <div class="invinfo-shell">
+
+      <div class="invinfo-header-card">
+        <div class="invinfo-header-overlay">
+          <div class="invinfo-header-text">
+            <h3 class="invinfo-title m-0">Registro — Inventario de Información</h3>
+            <div class="invinfo-subtitle">
+              Registro y clasificación de activos de información del Sistema de Gestión de Seguridad de la Información
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="invinfo-header-actions">
+        <a href="{{ url_for('inventario_informacion') }}"
+           class="btn rounded-pill px-4 fw-bold invinfo-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+
+      </div>
+
+      <div class="invinfo-card">
+        <div class="invinfo-card-body">
+          <form method="post">
+            <div class="row g-3">
+
+              <div class="col-md-3">
+                <label class="form-label">Área</label>
+                <select name="area_id" id="area_id" class="form-select" required>
+                  <option value="">-- Seleccione --</option>
+                  {% for a in areas %}
+                    <option value="{{ a.id }}">{{ a.area }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">División</label>
+                <select name="division" id="division" class="form-select">
+                  <option value="">-- Seleccione --</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Proceso</label>
+                <input type="text" name="proceso" class="form-control" required>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Nombre del Activo</label>
+                <input type="text" name="nombre_activo" class="form-control" required>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Propietario</label>
+                <select name="propietario" class="form-select" required>
+                  <option value="">-- Seleccione cargo del dueño de información --</option>
+                  {% for d in duenos_info_opts %}
+                    <option value="{{ d.dueno_cargo }}">
+                      {{ d.dueno_cargo }}{% if d.dueno_nombre %} — {{ d.dueno_nombre }}{% endif %}{% if d.area %} ({{ d.area.area }}){% endif %}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-12">
+                <label class="form-label">Descripción</label>
+                <textarea name="descripcion" class="form-control" rows="2" required></textarea>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Formato</label>
+                <select name="formato" class="form-select">
+                  <option value="Digital">Digital</option>
+                  <option value="Físico">Físico</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Ubicación Digital</label>
+                <input type="text" name="ubicacion_digital" class="form-control">
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Accesos Autorizados</label>
+                <input type="text" name="accesos_autorizados" class="form-control">
+              </div>
+
+              <div class="col-md-2">
+                <label class="form-label">Lectura / Consulta</label>
+                <select name="lectura" class="form-select">
+                  <option value="Sí">Sí</option>
+                  <option value="No">No</option>
+                </select>
+              </div>
+
+              <div class="col-md-2">
+                <label class="form-label">Escritura</label>
+                <select name="escritura" class="form-select">
+                  <option value="Sí">Sí</option>
+                  <option value="No">No</option>
+                </select>
+              </div>
+
+              <div class="col-md-2">
+                <label class="form-label">Eliminación</label>
+                <select name="eliminacion" class="form-select">
+                  <option value="Sí">Sí</option>
+                  <option value="No">No</option>
+                </select>
+              </div>
+
+              <div class="col-md-2">
+                <label class="form-label">Clasificación Confidencialidad</label>
+                <select name="c_nivel" class="form-select">
+                  {% for o in conf_opts %}
+                    <option value="{{ o.nivel_num }}">{{ o.nivel_num }} — {{ o.clasificacion }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-2">
+                <label class="form-label">Clasificación Integridad</label>
+                <select name="i_nivel" class="form-select">
+                  {% for o in inte_opts %}
+                    <option value="{{ o.nivel_num }}">{{ o.nivel_num }} — {{ o.nivel }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-2">
+                <label class="form-label">Clasificación Disponibilidad</label>
+                <select name="d_nivel" class="form-select">
+                  {% for o in disp_opts %}
+                    <option value="{{ o.nivel_num }}">{{ o.nivel_num }} — {{ o.nivel }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-2">
+                <label class="form-label">¿Es Información Personal?</label>
+                <select name="info_personal" class="form-select">
+                  <option value="Sí">Sí</option>
+                  <option value="No">No</option>
+                </select>
+              </div>
+
+              <div class="col-md-2">
+                <label class="form-label">¿Regulada por legislación?</label>
+                <select name="info_regulada" class="form-select">
+                  <option value="Sí">Sí</option>
+                  <option value="No">No</option>
+                </select>
+              </div>
+
+              <div class="col-md-2">
+                <label class="form-label">¿Información sensible de la Compañía?</label>
+                <select name="info_sensible" class="form-select">
+                  <option value="Sí">Sí</option>
+                  <option value="No">No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">¿Información sensible de Clientes?</label>
+                <select name="info_sensible_clientes" class="form-select">
+                  <option value="Sí">Sí</option>
+                  <option value="No">No</option>
+                </select>
+              </div>
+
+              <div class="col-md-12">
+                <label class="form-label">Observaciones</label>
+                <textarea name="observaciones" class="form-control" rows="2"></textarea>
+              </div>
+
+            </div>
+
+            <div class="invinfo-bottom-actions">
+              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
+                Guardar
+              </button>
+              <a href="{{ url_for('inventario_informacion') }}"
+                 class="btn rounded-pill px-4 fw-bold invinfo-cancel-btn">
+                Cancelar
+              </a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .invinfo-shell{
+        width:96%;
+        max-width:1500px;
+        margin:10px auto 24px auto;
+      }
+
+      .invinfo-header-card{
+        background:linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.24);
+        color:#fff;
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .invinfo-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 15px);
+      }
+
+      .invinfo-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        padding:0;
+        background:transparent;
+        position:relative;
+        z-index:1;
+      }
+
+      .invinfo-header-overlay::before{
+        content:"📚";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#fff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.20);
+        margin-right:14px;
+      }
+
+      .invinfo-header-text::before{
+        content:"SGSI · Inventario de Información";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+      }
+
+      .invinfo-title{
+        color:#fff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        margin:0 !important;
+      }
+
+      .invinfo-subtitle{
+        color:rgba(248,252,255,.96);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .invinfo-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 12px;
+      }
+
+      .invinfo-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .invinfo-back-btn{
+        background:#fff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+        box-shadow:0 6px 14px rgba(0,0,0,.10);
+      }
+
+      .invinfo-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .invinfo-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        overflow:hidden;
+        border:1px solid rgba(219,230,244,.9);
+      }
+
+      .invinfo-card-body{
+        padding:16px 18px;
+      }
+
+      .invinfo-card .form-label{
+        font-weight:800;
+        color:#25324a;
+        margin-bottom:4px;
+        font-size:.78rem;
+      }
+
+      .invinfo-card .form-control,
+      .invinfo-card .form-select{
+        border-radius:9px;
+        border:1px solid #d9e3f0;
+        min-height:37px;
+        font-size:.80rem;
+        background:#f8fafc;
+        box-shadow:none;
+      }
+
+      .invinfo-card textarea.form-control{
+        min-height:70px;
+        resize:vertical;
+      }
+
+      .invinfo-card .form-control:focus,
+      .invinfo-card .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .18rem rgba(63,134,214,.18);
+        background:#fff;
+      }
+
+      .invinfo-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        margin-top:18px;
+        flex-wrap:wrap;
+      }
+
+      .invinfo-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .invinfo-cancel-btn{
+        background:#fff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invinfo-cancel-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      @media (max-width:992px){
+        .invinfo-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .invinfo-header-card{
+          min-height:88px;
+        }
+
+        .invinfo-title{
+          font-size:1.2rem;
+        }
+
+        .invinfo-card-body{
+          padding:8px 7px;
+        }
+      }
+
+      @media (max-width:768px){
+        .invinfo-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .invinfo-header-overlay::before{
+          margin:0;
+        }
+
+        .invinfo-header-actions .btn,
+        .invinfo-bottom-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+
+    <script>
+      function cargarDivisionesPorArea() {
+        const areaSel = document.getElementById('area_id');
+        const divSel  = document.getElementById('division');
+
+        if (!areaSel || !divSel) return;
+
+        const areaId = areaSel.value;
+        divSel.innerHTML = '<option value="">-- Seleccione --</option>';
+
+        if (!areaId) return;
+
+        fetch(`/areas/${areaId}/divisiones_json`)
+          .then(r => r.json())
+          .then(data => {
+            if (!data.divisiones || data.divisiones.length === 0) {
+              divSel.innerHTML = '<option value="">(Sin divisiones para esta área)</option>';
+              return;
+            }
+
+            divSel.innerHTML = '<option value="">-- Seleccione --</option>';
+            data.divisiones.forEach(d => {
+              const opt = document.createElement('option');
+              opt.value = d.nombre;
+              opt.textContent = d.nombre;
+              divSel.appendChild(opt);
+            });
+          })
+          .catch(err => {
+            console.error('Error cargando divisiones:', err);
+            divSel.innerHTML = '<option value="">Error cargando divisiones</option>';
+          });
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+        const areaSel = document.getElementById('area_id');
+        if (areaSel) {
+          areaSel.addEventListener('change', cargarDivisionesPorArea);
+        }
+      });
+    </script>
+    """
+    inner = render_template_string(
+        html,
+        conf_opts=conf_opts,
+        inte_opts=inte_opts,
+        disp_opts=disp_opts,
+        crit_opts=crit_opts,
+        areas=areas,
+        duenos_info_opts=duenos_info_opts
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+
+# =========================
+# EDICIÓN — Inventario de Información
+# =========================
 @app.route('/inventario_informacion/edit/<int:id>', methods=['GET','POST'])
 @login_required
 def inventario_informacion_edit(id):
@@ -2440,7331 +8858,4 @@ def inventario_software_new():
 
 # =========================
 # EDICIÓN — Inventario de Software
-# =========================
-@app.route('/inventario_software/edit/<int:id>', methods=['GET', 'POST'])
-@login_required
-def inventario_software_edit(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor' or (
-        user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información")
-    ):
-        flash("No tiene permiso para editar registros de activos de software.", "danger")
-        return redirect(url_for('inventario_software'))
-
-    item = InventarioSoftware.query.get_or_404(id)
-    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
-
-    evidencias = InventarioSoftwareEvidencia.query.filter_by(
-        registro_id=item.id
-    ).order_by(InventarioSoftwareEvidencia.id.desc()).all()
-
-    conf_opts = ValoracionConfidencialidad.query.order_by(ValoracionConfidencialidad.nivel_num.asc()).all()
-    inte_opts = ValoracionIntegridad.query.order_by(ValoracionIntegridad.nivel_num.asc()).all()
-    disp_opts = ValoracionDisponibilidad.query.order_by(ValoracionDisponibilidad.nivel_num.asc()).all()
-
-    current_area = AreaEmpresa.query.filter_by(area=(item.area or '')).first()
-    current_area_id = current_area.id if current_area else 0
-
-    if request.method == 'POST':
-        selected_area_id = request.form.get('area_id', type=int)
-        selected_area = AreaEmpresa.query.get(selected_area_id) if selected_area_id else None
-
-        item.area = selected_area.area if selected_area else ''
-        item.division = (request.form.get('division') or '').strip()
-        item.proceso = (request.form.get('proceso') or '').strip()
-        item.nombre_activo = (request.form.get('nombre_activo') or '').strip()
-        item.administrador = (request.form.get('administrador') or '').strip()
-        item.dueno_tecnico = (request.form.get('dueno_tecnico') or '').strip()
-        item.propietario = (request.form.get('propietario') or '').strip()
-        item.medio = (request.form.get('medio') or '').strip()
-        item.ubicacion_tipo = (request.form.get('ubicacion') or '').strip()
-        item.ubicacion_nombre = (request.form.get('ubicacion_nombre') or '').strip()
-        item.descripcion = (request.form.get('descripcion') or '').strip()
-        item.accesos_autorizados = (request.form.get('accesos_autorizados') or '').strip()
-        item.info_personal = request.form.get('info_personal') or 'No'
-        item.info_regulada = request.form.get('info_regulada') or 'No'
-        item.info_sensible_compania = request.form.get('info_sensible_compania') or 'No'
-        item.info_sensible_clientes = request.form.get('info_sensible_clientes') or 'No'
-        item.observaciones = (request.form.get('observaciones') or '').strip()
-
-        try:
-            item.c_nivel = int(request.form.get('conf_num') or 0)
-            item.i_nivel = int(request.form.get('int_num') or 0)
-            item.d_nivel = int(request.form.get('disp_num') or 0)
-        except ValueError:
-            item.c_nivel = item.i_nivel = item.d_nivel = 0
-
-        if not (
-            item.area and item.division and item.proceso and item.nombre_activo and
-            item.administrador and item.dueno_tecnico and item.ubicacion_nombre and item.accesos_autorizados
-        ):
-            flash(
-                "Campos obligatorios: Área, División, Proceso, Nombre, Administrador, Dueño Técnico, Nombre de la ubicación y Acceso Autorizado.",
-                "danger"
-            )
-            return redirect(url_for('inventario_software_edit', id=item.id))
-
-        for n in (item.c_nivel, item.i_nivel, item.d_nivel):
-            if n < 1 or n > 5:
-                flash("Los niveles C/I/D deben estar entre 1 y 5.", "danger")
-                return redirect(url_for('inventario_software_edit', id=item.id))
-
-        item.valor_activo = round((item.c_nivel + item.i_nivel + item.d_nivel) / 3)
-
-        conf_row = ValoracionConfidencialidad.query.filter_by(nivel_num=item.c_nivel).first()
-        item.etiqueta_conf_num = item.c_nivel
-        item.etiqueta_conf_texto = conf_row.clasificacion if conf_row else f"Nivel {item.c_nivel}"
-
-        crit_row = ValoracionCriticidadActivo.query.filter_by(nivel_num=item.valor_activo).first()
-        item.criticidad_num = item.valor_activo
-        item.criticidad_texto = crit_row.nivel_texto if crit_row else f"Nivel {item.valor_activo}"
-
-        db.session.add(item)
-        guardar_evidencias_inventario_software(item)
-        db.session.commit()
-
-        flash("Cambios guardados.", "success")
-        return redirect(url_for('inventario_software_edit', id=item.id))
-
-    html = """
-    <div class="invsoftedit-shell">
-
-      <div class="invsoftedit-header-card">
-        <div class="invsoftedit-header-overlay">
-          <div class="invsoftedit-header-text">
-            <h3 class="invsoftedit-title m-0">Editar — Inventario de Software</h3>
-            <div class="invsoftedit-subtitle">
-              Actualización de activos de software del Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="invsoftedit-header-actions">
-        <a href="{{ url_for('inventario_software') }}"
-           class="btn rounded-pill px-4 fw-bold invsoftedit-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-
-        <a href="{{ url_for('inventario_software_detalle', id=item.id) }}"
-           class="btn btn-info rounded-pill px-4 fw-bold text-white">
-          Ver detalle
-        </a>
-      </div>
-
-      <div class="invsoftedit-card">
-        <div class="invsoftedit-card-body">
-
-          <form id="formEditarInventarioSoftware" method="post" enctype="multipart/form-data">
-
-            <div class="row g-3">
-
-              <div class="col-md-4">
-                <label class="form-label">Área</label>
-                <select name="area_id" id="softArea" class="form-select" required>
-                  <option value="">-- Seleccione --</option>
-                  {% for a in areas %}
-                    <option value="{{ a.id }}" {% if current_area_id == a.id %}selected{% endif %}>
-                      {{ a.area }}
-                    </option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">División</label>
-                <select name="division" id="softDivision" class="form-select" required>
-                  <option value="">-- Seleccione --</option>
-                  {% if item.division %}
-                    <option value="{{ item.division }}" selected>{{ item.division }}</option>
-                  {% endif %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Proceso</label>
-                <input type="text" name="proceso" class="form-control" required value="{{ item.proceso or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Nombre del Activo</label>
-                <input type="text" name="nombre_activo" class="form-control" required value="{{ item.nombre_activo or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Administrador (Owner)</label>
-                <input type="text" name="administrador" class="form-control" required value="{{ item.administrador or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Dueño Técnico</label>
-                <input type="text" name="dueno_tecnico" class="form-control" required value="{{ item.dueno_tecnico or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Propietario</label>
-                <input type="text" name="propietario" class="form-control" value="{{ item.propietario or '' }}">
-              </div>
-
-              <div class="col-md-9">
-                <label class="form-label">Descripción</label>
-                <textarea name="descripcion" class="form-control" rows="2">{{ item.descripcion or '' }}</textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Medio</label>
-                <select name="medio" class="form-select">
-                  {% for opt in ['Aplicación Web','Aplicación de Escritorio','Aplicación de Servidor','Servicios con un Tercero'] %}
-                    <option value="{{ opt }}" {% if item.medio == opt %}selected{% endif %}>{{ opt }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Ubicación</label>
-                <select name="ubicacion" class="form-select">
-                  {% for opt in ['Área','Servidor','Dominio/URL'] %}
-                    <option value="{{ opt }}" {% if item.ubicacion_tipo == opt %}selected{% endif %}>{{ opt }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Nombre de la ubicación</label>
-                <input type="text" name="ubicacion_nombre" class="form-control" required value="{{ item.ubicacion_nombre or '' }}">
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Acceso Autorizado (Áreas o Divisiones)</label>
-                <input type="text"
-                       name="accesos_autorizados"
-                       class="form-control"
-                       value="{{ item.accesos_autorizados or '' }}"
-                       placeholder="p.ej.: Operaciones; Ventas; División Andina"
-                       required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Confidencialidad (1..5)</label>
-                <select name="conf_num" class="form-select" required>
-                  {% for o in conf_opts %}
-                    <option value="{{ o.nivel_num }}" {% if item.c_nivel == o.nivel_num %}selected{% endif %}>
-                      {{ o.nivel_num }} — {{ o.clasificacion }}
-                    </option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Integridad (1..5)</label>
-                <select name="int_num" class="form-select" required>
-                  {% for o in inte_opts %}
-                    <option value="{{ o.nivel_num }}" {% if item.i_nivel == o.nivel_num %}selected{% endif %}>
-                      {{ o.nivel_num }} — {{ o.nivel }}
-                    </option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Disponibilidad (1..5)</label>
-                <select name="disp_num" class="form-select" required>
-                  {% for o in disp_opts %}
-                    <option value="{{ o.nivel_num }}" {% if item.d_nivel == o.nivel_num %}selected{% endif %}>
-                      {{ o.nivel_num }} — {{ o.nivel }}
-                    </option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">¿Info Personal?</label>
-                <select name="info_personal" class="form-select">
-                  <option value="Sí" {% if item.info_personal == 'Sí' %}selected{% endif %}>Sí</option>
-                  <option value="No" {% if item.info_personal == 'No' %}selected{% endif %}>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">¿Regulada?</label>
-                <select name="info_regulada" class="form-select">
-                  <option value="Sí" {% if item.info_regulada == 'Sí' %}selected{% endif %}>Sí</option>
-                  <option value="No" {% if item.info_regulada == 'No' %}selected{% endif %}>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">¿Sens. Compañía?</label>
-                <select name="info_sensible_compania" class="form-select">
-                  <option value="Sí" {% if item.info_sensible_compania == 'Sí' %}selected{% endif %}>Sí</option>
-                  <option value="No" {% if item.info_sensible_compania == 'No' %}selected{% endif %}>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">¿Sens. Clientes?</label>
-                <select name="info_sensible_clientes" class="form-select">
-                  <option value="Sí" {% if item.info_sensible_clientes == 'Sí' %}selected{% endif %}>Sí</option>
-                  <option value="No" {% if item.info_sensible_clientes == 'No' %}selected{% endif %}>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Observaciones</label>
-                <input type="text" name="observaciones" class="form-control" value="{{ item.observaciones or '' }}">
-              </div>
-
-              <div class="col-md-12">
-                <div class="invsoftedit-evidence-upload">
-                  <label class="form-label mb-1">Agregar nuevas evidencias PDF</label>
-                  <input type="file" name="evidencias" class="form-control" accept="application/pdf,.pdf" multiple>
-                  <div class="invsoftedit-evidence-help">
-                    Los nuevos PDF se sumarán a las evidencias existentes del activo.
-                  </div>
-                </div>
-              </div>
-
-            </div>
-
-            <div class="invsoftedit-bottom-actions">
-              <button class="btn btn-success rounded-pill px-4 fw-bold"
-                      type="submit"
-                      form="formEditarInventarioSoftware">
-                Guardar cambios
-              </button>
-
-              <a href="{{ url_for('inventario_software') }}"
-                 class="btn rounded-pill px-4 fw-bold invsoftedit-cancel-btn">
-                Cancelar
-              </a>
-            </div>
-
-          </form>
-
-          <div class="invsoftedit-evidence-section">
-            <div class="invsoftedit-section-title">📎 Evidencias actuales</div>
-
-            {% if evidencias %}
-              <div class="invsoftedit-evidence-grid">
-
-                {% for ev in evidencias %}
-                  <div class="invsoftedit-evidence-card">
-
-                    <div class="invsoftedit-evidence-icon">📄</div>
-
-                    <div class="invsoftedit-evidence-content">
-                      <div class="invsoftedit-evidence-name">
-                        {{ ev.original_name or ev.filename }}
-                      </div>
-
-                      <div class="invsoftedit-evidence-meta">
-                        {{ ev.uploaded_at.strftime('%Y-%m-%d %H:%M') if ev.uploaded_at else '—' }}
-                        ·
-                        {{ ev.uploaded_by or 'Sistema' }}
-                      </div>
-                    </div>
-
-                    <div class="invsoftedit-evidence-actions">
-
-                      <a href="/inventario_software/evidencia/{{ ev.id }}/pdf"
-                         class="btn btn-sm btn-primary rounded-pill fw-bold">
-                        Ver evidencia
-                      </a>
-
-                      <form method="post"
-                            action="/inventario_software/evidencia/{{ ev.id }}/delete"
-                            class="d-inline"
-                            onsubmit="return confirm('¿Eliminar esta evidencia?');">
-                        <button type="submit"
-                                class="btn btn-sm btn-danger rounded-pill fw-bold">
-                          Eliminar
-                        </button>
-                      </form>
-
-                    </div>
-
-                  </div>
-                {% endfor %}
-
-              </div>
-            {% else %}
-              <div class="invsoftedit-no-evidence">
-                No hay evidencias PDF cargadas para este activo.
-              </div>
-            {% endif %}
-          </div>
-
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .invsoftedit-shell{
-        width:96%;
-        max-width:1500px;
-        margin:10px auto 24px auto;
-      }
-
-      .invsoftedit-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .invsoftedit-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .invsoftedit-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent;
-        padding:0;
-        position:relative;
-        z-index:1;
-      }
-
-      .invsoftedit-header-overlay::before{
-        content:"✏️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .invsoftedit-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .invsoftedit-header-text::before{
-        content:"SGSI · Edición Inventario de Software";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .invsoftedit-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .invsoftedit-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .invsoftedit-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .invsoftedit-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invsoftedit-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invsoftedit-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .invsoftedit-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .invsoftedit-card-body{
-        padding:18px;
-      }
-
-      .invsoftedit-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .invsoftedit-card .form-control,
-      .invsoftedit-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .invsoftedit-card textarea.form-control{
-        min-height:70px;
-      }
-
-      .invsoftedit-card .form-control:focus,
-      .invsoftedit-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 0.15rem rgba(63,134,214,.18);
-      }
-
-      .invsoftedit-evidence-upload{
-        background:#f8fbff;
-        border:1px dashed #9ec5fe;
-        border-radius:14px;
-        padding:12px;
-      }
-
-      .invsoftedit-evidence-help{
-        color:#475569;
-        font-size:.74rem;
-        margin-top:5px;
-      }
-
-      .invsoftedit-evidence-section{
-        margin-top:18px;
-        background:#f8fbff;
-        border:1px solid #dbeafe;
-        border-radius:16px;
-        padding:8px 7px;
-      }
-
-      .invsoftedit-section-title{
-        color:#0f172a;
-        font-size:.92rem;
-        font-weight:950;
-        margin-bottom:10px;
-      }
-
-      .invsoftedit-evidence-grid{
-        display:grid;
-        grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
-        gap:12px;
-      }
-
-      .invsoftedit-evidence-card{
-        background:#ffffff;
-        border:1px solid #dbe6f4;
-        border-radius:16px;
-        padding:8px 7px;
-        display:flex;
-        align-items:center;
-        gap:12px;
-        box-shadow:0 8px 16px rgba(15,23,42,.08);
-      }
-
-      .invsoftedit-evidence-icon{
-        width:46px;
-        height:46px;
-        min-width:46px;
-        border-radius:14px;
-        background:linear-gradient(135deg,#e0f2fe,#dbeafe);
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-      }
-
-      .invsoftedit-evidence-content{
-        flex:1;
-        min-width:0;
-      }
-
-      .invsoftedit-evidence-name{
-        color:#0f172a;
-        font-size:.82rem;
-        font-weight:950;
-        word-break:break-word;
-      }
-
-      .invsoftedit-evidence-meta{
-        color:#475569;
-        font-size:.72rem;
-        margin-top:3px;
-      }
-
-      .invsoftedit-evidence-actions{
-        display:flex;
-        gap:6px;
-        flex-wrap:wrap;
-        justify-content:flex-end;
-      }
-
-      .invsoftedit-evidence-actions .btn{
-        font-size:.70rem;
-        font-weight:900;
-        padding:5px 11px;
-      }
-
-      .invsoftedit-no-evidence{
-        background:#fff;
-        border:1px dashed #9ec5fe;
-        border-radius:14px;
-        padding:8px 7px;
-        color:#475569;
-        font-size:.82rem;
-        font-weight:700;
-      }
-
-      .invsoftedit-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:18px;
-        flex-wrap:wrap;
-      }
-
-      .invsoftedit-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invsoftedit-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invsoftedit-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      @media (max-width:992px){
-        .invsoftedit-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .invsoftedit-header-card{
-          min-height:88px;
-        }
-
-        .invsoftedit-title{
-          font-size:1.20rem;
-        }
-
-        .invsoftedit-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .invsoftedit-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .invsoftedit-header-overlay::before{
-          margin:0;
-        }
-
-        .invsoftedit-header-actions .btn,
-        .invsoftedit-bottom-actions .btn{
-          width:100%;
-        }
-
-        .invsoftedit-evidence-card{
-          flex-direction:column;
-          align-items:flex-start;
-        }
-
-        .invsoftedit-evidence-actions{
-          width:100%;
-          justify-content:flex-start;
-        }
-      }
-    </style>
-
-    <script>
-      function cargarDivisionesSoftwareEdit() {
-        const areaSel = document.getElementById('softArea');
-        const divSel  = document.getElementById('softDivision');
-        const divisionActual = "{{ item.division|e }}";
-
-        if (!areaSel || !divSel) return;
-
-        const areaId = areaSel.value;
-        divSel.innerHTML = '<option value="">-- Seleccione --</option>';
-
-        if (!areaId) return;
-
-        fetch(`/areas/${areaId}/divisiones_json`)
-          .then(r => r.json())
-          .then(data => {
-            if (!data.divisiones || data.divisiones.length === 0) {
-              divSel.innerHTML = '<option value="">(Sin divisiones para esta área)</option>';
-              return;
-            }
-
-            divSel.innerHTML = '<option value="">-- Seleccione --</option>';
-
-            data.divisiones.forEach(d => {
-              const opt = document.createElement('option');
-              opt.value = d.nombre;
-              opt.textContent = d.nombre;
-
-              if (d.nombre === divisionActual) {
-                opt.selected = true;
-              }
-
-              divSel.appendChild(opt);
-            });
-          })
-          .catch(err => {
-            console.error('Error cargando divisiones (software):', err);
-            divSel.innerHTML = '<option value="">Error cargando divisiones</option>';
-          });
-      }
-
-      document.addEventListener('DOMContentLoaded', () => {
-        const areaSel = document.getElementById('softArea');
-
-        if (areaSel) {
-          areaSel.addEventListener('change', cargarDivisionesSoftwareEdit);
-
-          if (areaSel.value) {
-            cargarDivisionesSoftwareEdit();
-          }
-        }
-      });
-    </script>
-    """
-
-    inner = render_template_string(
-        html,
-        item=item,
-        areas=areas,
-        evidencias=evidencias,
-        current_area_id=current_area_id,
-        conf_opts=conf_opts,
-        inte_opts=inte_opts,
-        disp_opts=disp_opts
-    )
-
-    return render_template_string(BASE, content=Markup(inner))
-
-# =========================
-# MATRIZ — Inventario de Software
-# =========================
-@app.route('/inventario_software', methods=['GET'])
-@login_required
-def inventario_software():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        read_only = True
-    else:
-        if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
-            flash("No tiene permiso para ver los activos de información.", "danger")
-            return redirect(url_for('menu'))
-        read_only = False
-
-    items = InventarioSoftware.query.order_by(InventarioSoftware.id.desc()).all()
-
-    matriz_items = []
-
-    for item in items:
-        conf_row = ValoracionConfidencialidad.query.filter_by(
-            nivel_num=item.c_nivel
-        ).first() if item.c_nivel is not None else None
-
-        inte_row = ValoracionIntegridad.query.filter_by(
-            nivel_num=item.i_nivel
-        ).first() if item.i_nivel is not None else None
-
-        disp_row = ValoracionDisponibilidad.query.filter_by(
-            nivel_num=item.d_nivel
-        ).first() if item.d_nivel is not None else None
-
-        valor_row = ValoracionCriticidadActivo.query.filter_by(
-            nivel_num=item.valor_activo
-        ).first() if item.valor_activo is not None else None
-
-        conf_texto = (
-            conf_row.clasificacion
-            if conf_row and getattr(conf_row, 'clasificacion', None)
-            else (item.etiqueta_conf_texto or (f"Nivel {item.c_nivel}" if item.c_nivel is not None else "—"))
-        )
-
-        inte_texto = (
-            inte_row.nivel
-            if inte_row and getattr(inte_row, 'nivel', None)
-            else (f"Nivel {item.i_nivel}" if item.i_nivel is not None else "—")
-        )
-
-        disp_texto = (
-            disp_row.nivel
-            if disp_row and getattr(disp_row, 'nivel', None)
-            else (f"Nivel {item.d_nivel}" if item.d_nivel is not None else "—")
-        )
-
-        valor_texto = (
-            valor_row.nivel_texto
-            if valor_row and getattr(valor_row, 'nivel_texto', None)
-            else (f"Nivel {item.valor_activo}" if item.valor_activo is not None else "—")
-        )
-
-        matriz_items.append({
-            "item": item,
-            "conf_texto": conf_texto,
-            "inte_texto": inte_texto,
-            "disp_texto": disp_texto,
-            "valor_texto": valor_texto,
-            "criticidad_texto": item.criticidad_texto or (f"Nivel {item.criticidad_num}" if item.criticidad_num is not None else "—"),
-            "etiquetado_texto": item.etiqueta_conf_texto or (f"Nivel {item.etiqueta_conf_num}" if item.etiqueta_conf_num is not None else "—"),
-        })
-
-    html = """
-    <div class="invsoftmat-shell">
-
-      <div class="invsoftmat-header-card">
-        <div class="invsoftmat-header-overlay">
-          <div class="invsoftmat-header-text">
-            <h3 class="invsoftmat-title m-0">Inventario de Software — Matriz</h3>
-            <div class="invsoftmat-subtitle">
-              Visualización resumida de activos de software del Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="invsoftmat-header-actions">
-        {% if not read_only %}
-          <a href="{{ url_for('inventario_software_new') }}"
-             class="btn btn-primary rounded-pill px-4 fw-bold">
-            ➕ Agregar Activo
-          </a>
-        {% else %}
-          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
-            ➕ Agregar Activo
-          </button>
-        {% endif %}
-      </div>
-
-      <style>
-        .badge-n1 { background:#2ecc71; color:#fff; }
-        .badge-n2 { background:#f1c40f; color:#111; }
-        .badge-n3 { background:#e67e22; color:#fff; }
-        .badge-n4 { background:#e74c3c; color:#fff; }
-        .badge-n5 { background:#8e44ad; color:#fff; }
-      </style>
-
-      <div class="invsoftmat-card">
-        <div class="invsoftmat-topbar">
-          <div>
-            <h5 class="invsoftmat-top-title mb-1">Resumen de activos de software</h5>
-            <div class="invsoftmat-top-note">
-              La matriz muestra los niveles de valoración en texto. Para consultar toda la información utilice el botón <strong>Ver detalle</strong>.
-            </div>
-          </div>
-
-          <div class="invsoftmat-counter-badge">
-            Total registros: {{ matriz_items|length }}
-          </div>
-        </div>
-
-        <div class="invsoftmat-card-body">
-          <div class="invsoftmat-table-wrap">
-            <div class="table-responsive">
-              <table class="table table-bordered table-hover align-middle invsoftmat-table mb-0">
-
-                <colgroup>
-                  <col style="width: 11%;">
-                  <col style="width: 11%;">
-                  <col style="width: 11%;">
-                  <col style="width: 15%;">
-                  <col style="width: 12%;">
-                  <col style="width: 12%;">
-                  <col style="width: 12%;">
-                  <col style="width: 12%;">
-                  <col style="width: 12%;">
-                  <col style="width: 12%;">
-                  <col style="width: 14%;">
-                </colgroup>
-
-                <thead>
-                  <tr>
-                    <th>Área</th>
-                    <th>División</th>
-                    <th>Proceso</th>
-                    <th>Nombre del Activo</th>
-                    <th>Confidencialidad</th>
-                    <th>Integridad</th>
-                    <th>Disponibilidad</th>
-                    <th>Valor</th>
-                    <th>Criticidad</th>
-                    <th>Etiquetado</th>
-                    <th class="invsoftmat-col-acciones">Acciones</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {% for row in matriz_items %}
-                    {% set item = row.item %}
-                    <tr>
-                      <td>{{ item.area or '—' }}</td>
-                      <td>{{ item.division or '—' }}</td>
-                      <td>{{ item.proceso or '—' }}</td>
-
-                      <td class="invsoftmat-cell-main">
-                        <div class="invsoftmat-main-text">{{ item.nombre_activo or '—' }}</div>
-                      </td>
-
-                      <td class="text-center">
-                        <span class="badge badge-n{{ item.c_nivel or 1 }} invsoftmat-badge-text">
-                          {{ row.conf_texto }}
-                        </span>
-                      </td>
-
-                      <td class="text-center">
-                        <span class="badge badge-n{{ item.i_nivel or 1 }} invsoftmat-badge-text">
-                          {{ row.inte_texto }}
-                        </span>
-                      </td>
-
-                      <td class="text-center">
-                        <span class="badge badge-n{{ item.d_nivel or 1 }} invsoftmat-badge-text">
-                          {{ row.disp_texto }}
-                        </span>
-                      </td>
-
-                      <td class="text-center">
-                        <span class="badge badge-n{{ item.valor_activo or 1 }} invsoftmat-badge-text">
-                          {{ row.valor_texto }}
-                        </span>
-                      </td>
-
-                      <td class="text-center">
-                        <span class="badge badge-n{{ item.criticidad_num or 1 }} invsoftmat-badge-text">
-                          {{ row.criticidad_texto }}
-                        </span>
-                      </td>
-
-                      <td class="text-center">
-                        <span class="badge badge-n{{ item.etiqueta_conf_num or 1 }} invsoftmat-badge-text">
-                          {{ row.etiquetado_texto }}
-                        </span>
-                      </td>
-
-                      <td class="text-center invsoftmat-col-acciones">
-                        <div class="invsoftmat-actions-wrap">
-
-                          <a href="{{ url_for('inventario_software_detalle', id=item.id) }}"
-                             class="btn btn-info btn-sm rounded-pill invsoftmat-btn-action text-white fw-bold">
-                            Ver detalle
-                          </a>
-
-                          {% if not read_only %}
-                            <a href="{{ url_for('inventario_software_edit', id=item.id) }}"
-                               class="btn btn-warning btn-sm rounded-pill invsoftmat-btn-action fw-bold">
-                              Editar
-                            </a>
-
-                            <a href="{{ url_for('inventario_software_delete', id=item.id) }}"
-                               class="btn btn-danger btn-sm rounded-pill invsoftmat-btn-action fw-bold"
-                               onclick="return confirm('¿Eliminar este activo de software?');">
-                              Eliminar
-                            </a>
-                          {% else %}
-                            <span class="badge bg-secondary">Solo lectura</span>
-                          {% endif %}
-
-                        </div>
-                      </td>
-                    </tr>
-                  {% endfor %}
-
-                  {% if matriz_items|length == 0 %}
-                    <tr>
-                      <td colspan="11" class="text-center text-muted py-5">
-                        Sin registros
-                      </td>
-                    </tr>
-                  {% endif %}
-                </tbody>
-
-              </table>
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .invsoftmat-shell{
-        width:96%;
-        max-width:1750px;
-        margin:10px auto 24px auto;
-      }
-
-      .invsoftmat-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .invsoftmat-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .invsoftmat-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent;
-        padding:0;
-        position:relative;
-        z-index:1;
-      }
-
-      .invsoftmat-header-overlay::before{
-        content:"💻";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .invsoftmat-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .invsoftmat-header-text::before{
-        content:"SGSI · Matriz Inventario de Software";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .invsoftmat-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .invsoftmat-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .invsoftmat-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .invsoftmat-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invsoftmat-card{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .invsoftmat-topbar{
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:12px;
-        padding:14px 16px 0 16px;
-        flex-wrap:wrap;
-      }
-
-      .invsoftmat-top-title{
-        color:#0f172a;
-        font-weight:950;
-        font-size:.92rem;
-      }
-
-      .invsoftmat-top-note{
-        color:#475569;
-        font-size:.78rem;
-      }
-
-      .invsoftmat-counter-badge{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        color:#fff;
-        font-weight:900;
-        border-radius:999px;
-        padding:7px 14px;
-        font-size:.78rem;
-        box-shadow:0 8px 16px rgba(15,23,42,.16);
-      }
-
-      .invsoftmat-card-body{
-        padding:12px 16px 16px 16px;
-      }
-
-      .invsoftmat-table-wrap{
-        max-height:70vh;
-        overflow-y:auto;
-        overflow-x:auto;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:#fff;
-      }
-
-      .invsoftmat-table{
-        min-width:1650px;
-        table-layout:fixed;
-        margin-bottom:0;
-      }
-
-      .invsoftmat-table thead th{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#fff;
-        font-weight:900;
-        text-align:center;
-        vertical-align:middle;
-      }
-
-      .invsoftmat-table th,
-      .invsoftmat-table td{
-        vertical-align:top;
-        font-size:.68rem;
-        padding:9px 8px;
-        white-space:normal;
-        word-break:break-word;
-        overflow-wrap:anywhere;
-      }
-
-      .invsoftmat-table td{
-        border-bottom:1px solid #e5edf7;
-      }
-
-      .invsoftmat-table tbody tr:nth-child(even){
-        background:#f8fbff;
-      }
-
-      .invsoftmat-table tbody tr:hover{
-        background:#eef6ff;
-      }
-
-      .invsoftmat-cell-main .invsoftmat-main-text{
-        font-weight:900;
-        color:#0f172a;
-      }
-
-      .invsoftmat-badge-text{
-        font-size:.68rem !important;
-        line-height:1.15;
-        padding:5px 8px;
-        border-radius:999px;
-        font-weight:900;
-        white-space:normal;
-        max-width:130px;
-        display:inline-block;
-      }
-
-      .invsoftmat-col-acciones{
-        width:160px !important;
-        min-width:160px !important;
-      }
-
-      .invsoftmat-actions-wrap{
-        display:flex;
-        flex-direction:column;
-        gap:6px;
-        align-items:center;
-        justify-content:center;
-      }
-
-      .invsoftmat-btn-action,
-      .invsoftmat-actions-wrap .badge{
-        font-size:.64rem !important;
-        line-height:1.1;
-        padding:4px 10px !important;
-        min-width:108px;
-        max-width:108px;
-        text-align:center;
-        white-space:nowrap;
-        border-radius:999px !important;
-        font-weight:900;
-      }
-
-      @media (max-width:992px){
-        .invsoftmat-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .invsoftmat-header-card{
-          min-height:88px;
-        }
-
-        .invsoftmat-title{
-          font-size:1.20rem;
-        }
-
-        .invsoftmat-card-body{
-          padding:12px;
-        }
-
-        .invsoftmat-topbar{
-          padding:12px 14px 0 14px;
-        }
-      }
-
-      @media (max-width:768px){
-        .invsoftmat-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .invsoftmat-header-overlay::before{
-          margin:0;
-        }
-
-        .invsoftmat-header-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-
-    inner = render_template_string(
-        html,
-        matriz_items=matriz_items,
-        read_only=read_only
-    )
-
-    return render_template_string(BASE, content=Markup(inner))
-
-# =========================
-# DETALLE — Inventario de Software
-# =========================
-@app.route('/inventario_software/detalle/<int:id>', methods=['GET'])
-@login_required
-def inventario_software_detalle(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role != 'auditor':
-        if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
-            flash("No tiene permiso para ver el detalle de activos de software.", "danger")
-            return redirect(url_for('inventario_software'))
-
-    item = InventarioSoftware.query.get_or_404(id)
-
-    evidencias = InventarioSoftwareEvidencia.query.filter_by(
-        registro_id=item.id
-    ).order_by(InventarioSoftwareEvidencia.id.desc()).all()
-
-    conf_row = ValoracionConfidencialidad.query.filter_by(nivel_num=item.c_nivel).first() if item.c_nivel is not None else None
-    inte_row = ValoracionIntegridad.query.filter_by(nivel_num=item.i_nivel).first() if item.i_nivel is not None else None
-    disp_row = ValoracionDisponibilidad.query.filter_by(nivel_num=item.d_nivel).first() if item.d_nivel is not None else None
-    valor_row = ValoracionCriticidadActivo.query.filter_by(nivel_num=item.valor_activo).first() if item.valor_activo is not None else None
-
-    conf_texto = conf_row.clasificacion if conf_row and getattr(conf_row, 'clasificacion', None) else (item.etiqueta_conf_texto or (f"Nivel {item.c_nivel}" if item.c_nivel is not None else "—"))
-    inte_texto = inte_row.nivel if inte_row and getattr(inte_row, 'nivel', None) else (f"Nivel {item.i_nivel}" if item.i_nivel is not None else "—")
-    disp_texto = disp_row.nivel if disp_row and getattr(disp_row, 'nivel', None) else (f"Nivel {item.d_nivel}" if item.d_nivel is not None else "—")
-    valor_texto = valor_row.nivel_texto if valor_row and getattr(valor_row, 'nivel_texto', None) else (f"Nivel {item.valor_activo}" if item.valor_activo is not None else "—")
-
-    criticidad_texto = item.criticidad_texto or (f"Nivel {item.criticidad_num}" if item.criticidad_num is not None else "—")
-    etiquetado_texto = item.etiqueta_conf_texto or (
-        conf_row.clasificacion if conf_row and getattr(conf_row, 'clasificacion', None)
-        else (f"Nivel {item.etiqueta_conf_num}" if item.etiqueta_conf_num is not None else "—")
-    )
-
-    def badge_class(n):
-        if n == 1:
-            return "badge-n1"
-        if n == 2:
-            return "badge-n2"
-        if n == 3:
-            return "badge-n3"
-        if n == 4:
-            return "badge-n4"
-        return "badge-n5"
-
-    conf_badge = badge_class(item.c_nivel or 1)
-    inte_badge = badge_class(item.i_nivel or 1)
-    disp_badge = badge_class(item.d_nivel or 1)
-    valor_badge = badge_class(item.valor_activo or 1)
-    criticidad_badge = badge_class(item.criticidad_num or 1)
-    etiquetado_badge = badge_class(item.etiqueta_conf_num or 1)
-
-    html = """
-    <div class="invsoftdet-shell">
-
-      <div class="invsoftdet-header-card">
-        <div class="invsoftdet-header-overlay">
-          <div class="invsoftdet-header-text">
-            <h3 class="invsoftdet-title m-0">Detalle — Inventario de Software</h3>
-            <div class="invsoftdet-subtitle">
-              Consulta completa del activo de software registrado en el Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="invsoftdet-header-actions">
-        <a href="{{ url_for('inventario_software') }}"
-           class="btn rounded-pill px-4 fw-bold invsoftdet-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-
-        {% if user.role != 'auditor' %}
-          <a href="{{ url_for('inventario_software_edit', id=item.id) }}"
-             class="btn btn-warning rounded-pill px-4 fw-bold">
-            Editar
-          </a>
-        {% endif %}
-      </div>
-
-      <style>
-        .badge-n1 { background:#2ecc71; color:#fff; }
-        .badge-n2 { background:#f1c40f; color:#111; }
-        .badge-n3 { background:#e67e22; color:#fff; }
-        .badge-n4 { background:#e74c3c; color:#fff; }
-        .badge-n5 { background:#8e44ad; color:#fff; }
-      </style>
-
-      <div class="invsoftdet-card">
-        <div class="invsoftdet-card-body">
-
-          <div class="row g-3">
-
-            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">Área</div><div class="invsoftdet-value">{{ item.area or '—' }}</div></div></div>
-            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">División</div><div class="invsoftdet-value">{{ item.division or '—' }}</div></div></div>
-            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">Proceso</div><div class="invsoftdet-value">{{ item.proceso or '—' }}</div></div></div>
-
-            <div class="col-md-6"><div class="invsoftdet-field"><div class="invsoftdet-label">Nombre del Activo</div><div class="invsoftdet-value">{{ item.nombre_activo or '—' }}</div></div></div>
-            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">Owner/Admin</div><div class="invsoftdet-value">{{ item.administrador or '—' }}</div></div></div>
-            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">Dueño Técnico</div><div class="invsoftdet-value">{{ item.dueno_tecnico or '—' }}</div></div></div>
-
-            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">Propietario</div><div class="invsoftdet-value">{{ item.propietario or '—' }}</div></div></div>
-            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">Medio</div><div class="invsoftdet-value">{{ item.medio or '—' }}</div></div></div>
-            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">Ubicación</div><div class="invsoftdet-value">{{ item.ubicacion_tipo or '—' }} — {{ item.ubicacion_nombre or '—' }}</div></div></div>
-
-            <div class="col-md-12"><div class="invsoftdet-field"><div class="invsoftdet-label">Descripción</div><div class="invsoftdet-value">{{ item.descripcion or '—' }}</div></div></div>
-            <div class="col-md-12"><div class="invsoftdet-field"><div class="invsoftdet-label">Accesos Autorizados</div><div class="invsoftdet-value">{{ item.accesos_autorizados or '—' }}</div></div></div>
-
-            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Confidencialidad</div><span class="badge {{ conf_badge }} invsoftdet-badge">{{ conf_texto }}</span></div></div>
-            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Integridad</div><span class="badge {{ inte_badge }} invsoftdet-badge">{{ inte_texto }}</span></div></div>
-            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Disponibilidad</div><span class="badge {{ disp_badge }} invsoftdet-badge">{{ disp_texto }}</span></div></div>
-            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Valor del Activo</div><span class="badge {{ valor_badge }} invsoftdet-badge">{{ valor_texto }}</span></div></div>
-            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Criticidad</div><span class="badge {{ criticidad_badge }} invsoftdet-badge">{{ criticidad_texto }}</span></div></div>
-            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Etiquetado</div><span class="badge {{ etiquetado_badge }} invsoftdet-badge">{{ etiquetado_texto }}</span></div></div>
-
-            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">¿Info Personal?</div><div class="invsoftdet-value">{{ item.info_personal or '—' }}</div></div></div>
-            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">¿Regulada?</div><div class="invsoftdet-value">{{ item.info_regulada or '—' }}</div></div></div>
-            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">¿Sens. Compañía?</div><div class="invsoftdet-value">{{ item.info_sensible_compania or '—' }}</div></div></div>
-            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">¿Sens. Clientes?</div><div class="invsoftdet-value">{{ item.info_sensible_clientes or '—' }}</div></div></div>
-
-            <div class="col-md-12"><div class="invsoftdet-field"><div class="invsoftdet-label">Observaciones</div><div class="invsoftdet-value">{{ item.observaciones or '—' }}</div></div></div>
-
-          </div>
-
-          <div class="invsoftdet-evidence-section">
-            <div class="invsoftdet-section-title">📎 Evidencias PDF</div>
-
-            {% if evidencias %}
-              <div class="invsoftdet-evidence-grid">
-
-                {% for ev in evidencias %}
-                  <div class="invsoftdet-evidence-card">
-
-                    <div class="invsoftdet-evidence-icon">📄</div>
-
-                    <div class="invsoftdet-evidence-content">
-                      <div class="invsoftdet-evidence-name">
-                        {{ ev.original_name or ev.filename }}
-                      </div>
-
-                      <div class="invsoftdet-evidence-meta">
-                        {{ ev.uploaded_at.strftime('%Y-%m-%d %H:%M') if ev.uploaded_at else '—' }}
-                        ·
-                        {{ ev.uploaded_by or 'Sistema' }}
-                      </div>
-                    </div>
-
-                    <div class="invsoftdet-evidence-actions">
-
-                      <a href="/inventario_software/evidencia/{{ ev.id }}/pdf"
-                         class="btn btn-sm btn-primary rounded-pill fw-bold">
-                        Ver evidencia
-                      </a>
-
-                      {% if user.role != 'auditor' %}
-                        <form method="post"
-                              action="/inventario_software/evidencia/{{ ev.id }}/delete"
-                              class="d-inline"
-                              onsubmit="return confirm('¿Eliminar esta evidencia?');">
-                          <button type="submit"
-                                  class="btn btn-sm btn-danger rounded-pill fw-bold">
-                            Eliminar
-                          </button>
-                        </form>
-                      {% endif %}
-
-                    </div>
-
-                  </div>
-                {% endfor %}
-
-              </div>
-            {% else %}
-              <div class="invsoftdet-no-evidence">
-                No hay evidencias PDF cargadas para este activo.
-              </div>
-            {% endif %}
-          </div>
-
-          <div class="invsoftdet-bottom-actions">
-            <a href="{{ url_for('inventario_software') }}"
-               class="btn rounded-pill px-4 fw-bold invsoftdet-cancel-btn">
-              Cerrar
-            </a>
-          </div>
-
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .invsoftdet-shell{
-        width:96%;
-        max-width:1400px;
-        margin:10px auto 24px auto;
-      }
-
-      .invsoftdet-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .invsoftdet-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 90% 10%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .invsoftdet-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-      }
-
-      .invsoftdet-header-overlay::before{
-        content:"💻";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .invsoftdet-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .invsoftdet-header-text::before{
-        content:"SGSI · Inventario de Software";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .invsoftdet-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .invsoftdet-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .invsoftdet-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .invsoftdet-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invsoftdet-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invsoftdet-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .invsoftdet-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-      }
-
-      .invsoftdet-card-body{
-        padding:20px;
-      }
-
-      .invsoftdet-field{
-        background:linear-gradient(180deg,#f8fafc,#ffffff);
-        border:1px solid #e2e8f0;
-        border-radius:14px;
-        padding:8px 7px;
-        height:100%;
-        box-shadow:0 4px 10px rgba(0,0,0,.05);
-      }
-
-      .invsoftdet-label{
-        font-size:.72rem;
-        font-weight:900;
-        color:#2563eb;
-        text-transform:uppercase;
-        letter-spacing:.4px;
-        margin-bottom:6px;
-      }
-
-      .invsoftdet-value{
-        color:#0f172a;
-        font-size:.90rem;
-        white-space:pre-wrap;
-        word-break:break-word;
-        line-height:1.35;
-      }
-
-      .invsoftdet-badge{
-        font-size:.72rem;
-        padding:6px 10px;
-        border-radius:999px;
-        display:inline-block;
-        font-weight:800;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }
-
-      .invsoftdet-evidence-section{
-        margin-top:18px;
-        background:#f8fbff;
-        border:1px solid #dbeafe;
-        border-radius:16px;
-        padding:8px 7px;
-      }
-
-      .invsoftdet-section-title{
-        color:#0f172a;
-        font-size:.92rem;
-        font-weight:950;
-        margin-bottom:10px;
-      }
-
-      .invsoftdet-evidence-grid{
-        display:grid;
-        grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
-        gap:12px;
-      }
-
-      .invsoftdet-evidence-card{
-        background:#ffffff;
-        border:1px solid #dbe6f4;
-        border-radius:16px;
-        padding:8px 7px;
-        display:flex;
-        align-items:center;
-        gap:12px;
-        box-shadow:0 8px 16px rgba(15,23,42,.08);
-      }
-
-      .invsoftdet-evidence-icon{
-        width:46px;
-        height:46px;
-        min-width:46px;
-        border-radius:14px;
-        background:linear-gradient(135deg,#e0f2fe,#dbeafe);
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-      }
-
-      .invsoftdet-evidence-content{
-        flex:1;
-        min-width:0;
-      }
-
-      .invsoftdet-evidence-name{
-        color:#0f172a;
-        font-size:.82rem;
-        font-weight:950;
-        word-break:break-word;
-      }
-
-      .invsoftdet-evidence-meta{
-        color:#475569;
-        font-size:.72rem;
-        margin-top:3px;
-      }
-
-      .invsoftdet-evidence-actions{
-        display:flex;
-        gap:6px;
-        flex-wrap:wrap;
-        justify-content:flex-end;
-      }
-
-      .invsoftdet-evidence-actions .btn{
-        font-size:.70rem;
-        font-weight:900;
-        padding:5px 11px;
-      }
-
-      .invsoftdet-no-evidence{
-        background:#fff;
-        border:1px dashed #9ec5fe;
-        border-radius:14px;
-        padding:8px 7px;
-        color:#475569;
-        font-size:.82rem;
-        font-weight:700;
-      }
-
-      .invsoftdet-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:12px;
-        margin-top:24px;
-        flex-wrap:wrap;
-      }
-
-      .invsoftdet-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-      }
-
-      .invsoftdet-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-        box-shadow:0 6px 12px rgba(0,0,0,.10);
-      }
-
-      .invsoftdet-cancel-btn:hover{
-        background:#f1f5f9;
-      }
-
-      @media (max-width:992px){
-        .invsoftdet-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .invsoftdet-title{
-          font-size:1.20rem;
-        }
-
-        .invsoftdet-card-body{
-          padding:8px 7px;
-        }
-
-        .invsoftdet-badge{
-          width:100%;
-          text-align:center;
-        }
-      }
-
-      @media (max-width:768px){
-        .invsoftdet-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .invsoftdet-header-overlay::before{
-          margin:0;
-        }
-
-        .invsoftdet-header-actions .btn{
-          width:100%;
-        }
-
-        .invsoftdet-evidence-card{
-          flex-direction:column;
-          align-items:flex-start;
-        }
-
-        .invsoftdet-evidence-actions{
-          width:100%;
-          justify-content:flex-start;
-        }
-      }
-    </style>
-    """
-
-    inner = render_template_string(
-        html,
-        item=item,
-        user=user,
-        evidencias=evidencias,
-        conf_texto=conf_texto,
-        inte_texto=inte_texto,
-        disp_texto=disp_texto,
-        valor_texto=valor_texto,
-        criticidad_texto=criticidad_texto,
-        etiquetado_texto=etiquetado_texto,
-        conf_badge=conf_badge,
-        inte_badge=inte_badge,
-        disp_badge=disp_badge,
-        valor_badge=valor_badge,
-        criticidad_badge=criticidad_badge,
-        etiquetado_badge=etiquetado_badge
-    )
-
-    return render_template_string(BASE, content=Markup(inner))
-
-# =========================
-# VISTA — Evidencia Inventario de Software
-# =========================
-@app.route('/inventario_software/evidencia/<int:evidencia_id>/pdf')
-@login_required
-def inventario_software_evidencia_pdf(evidencia_id):
-
-    user = User.query.get(session.get('user_id'))
-
-    if user.role != 'auditor':
-
-        if user.role != 'admin' and not verificar_permiso(
-            user,
-            "Gestión de Activos de Información"
-        ):
-
-            flash(
-                "No tiene permiso para ver evidencias de activos de software.",
-                "danger"
-            )
-
-            return redirect(url_for('inventario_software'))
-
-    ev = InventarioSoftwareEvidencia.query.get_or_404(evidencia_id)
-
-    item = InventarioSoftware.query.get_or_404(
-        ev.registro_id
-    )
-
-    upload_dir = app.config.get(
-        'UPLOAD_INVENTARIO_SOFTWARE_DIR'
-    )
-
-    if not upload_dir:
-        abort(404)
-
-    file_path = os.path.join(
-        upload_dir,
-        ev.filename
-    )
-
-    if not os.path.exists(file_path):
-
-        flash(
-            "No se encontró el archivo de evidencia.",
-            "danger"
-        )
-
-        return redirect(
-            url_for(
-                'inventario_software_detalle',
-                id=ev.registro_id
-            )
-        )
-
-    inner_html = """
-
-    <div class="container my-3">
-
-      <!-- =========================
-           BOTONES SUPERIORES
-      ========================== -->
-      <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
-
-        <a href="{{ url_for('inventario_software_detalle', id=item.id) }}"
-           class="btn btn-secondary rounded-pill px-4 py-2 fw-bold">
-
-          ⬅ Volver al Detalle
-
-        </a>
-
-        <div class="small text-muted text-truncate">
-          Archivo: {{ ev.original_name or ev.filename }}
-        </div>
-
-      </div>
-
-      <!-- =========================
-           CARD VISOR PDF
-      ========================== -->
-      <div class="card shadow-sm evidencia-card">
-
-        <div class="card-header evidencia-header">
-
-          <div>
-
-            <small>
-              Activo:
-              {{ item.nombre_activo or '—' }}
-            </small>
-
-          </div>
-
-        </div>
-
-        <div class="card-body p-2">
-
-          <div class="pdf-container">
-
-            <iframe
-              id="pdfFrame"
-              src="{{ url_for('inventario_software_evidencia_pdf_raw', evidencia_id=ev.id) }}#zoom=page-width"
-              title="Visor PDF">
-            </iframe>
-
-          </div>
-
-        </div>
-
-      </div>
-
-    </div>
-
-    <style>
-
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .evidencia-card{
-        background:rgba(255,255,255,.90)!important;
-        backdrop-filter:blur(4px);
-        border-radius:14px;
-        overflow:hidden;
-        border:none;
-      }
-
-      .evidencia-header{
-        background:linear-gradient(
-          135deg,
-          #062b55,
-          #0b4a8f,
-          #1d5fae
-        );
-
-        color:#fff !important;
-        border:none;
-      }
-
-      .pdf-container{
-        height:min(82vh,1000px);
-        min-height:600px;
-        width:100%;
-      }
-
-      .pdf-container iframe{
-        width:100%;
-        height:100%;
-        border:1px solid #dee2e6;
-        border-radius:8px;
-        background:#fff;
-      }
-
-      @media (max-width:768px){
-
-        .pdf-container{
-          min-height:500px;
-        }
-
-      }
-
-    </style>
-
-    """
-
-    return render_template_string(
-        BASE,
-        content=Markup(
-            render_template_string(
-                inner_html,
-                ev=ev,
-                item=item
-            )
-        )
-    )
-
-
-# =========================
-# PDF RAW — Evidencia Inventario de Software
-# =========================
-@app.route('/inventario_software/evidencia/<int:evidencia_id>/pdf/raw')
-@login_required
-def inventario_software_evidencia_pdf_raw(evidencia_id):
-
-    user = User.query.get(session.get('user_id'))
-
-    if user.role != 'auditor':
-
-        if user.role != 'admin' and not verificar_permiso(
-            user,
-            "Gestión de Activos de Información"
-        ):
-
-            flash(
-                "No tiene permiso para ver evidencias de activos de software.",
-                "danger"
-            )
-
-            return redirect(url_for('inventario_software'))
-
-    ev = InventarioSoftwareEvidencia.query.get_or_404(
-        evidencia_id
-    )
-
-    upload_dir = app.config.get(
-        'UPLOAD_INVENTARIO_SOFTWARE_DIR'
-    )
-
-    if not upload_dir:
-        abort(404)
-
-    file_path = os.path.join(
-        upload_dir,
-        ev.filename
-    )
-
-    if not os.path.exists(file_path):
-
-        flash(
-            "No se encontró el archivo de evidencia.",
-            "danger"
-        )
-
-        return redirect(
-            url_for(
-                'inventario_software_detalle',
-                id=ev.registro_id
-            )
-        )
-
-    return send_from_directory(
-        upload_dir,
-        ev.filename,
-        mimetype='application/pdf',
-        as_attachment=False,
-        download_name=ev.original_name or ev.filename
-    )
-
-@app.route('/inventario_software/evidencia/<int:evidencia_id>/delete', methods=['POST'])
-@login_required
-def inventario_software_evidencia_delete(evidencia_id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede eliminar evidencias.", "danger")
-        return redirect(url_for('inventario_software'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
-        flash("No tiene permiso para eliminar evidencias.", "danger")
-        return redirect(url_for('inventario_software'))
-
-    ev = InventarioSoftwareEvidencia.query.get_or_404(evidencia_id)
-    registro_id = ev.registro_id
-
-    upload_dir = app.config.get('UPLOAD_INVENTARIO_SOFTWARE_DIR')
-    file_path = os.path.join(upload_dir, ev.filename) if upload_dir else None
-
-    try:
-        if file_path and os.path.exists(file_path):
-            os.remove(file_path)
-    except Exception:
-        pass
-
-    db.session.delete(ev)
-    db.session.commit()
-
-    flash("Evidencia eliminada correctamente.", "success")
-    return redirect(url_for('inventario_software_detalle', id=registro_id))
-
-# =========================
-# ELIMINAR — Inventario de Software
-# =========================
-@app.route('/inventario_software/delete/<int:id>')
-@login_required
-def inventario_software_delete(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor' or (
-        user.role != 'admin'
-        and not verificar_permiso(user, "Gestión de Activos de Información")
-    ):
-        flash("No tiene permiso para eliminar activos.", "danger")
-        return redirect(url_for('inventario_software_menu'))
-
-    it = InventarioSoftware.query.get_or_404(id)
-
-    upload_dir = app.config.get('UPLOAD_INVENTARIO_SOFTWARE_DIR')
-    if upload_dir:
-        try:
-            for ev in list(it.evidencias or []):
-                if ev.filename:
-                    file_path = os.path.join(upload_dir, ev.filename)
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-        except Exception as e:
-            print("Error eliminando evidencias del activo de software:", repr(e))
-
-    db.session.delete(it)
-    db.session.commit()
-    flash("Eliminado correctamente.", "success")
-    return redirect(url_for('inventario_software'))
-
-# ===================================
-# ENTRADA DIRECTA — Inventario Físico
-# ===================================
-
-# ============================================================
-#                 INTEGRACIÓN GLPI → INVENTARIO FÍSICO GRAC
-# ============================================================
-
-# =========================
-# MODELO — Configuración GLPI Inventario Físico
-# =========================
-class GLPIInventarioFisicoConfig(db.Model):
-    __tablename__ = "glpi_inventario_fisico_config"
-
-    id = db.Column(db.Integer, primary_key=True)
-    nombre = db.Column(db.String(120), nullable=False, default="GLPI Principal")
-    base_url = db.Column(db.String(500), nullable=False)  # Ej: http://192.168.0.10:8080/apirest.php
-    app_token = db.Column(db.Text, nullable=True)
-    user_token = db.Column(db.Text, nullable=True)
-
-    # Valores por defecto para completar campos SGSI que GLPI normalmente no trae
-    # IMPORTANTE: sin ForeignKey porque en tu app la tabla real de AreaEmpresa no se llama necesariamente "area_empresa".
-    # Se guarda el ID del área y se consulta contra AreaEmpresa manualmente.
-    area_id_default = db.Column(db.Integer, nullable=True)
-    division_default = db.Column(db.String(250), nullable=True)
-    ciudad_default = db.Column(db.String(120), nullable=True)
-    pais_default = db.Column(db.String(120), nullable=True, default="Colombia")
-
-    c_nivel_default = db.Column(db.Integer, nullable=False, default=3)
-    i_nivel_default = db.Column(db.Integer, nullable=False, default=3)
-    d_nivel_default = db.Column(db.Integer, nullable=False, default=3)
-
-    activo = db.Column(db.Boolean, nullable=False, default=True)
-    verificar_ssl = db.Column(db.Boolean, nullable=False, default=False)
-    timeout = db.Column(db.Integer, nullable=False, default=30)
-
-    ultima_prueba = db.Column(db.DateTime, nullable=True)
-    ultimo_sync = db.Column(db.DateTime, nullable=True)
-    ultimo_estado = db.Column(db.String(40), nullable=True)
-    ultimo_mensaje = db.Column(db.Text, nullable=True)
-
-
-
-def ensure_glpi_inventario_fisico_tables():
-    """
-    Crea solo la tabla independiente de configuración GLPI si no existe.
-    No modifica la tabla actual InventarioFisico.
-    Evita ejecutar db.create_all() global para no disparar errores de otros modelos.
-    """
-    try:
-        with app.app_context():
-            GLPIInventarioFisicoConfig.__table__.create(bind=db.engine, checkfirst=True)
-    except Exception as e:
-        print("Error creando tabla GLPI Inventario Físico:", repr(e))
-
-
-try:
-    ensure_glpi_inventario_fisico_tables()
-except Exception:
-    pass
-
-
-# =========================
-# HELPERS — Seguridad token
-# =========================
-def _glpi_invfis_encrypt(value):
-    if not value:
-        return ""
-    try:
-        if "_fernet_from_app" in globals():
-            f = _fernet_from_app()
-            return f.encrypt(value.encode("utf-8")).decode("utf-8")
-    except Exception:
-        pass
-    return value
-
-
-def _glpi_invfis_decrypt(value):
-    if not value:
-        return ""
-    try:
-        if "_fernet_from_app" in globals():
-            f = _fernet_from_app()
-            return f.decrypt(value.encode("utf-8")).decode("utf-8")
-    except Exception:
-        pass
-    return value
-
-
-def _glpi_normalize_base_url(base_url):
-    base_url = (base_url or "").strip().rstrip("/")
-    if not base_url:
-        return ""
-    if not base_url.endswith("/apirest.php"):
-        base_url = base_url + "/apirest.php"
-    return base_url
-
-
-def _glpi_invfis_config_activa():
-    return (
-        GLPIInventarioFisicoConfig.query
-        .filter_by(activo=True)
-        .order_by(GLPIInventarioFisicoConfig.id.desc())
-        .first()
-    )
-
-
-def _glpi_invfis_headers(cfg, session_token=None):
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-
-    app_token = _glpi_invfis_decrypt(cfg.app_token)
-    if app_token:
-        headers["App-Token"] = app_token
-
-    if session_token:
-        headers["Session-Token"] = session_token
-
-    return headers
-
-
-def _glpi_invfis_init_session(cfg):
-    """
-    Inicia sesión en GLPI usando user_token + app_token.
-    """
-    base_url = _glpi_normalize_base_url(cfg.base_url)
-    user_token = _glpi_invfis_decrypt(cfg.user_token)
-
-    if not base_url or not user_token:
-        raise Exception("Debe configurar la URL base de GLPI y el User Token.")
-
-    headers = _glpi_invfis_headers(cfg)
-    headers["Authorization"] = "user_token " + user_token
-
-    url = base_url + "/initSession"
-    res = requests.get(
-        url,
-        headers=headers,
-        timeout=cfg.timeout or 30,
-        verify=bool(cfg.verificar_ssl),
-    )
-
-    if res.status_code not in (200, 201):
-        raise Exception(f"GLPI initSession falló: HTTP {res.status_code} - {res.text[:500]}")
-
-    data = res.json()
-    token = data.get("session_token")
-    if not token:
-        raise Exception("GLPI no devolvió session_token.")
-
-    return token
-
-
-def _glpi_invfis_kill_session(cfg, session_token):
-    try:
-        base_url = _glpi_normalize_base_url(cfg.base_url)
-        if not base_url or not session_token:
-            return
-
-        requests.get(
-            base_url + "/killSession",
-            headers=_glpi_invfis_headers(cfg, session_token),
-            timeout=10,
-            verify=bool(cfg.verificar_ssl),
-        )
-    except Exception:
-        pass
-
-
-def _glpi_get_value(obj, *keys, default=""):
-    """
-    Lee campos de GLPI soportando nombres comunes y valores nulos.
-    """
-    for k in keys:
-        if isinstance(obj, dict) and k in obj and obj.get(k) not in (None, ""):
-            return str(obj.get(k)).strip()
-    return default
-
-
-def _glpi_pick_dropdown_name(obj, key):
-    """
-    GLPI con expand_dropdowns puede devolver texto o dict.
-    """
-    val = obj.get(key) if isinstance(obj, dict) else None
-    if isinstance(val, dict):
-        return str(val.get("name") or val.get("completename") or "").strip()
-    if val not in (None, ""):
-        return str(val).strip()
-    return ""
-
-
-def _glpi_invfis_fetch_computers(cfg, session_token, range_start=0, range_end=999):
-    """
-    Consulta computadores de GLPI.
-    """
-    base_url = _glpi_normalize_base_url(cfg.base_url)
-
-    params = {
-        "expand_dropdowns": "true",
-        "range": f"{range_start}-{range_end}",
-    }
-
-    res = requests.get(
-        base_url + "/Computer",
-        headers=_glpi_invfis_headers(cfg, session_token),
-        params=params,
-        timeout=cfg.timeout or 30,
-        verify=bool(cfg.verificar_ssl),
-    )
-
-    if res.status_code not in (200, 206):
-        raise Exception(f"Consulta de computadores GLPI falló: HTTP {res.status_code} - {res.text[:500]}")
-
-    data = res.json()
-    if isinstance(data, dict) and "data" in data:
-        return data.get("data") or []
-    if isinstance(data, list):
-        return data
-    return []
-
-
-def _glpi_invfis_fetch_computer_detail(cfg, session_token, computer_id):
-    """
-    Consulta el detalle de un computador GLPI para traer campos que muchas veces
-    no vienen completos en la consulta masiva /Computer.
-    """
-    computer_id = _glpi_clean_text(computer_id)
-    if not computer_id:
-        return {}
-
-    base_url = _glpi_normalize_base_url(cfg.base_url)
-    params = {
-        "expand_dropdowns": "true",
-        "with_devices": "true",
-        "get_hateoas": "false",
-    }
-
-    res = requests.get(
-        base_url + f"/Computer/{computer_id}",
-        headers=_glpi_invfis_headers(cfg, session_token),
-        params=params,
-        timeout=cfg.timeout or 30,
-        verify=bool(cfg.verificar_ssl),
-    )
-
-    if res.status_code not in (200, 206):
-        return {}
-
-    data = res.json()
-    return data if isinstance(data, dict) else {}
-
-
-_GLPI_INVFIS_ITEM_CACHE = {}
-
-
-def _glpi_invfis_api_get(cfg, session_token, path, params=None):
-    """
-    GET genérico contra API REST GLPI.
-    Devuelve dict/list o {} si no responde correctamente.
-    """
-    try:
-        base_url = _glpi_normalize_base_url(cfg.base_url)
-        res = requests.get(
-            base_url + path,
-            headers=_glpi_invfis_headers(cfg, session_token),
-            params=params or {"expand_dropdowns": "true", "get_hateoas": "false"},
-            timeout=cfg.timeout or 30,
-            verify=bool(cfg.verificar_ssl),
-        )
-        if res.status_code not in (200, 206):
-            return {}
-        data = res.json()
-        return data
-    except Exception:
-        return {}
-
-
-def _glpi_invfis_first_dict(data):
-    """
-    Devuelve el primer diccionario útil desde una respuesta GLPI que puede venir
-    como dict, list o {"data": [...]}.
-    """
-    if isinstance(data, dict):
-        if isinstance(data.get("data"), list) and data.get("data"):
-            for row in data.get("data"):
-                if isinstance(row, dict):
-                    return row
-        return data
-
-    if isinstance(data, list):
-        for row in data:
-            if isinstance(row, dict):
-                return row
-
-    return {}
-
-
-def _glpi_invfis_fetch_operating_system_relation(cfg, session_token, computer_id):
-    """
-    GLPI 10 suele guardar la pestaña 'Operating systems' como relación
-    Item_OperatingSystem, no siempre dentro del objeto Computer.
-
-    Esta función consulta varias rutas compatibles y devuelve el primer registro
-    de sistema operativo asociado al computador.
-
-    Campos esperados en Item_OperatingSystem:
-      - operatingsystems_id
-      - operatingsystemversions_id
-      - operatingsystemarchitectures_id
-      - operatingsystemkernels_id
-      - operatingsystemkernelversions_id
-      - operatingsystemeditions_id
-      - operatingsystemservicepacks_id
-    """
-    computer_id = _glpi_clean_text(computer_id)
-    if not computer_id:
-        return {}
-
-    candidates = [
-        f"/Computer/{computer_id}/Item_OperatingSystem",
-        f"/Computer/{computer_id}/OperatingSystem",
-        f"/Computer/{computer_id}/OperatingSystemVersion",
-    ]
-
-    for path in candidates:
-        data = _glpi_invfis_api_get(
-            cfg,
-            session_token,
-            path,
-            params={"expand_dropdowns": "true", "get_hateoas": "false"}
-        )
-        row = _glpi_invfis_first_dict(data)
-        if row:
-            return row
-
-    # Último intento: búsqueda directa sobre Item_OperatingSystem.
-    # Algunas instalaciones no habilitan el endpoint padre/hijo, pero sí el itemtype directo.
-    try:
-        data = _glpi_invfis_api_get(
-            cfg,
-            session_token,
-            "/Item_OperatingSystem",
-            params={
-                "expand_dropdowns": "true",
-                "get_hateoas": "false",
-                "criteria[0][field]": "items_id",
-                "criteria[0][searchtype]": "equals",
-                "criteria[0][value]": computer_id,
-                "criteria[1][link]": "AND",
-                "criteria[1][field]": "itemtype",
-                "criteria[1][searchtype]": "equals",
-                "criteria[1][value]": "Computer",
-            }
-        )
-        row = _glpi_invfis_first_dict(data)
-        if row:
-            return row
-    except Exception:
-        pass
-
-    return {}
-
-
-def _glpi_invfis_merge_os_relation_into_computer(computer, os_relation):
-    """
-    Mezcla el registro Item_OperatingSystem en el dict Computer sin perder campos
-    del equipo. Además crea llaves alias para que el mapeo GRAC lea exactamente:
-      procesador      <- arquitectura
-      tipo_sistema    <- nombre del SO
-      version_so      <- kernel
-      edicion_so      <- edición
-    """
-    merged = dict(computer or {})
-
-    if not isinstance(os_relation, dict) or not os_relation:
-        return merged
-
-    for k, v in os_relation.items():
-        if v not in (None, "", "None", "null"):
-            merged[k] = v
-
-    return merged
-
-
-def _glpi_invfis_extract_id(value):
-    """
-    Extrae el ID real de un campo GLPI, aun cuando venga expandido como dict.
-    """
-    if value in (None, "", "None", "null"):
-        return ""
-
-    if isinstance(value, dict):
-        for k in ("id", "items_id", "value"):
-            if value.get(k) not in (None, "", "None", "null"):
-                return str(value.get(k)).strip()
-        return ""
-
-    # Si ya viene como número/string numérico
-    value = str(value).strip()
-    return value if value.isdigit() else ""
-
-
-def _glpi_invfis_extract_name(value):
-    """
-    Extrae nombre/completename si el campo GLPI ya vino expandido.
-    """
-    if value in (None, "", "None", "null"):
-        return ""
-
-    if isinstance(value, dict):
-        for k in ("name", "completename", "value"):
-            if value.get(k) not in (None, "", "None", "null"):
-                txt = str(value.get(k)).strip()
-                # Evita devolver un ID numérico como nombre
-                if txt and not txt.isdigit():
-                    return txt
-        return ""
-
-    txt = str(value).strip()
-    return "" if txt.isdigit() else txt
-
-
-def _glpi_invfis_resolve_item_name(cfg, session_token, itemtype, item_id):
-    """
-    Resuelve un ID de dropdown GLPI consultando su endpoint.
-    Ejemplos:
-      /OperatingSystem/1
-      /OperatingSystemArchitecture/1
-      /OperatingSystemKernel/1
-      /OperatingSystemKernelVersion/1
-      /OperatingSystemEdition/1
-    """
-    item_id = _glpi_clean_text(item_id)
-    if not itemtype or not item_id:
-        return ""
-
-    cache_key = (itemtype, item_id)
-    if cache_key in _GLPI_INVFIS_ITEM_CACHE:
-        return _GLPI_INVFIS_ITEM_CACHE[cache_key]
-
-    data = _glpi_invfis_api_get(cfg, session_token, f"/{itemtype}/{item_id}")
-    if isinstance(data, dict):
-        for k in ("name", "completename", "value"):
-            val = _glpi_clean_text(data.get(k))
-            if val:
-                if _GRAC_RENDER_LOW_MEMORY and len(_GLPI_INVFIS_ITEM_CACHE) >= 1000:
-                    _GLPI_INVFIS_ITEM_CACHE.clear()
-                _GLPI_INVFIS_ITEM_CACHE[cache_key] = val
-                return val
-
-    if _GRAC_RENDER_LOW_MEMORY and len(_GLPI_INVFIS_ITEM_CACHE) >= 1000:
-        _GLPI_INVFIS_ITEM_CACHE.clear()
-    _GLPI_INVFIS_ITEM_CACHE[cache_key] = ""
-    return ""
-
-
-def _glpi_invfis_resolve_dropdown(cfg, session_token, computer, field_name, itemtypes):
-    """
-    Resuelve un campo dropdown de GLPI:
-      1) Si ya vino expandido con name/completename, usa ese texto.
-      2) Si vino como ID, consulta el endpoint del itemtype correspondiente.
-      3) Si no existe, devuelve vacío.
-    """
-    if not isinstance(computer, dict):
-        return ""
-
-    raw = computer.get(field_name)
-    expanded_name = _glpi_invfis_extract_name(raw)
-    if expanded_name:
-        return expanded_name
-
-    item_id = _glpi_invfis_extract_id(raw)
-    if not item_id:
-        item_id = _glpi_any_value(computer, field_name)
-
-    item_id = _glpi_clean_text(item_id)
-    if not item_id or not item_id.isdigit():
-        return ""
-
-    for itemtype in itemtypes:
-        name = _glpi_invfis_resolve_item_name(cfg, session_token, itemtype, item_id)
-        if name:
-            return name
-
-    return ""
-
-
-def _glpi_invfis_resolve_operating_system_data(cfg, session_token, computer):
-    """
-    Relaciones definitivas solicitadas GLPI → GRAC:
-
-      - Procesador en GRAC      = Arquitecturas en GLPI
-      - Tipo de sistema en GRAC = Nombre en Operating system GLPI
-      - Versión SO en GRAC      = Kernel en Operating system GLPI
-      - Edición del SO en GRAC  = Edición en Operating system GLPI
-
-    Se consulta primero el campo expandido. Si GLPI solo entrega IDs,
-    se resuelven contra los endpoints nativos de GLPI.
-    """
-
-    # Tipo de sistema GRAC = Nombre en Operating system GLPI
-    tipo_sistema = (
-        _glpi_invfis_resolve_dropdown(
-            cfg,
-            session_token,
-            computer,
-            "operatingsystems_id",
-            ("OperatingSystem",)
-        )
-        or _glpi_any_value(
-            computer,
-            "operating_system",
-            "operatingsystem",
-            "operating_system_name",
-            "os_name",
-            "os",
-            "sistema_operativo",
-            "tipo_sistema",
-            "name_operatingsystem"
-        )
-    )
-
-    # Edición del SO GRAC = Edición en Operating system GLPI
-    edicion_so = (
-        _glpi_invfis_resolve_dropdown(
-            cfg,
-            session_token,
-            computer,
-            "operatingsystemeditions_id",
-            ("OperatingSystemEdition", "OperatingSystemServicePack")
-        )
-        or _glpi_any_value(
-            computer,
-            "operating_system_edition",
-            "operatingsystemedition",
-            "os_edition",
-            "edition",
-            "edicion",
-            "edicion_so"
-        )
-    )
-
-    # Versión SO GRAC = Kernel en Operating system GLPI
-    # En GLPI puede existir como kernel o kernel version, según versión/agente.
-    version_so_kernel = (
-        _glpi_invfis_resolve_dropdown(
-            cfg,
-            session_token,
-            computer,
-            "operatingsystemkernels_id",
-            ("OperatingSystemKernel",)
-        )
-        or _glpi_invfis_resolve_dropdown(
-            cfg,
-            session_token,
-            computer,
-            "operatingsystemkernelversions_id",
-            ("OperatingSystemKernelVersion", "OperatingSystemKernel")
-        )
-        or _glpi_any_value(
-            computer,
-            "operating_system_kernel",
-            "operatingsystemkernel",
-            "operating_system_kernel_version",
-            "kernel",
-            "kernel_version",
-            "os_kernel",
-            "version_kernel",
-            "version_so"
-        )
-    )
-
-    # Procesador GRAC = Arquitecturas en GLPI
-    arquitectura = (
-        _glpi_invfis_resolve_dropdown(
-            cfg,
-            session_token,
-            computer,
-            "operatingsystemarchitectures_id",
-            ("OperatingSystemArchitecture", "Architecture")
-        )
-        or _glpi_invfis_resolve_dropdown(
-            cfg,
-            session_token,
-            computer,
-            "architectures_id",
-            ("Architecture", "OperatingSystemArchitecture")
-        )
-        or _glpi_any_value(
-            computer,
-            "operating_system_architecture",
-            "operatingsystemarchitecture",
-            "architecture",
-            "architectures",
-            "arquitectura",
-            "arquitecturas",
-            "os_architecture"
-        )
-    )
-
-    return tipo_sistema, edicion_so, version_so_kernel, arquitectura
-
-
-
-def _glpi_clean_text(value):
-    """
-    Normaliza valores traídos desde GLPI.
-    Si GLPI no trae valor, devuelve cadena vacía.
-    """
-    if value in (None, "", "None", "null"):
-        return ""
-    return str(value).strip()
-
-
-def _glpi_any_value(obj, *keys):
-    """
-    Busca el primer valor real en el diccionario GLPI.
-    No inventa valores por defecto.
-    """
-    if not isinstance(obj, dict):
-        return ""
-
-    for key in keys:
-        val = obj.get(key)
-        if isinstance(val, dict):
-            val = val.get("name") or val.get("completename") or val.get("value")
-        elif isinstance(val, list):
-            val = ", ".join([_glpi_clean_text(x.get("name") if isinstance(x, dict) else x) for x in val if x])
-        val = _glpi_clean_text(val)
-        if val:
-            return val
-
-    return ""
-
-
-def _glpi_invfis_os_data(cfg, session_token, computer):
-    """
-    Wrapper compatible para las relaciones GLPI → GRAC.
-    Usa resolución robusta por endpoint cuando GLPI trae IDs.
-    """
-    return _glpi_invfis_resolve_operating_system_data(cfg, session_token, computer)
-
-
-
-def _glpi_invfis_hw_data(computer):
-    """
-    RAM se toma solo si viene desde GLPI.
-
-    Procesador NO se toma de CPU física porque el requerimiento indica:
-      procesador en GRAC = Arquitecturas en GLPI.
-    Ese valor se asigna desde _glpi_invfis_os_data().
-    """
-    ram = _glpi_any_value(
-        computer,
-        "memory",
-        "ram",
-        "ram_instalada",
-        "memories",
-        "computermemories"
-    )
-
-    return ram
-
-
-
-def _glpi_invfis_fetch_group_relation(cfg, session_token, computer_id):
-    """
-    Busca el Grupo a cargo del computador en GLPI.
-
-    En GLPI, el campo visual 'Grupo a cargo' puede venir:
-      - directamente en Computer como groups_id_tech / groups_id
-      - o como relación Group_Item asociada al Computer.
-
-    Devuelve el primer registro útil.
-    """
-    computer_id = _glpi_clean_text(computer_id)
-    if not computer_id:
-        return {}
-
-    candidates = [
-        f"/Computer/{computer_id}/Group_Item",
-        f"/Computer/{computer_id}/Group",
-    ]
-
-    for path in candidates:
-        data = _glpi_invfis_api_get(
-            cfg,
-            session_token,
-            path,
-            params={"expand_dropdowns": "true", "get_hateoas": "false"}
-        )
-        row = _glpi_invfis_first_dict(data)
-        if row:
-            return row
-
-    # Intento directo sobre Group_Item.
-    try:
-        data = _glpi_invfis_api_get(
-            cfg,
-            session_token,
-            "/Group_Item",
-            params={
-                "expand_dropdowns": "true",
-                "get_hateoas": "false",
-                "criteria[0][field]": "items_id",
-                "criteria[0][searchtype]": "equals",
-                "criteria[0][value]": computer_id,
-                "criteria[1][link]": "AND",
-                "criteria[1][field]": "itemtype",
-                "criteria[1][searchtype]": "equals",
-                "criteria[1][value]": "Computer",
-            }
-        )
-        row = _glpi_invfis_first_dict(data)
-        if row:
-            return row
-    except Exception:
-        pass
-
-    return {}
-
-
-def _glpi_invfis_merge_group_relation_into_computer(computer, group_relation):
-    """
-    Mezcla la relación Group_Item al dict Computer y crea aliases.
-    """
-    merged = dict(computer or {})
-
-    if not isinstance(group_relation, dict) or not group_relation:
-        return merged
-
-    for k, v in group_relation.items():
-        if v not in (None, "", "None", "null"):
-            merged[k] = v
-
-    # Normaliza aliases comunes hacia groups_id_tech.
-    for key in ("groups_id", "groups_id_tech", "group_id", "group", "name", "completename"):
-        val = group_relation.get(key)
-        if val not in (None, "", "None", "null") and not merged.get("groups_id_tech"):
-            merged["groups_id_tech"] = val
-            break
-
-    return merged
-
-
-
-def _glpi_invfis_resolver_nombre_grupo_glpi(cfg=None, session_token=None, computer=None):
-    raw_group = ""
-
-    if isinstance(computer, dict):
-        raw_group = (
-            computer.get("groups_id_tech")
-            or computer.get("groups_id")
-            or computer.get("group_id")
-            or ""
-        )
-
-    group_id = str(raw_group).strip()
-
-    mapa_grupos = {
-        "1": "Seguridad",
-        "3": "Ventas",
-    }
-
-    return mapa_grupos.get(group_id, ""), group_id
-
-
-def _glpi_invfis_crear_area_segura(nombre_area):
-    nombre_area = _glpi_clean_text(nombre_area)
-    if not nombre_area:
-        return None
-
-    try:
-        with db.session.no_autoflush:
-            area = AreaEmpresa.query.filter(AreaEmpresa.area.ilike(nombre_area)).first()
-            if area:
-                return area.id
-    except Exception:
-        db.session.rollback()
-
-    try:
-        from sqlalchemy import text
-
-        tabla = AreaEmpresa.__table__.name
-
-        columnas_db = db.session.execute(
-            text(f"PRAGMA table_info({tabla})")
-        ).fetchall()
-
-        valores = {}
-
-        for col in columnas_db:
-            col_name = col[1]
-            not_null = col[3]
-            pk = col[5]
-
-            if pk:
-                continue
-
-            if col_name == "area":
-                valores[col_name] = nombre_area
-            elif not_null:
-                if "responsable" in col_name.lower():
-                    valores[col_name] = "Importado desde GLPI"
-                elif "cargo" in col_name.lower():
-                    valores[col_name] = "Automático GLPI"
-                else:
-                    valores[col_name] = ""
-            else:
-                valores[col_name] = None
-
-        columnas = ", ".join(valores.keys())
-        placeholders = ", ".join([f":{k}" for k in valores.keys()])
-
-        db.session.execute(
-            text(f"INSERT INTO {tabla} ({columnas}) VALUES ({placeholders})"),
-            valores
-        )
-        db.session.flush()
-
-        area = AreaEmpresa.query.filter(AreaEmpresa.area.ilike(nombre_area)).first()
-        return area.id if area else None
-
-    except Exception as e:
-        print("ERROR REAL CREANDO AREA GLPI:", repr(e))
-        db.session.rollback()
-        return None
-
-
-def _glpi_invfis_resolver_area_obligatoria(cfg=None, session_token=None, computer=None):
-    grupo_texto, group_id = _glpi_invfis_resolver_nombre_grupo_glpi(
-        cfg,
-        session_token,
-        computer
-    )
-
-    if not grupo_texto:
-        return None
-
-    return _glpi_invfis_crear_area_segura(grupo_texto)
-
-
-def _glpi_invfis_numero_neutro(value=None):
-    """
-    Devuelve 0 cuando GLPI no trae clasificación.
-    Se usa para cumplir columnas numéricas NOT NULL sin inventar niveles 1-5.
-    """
-    try:
-        if value in (None, "", "None", "null"):
-            return 0
-        return int(value)
-    except Exception:
-        return 0
-
-
-def _glpi_invfis_map_computer_to_data(cfg, computer, session_token=None):
-    """
-    Mapeo GLPI Computer → InventarioFisico.
-
-    Reglas aplicadas:
-    - No se inventan datos funcionales cuando GLPI no los trae.
-    - Asignado a = campo name de GLPI.
-    - Todo campo SO se interpreta como Sistema Operativo.
-    - Sistema Operativo de GLPI se guarda en GRAC como tipo_sistema.
-    - area_id se resuelve técnicamente porque la tabla inventario_fisico lo exige NOT NULL.
-    """
-
-    glpi_id = _glpi_any_value(computer, "id")
-    nombre_glpi = _glpi_any_value(computer, "name", "nombre")
-    serial = _glpi_any_value(computer, "serial", "serial_number", "otherserial")
-    uuid = _glpi_any_value(computer, "uuid", "id_producto")
-
-    marca = (
-        _glpi_pick_dropdown_name(computer, "manufacturers_id")
-        or _glpi_any_value(computer, "manufacturer", "marca")
-    )
-
-    modelo = (
-        _glpi_pick_dropdown_name(computer, "computermodels_id")
-        or _glpi_any_value(computer, "model", "modelo")
-    )
-
-    tipo_equipo = (
-        _glpi_pick_dropdown_name(computer, "computertypes_id")
-        or _glpi_any_value(computer, "type", "tipo", "clase_activo")
-    )
-
-    ubicacion = (
-        _glpi_pick_dropdown_name(computer, "locations_id")
-        or _glpi_any_value(computer, "location", "ubicacion", "ciudad")
-    )
-
-    sistema_operativo, edicion_so, version_so, arquitectura_glpi = _glpi_invfis_os_data(cfg, session_token, computer)
-    ram = _glpi_invfis_hw_data(computer)
-
-    comentario = _glpi_any_value(computer, "comment", "comments")
-
-    # Clase del activo solo con datos que vienen de GLPI.
-    clase_activo = ""
-    if tipo_equipo and modelo:
-        clase_activo = f"{tipo_equipo} / {modelo}"
-    elif tipo_equipo:
-        clase_activo = tipo_equipo
-    elif modelo:
-        clase_activo = modelo
-
-    # IMPORTANTE:
-    # area_id es obligatorio por estructura de la tabla inventario_fisico.
-    # Si GLPI no trae un área que coincida con AreaEmpresa, se toma la primera área existente
-    # únicamente para permitir el guardado. No se completan otros valores por defecto.
-    area_id_obligatoria = _glpi_invfis_resolver_area_obligatoria(
-        cfg,
-        session_token,
-        computer
-    )
-
-    data = {
-        "area_id": area_id_obligatoria,
-        "division": _glpi_any_value(computer, "division", "business_unit", "departamento"),
-
-        # Regla solicitada: Asignado a = campo name de GLPI
-        "asignado_a": nombre_glpi,
-
-        "cargo": _glpi_any_value(computer, "cargo", "position", "title"),
-        "ciudad": ubicacion,
-        "clase_activo": clase_activo,
-        "marca": marca,
-
-        # Solo si GLPI lo trae.
-        "mouse": _glpi_any_value(computer, "mouse"),
-        "teclado": _glpi_any_value(computer, "keyboard", "teclado"),
-        "base_portatil": _glpi_any_value(computer, "base_portatil", "dock", "docking_station"),
-        "monitor": _glpi_any_value(computer, "monitor", "monitors"),
-
-        "numero_serial": serial,
-        "nombre_dispositivo": nombre_glpi,
-        # Relación solicitada: Procesador GRAC = Arquitecturas en GLPI
-        "procesador": arquitectura_glpi,
-        "ram_instalada": ram,
-
-        # Identificadores GLPI
-        "id_dispositivo": glpi_id,
-        "id_producto": uuid,
-
-        # SO = Sistema Operativo
-        "tipo_sistema": sistema_operativo,
-        "edicion_so": edicion_so,
-        "version_so": version_so,
-
-        "pais": _glpi_any_value(computer, "country", "pais"),
-        "fecha_compra": None,
-        "fecha_asignacion": None,
-
-        # Clasificación SGSI: GLPI no la trae.
-        # Se guarda 0 para cumplir columnas numéricas NOT NULL si existen, sin mostrar niveles inventados.
-        "c_nivel": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "c_nivel", "confidencialidad")),
-        "i_nivel": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "i_nivel", "integridad")),
-        "d_nivel": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "d_nivel", "disponibilidad")),
-        "valor_activo": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "valor_activo")),
-        "criticidad_num": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "criticidad_num")),
-        "criticidad_texto": _glpi_any_value(computer, "criticidad_texto"),
-        "etiqueta_conf_num": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "etiqueta_conf_num")),
-        "etiqueta_conf_texto": _glpi_any_value(computer, "etiqueta_conf_texto"),
-
-        # Información regulatoria: solo se diligencia si GLPI lo trae.
-        "info_personal": _glpi_any_value(computer, "info_personal"),
-        "info_regulada": _glpi_any_value(computer, "info_regulada"),
-        "info_sensible": _glpi_any_value(computer, "info_sensible"),
-        "info_sensible_clientes": _glpi_any_value(computer, "info_sensible_clientes"),
-
-        "observaciones": comentario,
-    }
-
-    return data
-
-
-def _glpi_invfis_find_existing(data):
-    """
-    Evita duplicados.
-    Prioridad:
-    1) número serial
-    2) id_dispositivo GLPI
-    3) nombre de dispositivo
-
-    Usa no_autoflush para que una búsqueda no dispare flush prematuro.
-    """
-    serial = (data.get("numero_serial") or "").strip()
-    glpi_id = (data.get("id_dispositivo") or "").strip()
-    nombre = (data.get("nombre_dispositivo") or "").strip()
-
-    with db.session.no_autoflush:
-        if serial:
-            item = InventarioFisico.query.filter_by(numero_serial=serial).first()
-            if item:
-                return item
-
-        if glpi_id:
-            item = InventarioFisico.query.filter_by(id_dispositivo=glpi_id).first()
-            if item:
-                return item
-
-        if nombre:
-            item = InventarioFisico.query.filter_by(nombre_dispositivo=nombre).first()
-            if item:
-                return item
-
-    return None
-
-
-def _glpi_invfis_upsert(data):
-    """
-    Crea o actualiza un activo físico desde datos GLPI.
-    Ejecuta flush controlado para detectar errores por registro y no dejar
-    la sesión en estado inválido para el siguiente equipo.
-    """
-    item = _glpi_invfis_find_existing(data)
-    created = False
-
-    if not item:
-        item = InventarioFisico()
-        db.session.add(item)
-        created = True
-
-    for k, v in data.items():
-        if hasattr(item, k):
-            setattr(item, k, v)
-
-    db.session.flush()
-    return item, created
-
-
-def glpi_invfis_sincronizar():
-    """
-    Ejecuta sincronización GLPI → InventarioFisico.
-    No importa registros sin identificador mínimo de GLPI.
-    Hace commit por registro para evitar que un error dañe toda la transacción.
-    """
-    cfg = _glpi_invfis_config_activa()
-    if not cfg:
-        raise Exception("No existe una configuración GLPI activa.")
-
-    session_token = None
-    creados = 0
-    actualizados = 0
-    omitidos = 0
-    errores = []
-
-    try:
-        session_token = _glpi_invfis_init_session(cfg)
-        computers = _glpi_invfis_fetch_computers(cfg, session_token)
-
-        for comp in computers:
-            try:
-                comp_detalle = comp
-
-                # Consulta detalle por equipo y, muy importante, la relación
-                # Item_OperatingSystem que alimenta la pestaña "Operating systems" de GLPI.
-                # Sin esta relación, muchos GLPI devuelven en blanco:
-                # Arquitecturas, Nombre del SO, Kernel y Edición.
-                glpi_comp_id = _glpi_any_value(comp, "id")
-                if glpi_comp_id:
-                    detalle = _glpi_invfis_fetch_computer_detail(cfg, session_token, glpi_comp_id)
-                    if detalle:
-                        comp_detalle = {**comp, **detalle}
-
-                    os_relation = _glpi_invfis_fetch_operating_system_relation(cfg, session_token, glpi_comp_id)
-                    if os_relation:
-                        comp_detalle = _glpi_invfis_merge_os_relation_into_computer(comp_detalle, os_relation)
-
-                    group_relation = _glpi_invfis_fetch_group_relation(cfg, session_token, glpi_comp_id)
-                    if group_relation:
-                        comp_detalle = _glpi_invfis_merge_group_relation_into_computer(comp_detalle, group_relation)
-
-                data = _glpi_invfis_map_computer_to_data(cfg, comp_detalle, session_token)
-
-                # FORZAR ÁREA DESDE GRUPO GLPI ANTES DE OMITIR
-                if not data.get("area_id"):
-                    grupo_glpi = (
-                        _glpi_any_value(comp_detalle, "groups_id_tech", "groups_id", "group_id")
-                        or ""
-                    ).strip()
-
-                    mapa_grupos = {
-                        "1": "Seguridad",
-                        "3": "Ventas",
-                    }
-
-                    nombre_area = mapa_grupos.get(grupo_glpi)
-
-                    if nombre_area:
-                        area = AreaEmpresa.query.filter(AreaEmpresa.area.ilike(nombre_area)).first()
-
-                        if not area:
-                            area = AreaEmpresa(
-                                area=nombre_area,
-                                responsable_nombre="GLPI",
-                                responsable_cargo="GLPI"
-                            )
-                            db.session.add(area)
-                            db.session.flush()
-
-                        data["area_id"] = area.id
-
-                if not data.get("area_id"):
-                    grupo_debug = (
-                        _glpi_any_value(comp_detalle, "groups_id_tech", "groups_id", "group_id", "name", "completename")
-                        or _glpi_any_value(comp_detalle, "grupo_a_cargo", "technical_group", "group_tech")
-                        or "NO DETECTADO"
-                    )
-
-                    omitidos += 1
-                    errores.append(
-                        f"Equipo GLPI {comp.get('id', 'N/D')} omitido: FALLÓ crear Área desde Grupo GLPI. "
-                        f"Valor detectado GLPI: {grupo_debug}"
-                    )
-                    db.session.rollback()
-                    continue
-
-                _, created = _glpi_invfis_upsert(data)
-                db.session.commit()
-
-                if created:
-                    creados += 1
-                else:
-                    actualizados += 1
-
-            except Exception as e:
-                db.session.rollback()
-                omitidos += 1
-                errores.append(f"Equipo GLPI {comp.get('id', 'N/D')}: {str(e)}")
-
-        try:
-            cfg = _glpi_invfis_config_activa()
-            cfg.ultimo_sync = datetime.utcnow()
-            cfg.ultimo_estado = "OK" if not errores else "OK_CON_OMITIDOS"
-            cfg.ultimo_mensaje = f"Creados: {creados}, Actualizados: {actualizados}, Omitidos: {omitidos}"
-            if errores:
-                cfg.ultimo_mensaje += " | " + " || ".join(errores[:5])
-            db.session.add(cfg)
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-
-        return {
-            "creados": creados,
-            "actualizados": actualizados,
-            "omitidos": omitidos,
-            "errores": errores[:20],
-        }
-
-    except Exception as e:
-        db.session.rollback()
-        try:
-            cfg = _glpi_invfis_config_activa()
-            if cfg:
-                cfg.ultimo_sync = datetime.utcnow()
-                cfg.ultimo_estado = "ERROR"
-                cfg.ultimo_mensaje = str(e)
-                db.session.add(cfg)
-                db.session.commit()
-        except Exception:
-            db.session.rollback()
-        raise
-
-    finally:
-        if session_token:
-            _glpi_invfis_kill_session(cfg, session_token)
-
-# =========================
-# RUTA — Configurar conexión GLPI
-# =========================
-@app.route('/inventario_fisico/glpi/config', methods=['GET', 'POST'])
-@login_required
-def inventario_fisico_glpi_config():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor' or (
-        user.role != 'admin'
-        and not verificar_permiso(user, "Gestión de Activos de Información")
-    ):
-        flash("No tiene permiso para configurar GLPI.", "danger")
-        return redirect(url_for('inventario_fisico'))
-
-    cfg = _glpi_invfis_config_activa()
-    if not cfg:
-        cfg = GLPIInventarioFisicoConfig(
-            nombre="GLPI Principal",
-            base_url="",
-            activo=True,
-            verificar_ssl=False,
-            timeout=30,
-
-            # Estos campos se conservan por compatibilidad con la tabla,
-            # pero la sincronización ya no los usa para inventar datos.
-            area_id_default=None,
-            division_default="",
-            ciudad_default="",
-            pais_default="",
-            c_nivel_default=0,
-            i_nivel_default=0,
-            d_nivel_default=0,
-        )
-        db.session.add(cfg)
-        db.session.commit()
-
-    if request.method == 'POST':
-        accion = request.form.get("accion") or "guardar"
-
-        cfg.nombre = (request.form.get("nombre") or "GLPI Principal").strip()
-        cfg.base_url = _glpi_normalize_base_url(request.form.get("base_url"))
-
-        app_token = (request.form.get("app_token") or "").strip()
-        user_token = (request.form.get("user_token") or "").strip()
-
-        if app_token:
-            cfg.app_token = _glpi_invfis_encrypt(app_token)
-        if user_token:
-            cfg.user_token = _glpi_invfis_encrypt(user_token)
-
-        # No se diligencian valores por defecto que no vengan de GLPI.
-        cfg.area_id_default = None
-        cfg.division_default = ""
-        cfg.ciudad_default = ""
-        cfg.pais_default = ""
-        cfg.c_nivel_default = 0
-        cfg.i_nivel_default = 0
-        cfg.d_nivel_default = 0
-
-        cfg.verificar_ssl = True if request.form.get("verificar_ssl") == "1" else False
-        cfg.timeout = request.form.get("timeout", type=int) or 30
-        cfg.activo = True
-
-        db.session.add(cfg)
-        db.session.commit()
-
-        if accion == "probar":
-            session_token = None
-            try:
-                session_token = _glpi_invfis_init_session(cfg)
-                cfg.ultima_prueba = datetime.utcnow()
-                cfg.ultimo_estado = "OK"
-                cfg.ultimo_mensaje = "Conexión exitosa con GLPI."
-                db.session.add(cfg)
-                db.session.commit()
-                flash("Conexión exitosa con GLPI.", "success")
-            except Exception as e:
-                cfg.ultima_prueba = datetime.utcnow()
-                cfg.ultimo_estado = "ERROR"
-                cfg.ultimo_mensaje = str(e)
-                db.session.add(cfg)
-                db.session.commit()
-                flash(f"Error probando conexión GLPI: {str(e)}", "danger")
-            finally:
-                if session_token:
-                    _glpi_invfis_kill_session(cfg, session_token)
-        else:
-            flash("Configuración GLPI guardada correctamente.", "success")
-
-        return redirect(url_for('inventario_fisico_glpi_config'))
-
-    html = """
-    <div class="glpiinv-shell">
-
-      <div class="glpiinv-header-card">
-        <div class="glpiinv-header-overlay">
-          <div class="glpiinv-header-text">
-            <h3 class="glpiinv-title m-0">Configurar conexión GLPI</h3>
-            <div class="glpiinv-subtitle">
-              Parámetros de integración para importar exclusivamente datos existentes en GLPI al Inventario Físico GRAC
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="glpiinv-header-actions">
-        <a href="{{ url_for('inventario_fisico') }}"
-           class="btn rounded-pill px-4 fw-bold glpiinv-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-      </div>
-
-      <div class="glpiinv-card">
-        <div class="glpiinv-card-body">
-
-          {% with msgs = get_flashed_messages(with_categories=true) %}
-            {% if msgs %}
-              {% for cat, msg in msgs %}
-                <div class="alert alert-{{ 'warning' if cat=='message' else cat }} alert-dismissible fade show" role="alert">
-                  {{ msg }}
-                  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                </div>
-              {% endfor %}
-            {% endif %}
-          {% endwith %}
-
-          <form method="post">
-            <div class="row g-3">
-
-              <div class="col-md-4">
-                <label class="form-label">Nombre de la conexión</label>
-                <input type="text" name="nombre" class="form-control" value="{{ cfg.nombre or '' }}">
-              </div>
-
-              <div class="col-md-8">
-                <label class="form-label">URL API REST GLPI</label>
-                <input type="text"
-                       name="base_url"
-                       class="form-control"
-                       required
-                       placeholder="http://192.168.0.10:8080/apirest.php"
-                       value="{{ cfg.base_url or '' }}">
-                <small class="text-muted">Puede ser con o sin /apirest.php. El sistema lo normaliza.</small>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">App Token</label>
-                <input type="password" name="app_token" class="form-control" placeholder="Dejar vacío para conservar el actual">
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">User Token</label>
-                <input type="password" name="user_token" class="form-control" placeholder="Dejar vacío para conservar el actual">
-              </div>
-
-              <div class="col-md-2">
-                <label class="form-label">Timeout</label>
-                <input type="number" name="timeout" class="form-control" min="5" max="300" value="{{ cfg.timeout or 30 }}">
-              </div>
-
-              <div class="col-md-12">
-                <div class="form-check mt-2">
-                  <input class="form-check-input" type="checkbox" name="verificar_ssl" value="1" id="verificar_ssl"
-                         {% if cfg.verificar_ssl %}checked{% endif %}>
-                  <label class="form-check-label fw-bold" for="verificar_ssl">
-                    Verificar certificado SSL
-                  </label>
-                </div>
-              </div>
-
-            </div>
-
-            <div class="glpiinv-status-box mt-4">
-              <div><b>Última prueba:</b> {{ cfg.ultima_prueba or '—' }}</div>
-              <div><b>Última sincronización:</b> {{ cfg.ultimo_sync or '—' }}</div>
-              <div><b>Estado:</b> {{ cfg.ultimo_estado or '—' }}</div>
-              <div><b>Mensaje:</b> {{ cfg.ultimo_mensaje or '—' }}</div>
-            </div>
-
-            <div class="glpiinv-note mt-3">
-              <b>Nota:</b> la importación no diligencia valores por defecto de GRAC. Solo se guardan datos que existan en GLPI.
-              El campo <b>Asignado a</b> se toma del campo <b>name</b> de GLPI. <b>Procesador</b> se toma de <b>Arquitecturas</b>. <b>Tipo de sistema</b> se toma del <b>Nombre del Operating system</b>, <b>Versión SO</b> del <b>Kernel</b> y <b>Edición del SO</b> de <b>Edición</b>.
-            </div>
-
-            <div class="glpiinv-bottom-actions">
-              <button class="btn btn-success rounded-pill px-4 fw-bold" name="accion" value="guardar" type="submit">
-                💾 Guardar configuración
-              </button>
-              <button class="btn btn-primary rounded-pill px-4 fw-bold" name="accion" value="probar" type="submit">
-                🔌 Probar conexión
-              </button>
-            </div>
-
-          </form>
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .glpiinv-shell{
-        width:96%;
-        max-width:1500px;
-        margin:10px auto 24px auto;
-      }
-
-      .glpiinv-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        color:#fff;
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .glpiinv-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .glpiinv-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        position:relative;
-        z-index:1;
-      }
-
-      .glpiinv-header-overlay::before{
-        content:"🔌";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#fff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .glpiinv-header-text::before{
-        content:"SGSI · GLPI Inventario Físico";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-      }
-
-      .glpiinv-title{
-        color:#fff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        margin:0 !important;
-      }
-
-      .glpiinv-subtitle{
-        color:rgba(248,252,255,.96);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .glpiinv-header-actions,
-      .glpiinv-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 12px;
-      }
-
-      .glpiinv-header-actions .btn,
-      .glpiinv-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.14);
-      }
-
-      .glpiinv-back-btn{
-        background:#fff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .glpiinv-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .glpiinv-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        overflow:hidden;
-        border:1px solid rgba(219,230,244,.9);
-      }
-
-      .glpiinv-card-body{
-        padding:16px 18px;
-      }
-
-      .glpiinv-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        font-size:.78rem;
-      }
-
-      .glpiinv-card .form-control,
-      .glpiinv-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .glpiinv-status-box,
-      .glpiinv-note{
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        padding:12px 14px;
-        background:#f8fbff;
-        font-size:.82rem;
-        color:#24324a;
-      }
-    </style>
-    """
-
-    inner = render_template_string(html, cfg=cfg)
-    return render_template_string(BASE, content=Markup(inner))
-
-
-# =========================
-# RUTA — Sincronizar GLPI → Inventario Físico
-# =========================
-@app.route('/inventario_fisico/glpi/sync', methods=['POST'])
-@login_required
-def inventario_fisico_glpi_sync():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor' or (
-        user.role != 'admin'
-        and not verificar_permiso(user, "Gestión de Activos de Información")
-    ):
-        flash("No tiene permiso para sincronizar GLPI.", "danger")
-        return redirect(url_for('inventario_fisico'))
-
-    try:
-        resumen = glpi_invfis_sincronizar()
-
-        msg = (
-            f"Sincronización GLPI finalizada. "
-            f"Creados: {resumen['creados']}, "
-            f"Actualizados: {resumen['actualizados']}, "
-            f"Omitidos: {resumen['omitidos']}."
-        )
-
-        errores = resumen.get("errores") or []
-        if errores:
-            msg += " Detalle: " + " | ".join(errores[:10])
-
-        flash(msg, "success" if resumen["omitidos"] == 0 else "warning")
-
-    except Exception as e:
-        print("ERROR GLPI Inventario Físico:", traceback.format_exc())
-        flash(f"Error sincronizando con GLPI: {str(e)}", "danger")
-
-    return redirect(url_for('inventario_fisico'))
-
-
-@app.route('/inventario_fisico_menu', methods=['GET'])
-@login_required
-def inventario_fisico_menu():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role not in ('admin', 'auditor') and not verificar_permiso(
-        user, "Gestión de Activos de Información"
-    ):
-        flash("No tiene permiso para acceder al módulo de inventarios físico.", "danger")
-        return redirect(url_for('activos_menu'))
-
-    return redirect(url_for('inventario_fisico'))
-
-# =========================
-# AGREGAR — Inventario Físico
-# =========================
-@app.route('/inventario_fisico/new', methods=['GET', 'POST'])
-@login_required
-def inventario_fisico_new():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede agregar registros.", "danger")
-        return redirect(url_for('inventario_fisico'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
-        flash("No tiene permiso para agregar registros de activos.", "danger")
-        return redirect(url_for('inventario_fisico'))
-    
-    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
-    paises = sorted([c.name for c in pycountry.countries])
-
-    conf_opts = ValoracionConfidencialidad.query.order_by(ValoracionConfidencialidad.nivel_num.asc()).all()
-    inte_opts = ValoracionIntegridad.query.order_by(ValoracionIntegridad.nivel_num.asc()).all()
-    disp_opts = ValoracionDisponibilidad.query.order_by(ValoracionDisponibilidad.nivel_num.asc()).all()
-
-    if request.method == 'POST':
-        area_id = request.form.get('area_id', type=int)
-        division = (request.form.get('division') or '').strip()
-
-        asignado_a = (request.form.get('asignado_a') or '').strip()
-        cargo      = (request.form.get('cargo') or '').strip()
-        ciudad     = (request.form.get('ciudad') or '').strip()
-
-        clase_activo = (request.form.get('clase_activo') or '').strip()
-        marca        = (request.form.get('marca') or '').strip()
-
-        mouse         = request.form.get('mouse') or 'No'
-        teclado       = request.form.get('teclado') or 'No'
-        base_portatil = request.form.get('base_portatil') or 'No'
-        monitor       = request.form.get('monitor') or 'No'
-
-        numero_serial      = (request.form.get('numero_serial') or '').strip()
-        nombre_dispositivo = (request.form.get('nombre_dispositivo') or '').strip()
-        procesador         = (request.form.get('procesador') or '').strip()
-        ram_instalada      = (request.form.get('ram_instalada') or '').strip()
-        id_dispositivo     = (request.form.get('id_dispositivo') or '').strip()
-        id_producto        = (request.form.get('id_producto') or '').strip()
-        tipo_sistema       = (request.form.get('tipo_sistema') or '').strip()
-        edicion_so         = (request.form.get('edicion_so') or '').strip()
-        version_so         = (request.form.get('version_so') or '').strip()
-        pais               = (request.form.get('pais') or '').strip()
-
-        from datetime import datetime
-        fecha_compra_str     = (request.form.get('fecha_compra') or '').strip()
-        fecha_asignacion_str = (request.form.get('fecha_asignacion') or '').strip()
-
-        fecha_compra = None
-        fecha_asignacion = None
-        try:
-            fecha_compra = datetime.strptime(fecha_compra_str, '%Y-%m-%d').date() if fecha_compra_str else None
-            fecha_asignacion = datetime.strptime(fecha_asignacion_str, '%Y-%m-%d').date() if fecha_asignacion_str else None
-        except ValueError:
-            flash("Formato de fecha inválido.", "danger")
-            return redirect(url_for('inventario_fisico_new'))
-
-        try:
-            c_nivel = int(request.form.get('c_nivel') or 0)
-            i_nivel = int(request.form.get('i_nivel') or 0)
-            d_nivel = int(request.form.get('d_nivel') or 0)
-        except ValueError:
-            c_nivel = i_nivel = d_nivel = 0
-
-        info_personal          = request.form.get('info_personal') or 'No'
-        info_regulada          = request.form.get('info_regulada') or 'No'
-        info_sensible          = request.form.get('info_sensible') or 'No'
-        info_sensible_clientes = request.form.get('info_sensible_clientes') or 'No'
-
-        observaciones = (request.form.get('observaciones') or '').strip()
-
-        if not (area_id and division and clase_activo and nombre_dispositivo):
-            flash("Campos obligatorios: Área, División, Clase de activo y Nombre del dispositivo.", "danger")
-            return redirect(url_for('inventario_fisico_new'))
-
-        for n in (c_nivel, i_nivel, d_nivel):
-            if n < 1 or n > 5:
-                flash("Los niveles C/I/D deben estar entre 1 y 5.", "danger")
-                return redirect(url_for('inventario_fisico_new'))
-
-        valor_activo = round((c_nivel + i_nivel + d_nivel) / 3)
-
-        conf_row = ValoracionConfidencialidad.query.filter_by(nivel_num=c_nivel).first()
-        etiqueta_conf_num = c_nivel
-        etiqueta_conf_texto = conf_row.clasificacion if conf_row else f"Nivel {c_nivel}"
-
-        crit_row = ValoracionCriticidadActivo.query.filter_by(nivel_num=valor_activo).first()
-        criticidad_num = valor_activo
-        criticidad_texto = crit_row.nivel_texto if crit_row else f"Nivel {valor_activo}"
-
-        it = InventarioFisico(
-            area_id=area_id,
-            division=division,
-            asignado_a=asignado_a,
-            cargo=cargo,
-            ciudad=ciudad,
-            clase_activo=clase_activo,
-            marca=marca,
-            mouse=mouse,
-            teclado=teclado,
-            base_portatil=base_portatil,
-            monitor=monitor,
-            numero_serial=numero_serial,
-            nombre_dispositivo=nombre_dispositivo,
-            procesador=procesador,
-            ram_instalada=ram_instalada,
-            id_dispositivo=id_dispositivo,
-            id_producto=id_producto,
-            tipo_sistema=tipo_sistema,
-            edicion_so=edicion_so,
-            version_so=version_so,
-            pais=pais,
-            fecha_compra=fecha_compra,
-            fecha_asignacion=fecha_asignacion,
-            c_nivel=c_nivel,
-            i_nivel=i_nivel,
-            d_nivel=d_nivel,
-            valor_activo=valor_activo,
-            criticidad_num=criticidad_num,
-            criticidad_texto=criticidad_texto,
-            etiqueta_conf_num=etiqueta_conf_num,
-            etiqueta_conf_texto=etiqueta_conf_texto,
-            info_personal=info_personal,
-            info_regulada=info_regulada,
-            info_sensible=info_sensible,
-            info_sensible_clientes=info_sensible_clientes,
-            observaciones=observaciones
-        )
-        db.session.add(it)
-        db.session.commit()
-        flash("Activo físico creado.", "success")
-        return redirect(url_for('inventario_fisico'))
-
-    html = """
-    <div class="invfis-shell">
-
-      <div class="invfis-header-card">
-        <div class="invfis-header-overlay">
-          <div class="invfis-header-text">
-            <h3 class="invfis-title m-0">Agregar — Inventario Físico</h3>
-            <div class="invfis-subtitle">
-              Registro y clasificación de activos físicos del Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="invfis-header-actions">
-        <a href="{{ url_for('inventario_fisico') }}"
-           class="btn rounded-pill px-4 fw-bold invfis-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-      </div>
-
-      <div class="invfis-card">
-        <div class="invfis-card-body">
-          <form method="post">
-            <div class="row g-3">
-
-              <div class="col-md-3">
-                <label class="form-label">Área</label>
-                <select name="area_id" id="fisArea" class="form-select" required>
-                  <option value="">-- Seleccione --</option>
-                  {% for a in areas %}
-                    <option value="{{ a.id }}">{{ a.area }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">División</label>
-                <select name="division" id="fisDivision" class="form-select" required>
-                  <option value="">-- Seleccione --</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Asignado a</label>
-                <input type="text" name="asignado_a" class="form-control">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Cargo</label>
-                <input type="text" name="cargo" class="form-control">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">País</label>
-                <select name="pais" class="form-select">
-                  <option value="">-- Seleccione --</option>
-                  {% for p in paises %}
-                    <option value="{{ p }}">{{ p }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Ciudad</label>
-                <input type="text" name="ciudad" class="form-control">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Clase de activo</label>
-                <select name="clase_activo" class="form-select" required>
-                  {% for opt in ['Laptop','Servidor','Equipo de comunicación','Desktop'] %}
-                    <option value="{{ opt }}">{{ opt }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Marca</label>
-                <input type="text" name="marca" class="form-control">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Mouse</label>
-                <select name="mouse" class="form-select">
-                  <option>Sí</option>
-                  <option>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Teclado</label>
-                <select name="teclado" class="form-select">
-                  <option>Sí</option>
-                  <option>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Base Portátil</label>
-                <select name="base_portatil" class="form-select">
-                  <option>Sí</option>
-                  <option>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Monitor</label>
-                <select name="monitor" class="form-select">
-                  <option>Sí</option>
-                  <option>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Número de serial</label>
-                <input type="text" name="numero_serial" class="form-control">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Nombre del dispositivo</label>
-                <input type="text" name="nombre_dispositivo" class="form-control" required>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Procesador</label>
-                <input type="text" name="procesador" class="form-control">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">RAM instalada</label>
-                <input type="text" name="ram_instalada" class="form-control">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Id. del dispositivo</label>
-                <input type="text" name="id_dispositivo" class="form-control">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Id. del producto</label>
-                <input type="text" name="id_producto" class="form-control">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Tipo de sistema operativo</label>
-                <input type="text" name="tipo_sistema" class="form-control">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Edición del SO</label>
-                <input type="text" name="edicion_so" class="form-control">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Versión</label>
-                <input type="text" name="version_so" class="form-control">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Fecha de compra</label>
-                <input type="date" name="fecha_compra" class="form-control">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Fecha de asignación del equipo</label>
-                <input type="date" name="fecha_asignacion" class="form-control">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Clasificación Confidencialidad</label>
-                <select name="c_nivel" class="form-select">
-                  {% for o in conf_opts %}
-                    <option value="{{ o.nivel_num }}">{{ o.nivel_num }} — {{ o.clasificacion }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Clasificación Integridad</label>
-                <select name="i_nivel" class="form-select">
-                  {% for o in inte_opts %}
-                    <option value="{{ o.nivel_num }}">{{ o.nivel_num }} — {{ o.nivel }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Clasificación Disponibilidad</label>
-                <select name="d_nivel" class="form-select">
-                  {% for o in disp_opts %}
-                    <option value="{{ o.nivel_num }}">{{ o.nivel_num }} — {{ o.nivel }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">¿Es Información Personal?</label>
-                <select name="info_personal" class="form-select">
-                  <option>Sí</option>
-                  <option>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">¿Es información regulada por una legislación?</label>
-                <select name="info_regulada" class="form-select">
-                  <option>Sí</option>
-                  <option>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">¿Es información sensible de la Compañía?</label>
-                <select name="info_sensible" class="form-select">
-                  <option>Sí</option>
-                  <option>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">¿Es información sensible de Clientes?</label>
-                <select name="info_sensible_clientes" class="form-select">
-                  <option>Sí</option>
-                  <option>No</option>
-                </select>
-              </div>
-
-              <div class="col-12">
-                <label class="form-label">Observaciones</label>
-                <textarea name="observaciones" class="form-control" rows="2"></textarea>
-              </div>
-
-            </div>
-
-            <div class="invfis-bottom-actions">
-              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
-                Guardar
-              </button>
-              <a href="{{ url_for('inventario_fisico') }}"
-                 class="btn rounded-pill px-4 fw-bold invfis-cancel-btn">
-                Cancelar
-              </a>
-            </div>
-
-          </form>
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .invfis-shell{
-        width:96%;
-        max-width:1550px;
-        margin:10px auto 24px auto;
-      }
-
-      .invfis-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .invfis-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .invfis-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent;
-        padding:0;
-        position:relative;
-        z-index:1;
-      }
-
-      .invfis-header-overlay::before{
-        content:"🏢";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .invfis-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .invfis-header-text::before{
-        content:"SGSI · Inventario Físico";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .invfis-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .invfis-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .invfis-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .invfis-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invfis-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invfis-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .invfis-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .invfis-card-body{
-        padding:18px;
-      }
-
-      .invfis-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .invfis-card .form-control,
-      .invfis-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .invfis-card textarea.form-control{
-        min-height:70px;
-        resize:vertical;
-      }
-
-      .invfis-card .form-control:focus,
-      .invfis-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#fff;
-      }
-
-      .invfis-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:18px;
-        flex-wrap:wrap;
-      }
-
-      .invfis-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invfis-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invfis-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      @media (max-width:992px){
-        .invfis-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .invfis-header-card{
-          min-height:88px;
-        }
-
-        .invfis-title{
-          font-size:1.20rem;
-        }
-
-        .invfis-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .invfis-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .invfis-header-overlay::before{
-          margin:0;
-        }
-
-        .invfis-header-actions .btn,
-        .invfis-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(
-        html,
-        areas=areas,
-        paises=paises,
-        conf_opts=conf_opts,
-        inte_opts=inte_opts,
-        disp_opts=disp_opts
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-# =========================
-# EDICIÓN — Inventario Físico
-# =========================
-@app.route('/inventario_fisico/edit/<int:id>', methods=['GET', 'POST'])
-@login_required
-def inventario_fisico_edit(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor' or (
-        user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información")
-    ):
-        flash("No tiene permiso para editar registros de activos físicos.", "danger")
-        return redirect(url_for('inventario_fisico'))
-    
-    item = InventarioFisico.query.get_or_404(id)
-
-    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
-    paises = sorted([c.name for c in pycountry.countries])
-    divisiones = DivisionEmpresa.query.order_by(
-        DivisionEmpresa.area_id.asc(),
-        DivisionEmpresa.nombre_division.asc()
-    ).all()
-
-    div_map = {}
-    for d in divisiones:
-        div_map.setdefault(d.area_id, []).append(d.nombre_division)
-
-    conf_opts = ValoracionConfidencialidad.query.order_by(ValoracionConfidencialidad.nivel_num.asc()).all()
-    inte_opts = ValoracionIntegridad.query.order_by(ValoracionIntegridad.nivel_num.asc()).all()
-    disp_opts = ValoracionDisponibilidad.query.order_by(ValoracionDisponibilidad.nivel_num.asc()).all()
-
-    if request.method == 'POST':
-        item.area_id = request.form.get('area_id', type=int)
-        item.division = (request.form.get('division') or '').strip()
-
-        item.asignado_a = (request.form.get('asignado_a') or '').strip()
-        item.cargo      = (request.form.get('cargo') or '').strip()
-        item.ciudad     = (request.form.get('ciudad') or '').strip()
-
-        item.clase_activo = (request.form.get('clase_activo') or '').strip()
-        item.marca        = (request.form.get('marca') or '').strip()
-
-        item.mouse         = request.form.get('mouse') or 'No'
-        item.teclado       = request.form.get('teclado') or 'No'
-        item.base_portatil = request.form.get('base_portatil') or 'No'
-        item.monitor       = request.form.get('monitor') or 'No'
-
-        item.numero_serial      = (request.form.get('numero_serial') or '').strip()
-        item.nombre_dispositivo = (request.form.get('nombre_dispositivo') or '').strip()
-        item.procesador         = (request.form.get('procesador') or '').strip()
-        item.ram_instalada      = (request.form.get('ram_instalada') or '').strip()
-        item.id_dispositivo     = (request.form.get('id_dispositivo') or '').strip()
-        item.id_producto        = (request.form.get('id_producto') or '').strip()
-        item.tipo_sistema       = (request.form.get('tipo_sistema') or '').strip()
-        item.edicion_so         = (request.form.get('edicion_so') or '').strip()
-        item.version_so         = (request.form.get('version_so') or '').strip()
-        item.pais               = (request.form.get('pais') or '').strip()
-
-        from datetime import datetime
-        fecha_compra_str     = (request.form.get('fecha_compra') or '').strip()
-        fecha_asignacion_str = (request.form.get('fecha_asignacion') or '').strip()
-
-        try:
-            item.fecha_compra = datetime.strptime(fecha_compra_str, '%Y-%m-%d').date() if fecha_compra_str else None
-            item.fecha_asignacion = datetime.strptime(fecha_asignacion_str, '%Y-%m-%d').date() if fecha_asignacion_str else None
-        except ValueError:
-            flash("Formato de fecha inválido.", "danger")
-            return redirect(url_for('inventario_fisico_edit', id=item.id))
-
-        try:
-            item.c_nivel = int(request.form.get('c_nivel') or 0)
-            item.i_nivel = int(request.form.get('i_nivel') or 0)
-            item.d_nivel = int(request.form.get('d_nivel') or 0)
-        except ValueError:
-            item.c_nivel = item.i_nivel = item.d_nivel = 0
-
-        item.info_personal          = request.form.get('info_personal') or 'No'
-        item.info_regulada          = request.form.get('info_regulada') or 'No'
-        item.info_sensible          = request.form.get('info_sensible') or 'No'
-        item.info_sensible_clientes = request.form.get('info_sensible_clientes') or 'No'
-        item.observaciones          = (request.form.get('observaciones') or '').strip()
-
-        if not (item.area_id and item.division and item.clase_activo and item.nombre_dispositivo):
-            flash("Campos obligatorios: Área, División, Clase de activo y Nombre del dispositivo.", "danger")
-            return redirect(url_for('inventario_fisico_edit', id=item.id))
-
-        for n in (item.c_nivel, item.i_nivel, item.d_nivel):
-            if n < 1 or n > 5:
-                flash("Los niveles C/I/D deben estar entre 1 y 5.", "danger")
-                return redirect(url_for('inventario_fisico_edit', id=item.id))
-
-        item.valor_activo = round((item.c_nivel + item.i_nivel + item.d_nivel) / 3)
-
-        conf_row = ValoracionConfidencialidad.query.filter_by(nivel_num=item.c_nivel).first()
-        item.etiqueta_conf_num = item.c_nivel
-        item.etiqueta_conf_texto = conf_row.clasificacion if conf_row else f"Nivel {item.c_nivel}"
-
-        crit_row = ValoracionCriticidadActivo.query.filter_by(nivel_num=item.valor_activo).first()
-        item.criticidad_num = item.valor_activo
-        item.criticidad_texto = crit_row.nivel_texto if crit_row else f"Nivel {item.valor_activo}"
-
-        db.session.add(item)
-        db.session.commit()
-        flash("Cambios guardados.", "success")
-        return redirect(url_for('inventario_fisico'))
-
-    html = """
-    <div class="invfisedit-shell">
-
-      <div class="invfisedit-header-card">
-        <div class="invfisedit-header-overlay">
-          <div class="invfisedit-header-text">
-            <h3 class="invfisedit-title m-0">Editar — Inventario Físico</h3>
-            <div class="invfisedit-subtitle">
-              Actualización de activos físicos del Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="invfisedit-header-actions">
-        <a href="{{ url_for('inventario_fisico') }}"
-           class="btn rounded-pill px-4 fw-bold invfisedit-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-
-      </div>
-
-      <div class="invfisedit-card">
-        <div class="invfisedit-card-body">
-          <form method="post">
-            <div class="row g-3">
-
-              <div class="col-md-3">
-                <label class="form-label">Área</label>
-                <select name="area_id" id="fisAreaEdit" class="form-select" required>
-                  <option value="">-- Seleccione --</option>
-                  {% for a in areas %}
-                    <option value="{{ a.id }}" {% if item.area_id == a.id %}selected{% endif %}>
-                      {{ a.area }}
-                    </option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">División</label>
-                <select name="division" id="fisDivisionEdit" class="form-select" required>
-                  <option value="">-- Seleccione --</option>
-                  {% if item.division %}
-                    <option value="{{ item.division }}" selected>{{ item.division }}</option>
-                  {% endif %}
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Asignado a</label>
-                <input type="text" name="asignado_a" class="form-control" value="{{ item.asignado_a or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Cargo</label>
-                <input type="text" name="cargo" class="form-control" value="{{ item.cargo or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">País</label>
-                <select name="pais" class="form-select">
-                  <option value="">-- Seleccione --</option>
-                  {% for p in paises %}
-                    <option value="{{ p }}" {% if item.pais == p %}selected{% endif %}>{{ p }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Ciudad</label>
-                <input type="text" name="ciudad" class="form-control" value="{{ item.ciudad or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Clase de activo</label>
-                <select name="clase_activo" class="form-select" required>
-                  {% for opt in ['Laptop','Servidor','Equipo de comunicación','Desktop'] %}
-                    <option value="{{ opt }}" {% if item.clase_activo == opt %}selected{% endif %}>{{ opt }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Marca</label>
-                <input type="text" name="marca" class="form-control" value="{{ item.marca or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Mouse</label>
-                <select name="mouse" class="form-select">
-                  <option value="Sí" {% if item.mouse == 'Sí' %}selected{% endif %}>Sí</option>
-                  <option value="No" {% if item.mouse == 'No' %}selected{% endif %}>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Teclado</label>
-                <select name="teclado" class="form-select">
-                  <option value="Sí" {% if item.teclado == 'Sí' %}selected{% endif %}>Sí</option>
-                  <option value="No" {% if item.teclado == 'No' %}selected{% endif %}>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Base Portátil</label>
-                <select name="base_portatil" class="form-select">
-                  <option value="Sí" {% if item.base_portatil == 'Sí' %}selected{% endif %}>Sí</option>
-                  <option value="No" {% if item.base_portatil == 'No' %}selected{% endif %}>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Monitor</label>
-                <select name="monitor" class="form-select">
-                  <option value="Sí" {% if item.monitor == 'Sí' %}selected{% endif %}>Sí</option>
-                  <option value="No" {% if item.monitor == 'No' %}selected{% endif %}>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Número de serial</label>
-                <input type="text" name="numero_serial" class="form-control" value="{{ item.numero_serial or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Nombre del dispositivo</label>
-                <input type="text" name="nombre_dispositivo" class="form-control" value="{{ item.nombre_dispositivo or '' }}" required>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Procesador</label>
-                <input type="text" name="procesador" class="form-control" value="{{ item.procesador or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">RAM instalada</label>
-                <input type="text" name="ram_instalada" class="form-control" value="{{ item.ram_instalada or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Id. del dispositivo</label>
-                <input type="text" name="id_dispositivo" class="form-control" value="{{ item.id_dispositivo or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Id. del producto</label>
-                <input type="text" name="id_producto" class="form-control" value="{{ item.id_producto or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Tipo de sistema operativo</label>
-                <input type="text" name="tipo_sistema" class="form-control" value="{{ item.tipo_sistema or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Edición del SO</label>
-                <input type="text" name="edicion_so" class="form-control" value="{{ item.edicion_so or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Versión</label>
-                <input type="text" name="version_so" class="form-control" value="{{ item.version_so or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Fecha de compra</label>
-                <input type="date" name="fecha_compra" class="form-control"
-                       value="{{ item.fecha_compra.strftime('%Y-%m-%d') if item.fecha_compra else '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Fecha de asignación del equipo</label>
-                <input type="date" name="fecha_asignacion" class="form-control"
-                       value="{{ item.fecha_asignacion.strftime('%Y-%m-%d') if item.fecha_asignacion else '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Clasificación Confidencialidad</label>
-                <select name="c_nivel" class="form-select">
-                  {% for o in conf_opts %}
-                    <option value="{{ o.nivel_num }}" {% if item.c_nivel == o.nivel_num %}selected{% endif %}>{{ o.nivel_num }} — {{ o.clasificacion }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Clasificación Integridad</label>
-                <select name="i_nivel" class="form-select">
-                  {% for o in inte_opts %}
-                    <option value="{{ o.nivel_num }}" {% if item.i_nivel == o.nivel_num %}selected{% endif %}>{{ o.nivel_num }} — {{ o.nivel }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Clasificación Disponibilidad</label>
-                <select name="d_nivel" class="form-select">
-                  {% for o in disp_opts %}
-                    <option value="{{ o.nivel_num }}" {% if item.d_nivel == o.nivel_num %}selected{% endif %}>{{ o.nivel_num }} — {{ o.nivel }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">¿Es Información Personal?</label>
-                <select name="info_personal" class="form-select">
-                  <option value="Sí" {% if item.info_personal == 'Sí' %}selected{% endif %}>Sí</option>
-                  <option value="No" {% if item.info_personal == 'No' %}selected{% endif %}>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">¿Es información regulada por una legislación?</label>
-                <select name="info_regulada" class="form-select">
-                  <option value="Sí" {% if item.info_regulada == 'Sí' %}selected{% endif %}>Sí</option>
-                  <option value="No" {% if item.info_regulada == 'No' %}selected{% endif %}>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">¿Es información sensible de la Compañía?</label>
-                <select name="info_sensible" class="form-select">
-                  <option value="Sí" {% if item.info_sensible == 'Sí' %}selected{% endif %}>Sí</option>
-                  <option value="No" {% if item.info_sensible == 'No' %}selected{% endif %}>No</option>
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">¿Es información sensible de Clientes?</label>
-                <select name="info_sensible_clientes" class="form-select">
-                  <option value="Sí" {% if item.info_sensible_clientes == 'Sí' %}selected{% endif %}>Sí</option>
-                  <option value="No" {% if item.info_sensible_clientes == 'No' %}selected{% endif %}>No</option>
-                </select>
-              </div>
-
-              <div class="col-12">
-                <label class="form-label">Observaciones</label>
-                <textarea name="observaciones" class="form-control" rows="2">{{ item.observaciones or '' }}</textarea>
-              </div>
-
-            </div>
-
-            <div class="invfisedit-bottom-actions">
-              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
-                Guardar cambios
-              </button>
-              <a href="{{ url_for('inventario_fisico') }}"
-                 class="btn rounded-pill px-4 fw-bold invfisedit-cancel-btn">
-                Cancelar
-              </a>
-            </div>
-
-          </form>
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      /* =========================
-         CONTENEDOR
-         ========================= */
-      .invfisedit-shell{
-        width:96%;
-        max-width:1450px;
-        margin:10px auto 24px auto;
-      }
-
-      /* =========================
-         HEADER SGSI PRO
-         ========================= */
-      .invfisedit-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .invfisedit-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .invfisedit-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-      }
-
-      .invfisedit-header-overlay::before{
-        content:"🏢";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .invfisedit-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .invfisedit-header-text::before{
-        content:"SGSI · Inventario Físico";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .invfisedit-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .invfisedit-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      /* =========================
-         BOTONES SUPERIORES
-         ========================= */
-      .invfisedit-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .invfisedit-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invfisedit-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invfisedit-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      /* =========================
-         CARD
-         ========================= */
-      .invfisedit-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .invfisedit-card-body{
-        padding:18px;
-      }
-
-      /* =========================
-         FORMULARIOS (COMPACTOS PRO)
-         ========================= */
-      .invfisedit-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .invfisedit-card .form-control,
-      .invfisedit-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .invfisedit-card textarea.form-control{
-        min-height:70px;
-        resize:vertical;
-      }
-
-      .invfisedit-card .form-control:focus,
-      .invfisedit-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#fff;
-      }
-
-      /* =========================
-         BOTONES INFERIORES
-         ========================= */
-      .invfisedit-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:18px;
-        flex-wrap:wrap;
-      }
-
-      .invfisedit-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invfisedit-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invfisedit-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      /* =========================
-         RESPONSIVE
-         ========================= */
-      @media (max-width:992px){
-        .invfisedit-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .invfisedit-title{
-          font-size:1.20rem;
-        }
-
-        .invfisedit-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .invfisedit-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .invfisedit-header-overlay::before{
-          margin:0;
-        }
-
-        .invfisedit-header-actions .btn,
-        .invfisedit-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(
-        html,
-        item=item,
-        areas=areas,
-        div_map=div_map,
-        paises=paises,
-        conf_opts=conf_opts,
-        inte_opts=inte_opts,
-        disp_opts=disp_opts
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-# =========================
-# MATRIZ — Inventario Físico
-# =========================
-@app.route('/inventario_fisico', methods=['GET'])
-@login_required
-def inventario_fisico():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        read_only = True
-    else:
-        if user.role != 'admin' and not verificar_permiso_activos(user, "Inventario Físico"):
-            flash("No tiene permiso para ver los activos físicos.", "danger")
-            return redirect(url_for('menu'))
-        read_only = False
-
-    items = (
-        InventarioFisico.query
-        .options(selectinload(InventarioFisico.area))
-        .order_by(InventarioFisico.id.desc())
-        .all()
-    )
-
-    cfg_glpi = _glpi_invfis_config_activa()
-
-    matriz_items = []
-
-    for item in items:
-        conf_row = ValoracionConfidencialidad.query.filter_by(nivel_num=item.c_nivel).first() if item.c_nivel is not None else None
-        inte_row = ValoracionIntegridad.query.filter_by(nivel_num=item.i_nivel).first() if item.i_nivel is not None else None
-        disp_row = ValoracionDisponibilidad.query.filter_by(nivel_num=item.d_nivel).first() if item.d_nivel is not None else None
-        valor_row = ValoracionCriticidadActivo.query.filter_by(nivel_num=item.valor_activo).first() if item.valor_activo is not None else None
-
-        conf_texto = conf_row.clasificacion if conf_row and getattr(conf_row, 'clasificacion', None) else (item.etiqueta_conf_texto or (f"Nivel {item.c_nivel}" if item.c_nivel is not None else "—"))
-        inte_texto = inte_row.nivel if inte_row and getattr(inte_row, 'nivel', None) else (f"Nivel {item.i_nivel}" if item.i_nivel is not None else "—")
-        disp_texto = disp_row.nivel if disp_row and getattr(disp_row, 'nivel', None) else (f"Nivel {item.d_nivel}" if item.d_nivel is not None else "—")
-        valor_texto = valor_row.nivel_texto if valor_row and getattr(valor_row, 'nivel_texto', None) else (f"Nivel {item.valor_activo}" if item.valor_activo is not None else "—")
-        criticidad_texto = item.criticidad_texto or (f"Nivel {item.criticidad_num}" if item.criticidad_num is not None else "—")
-        etiquetado_texto = item.etiqueta_conf_texto or (
-            conf_row.clasificacion if conf_row and getattr(conf_row, 'clasificacion', None)
-            else (f"Nivel {item.etiqueta_conf_num}" if item.etiqueta_conf_num is not None else "—")
-        )
-
-        matriz_items.append({
-            "item": item,
-            "conf_texto": conf_texto,
-            "inte_texto": inte_texto,
-            "disp_texto": disp_texto,
-            "valor_texto": valor_texto,
-            "criticidad_texto": criticidad_texto,
-            "etiquetado_texto": etiquetado_texto,
-        })
-
-    html = """
-    <div class="invfismat-shell">
-
-      <div class="invfismat-header-card">
-        <div class="invfismat-header-overlay">
-          <div class="invfismat-header-text">
-            <h3 class="invfismat-title m-0">Inventario Físico — Matriz</h3>
-            <div class="invfismat-subtitle">
-              Visualización resumida de activos físicos del Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="invfismat-header-actions">
-        {% if not read_only %}
-          <a href="{{ url_for('inventario_fisico_new') }}"
-             class="btn btn-primary rounded-pill px-4 fw-bold">
-            ➕ Agregar Activo
-          </a>
-
-          <a href="{{ url_for('inventario_fisico_glpi_config') }}"
-             class="btn rounded-pill px-4 fw-bold invfismat-btn-config-glpi">
-            ⚙️ Configurar GLPI
-          </a>
-
-          <form method="post"
-                action="{{ url_for('inventario_fisico_glpi_sync') }}"
-                class="d-inline"
-                onsubmit="return confirm('¿Desea sincronizar los equipos de GLPI con la matriz de inventario físico?');">
-            <button type="submit"
-                    class="btn rounded-pill px-4 fw-bold invfismat-btn-glpi">
-              🔌 Sincronizar GLPI
-            </button>
-          </form>
-        {% else %}
-          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
-            ➕ Agregar Activo
-          </button>
-          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
-            🔌 Sincronizar GLPI
-          </button>
-        {% endif %}
-      </div>
-
-      {% if cfg_glpi %}
-        <div class="invfismat-glpi-status">
-          <b>GLPI:</b> {{ cfg_glpi.base_url or 'Sin URL' }}
-          <span class="mx-2">|</span>
-          <b>Último sync:</b> {{ cfg_glpi.ultimo_sync or '—' }}
-          <span class="mx-2">|</span>
-          <b>Estado:</b> {{ cfg_glpi.ultimo_estado or '—' }}
-          {% if cfg_glpi.ultimo_mensaje %}
-            <span class="mx-2">|</span>
-            {{ cfg_glpi.ultimo_mensaje }}
-          {% endif %}
-        </div>
-      {% else %}
-        <div class="invfismat-glpi-status">
-          <b>GLPI:</b> no configurado. Use el botón <b>Configurar GLPI</b>.
-        </div>
-      {% endif %}
-
-      <style>
-        .badge-n1 { background:#2ecc71; color:#fff; }
-        .badge-n2 { background:#f1c40f; color:#111; }
-        .badge-n3 { background:#e67e22; color:#fff; }
-        .badge-n4 { background:#e74c3c; color:#fff; }
-        .badge-n5 { background:#8e44ad; color:#fff; }
-      </style>
-
-      <div class="invfismat-card">
-        <div class="invfismat-topbar">
-          <div>
-            <h5 class="invfismat-top-title mb-1">Resumen de activos físicos</h5>
-            <div class="invfismat-top-note">
-              La matriz muestra los niveles de valoración en texto. Para consultar toda la información utilice el botón <strong>Ver detalle</strong>.
-            </div>
-          </div>
-
-          <div class="invfismat-counter-badge">
-            Total registros: {{ matriz_items|length }}
-          </div>
-        </div>
-
-        <div class="invfismat-card-body">
-          <div class="invfismat-table-wrap">
-            <div class="table-responsive">
-              <table class="table table-bordered table-hover align-middle invfismat-table mb-0">
-
-                <colgroup>
-                  <col style="width: 10%;">
-                  <col style="width: 10%;">
-                  <col style="width: 13%;">
-                  <col style="width: 9%;">
-                  <col style="width: 9%;">
-                  <col style="width: 11%;">
-                  <col style="width: 11%;">
-                  <col style="width: 11%;">
-                  <col style="width: 11%;">
-                  <col style="width: 11%;">
-                  <col style="width: 12%;">
-                  <col style="width: 14%;">
-                </colgroup>
-
-                <thead>
-                  <tr>
-                    <th>Área</th>
-                    <th>División</th>
-                    <th>Nombre del dispositivo</th>
-                    <th>Clase</th>
-                    <th>Marca</th>
-                    <th>Confidencialidad</th>
-                    <th>Integridad</th>
-                    <th>Disponibilidad</th>
-                    <th>Valor</th>
-                    <th>Criticidad</th>
-                    <th>Etiquetado</th>
-                    <th class="invfismat-col-acciones">Acciones</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {% for row in matriz_items %}
-                    {% set item = row.item %}
-                    <tr>
-                      <td>{{ item.area.area if item.area else '—' }}</td>
-                      <td>{{ item.division or '—' }}</td>
-
-                      <td class="invfismat-cell-main">
-                        <div class="invfismat-main-text">{{ item.nombre_dispositivo or '—' }}</div>
-                      </td>
-
-                      <td>{{ item.clase_activo or '—' }}</td>
-                      <td>{{ item.marca or '—' }}</td>
-
-                      <td class="text-center">
-                        <span class="badge badge-n{{ item.c_nivel or 1 }} invfismat-badge-text">
-                          {{ row.conf_texto }}
-                        </span>
-                      </td>
-
-                      <td class="text-center">
-                        <span class="badge badge-n{{ item.i_nivel or 1 }} invfismat-badge-text">
-                          {{ row.inte_texto }}
-                        </span>
-                      </td>
-
-                      <td class="text-center">
-                        <span class="badge badge-n{{ item.d_nivel or 1 }} invfismat-badge-text">
-                          {{ row.disp_texto }}
-                        </span>
-                      </td>
-
-                      <td class="text-center">
-                        <span class="badge badge-n{{ item.valor_activo or 1 }} invfismat-badge-text">
-                          {{ row.valor_texto }}
-                        </span>
-                      </td>
-
-                      <td class="text-center">
-                        <span class="badge badge-n{{ item.criticidad_num or 1 }} invfismat-badge-text">
-                          {{ row.criticidad_texto }}
-                        </span>
-                      </td>
-
-                      <td class="text-center">
-                        <span class="badge badge-n{{ item.etiqueta_conf_num or 1 }} invfismat-badge-text">
-                          {{ row.etiquetado_texto }}
-                        </span>
-                      </td>
-
-                      <td class="text-center invfismat-col-acciones">
-                        <div class="invfismat-actions-wrap">
-
-                          <a href="{{ url_for('inventario_fisico_detalle', id=item.id) }}"
-                             class="btn btn-info btn-sm rounded-pill invfismat-btn-action text-white fw-bold">
-                            Ver detalle
-                          </a>
-
-                          {% if not read_only %}
-                            <a href="{{ url_for('inventario_fisico_edit', id=item.id) }}"
-                               class="btn btn-warning btn-sm rounded-pill invfismat-btn-action fw-bold">
-                              Editar
-                            </a>
-
-                            <a href="{{ url_for('inventario_fisico_delete', id=item.id) }}"
-                               class="btn btn-danger btn-sm rounded-pill invfismat-btn-action fw-bold"
-                               onclick="return confirm('¿Eliminar este activo físico?');">
-                              Eliminar
-                            </a>
-                          {% else %}
-                            <span class="badge bg-secondary">Solo lectura</span>
-                          {% endif %}
-
-                        </div>
-                      </td>
-                    </tr>
-                  {% endfor %}
-
-                  {% if matriz_items|length == 0 %}
-                    <tr>
-                      <td colspan="12" class="text-center text-muted py-5">
-                        Sin registros
-                      </td>
-                    </tr>
-                  {% endif %}
-                </tbody>
-
-              </table>
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .invfismat-shell{
-        width:96%;
-        max-width:1850px;
-        margin:10px auto 24px auto;
-      }
-
-      .invfismat-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .invfismat-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .invfismat-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent;
-        padding:0;
-        position:relative;
-        z-index:1;
-      }
-
-      .invfismat-header-overlay::before{
-        content:"🏢";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .invfismat-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .invfismat-header-text::before{
-        content:"SGSI · Matriz Inventario Físico";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .invfismat-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .invfismat-subtitle{
-        color:rgba(248,252,255,.96);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .invfismat-header-actions{
-        display:flex;
-        justify-content:center;
-        align-items:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 12px;
-      }
-
-      .invfismat-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.14);
-      }
-
-      .invfismat-btn-config-glpi{
-        background:#475569;
-        color:#fff;
-        border:1px solid #475569;
-      }
-
-      .invfismat-btn-config-glpi:hover{
-        background:#475569;
-        color:#fff;
-        border-color:#475569;
-      }
-
-      .invfismat-btn-glpi{
-        background:#0b65d8;
-        color:#fff;
-        border:1px solid #0b65d8;
-      }
-
-      .invfismat-btn-glpi:hover{
-        background:#084fa8;
-        color:#fff;
-        border-color:#084fa8;
-      }
-
-      .invfismat-glpi-status{
-        width:100%;
-        max-width:1850px;
-        margin:0 auto 12px auto;
-        background:rgba(255,255,255,.92);
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        padding:10px 14px;
-        box-shadow:0 8px 18px rgba(15,23,42,.12);
-        font-size:.80rem;
-        color:#25324a;
-        text-align:center;
-      }
-
-      .invfismat-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        overflow:hidden;
-        border:1px solid rgba(219,230,244,.9);
-      }
-
-      .invfismat-topbar{
-        padding:14px 18px;
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:14px;
-        background:linear-gradient(180deg,#ffffff 0%,#f5f9ff 100%);
-        border-bottom:1px solid #e2e8f0;
-      }
-
-      .invfismat-top-title{
-        font-weight:950;
-        color:#1e293b;
-        font-size:1rem;
-      }
-
-      .invfismat-top-note{
-        font-size:.78rem;
-        color:#475569;
-      }
-
-      .invfismat-counter-badge{
-        background:#0b4a8f;
-        color:#fff;
-        border-radius:999px;
-        padding:8px 14px;
-        font-weight:900;
-        font-size:.78rem;
-        white-space:nowrap;
-        box-shadow:0 8px 16px rgba(20,89,166,.22);
-      }
-
-      .invfismat-card-body{
-        padding:16px 18px;
-      }
-
-      .invfismat-table-wrap{
-        max-height:72vh;
-        overflow:auto;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:#fff;
-      }
-
-      .invfismat-table{
-        min-width:1450px;
-        table-layout:fixed;
-      }
-
-      .invfismat-table th,
-      .invfismat-table td{
-        font-size:.68rem;
-        padding:8px 7px;
-        vertical-align:middle;
-        word-break:break-word;
-      }
-
-      .invfismat-table thead th{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#fff !important;
-        font-weight:900;
-        text-align:center;
-      }
-
-      .invfismat-table tbody tr:nth-child(even){
-        background:#f8fbff;
-      }
-
-      .invfismat-table tbody tr:hover{
-        background:#eef6ff;
-      }
-
-      .invfismat-main-text{
-        font-weight:900;
-        color:#1e293b;
-      }
-
-      .invfismat-badge-text{
-        border-radius:999px;
-        padding:.42rem .58rem;
-        font-size:.68rem;
-        font-weight:900;
-        white-space:normal;
-        line-height:1.15;
-        display:inline-block;
-        min-width:80px;
-      }
-
-      .invfismat-col-acciones{
-        min-width:170px;
-      }
-
-      .invfismat-actions-wrap{
-        display:flex;
-        justify-content:center;
-        align-items:center;
-        gap:6px;
-        flex-wrap:wrap;
-      }
-
-      .invfismat-btn-action{
-        font-size:.64rem !important;
-        padding:5px 10px !important;
-        box-shadow:0 4px 10px rgba(0,0,0,.10);
-      }
-
-      @media (max-width:992px){
-        .invfismat-shell{
-          width:98%;
-        }
-
-        .invfismat-topbar{
-          flex-direction:column;
-          align-items:flex-start;
-        }
-      }
-
-      @media (max-width:768px){
-        .invfismat-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .invfismat-header-overlay::before{
-          margin:0;
-        }
-
-        .invfismat-header-actions .btn,
-        .invfismat-header-actions form{
-          width:100%;
-        }
-
-        .invfismat-header-actions form button{
-          width:100%;
-        }
-      }
-    </style>
-    """
-
-    inner = render_template_string(
-        html,
-        matriz_items=matriz_items,
-        read_only=read_only,
-        cfg_glpi=cfg_glpi,
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-# =========================
-# DETALLE — Inventario Físico
-# =========================
-@app.route('/inventario_fisico/detalle/<int:id>', methods=['GET'])
-@login_required
-def inventario_fisico_detalle(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role != 'auditor':
-        if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
-            flash("No tiene permiso para ver el detalle de activos físicos.", "danger")
-            return redirect(url_for('inventario_fisico'))
-
-    item = (
-        InventarioFisico.query
-        .options(selectinload(InventarioFisico.area))
-        .get_or_404(id)
-    )
-
-    conf_row = ValoracionConfidencialidad.query.filter_by(
-        nivel_num=item.c_nivel
-    ).first() if item.c_nivel is not None else None
-
-    inte_row = ValoracionIntegridad.query.filter_by(
-        nivel_num=item.i_nivel
-    ).first() if item.i_nivel is not None else None
-
-    disp_row = ValoracionDisponibilidad.query.filter_by(
-        nivel_num=item.d_nivel
-    ).first() if item.d_nivel is not None else None
-
-    valor_row = ValoracionCriticidadActivo.query.filter_by(
-        nivel_num=item.valor_activo
-    ).first() if item.valor_activo is not None else None
-
-    conf_texto = (
-        conf_row.clasificacion
-        if conf_row and getattr(conf_row, 'clasificacion', None)
-        else (item.etiqueta_conf_texto or (f"Nivel {item.c_nivel}" if item.c_nivel is not None else "—"))
-    )
-
-    inte_texto = (
-        inte_row.nivel
-        if inte_row and getattr(inte_row, 'nivel', None)
-        else (f"Nivel {item.i_nivel}" if item.i_nivel is not None else "—")
-    )
-
-    disp_texto = (
-        disp_row.nivel
-        if disp_row and getattr(disp_row, 'nivel', None)
-        else (f"Nivel {item.d_nivel}" if item.d_nivel is not None else "—")
-    )
-
-    valor_texto = (
-        valor_row.nivel_texto
-        if valor_row and getattr(valor_row, 'nivel_texto', None)
-        else (f"Nivel {item.valor_activo}" if item.valor_activo is not None else "—")
-    )
-
-    criticidad_texto = item.criticidad_texto or (
-        f"Nivel {item.criticidad_num}" if item.criticidad_num is not None else "—"
-    )
-
-    etiquetado_texto = item.etiqueta_conf_texto or (
-        conf_row.clasificacion if conf_row and getattr(conf_row, 'clasificacion', None)
-        else (f"Nivel {item.etiqueta_conf_num}" if item.etiqueta_conf_num is not None else "—")
-    )
-
-    def badge_class(n):
-        if n == 1:
-            return "badge-n1"
-        if n == 2:
-            return "badge-n2"
-        if n == 3:
-            return "badge-n3"
-        if n == 4:
-            return "badge-n4"
-        return "badge-n5"
-
-    conf_badge = badge_class(item.c_nivel or 1)
-    inte_badge = badge_class(item.i_nivel or 1)
-    disp_badge = badge_class(item.d_nivel or 1)
-    valor_badge = badge_class(item.valor_activo or 1)
-    criticidad_badge = badge_class(item.criticidad_num or 1)
-    etiquetado_badge = badge_class(item.etiqueta_conf_num or 1)
-
-    html = """
-    <div class="invfisdet-shell">
-
-      <div class="invfisdet-header-card">
-        <div class="invfisdet-header-overlay">
-          <div class="invfisdet-header-text">
-            <h3 class="invfisdet-title m-0">Detalle — Inventario Físico</h3>
-            <div class="invfisdet-subtitle">
-              Consulta completa del activo físico registrado en el Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="invfisdet-header-actions">
-        <a href="{{ url_for('inventario_fisico') }}"
-           class="btn rounded-pill px-4 fw-bold invfisdet-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-
-        {% if user.role != 'auditor' %}
-          <a href="{{ url_for('inventario_fisico_edit', id=item.id) }}"
-             class="btn btn-warning rounded-pill px-4 fw-bold">
-            Editar
-          </a>
-        {% endif %}
-      </div>
-
-      <style>
-        .badge-n1 { background:#2ecc71; color:#fff; }
-        .badge-n2 { background:#f1c40f; color:#111; }
-        .badge-n3 { background:#e67e22; color:#fff; }
-        .badge-n4 { background:#e74c3c; color:#fff; }
-        .badge-n5 { background:#8e44ad; color:#fff; }
-      </style>
-
-      <div class="invfisdet-card">
-        <div class="invfisdet-card-body">
-
-          <div class="row g-3">
-            <div class="col-md-4">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Área</div>
-                <div class="invfisdet-value">{{ item.area.area if item.area else '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-4">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">División</div>
-                <div class="invfisdet-value">{{ item.division or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-4">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Clase de activo</div>
-                <div class="invfisdet-value">{{ item.clase_activo or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-4">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Asignado a</div>
-                <div class="invfisdet-value">{{ item.asignado_a or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-4">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Cargo</div>
-                <div class="invfisdet-value">{{ item.cargo or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-4">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Ciudad</div>
-                <div class="invfisdet-value">{{ item.ciudad or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-4">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Marca</div>
-                <div class="invfisdet-value">{{ item.marca or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-4">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Número de serial</div>
-                <div class="invfisdet-value">{{ item.numero_serial or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-4">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Nombre del dispositivo</div>
-                <div class="invfisdet-value">{{ item.nombre_dispositivo or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-3">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Procesador</div>
-                <div class="invfisdet-value">{{ item.procesador or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-3">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">RAM instalada</div>
-                <div class="invfisdet-value">{{ item.ram_instalada or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-3">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">ID del dispositivo</div>
-                <div class="invfisdet-value">{{ item.id_dispositivo or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-3">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">ID del producto</div>
-                <div class="invfisdet-value">{{ item.id_producto or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-4">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Tipo de sistema</div>
-                <div class="invfisdet-value">{{ item.tipo_sistema or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-4">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Edición SO</div>
-                <div class="invfisdet-value">{{ item.edicion_so or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-4">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Versión SO</div>
-                <div class="invfisdet-value">{{ item.version_so or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-3">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">País</div>
-                <div class="invfisdet-value">{{ item.pais or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-3">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Fecha de compra</div>
-                <div class="invfisdet-value">{{ item.fecha_compra or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-3">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Fecha de asignación</div>
-                <div class="invfisdet-value">{{ item.fecha_asignacion or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-3">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Monitor</div>
-                <div class="invfisdet-value">{{ item.monitor or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-3">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Mouse</div>
-                <div class="invfisdet-value">{{ item.mouse or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-3">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Teclado</div>
-                <div class="invfisdet-value">{{ item.teclado or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-3">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Base portátil</div>
-                <div class="invfisdet-value">{{ item.base_portatil or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-2">
-              <div class="invfisdet-field text-center">
-                <div class="invfisdet-label">Confidencialidad</div>
-                <span class="badge {{ conf_badge }} invfisdet-badge">{{ conf_texto }}</span>
-              </div>
-            </div>
-
-            <div class="col-md-2">
-              <div class="invfisdet-field text-center">
-                <div class="invfisdet-label">Integridad</div>
-                <span class="badge {{ inte_badge }} invfisdet-badge">{{ inte_texto }}</span>
-              </div>
-            </div>
-
-            <div class="col-md-2">
-              <div class="invfisdet-field text-center">
-                <div class="invfisdet-label">Disponibilidad</div>
-                <span class="badge {{ disp_badge }} invfisdet-badge">{{ disp_texto }}</span>
-              </div>
-            </div>
-
-            <div class="col-md-2">
-              <div class="invfisdet-field text-center">
-                <div class="invfisdet-label">Valor del Activo</div>
-                <span class="badge {{ valor_badge }} invfisdet-badge">{{ valor_texto }}</span>
-              </div>
-            </div>
-
-            <div class="col-md-2">
-              <div class="invfisdet-field text-center">
-                <div class="invfisdet-label">Criticidad</div>
-                <span class="badge {{ criticidad_badge }} invfisdet-badge">{{ criticidad_texto }}</span>
-              </div>
-            </div>
-
-            <div class="col-md-2">
-              <div class="invfisdet-field text-center">
-                <div class="invfisdet-label">Etiquetado</div>
-                <span class="badge {{ etiquetado_badge }} invfisdet-badge">{{ etiquetado_texto }}</span>
-              </div>
-            </div>
-
-            <div class="col-md-3">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">¿Es información personal?</div>
-                <div class="invfisdet-value">{{ item.info_personal or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-3">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">¿Es información regulada?</div>
-                <div class="invfisdet-value">{{ item.info_regulada or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-3">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">¿Info sensible compañía?</div>
-                <div class="invfisdet-value">{{ item.info_sensible or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-3">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">¿Info sensible clientes?</div>
-                <div class="invfisdet-value">{{ item.info_sensible_clientes or '—' }}</div>
-              </div>
-            </div>
-
-            <div class="col-md-12">
-              <div class="invfisdet-field">
-                <div class="invfisdet-label">Observaciones</div>
-                <div class="invfisdet-value">{{ item.observaciones or '—' }}</div>
-              </div>
-            </div>
-
-          </div>
-
-          <div class="invfisdet-bottom-actions">
-            <a href="{{ url_for('inventario_fisico') }}"
-               class="btn rounded-pill px-4 fw-bold invfisdet-cancel-btn">
-              Cerrar
-            </a>
-          </div>
-
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .invfisdet-shell{
-        width:96%;
-        max-width:1400px;
-        margin:10px auto 24px auto;
-      }
-
-      .invfisdet-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .invfisdet-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 90% 10%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .invfisdet-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-      }
-
-      .invfisdet-header-overlay::before{
-        content:"🏢";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .invfisdet-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .invfisdet-header-text::before{
-        content:"SGSI · Inventario Físico";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .invfisdet-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .invfisdet-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .invfisdet-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .invfisdet-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invfisdet-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invfisdet-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .invfisdet-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .invfisdet-card-body{
-        padding:20px;
-      }
-
-      .invfisdet-field{
-        background:linear-gradient(180deg,#f8fafc,#ffffff);
-        border:1px solid #e2e8f0;
-        border-radius:14px;
-        padding:8px 7px;
-        height:100%;
-        box-shadow:0 4px 10px rgba(0,0,0,.05);
-      }
-
-      .invfisdet-label{
-        font-size:.72rem;
-        font-weight:900;
-        color:#2563eb;
-        text-transform:uppercase;
-        letter-spacing:.4px;
-        margin-bottom:6px;
-      }
-
-      .invfisdet-value{
-        color:#0f172a;
-        font-size:.90rem;
-        white-space:pre-wrap;
-        word-break:break-word;
-        line-height:1.35;
-      }
-
-      .invfisdet-badge{
-        font-size:.72rem;
-        padding:6px 10px;
-        border-radius:999px;
-        display:inline-block;
-        font-weight:800;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }
-
-      .invfisdet-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:12px;
-        margin-top:24px;
-        flex-wrap:wrap;
-      }
-
-      .invfisdet-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-      }
-
-      .invfisdet-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-        box-shadow:0 6px 12px rgba(0,0,0,.10);
-      }
-
-      .invfisdet-cancel-btn:hover{
-        background:#f1f5f9;
-      }
-
-      @media (max-width:992px){
-        .invfisdet-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .invfisdet-title{
-          font-size:1.20rem;
-        }
-
-        .invfisdet-card-body{
-          padding:8px 7px;
-        }
-
-        .invfisdet-badge{
-          width:100%;
-          text-align:center;
-        }
-      }
-
-      @media (max-width:768px){
-        .invfisdet-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .invfisdet-header-overlay::before{
-          margin:0;
-        }
-
-        .invfisdet-header-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(
-        html,
-        item=item,
-        user=user,
-        conf_texto=conf_texto,
-        inte_texto=inte_texto,
-        disp_texto=disp_texto,
-        valor_texto=valor_texto,
-        criticidad_texto=criticidad_texto,
-        etiquetado_texto=etiquetado_texto,
-        conf_badge=conf_badge,
-        inte_badge=inte_badge,
-        disp_badge=disp_badge,
-        valor_badge=valor_badge,
-        criticidad_badge=criticidad_badge,
-        etiquetado_badge=etiquetado_badge
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-# =========================
-# ELIMINAR — Inventario Físico
-# =========================
-@app.route('/inventario_fisico/delete/<int:id>')
-@login_required
-def inventario_fisico_delete(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor' or (
-        user.role != 'admin'
-        and not verificar_permiso(user, "Gestión de Activos de Información")
-    ):
-        flash("No tiene permiso para eliminar activos.", "danger")
-        return redirect(url_for('inventario_fisico_menu'))
-
-    it = InventarioFisico.query.get_or_404(id)
-    db.session.delete(it)
-    db.session.commit()
-    flash("Eliminado.", "success")
-    return redirect(url_for('inventario_fisico'))
-
-# ====================================
-# Inventario de Datos Personales
-# ====================================
-
-class InventarioDatosPersonales(db.Model):
-    __tablename__ = "inventario_datos_personales"
-
-    id = db.Column(db.Integer, primary_key=True)
-
-    responsable_datos = db.Column(db.String(255), nullable=False)
-
-    area_id = db.Column(db.Integer, nullable=True)
-    division_id = db.Column(db.Integer, nullable=True)
-
-    naturaleza_datos = db.Column(db.Text, nullable=False)
-    ubicacion_sistema_datos = db.Column(db.String(255), nullable=False)
-    titular_datos = db.Column(db.String(200), nullable=False)
-    sitio_web_asociado = db.Column(db.Text)
-
-    fuente_datos = db.Column(db.String(255), nullable=False)
-    administrador_sistema = db.Column(db.String(255), nullable=False)
-    alcance_datos = db.Column(db.Text)
-    formato_informacion = db.Column(db.String(150))
-    proposito_uso_datos = db.Column(db.Text, nullable=False)
-
-    pais_almacenamiento = db.Column(db.String(120), nullable=False)
-    pais_acceso = db.Column(db.String(120), nullable=False)
-
-    transferencia_fuera_compania = db.Column(db.String(2), default="No")
-    politica_retencion = db.Column(db.String(255))
-    politica_privacidad = db.Column(db.Text)
-    solicita_consentimiento = db.Column(db.String(2), default="No")
-
-    notas = db.Column(db.Text)
-    recomendacion = db.Column(db.Text)
-    seguridad_quien_tiene_acceso = db.Column(db.String(255), nullable=False)
-    consentimiento_titular_disponible = db.Column(db.String(2), default="No")
-
-    dato_nombre = db.Column(db.String(2), default="No")
-    dato_telefono = db.Column(db.String(2), default="No")
-    dato_direccion = db.Column(db.String(2), default="No")
-    dato_numero_identificacion = db.Column(db.String(2), default="No")
-    dato_fecha_nacimiento = db.Column(db.String(2), default="No")
-    dato_licencia_conduccion = db.Column(db.String(2), default="No")
-    dato_pasaporte_visa = db.Column(db.String(2), default="No")
-    dato_sensible = db.Column(db.String(2), default="No")
-
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    def __repr__(self):
-        return f"<InventarioDatosPersonales {self.id} - {self.responsable_datos}>"
-
-# =========================
-# ENTRADA DIRECTA — Inventario de Datos Personales
-# =========================
-@app.route('/inventario_datos_personales_menu')
-@login_required
-def inventario_datos_personales_menu():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role not in ('admin', 'auditor') and not verificar_permiso(user, "Gestión de Activos de Información"):
-        flash("No tiene permiso para acceder al módulo de inventario de datos personales.", "danger")
-        return redirect(url_for('activos_menu'))
-
-    return redirect(url_for('inventario_datos_personales'))
-
-
-# =========================
-# Agregar — Inventario de Datos Personales
-# =========================
-@app.route('/inventario_datos_personales/new', methods=['GET', 'POST'])
-@login_required
-def inventario_datos_personales_new():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede agregar registros.", "danger")
-        return redirect(url_for('inventario_datos_personales'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
-        flash("No tiene permiso para agregar registros de datos personales.", "danger")
-        return redirect(url_for('inventario_datos_personales'))
-
-    paises = sorted([c.name for c in pycountry.countries])
-    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
-
-    if request.method == 'POST':
-        area_id = request.form.get('area_id', type=int)
-        division_id = request.form.get('division_id', type=int)
-
-        naturaleza_datos = (request.form.get('naturaleza_datos') or "").strip()
-        ubicacion_sistema_datos = (request.form.get('ubicacion_sistema_datos') or "").strip()
-        titular_datos = (request.form.get('titular_datos') or "").strip()
-        sitio_web_asociado = (request.form.get('sitio_web_asociado') or "").strip()
-
-        fuente_datos = (request.form.get('fuente_datos') or "").strip()
-        administrador_sistema = (request.form.get('administrador_sistema') or "").strip()
-        alcance_datos = (request.form.get('alcance_datos') or "").strip()
-        formato_informacion = (request.form.get('formato_informacion') or "").strip()
-        proposito_uso_datos = (request.form.get('proposito_uso_datos') or "").strip()
-
-        pais_almacenamiento = (request.form.get('pais_almacenamiento') or "").strip()
-        pais_acceso = (request.form.get('pais_acceso') or "").strip()
-        transferencia_fuera_compania = request.form.get('transferencia_fuera_compania') or "No"
-        politica_retencion = (request.form.get('politica_retencion') or "").strip()
-        politica_privacidad = (request.form.get('politica_privacidad') or "").strip()
-        solicita_consentimiento = request.form.get('solicita_consentimiento') or "No"
-
-        notas = (request.form.get('notas') or "").strip()
-        recomendacion = (request.form.get('recomendacion') or "").strip()
-        seguridad_quien_tiene_acceso = (request.form.get('seguridad_quien_tiene_acceso') or "").strip()
-        consentimiento_titular_disponible = request.form.get('consentimiento_titular_disponible') or "No"
-
-        dato_nombre = request.form.get('dato_nombre') or "No"
-        dato_telefono = request.form.get('dato_telefono') or "No"
-        dato_direccion = request.form.get('dato_direccion') or "No"
-        dato_numero_identificacion = request.form.get('dato_numero_identificacion') or "No"
-        dato_fecha_nacimiento = request.form.get('dato_fecha_nacimiento') or "No"
-        dato_licencia_conduccion = request.form.get('dato_licencia_conduccion') or "No"
-        dato_pasaporte_visa = request.form.get('dato_pasaporte_visa') or "No"
-        dato_sensible = request.form.get('dato_sensible') or "No"
-
-        area = AreaEmpresa.query.get(area_id) if area_id else None
-        division = DivisionEmpresa.query.get(division_id) if division_id else None
-
-        responsable_datos = ""
-        if area:
-            responsable_datos = area.area
-        if division:
-            responsable_datos = f"{responsable_datos} / {division.nombre_division}"
-
-        if not (
-            area_id and naturaleza_datos and ubicacion_sistema_datos and
-            titular_datos and fuente_datos and administrador_sistema and
-            proposito_uso_datos and pais_almacenamiento and pais_acceso and
-            seguridad_quien_tiene_acceso
-        ):
-            flash("Complete los campos obligatorios del inventario de datos personales.", "danger")
-            return redirect(url_for('inventario_datos_personales_new'))
-
-        item = InventarioDatosPersonales(
-            responsable_datos=responsable_datos,
-            area_id=area_id,
-            division_id=division_id,
-            naturaleza_datos=naturaleza_datos,
-            ubicacion_sistema_datos=ubicacion_sistema_datos,
-            titular_datos=titular_datos,
-            sitio_web_asociado=sitio_web_asociado,
-            fuente_datos=fuente_datos,
-            administrador_sistema=administrador_sistema,
-            alcance_datos=alcance_datos,
-            formato_informacion=formato_informacion,
-            proposito_uso_datos=proposito_uso_datos,
-            pais_almacenamiento=pais_almacenamiento,
-            pais_acceso=pais_acceso,
-            transferencia_fuera_compania=transferencia_fuera_compania,
-            politica_retencion=politica_retencion,
-            politica_privacidad=politica_privacidad,
-            solicita_consentimiento=solicita_consentimiento,
-            notas=notas,
-            recomendacion=recomendacion,
-            seguridad_quien_tiene_acceso=seguridad_quien_tiene_acceso,
-            consentimiento_titular_disponible=consentimiento_titular_disponible,
-            dato_nombre=dato_nombre,
-            dato_telefono=dato_telefono,
-            dato_direccion=dato_direccion,
-            dato_numero_identificacion=dato_numero_identificacion,
-            dato_fecha_nacimiento=dato_fecha_nacimiento,
-            dato_licencia_conduccion=dato_licencia_conduccion,
-            dato_pasaporte_visa=dato_pasaporte_visa,
-            dato_sensible=dato_sensible
-        )
-        db.session.add(item)
-        db.session.commit()
-
-        flash("Registro de inventario de datos personales creado.", "success")
-        return redirect(url_for('inventario_datos_personales'))
-
-    html = """
-    <div class="invdp-shell">
-
-      <div class="invdp-header-card">
-        <div class="invdp-header-overlay">
-          <div class="invdp-header-text">
-            <h3 class="invdp-title m-0">Registro — Inventario de Datos Personales</h3>
-            <div class="invdp-subtitle">
-              Registro de sistemas, tratamientos, acceso, transferencia y elementos de datos personales
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="invdp-header-actions">
-        <a href="{{ url_for('inventario_datos_personales') }}"
-           class="btn rounded-pill px-4 fw-bold invdp-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-
-        
-      </div>
-
-      <div class="invdp-card">
-        <div class="invdp-card-body">
-          <form method="post">
-            <div class="row g-3">
-
-              <div class="col-md-8">
-                <label class="form-label">Responsable de los datos</label>
-
-                <div class="row g-2">
-                  <div class="col-md-6">
-                    <select name="area_id" id="area_id" class="form-select" required>
-                      <option value="">-- Seleccione Área --</option>
-                      {% for a in areas %}
-                        <option value="{{ a.id }}">{{ a.area }}</option>
-                      {% endfor %}
-                    </select>
-                  </div>
-
-                  <div class="col-md-6">
-                    <select name="division_id" id="division_id" class="form-select">
-                      <option value="">Todas las divisiones</option>
-                    </select>
-                  </div>
-                </div>
-
-                <small class="text-muted">Seleccione el área y, si aplica, la división responsable de los datos.</small>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Titular de los datos</label>
-                <input type="text" name="titular_datos" class="form-control" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Ubicación del sistema de datos</label>
-                <input type="text" name="ubicacion_sistema_datos" class="form-control" placeholder="Ej. SAP, CRM, ERP" required>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Naturaleza de los datos</label>
-                <textarea name="naturaleza_datos" class="form-control" rows="2" required></textarea>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Sitio web asociado</label>
-                <textarea name="sitio_web_asociado" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Fuente de los datos</label>
-                <input type="text" name="fuente_datos" class="form-control" required>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Administrador del sistema</label>
-                <input type="text" name="administrador_sistema" class="form-control" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Formato de la información</label>
-                <select name="formato_informacion" class="form-select">
-                  <option value="">-- Seleccione --</option>
-                  <option value="Digital">Digital</option>
-                  <option value="Físico">Físico</option>
-                  <option value="Mixto">Mixto</option>
-                </select>
-              </div>
-
-              <div class="col-md-8">
-                <label class="form-label">Alcance de los datos</label>
-                <textarea name="alcance_datos" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Propósito y uso de los datos</label>
-                <textarea name="proposito_uso_datos" class="form-control" rows="2" required></textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">¿Dónde se almacenan los datos?</label>
-                <select name="pais_almacenamiento" class="form-select" required>
-                  <option value="">-- Seleccione país --</option>
-                  {% for p in paises %}
-                    <option value="{{ p }}">{{ p }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">¿Dónde se accede a los datos?</label>
-                <select name="pais_acceso" class="form-select" required>
-                  <option value="">-- Seleccione país --</option>
-                  {% for p in paises %}
-                    <option value="{{ p }}">{{ p }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Transferencia de datos fuera de la compañía</label>
-                <select name="transferencia_fuera_compania" class="form-select">
-                  <option value="No">No</option>
-                  <option value="Sí">Sí</option>
-                </select>
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">Política de retención</label>
-                <input type="text" name="politica_retencion" class="form-control" placeholder="Ubicación de la política y años de retención">
-              </div>
-
-              <div class="col-md-6">
-                <label class="form-label">¿Política de privacidad?</label>
-                <textarea name="politica_privacidad" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">¿Se solicita consentimiento?</label>
-                <select name="solicita_consentimiento" class="form-select">
-                  <option value="No">No</option>
-                  <option value="Sí">Sí</option>
-                </select>
-              </div>
-
-              <div class="col-md-8">
-                <label class="form-label">Seguridad — ¿Quién tiene acceso?</label>
-                <input type="text" name="seguridad_quien_tiene_acceso" class="form-control" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">¿Existe consentimiento disponible del titular?</label>
-                <select name="consentimiento_titular_disponible" class="form-select">
-                  <option value="No">No</option>
-                  <option value="Sí">Sí</option>
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Notas</label>
-                <textarea name="notas" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Recomendación</label>
-                <textarea name="recomendacion" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-12 mt-4">
-                <div class="invdp-section-title">Elementos de datos</div>
-              </div>
-
-              {% set yn_fields = [
-                ('dato_nombre', 'Nombre'),
-                ('dato_telefono', 'Teléfono'),
-                ('dato_direccion', 'Dirección'),
-                ('dato_numero_identificacion', 'Número del Documento de Identificación'),
-                ('dato_fecha_nacimiento', 'Fecha de nacimiento'),
-                ('dato_licencia_conduccion', 'Número de licencia de conducción'),
-                ('dato_pasaporte_visa', 'Información de pasaporte / visa'),
-                ('dato_sensible', 'Datos sensibles')
-              ] %}
-
-              {% for field, label in yn_fields %}
-              <div class="col-md-3">
-                <label class="form-label">{{ label }}</label>
-                <select name="{{ field }}" class="form-select">
-                  <option value="No">No</option>
-                  <option value="Sí">Sí</option>
-                </select>
-              </div>
-              {% endfor %}
-
-            </div>
-
-            <div class="invdp-bottom-actions">
-              <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold">
-                Guardar registro
-              </button>
-
-              <a href="{{ url_for('inventario_datos_personales') }}"
-                 class="btn rounded-pill px-4 fw-bold invdp-cancel-btn">
-                Cancelar
-              </a>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-
-    <script>
-    document.addEventListener('DOMContentLoaded', function () {
-      const areaSel = document.getElementById('area_id');
-      const divSel = document.getElementById('division_id');
-
-      if (!areaSel || !divSel) return;
-
-      areaSel.addEventListener('change', async function () {
-        const areaId = this.value;
-        divSel.innerHTML = '<option value="">Todas las divisiones</option>';
-
-        if (!areaId) return;
-
-        try {
-          const resp = await fetch(`/areas/${areaId}/divisiones_json`);
-          const data = await resp.json();
-
-          (data.divisiones || []).forEach(d => {
-            const opt = document.createElement('option');
-            opt.value = d.id;
-            opt.textContent = d.nombre;
-            divSel.appendChild(opt);
-          });
-        } catch (e) {
-          console.error('Error cargando divisiones:', e);
-        }
-      });
-    });
-    </script>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .invdp-shell{
-        width:96%;
-        max-width:1400px;
-        margin:10px auto 24px auto;
-      }
-
-      .invdp-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .invdp-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .invdp-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent;
-        padding:0;
-        position:relative;
-        z-index:1;
-      }
-
-      .invdp-header-overlay::before{
-        content:"🗂️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .invdp-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .invdp-header-text::before{
-        content:"SGSI · Inventario de Datos Personales";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .invdp-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .invdp-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .invdp-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .invdp-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invdp-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invdp-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .invdp-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .invdp-card-body{
-        padding:18px;
-      }
-
-      .invdp-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .invdp-card .form-control,
-      .invdp-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .invdp-card textarea.form-control{
-        min-height:70px;
-        resize:vertical;
-      }
-
-      .invdp-card .form-control:focus,
-      .invdp-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#fff;
-      }
-
-      .invdp-section-title{
-        font-weight:950;
-        font-size:.78rem;
-        color:#0b4a8f;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin:10px 0 10px;
-      }
-
-      .invdp-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:18px;
-        flex-wrap:wrap;
-      }
-
-      .invdp-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invdp-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invdp-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      @media (max-width:992px){
-        .invdp-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .invdp-header-card{
-          min-height:88px;
-        }
-
-        .invdp-title{
-          font-size:1.20rem;
-        }
-
-        .invdp-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .invdp-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .invdp-header-overlay::before{
-          margin:0;
-        }
-
-        .invdp-header-actions .btn,
-        .invdp-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-
-    return render_template_string(
-        BASE,
-        content=Markup(render_template_string(html, paises=paises, areas=areas))
-    )
-
-
-# =========================
-# Matriz — Inventario de Datos Personales
-# =========================
-@app.route('/inventario_datos_personales', methods=['GET'])
-@login_required
-def inventario_datos_personales():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role not in ('admin', 'auditor') and not verificar_permiso_activos(user, "Inventario de Datos Personales"):
-        flash("No tiene permiso para ver la matriz de datos personales.", "danger")
-        return redirect(url_for('menu'))
-
-    read_only = (user.role == 'auditor')
-
-    items = InventarioDatosPersonales.query.order_by(InventarioDatosPersonales.id.desc()).all()
-
-    html = render_template_string("""
-    <div class="invdpm-shell">
-
-      <div class="invdpm-header-card">
-        <div class="invdpm-header-overlay">
-          <div class="invdpm-header-text">
-            <h3 class="invdpm-title m-0">Matriz — Inventario de Datos Personales</h3>
-            <div class="invdpm-subtitle">
-              Visualización resumida de registros del inventario de datos personales
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="invdpm-header-actions">
-
-        {% if not read_only %}
-          <a href="{{ url_for('inventario_datos_personales_new') }}"
-             class="btn btn-primary rounded-pill px-4 fw-bold">
-            ➕ Agregar Registro
-          </a>
-        {% else %}
-          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
-            ➕ Agregar Registro
-          </button>
-        {% endif %}
-      </div>
-
-      <div class="invdpm-card">
-        <div class="invdpm-topbar">
-          <div>
-            <h5 class="invdpm-top-title mb-1">Resumen de activos de información</h5>
-            <div class="invdpm-top-note">
-              La matriz muestra únicamente los campos esenciales. Para consultar toda la información utilice el botón <strong>Ver detalle</strong>.
-            </div>
-          </div>
-
-          <div class="invdpm-counter-badge">
-            Total registros: {{ items|length }}
-          </div>
-        </div>
-
-        <div class="invdpm-card-body">
-          <div class="invdpm-table-wrap">
-            <div class="table-responsive">
-              <table class="table align-middle mb-0 invdpm-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Responsable</th>
-                    <th>Naturaleza de los datos</th>
-                    <th>Titular</th>
-                    <th>Sistema</th>
-                    <th>Almacenamiento</th>
-                    <th>Acceso</th>
-                    <th class="text-center invdpm-col-acciones">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for it in items %}
-                  <tr>
-                    <td>{{ it.id }}</td>
-                    <td>{{ it.responsable_datos }}</td>
-                    <td>{{ it.naturaleza_datos }}</td>
-                    <td>{{ it.titular_datos }}</td>
-                    <td>{{ it.ubicacion_sistema_datos }}</td>
-                    <td>{{ it.pais_almacenamiento }}</td>
-                    <td>{{ it.pais_acceso }}</td>
-                    <td class="text-center invdpm-col-acciones">
-                      <div class="invdpm-actions-wrap">
-                        <a href="{{ url_for('inventario_datos_personales_detalle', id=it.id) }}"
-                           class="btn btn-info btn-sm text-white rounded-pill invdpm-btn-action">
-                          Ver detalle
-                        </a>
-
-                        {% if not read_only %}
-                          <a href="{{ url_for('inventario_datos_personales_edit', id=it.id) }}"
-                             class="btn btn-primary btn-sm rounded-pill invdpm-btn-action">
-                            Editar
-                          </a>
-
-                          <a href="{{ url_for('inventario_datos_personales_delete', id=it.id) }}"
-                             class="btn btn-danger btn-sm rounded-pill invdpm-btn-action"
-                             onclick="return confirm('¿Eliminar este registro de inventario de datos personales?');">
-                            Eliminar
-                          </a>
-                        {% else %}
-                          <span class="badge bg-secondary">Solo lectura</span>
-                        {% endif %}
-                      </div>
-                    </td>
-                  </tr>
-                  {% else %}
-                  <tr>
-                    <td colspan="8" class="text-center py-4 text-muted">
-                      No hay registros creados.
-                    </td>
-                  </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .invdpm-shell{
-        width:96%;
-        max-width:1500px;
-        margin:10px auto 24px auto;
-      }
-
-      .invdpm-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .invdpm-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .invdpm-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent;
-        padding:0;
-        position:relative;
-        z-index:1;
-      }
-
-      .invdpm-header-overlay::before{
-        content:"🗂️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .invdpm-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .invdpm-header-text::before{
-        content:"SGSI · Matriz de Datos Personales";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .invdpm-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .invdpm-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .invdpm-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .invdpm-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .invdpm-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .invdpm-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .invdpm-card{
-        background:rgba(255,255,255,.96);
-        border:none;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .invdpm-topbar{
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:12px;
-        padding:14px 16px 0 16px;
-        flex-wrap:wrap;
-      }
-
-      .invdpm-top-title{
-        color:#0f172a;
-        font-weight:950;
-        font-size:.92rem;
-      }
-
-      .invdpm-top-note{
-        color:#475569;
-        font-size:.78rem;
-      }
-
-      .invdpm-counter-badge{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        color:#fff;
-        font-weight:900;
-        border-radius:999px;
-        padding:7px 14px;
-        font-size:.78rem;
-        box-shadow:0 8px 16px rgba(15,23,42,.16);
-      }
-
-      .invdpm-card-body{
-        padding:12px 16px 16px 16px;
-      }
-
-      .invdpm-table-wrap{
-        max-height:70vh;
-        overflow-y:auto;
-        overflow-x:auto;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:#fff;
-      }
-
-      .invdpm-table{
-        min-width:1300px;
-        table-layout:fixed;
-        margin-bottom:0;
-      }
-
-      .invdpm-table thead th{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#ffffff;
-        font-weight:900;
-        text-align:center;
-        vertical-align:middle;
-        white-space:nowrap;
-      }
-
-      .invdpm-table td,
-      .invdpm-table th{
-        vertical-align:middle;
-        font-size:.78rem;
-        padding:9px 8px;
-        white-space:normal;
-        word-break:break-word;
-        overflow-wrap:anywhere;
-      }
-
-      .invdpm-table td{
-        border-bottom:1px solid #e5edf7;
-      }
-
-      .invdpm-table tbody tr:nth-child(even){
-        background:#f8fbff;
-      }
-
-      .invdpm-table tbody tr:hover{
-        background:#eef6ff;
-      }
-
-      .invdpm-col-acciones{
-        min-width:180px;
-        width:180px;
-      }
-
-      .invdpm-actions-wrap{
-        display:flex;
-        flex-direction:column;
-        gap:6px;
-        align-items:center;
-        justify-content:center;
-      }
-
-      .invdpm-btn-action{
-        min-width:105px;
-        max-width:120px;
-        font-size:.64rem !important;
-        padding:4px 12px !important;
-        line-height:1.2;
-        text-align:center;
-        white-space:nowrap;
-        border-radius:999px !important;
-        font-weight:900;
-      }
-
-      @media (max-width:992px){
-        .invdpm-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .invdpm-header-card{
-          min-height:88px;
-        }
-
-        .invdpm-title{
-          font-size:1.20rem;
-        }
-
-        .invdpm-card-body{
-          padding:12px;
-        }
-
-        .invdpm-topbar{
-          padding:12px 14px 0 14px;
-        }
-      }
-
-      @media (max-width:768px){
-        .invdpm-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .invdpm-header-overlay::before{
-          margin:0;
-        }
-
-        .invdpm-header-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """, items=items, read_only=read_only)
-
-    return render_template_string(BASE, content=Markup(html))
-
-# =========================
-# Detalle — Inventario de Datos Personales
 # =========================

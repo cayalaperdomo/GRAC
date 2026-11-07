@@ -1,120 +1,5405 @@
-@pci_madurez_bp.route("/ingreso", methods=["GET"])
+from sqlalchemy import text, func
+from sqlalchemy.orm import selectinload
+from collections import defaultdict
+import sqlite3
+
+from reportlab.lib.pagesizes import letter, landscape
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+
+from docx import Document
+from docx.shared import Inches, Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
+
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.drawing.image import Image as XLImage
+
+import io
+import os
+import datetime as datetime_module
+
+
+# ============================================================
+# CONFIG GENERAL
+# ============================================================
+
+# SOLO PDF + WORD
+REPORT_KEYS_PDF_WORD = {
+    "soa",
+    "incidentes",
+    "metricas_riesgos",
+    "metricas_vuln",
+    "metricas_cultura",
+    "metricas_mejora",
+    "dofa",
+}
+
+# SOLO EXCEL
+REPORT_KEYS_EXCEL_ONLY = {
+    "objetivos",
+    "docs",
+    "rev_accesos",
+    "gestion_accesos",
+    "legales",
+    "cambios",
+    "vuln",
+    "remediacion",
+    "concientizacion",
+    "competencia",
+    "proveedores",
+    "matriz_riesgos",
+    "registro_incidentes",
+    "planes_respuesta_incidentes",
+    "planes_accion_sgsi",
+    "partes_interesadas",
+    "inventario_ia",
+    "inventario_software",
+    "inventario_informacion",
+    "inventario_datos_personales",
+    "inventario_fisico",
+}
+
+REPORT_CATALOG = [
+    {"key": "soa",                 "label": "Declaración de aplicabilidad (SoA / Anexo A)", "icon": "bi-check2-square"},
+    {"key": "incidentes",          "label": "Métricas de Incidentes",                        "icon": "bi-exclamation-triangle"},
+    {"key": "metricas_riesgos",    "label": "Métricas de Riesgos",                           "icon": "bi-graph-up"},
+    {"key": "metricas_vuln",       "label": "Métricas de Vulnerabilidades",                  "icon": "bi-bar-chart"},
+    {"key": "metricas_cultura",    "label": "Métricas de Cultura de Seguridad",              "icon": "bi-people"},
+    {"key": "metricas_mejora",     "label": "Métricas Planes de Mejora",                     "icon": "bi-clipboard-check"},
+    {"key": "dofa",                "label": "DOFA",                                          "icon": "bi-grid-3x3-gap"},
+
+    {"key": "matriz_riesgos",      "label": "Matriz de Riesgos",                             "icon": "bi-shield-exclamation"},
+    {"key": "registro_incidentes", "label": "Registro de Incidentes",                        "icon": "bi-journal-medical"},
+    {"key": "planes_respuesta_incidentes", "label": "Planes de Respuesta a Incidentes", "icon": "bi-shield-check"},
+    {"key": "planes_accion_sgsi",  "label": "Planes de Acción del Sistema de Gestión",       "icon": "bi-list-check"},
+    {"key": "partes_interesadas",  "label": "Partes Interesadas",                            "icon": "bi-diagram-3"},
+    {"key": "inventario_ia",       "label": "Inventario de IA (ISO 42001)",                 "icon": "bi-cpu-fill"},
+    {"key": "inventario_software", "label": "Inventario de Software",                       "icon": "bi-cpu"},
+    {"key": "inventario_informacion", "label": "Inventario de Información",               "icon": "bi-file-earmark-text"},
+    {"key": "inventario_datos_personales", "label": "Inventario de Datos Personales",     "icon": "bi-shield-lock"},
+    {"key": "inventario_fisico",   "label": "Inventario Físico",                            "icon": "bi-pc-display"},
+
+    {"key": "objetivos",           "label": "Objetivos del SGSI",                            "icon": "bi-bullseye"},
+    {"key": "docs",                "label": "Listado maestro de documentos",                 "icon": "bi-journal-text"},
+    {"key": "rev_accesos",         "label": "Revisión de accesos",                           "icon": "bi-person-check"},
+    {"key": "gestion_accesos",     "label": "Gestión de accesos",                            "icon": "bi-shield-lock"},
+    {"key": "legales",             "label": "Requisitos legales",                            "icon": "bi-book"},
+    {"key": "cambios",             "label": "Gestión de cambios (RFC)",                      "icon": "bi-arrow-repeat"},
+    {"key": "vuln",                "label": "Registro de vulnerabilidades",                  "icon": "bi-bug"},
+    {"key": "remediacion",         "label": "Plan de remediación",                           "icon": "bi-wrench-adjustable"},
+    {"key": "concientizacion",     "label": "Plan de concientización",                       "icon": "bi-megaphone"},
+    {"key": "competencia",         "label": "Plan de competencia",                           "icon": "bi-mortarboard"},
+    {"key": "proveedores",         "label": "Registro de proveedores",                       "icon": "bi-truck"},
+]
+
+
+# ============================================================
+# HELPERS GENERALES
+# ============================================================
+
+def _sql_fetchall(sql: str, params: dict | None = None):
+    params = params or {}
+    rows = db.session.execute(text(sql), params).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def _table_columns(table_name: str):
+    try:
+        info = db.session.execute(text(f"PRAGMA table_info({table_name})")).mappings().all()
+        return [r["name"] for r in info]
+    except Exception:
+        return []
+
+
+def _first_existing(table_name: str, candidates: list[str]) -> str | None:
+    cols = set(_table_columns(table_name))
+    for c in candidates:
+        if c in cols:
+            return c
+    return None
+
+
+def _truncate_text(value, max_len=120):
+    if value is None:
+        return ""
+    s = str(value).strip()
+    if len(s) <= max_len:
+        return s
+    return s[:max_len - 3] + "..."
+
+
+def _fmt(v):
+    if v is None:
+        return ""
+    if isinstance(v, (datetime_module.date, datetime_module.datetime)):
+        return v.strftime("%Y-%m-%d")
+    return str(v)
+
+
+def _safe_rows(rows, columns, truncate_map=None):
+    truncate_map = truncate_map or {}
+    out = []
+    for r in (rows or []):
+        item = {}
+        for c in columns:
+            val = r.get(c)
+            if c in truncate_map:
+                val = _truncate_text(val, truncate_map[c])
+            item[c] = val
+        out.append(item)
+    return out
+
+
+def _auto_widths(columns):
+    widths = []
+    for c in columns:
+        lc = (c or "").lower()
+
+        if lc in {"id"}:
+            widths.append(0.45 * inch)
+        elif "fecha" in lc:
+            widths.append(0.90 * inch)
+        elif lc in {"estado", "severidad", "criticidad", "clasificacion", "version", "tipo"}:
+            widths.append(0.85 * inch)
+        elif lc in {"codigo", "ticket", "cve", "cvss"}:
+            widths.append(0.85 * inch)
+        elif "porcentaje" in lc or lc.endswith("_pct") or lc.startswith("pct_"):
+            widths.append(0.90 * inch)
+        elif lc in {"responsable", "owner", "propietario_riesgo", "usuario", "area"}:
+            widths.append(1.10 * inch)
+        elif "descripcion" in lc or "observ" in lc or "analisis" in lc or "justificacion" in lc or "motivation" in lc:
+            widths.append(1.90 * inch)
+        elif "nombre" in lc or "riesgo" in lc or "activo" in lc or "documento" in lc or "objetivo" in lc:
+            widths.append(1.45 * inch)
+        else:
+            widths.append(1.00 * inch)
+
+    return widths
+
+
+def _join_evidence_names(evidencias):
+    if not evidencias:
+        return ""
+    names = []
+    for ev in evidencias:
+        nm = getattr(ev, "original_name", None) or getattr(ev, "filename", None) or "Archivo"
+        names.append(str(nm))
+    return " | ".join(names)
+
+
+def _risk_label_map():
+    try:
+        return {c["key"]: c["label"] for c in RISK_COLUMNS}
+    except Exception:
+        out = {}
+        for c in RISK_COLUMNS:
+            if hasattr(c, "get"):
+                out[c.get("key")] = c.get("label")
+        return out
+
+
+def _mejora_label_map():
+    return dict(MEJORA_PLAN_COLS)
+
+
+def _partes_label_map():
+    return dict(PARTES_INTERESADAS_COLS)
+
+
+def _normalize_company_name(name: str) -> str:
+    return " ".join((name or "").strip().lower().split())
+
+
+def _resolve_company_name(company_name: str = "") -> str:
+    company_name = (company_name or "").strip()
+
+    try:
+        if company_name:
+            cfg = EmpresaConfig.query.filter_by(company_name=company_name).first()
+            if cfg and cfg.company_name:
+                return cfg.company_name
+
+        if company_name:
+            normalized = _normalize_company_name(company_name)
+            candidatos = EmpresaConfig.query.all()
+            for c in candidatos:
+                if _normalize_company_name(getattr(c, "company_name", "")) == normalized:
+                    return c.company_name
+
+        candidatos = EmpresaConfig.query.all()
+        for c in candidatos:
+            if getattr(c, "logo_filename", None):
+                return c.company_name
+
+        primero = EmpresaConfig.query.order_by(EmpresaConfig.id.asc()).first()
+        if primero and primero.company_name:
+            return primero.company_name
+    except Exception:
+        pass
+
+    return company_name or ""
+
+
+def _get_logo_and_company(company_name: str = ""):
+    resolved_company = _resolve_company_name(company_name)
+
+    logo_path = None
+    try:
+        if resolved_company:
+            logo_path = get_company_logo_path(resolved_company)
+            if logo_path and not os.path.exists(logo_path):
+                logo_path = None
+    except Exception:
+        logo_path = None
+
+    return resolved_company, logo_path
+
+
+# ============================================================
+# HELPERS PDF
+# ============================================================
+
+def _pdf_table(data_rows, columns, col_labels=None, col_widths=None):
+    col_labels = col_labels or columns
+    styles = getSampleStyleSheet()
+
+    body_style = ParagraphStyle(
+        "pdf_body",
+        parent=styles["BodyText"],
+        fontSize=7,
+        leading=9,
+        wordWrap="CJK"
+    )
+    head_style = ParagraphStyle(
+        "pdf_head",
+        parent=styles["BodyText"],
+        fontSize=7,
+        leading=9,
+        textColor=colors.white
+    )
+
+    header = [Paragraph(f"<b>{lab}</b>", head_style) for lab in col_labels]
+    body = []
+
+    for r in (data_rows or []):
+        row = []
+        for c in columns:
+            row.append(Paragraph(_truncate_text(_fmt(r.get(c)), 180), body_style))
+        body.append(row)
+
+    table = Table(
+        [header] + body,
+        colWidths=col_widths or _auto_widths(columns),
+        repeatRows=1,
+        splitByRow=1
+    )
+
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0d6efd")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.lightgrey]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    return table
+
+
+def _pdf_info_box(title, text, bg_color="#f8fafc"):
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "ibox_title",
+        parent=styles["BodyText"],
+        fontSize=9,
+        leading=11,
+        textColor=colors.HexColor("#0b1220")
+    )
+    body_style = ParagraphStyle(
+        "ibox_body",
+        parent=styles["BodyText"],
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor("#101827")
+    )
+
+    data = [[Paragraph(f"<b>{title}</b>", title_style)],
+            [Paragraph((_fmt(text) or " "), body_style)]]
+
+    tbl = Table(data, colWidths=[3.55 * inch])
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(bg_color)),
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#d1d5db")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    return tbl
+
+
+def _build_pdf(title: str, sections: list[dict], company_name: str = "", wide: bool = False) -> bytes:
+    buff = io.BytesIO()
+
+    resolved_company, logo_path = _get_logo_and_company(company_name)
+
+    pagesize = landscape(letter) if wide else letter
+    doc = SimpleDocTemplate(
+        buff,
+        pagesize=pagesize,
+        leftMargin=0.5 * inch,
+        rightMargin=0.5 * inch,
+        topMargin=0.6 * inch,
+        bottomMargin=0.6 * inch
+    )
+
+    styles = getSampleStyleSheet()
+    h1 = ParagraphStyle("h1", parent=styles["Heading1"], fontSize=16, spaceAfter=10)
+    h2 = ParagraphStyle("h2", parent=styles["Heading2"], fontSize=12, spaceAfter=6)
+    normal = ParagraphStyle("normal", parent=styles["BodyText"], fontSize=9, leading=12)
+
+    story = []
+    story.append(Paragraph(title, h1))
+    story.append(Paragraph(f"Generado: {datetime_module.datetime.now().strftime('%Y-%m-%d %H:%M')}", normal))
+    if resolved_company:
+        story.append(Paragraph(f"Empresa: {resolved_company}", normal))
+    story.append(Spacer(1, 10))
+
+    for sec in (sections or []):
+        render_mode = sec.get("render_mode", "default")
+
+        if render_mode == "dofa_cards":
+            story.append(Paragraph(str(sec.get("subtitle") or "DOFA"), h2))
+            for p in (sec.get("paragraphs") or []):
+                story.append(Paragraph(str(p), normal))
+                story.append(Spacer(1, 4))
+
+            cards_2x2 = sec.get("cards_2x2") or []
+            if cards_2x2:
+                rows_tbl = []
+                for i in range(0, len(cards_2x2), 2):
+                    left = cards_2x2[i]
+                    right = cards_2x2[i + 1] if i + 1 < len(cards_2x2) else {"title": "", "text": ""}
+                    rows_tbl.append([
+                        _pdf_info_box(left.get("title", ""), left.get("text", ""), left.get("bg", "#f8fafc")),
+                        _pdf_info_box(right.get("title", ""), right.get("text", ""), right.get("bg", "#f8fafc")),
+                    ])
+
+                grid = Table(rows_tbl, colWidths=[3.7 * inch, 3.7 * inch], hAlign="LEFT")
+                grid.setStyle(TableStyle([
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ]))
+                story.append(grid)
+                story.append(Spacer(1, 8))
+
+            strat_cards = sec.get("strategy_cards") or []
+            if strat_cards:
+                story.append(Paragraph("🧠 Estrategias FO / FA / DO / DA", h2))
+                strat_rows = []
+                for i in range(0, len(strat_cards), 2):
+                    left = strat_cards[i]
+                    right = strat_cards[i + 1] if i + 1 < len(strat_cards) else {"title": "", "text": ""}
+                    strat_rows.append([
+                        _pdf_info_box(left.get("title", ""), left.get("text", ""), "#f9fafb"),
+                        _pdf_info_box(right.get("title", ""), right.get("text", ""), "#f9fafb"),
+                    ])
+
+                sgrid = Table(strat_rows, colWidths=[3.7 * inch, 3.7 * inch], hAlign="LEFT")
+                sgrid.setStyle(TableStyle([
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ]))
+                story.append(sgrid)
+
+            if sec.get("page_break"):
+                story.append(PageBreak())
+            continue
+
+        subtitle = sec.get("subtitle")
+        if subtitle:
+            story.append(Paragraph(str(subtitle), h2))
+
+        for p in (sec.get("paragraphs") or []):
+            story.append(Paragraph(str(p), normal))
+            story.append(Spacer(1, 6))
+
+        tb = sec.get("table")
+        if tb and tb.get("rows") and tb.get("cols"):
+            story.append(_pdf_table(
+                data_rows=tb["rows"],
+                columns=tb["cols"],
+                col_labels=tb.get("labels"),
+                col_widths=tb.get("widths")
+            ))
+            story.append(Spacer(1, 10))
+
+        if sec.get("page_break"):
+            story.append(PageBreak())
+
+    doc.build(
+        story,
+        onFirstPage=lambda c, d: pdf_header_footer(c, d, "Informe SGSI", resolved_company, logo_path=logo_path),
+        onLaterPages=lambda c, d: pdf_header_footer(c, d, "Informe SGSI", resolved_company, logo_path=logo_path),
+    )
+    return buff.getvalue()
+
+
+# ============================================================
+# HELPERS DOCX
+# ============================================================
+
+def _docx_table(doc: Document, data_rows, columns, col_labels=None):
+    col_labels = col_labels or columns
+    table = doc.add_table(rows=1, cols=len(columns))
+    table.style = "Table Grid"
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+    hdr = table.rows[0].cells
+    for i, lab in enumerate(col_labels):
+        hdr[i].text = str(lab)
+
+    for r in (data_rows or []):
+        cells = table.add_row().cells
+        for i, c in enumerate(columns):
+            cells[i].text = _fmt(r.get(c))
+    return table
+
+
+def _build_docx(title: str, sections: list[dict], company_name: str = "") -> bytes:
+    doc = Document()
+
+    resolved_company, logo_path = _get_logo_and_company(company_name)
+
+    for section in doc.sections:
+        section.top_margin = Inches(0.6)
+        section.bottom_margin = Inches(0.6)
+        section.left_margin = Inches(0.6)
+        section.right_margin = Inches(0.6)
+
+    if logo_path and os.path.exists(logo_path):
+        try:
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            run = p.add_run()
+            run.add_picture(logo_path, width=Inches(1.6))
+        except Exception:
+            pass
+
+    p_title = doc.add_paragraph()
+    p_title.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    run = p_title.add_run(title)
+    run.bold = True
+    run.font.size = Pt(16)
+
+    p_meta1 = doc.add_paragraph()
+    p_meta1.add_run(f"Generado: {datetime_module.datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
+    if resolved_company:
+        p_meta2 = doc.add_paragraph()
+        p_meta2.add_run(f"Empresa: {resolved_company}")
+
+    doc.add_paragraph("")
+
+    for sec in (sections or []):
+        render_mode = sec.get("render_mode", "default")
+
+        if render_mode == "dofa_cards":
+            if sec.get("subtitle"):
+                doc.add_heading(str(sec["subtitle"]), level=2)
+
+            for ptxt in (sec.get("paragraphs") or []):
+                doc.add_paragraph(str(ptxt))
+
+            cards_2x2 = sec.get("cards_2x2") or []
+            if cards_2x2:
+                t = doc.add_table(rows=0, cols=2)
+                t.style = "Table Grid"
+                t.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+                for i in range(0, len(cards_2x2), 2):
+                    row_cells = t.add_row().cells
+                    left = cards_2x2[i]
+                    right = cards_2x2[i + 1] if i + 1 < len(cards_2x2) else {"title": "", "text": ""}
+
+                    row_cells[0].text = f"{left.get('title', '')}\n\n{_fmt(left.get('text', ''))}"
+                    row_cells[1].text = f"{right.get('title', '')}\n\n{_fmt(right.get('text', ''))}"
+
+                doc.add_paragraph("")
+
+            strat_cards = sec.get("strategy_cards") or []
+            if strat_cards:
+                doc.add_heading("🧠 Estrategias FO / FA / DO / DA", level=2)
+                t2 = doc.add_table(rows=0, cols=2)
+                t2.style = "Table Grid"
+                t2.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+                for i in range(0, len(strat_cards), 2):
+                    row_cells = t2.add_row().cells
+                    left = strat_cards[i]
+                    right = strat_cards[i + 1] if i + 1 < len(strat_cards) else {"title": "", "text": ""}
+
+                    row_cells[0].text = f"{left.get('title', '')}\n\n{_fmt(left.get('text', ''))}"
+                    row_cells[1].text = f"{right.get('title', '')}\n\n{_fmt(right.get('text', ''))}"
+
+                doc.add_paragraph("")
+
+            if sec.get("page_break"):
+                doc.add_page_break()
+            continue
+
+        if sec.get("subtitle"):
+            doc.add_heading(str(sec["subtitle"]), level=2)
+
+        for ptxt in (sec.get("paragraphs") or []):
+            doc.add_paragraph(str(ptxt))
+
+        tb = sec.get("table")
+        if tb and tb.get("rows") and tb.get("cols"):
+            _docx_table(
+                doc,
+                data_rows=tb["rows"],
+                columns=tb["cols"],
+                col_labels=tb.get("labels")
+            )
+
+        if sec.get("page_break"):
+            doc.add_page_break()
+
+        doc.add_paragraph("")
+
+    buff = io.BytesIO()
+    doc.save(buff)
+    return buff.getvalue()
+
+
+# ============================================================
+# HELPERS EXCEL
+# ============================================================
+
+def _write_excel_sheet(ws, title: str, rows, cols, labels=None, company_name: str = "", logo_path: str | None = None):
+    labels = labels or cols
+    current_row = 1
+
+    if logo_path and os.path.exists(logo_path):
+        try:
+            img = XLImage(logo_path)
+            img.width = 140
+            img.height = 70
+            ws.add_image(img, "A1")
+            current_row = 5
+        except Exception:
+            current_row = 1
+
+    ws.cell(row=current_row, column=1, value=title)
+    ws.cell(row=current_row, column=1).font = Font(bold=True, size=14)
+    current_row += 1
+
+    if company_name:
+        ws.cell(row=current_row, column=1, value=f"Empresa: {company_name}")
+        ws.cell(row=current_row, column=1).font = Font(bold=True)
+        current_row += 1
+
+    ws.cell(row=current_row, column=1, value=f"Generado: {datetime_module.datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    ws.cell(row=current_row, column=1).font = Font(italic=True)
+    current_row += 2
+
+    header_fill = PatternFill("solid", fgColor="0D6EFD")
+    header_font = Font(color="FFFFFF", bold=True)
+
+    header_row = current_row
+    for idx, lab in enumerate(labels, start=1):
+        cell = ws.cell(row=header_row, column=idx, value=str(lab))
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    r = header_row + 1
+    for item in (rows or []):
+        for cidx, col in enumerate(cols, start=1):
+            cell = ws.cell(row=r, column=cidx, value=_fmt(item.get(col)))
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+        r += 1
+
+    for col_cells in ws.columns:
+        try:
+            col_letter = col_cells[0].column_letter
+        except Exception:
+            continue
+
+        max_len = 0
+        for cell in col_cells:
+            try:
+                max_len = max(max_len, len(str(cell.value or "")))
+            except Exception:
+                pass
+        ws.column_dimensions[col_letter].width = min(max(max_len + 2, 12), 40)
+
+
+def _build_excel(filename: str, sheets: list[dict], company_name: str = "") -> bytes:
+    wb = Workbook()
+    first = True
+
+    resolved_company, logo_path = _get_logo_and_company(company_name)
+
+    for sheet in sheets:
+        if first:
+            ws = wb.active
+            ws.title = sheet.get("name", "Hoja1")[:31]
+            first = False
+        else:
+            ws = wb.create_sheet(title=sheet.get("name", "Hoja")[:31])
+
+        _write_excel_sheet(
+            ws=ws,
+            title=sheet.get("title", sheet.get("name", "Reporte")),
+            rows=sheet.get("rows", []),
+            cols=sheet.get("cols", []),
+            labels=sheet.get("labels"),
+            company_name=resolved_company,
+            logo_path=logo_path
+        )
+
+    buff = io.BytesIO()
+    wb.save(buff)
+    return buff.getvalue()
+
+
+# ============================================================
+# PAYLOADS - SOA Y MÉTRICAS
+# ============================================================
+
+def _payload_soa(company=""):
+    rows = _sql_fetchall("""
+        SELECT
+          nr,
+          chapter,
+          topic,
+          applicable,
+          implemented,
+          justification,
+          motivation
+        FROM control
+    """)
+
+    def _soa_sort_key(row):
+        nr = str(row.get("nr") or "").strip()
+        nr = nr.replace("A.", "").replace("a.", "")
+        parts = nr.split(".")
+
+        nums = []
+        for p in parts:
+            try:
+                nums.append(int(p))
+            except Exception:
+                nums.append(999)
+
+        while len(nums) < 3:
+            nums.append(0)
+
+        return nums
+
+    rows = sorted(rows, key=_soa_sort_key)
+
+    cols = ["nr", "chapter", "topic", "applicable", "implemented", "justification", "motivation"]
+    labels = ["Control", "Capítulo", "Control", "Aplica", "Implementado", "Justificación", "Evidencia"]
+
+    sections = [{
+        "subtitle": "Declaración de aplicabilidad",
+        "paragraphs": [
+            "Listado de controles de la declaración de aplicabilidad del SGSI."
+        ],
+        "table": {
+            "rows": rows,
+            "cols": cols,
+            "labels": labels,
+            "widths": [0.8*inch, 1.0*inch, 2.0*inch, 0.8*inch, 1.0*inch, 2.0*inch, 2.0*inch]
+        }
+    }]
+
+    return {
+        "title": "Declaración de aplicabilidad (SoA) – ISO/IEC 27001:2022",
+        "filename": "soa",
+        "wide": True,
+        "sections": sections,
+        "sheets": []
+    }
+
+def _payload_metricas_incidentes(company=""):
+    import sqlite3
+    from collections import defaultdict
+
+    year_param = request.args.get("year", "", type=str)
+    month_param = request.args.get("month", "", type=str)
+
+    year_selected = None
+    month_selected = None
+
+    if year_param and year_param != "all":
+        try:
+            year_selected = int(year_param)
+        except ValueError:
+            year_selected = None
+
+    if month_param and month_param != "all":
+        try:
+            month_selected = int(month_param)
+        except ValueError:
+            month_selected = None
+
+    sql = """
+        SELECT
+            id,
+            fecha_alerta,
+            id_incidente,
+            nombre_alerta,
+            descripcion_alerta,
+            clasificacion_incidente,
+            cargo_responsable,
+            atacante,
+            ubicacion_atacante,
+            tipo_recurso_afectado,
+            nombre_recurso_id,
+            estado,
+            fecha_cierre,
+            descripcion_cierre,
+            principio,
+            prioridad,
+            se_requiere_contencion,
+            fecha_hora_contencion,
+            descripcion_contencion,
+            se_requiere_recuperacion,
+            fecha_hora_recuperacion,
+            descripcion_recuperacion
+        FROM registro_incidentes
+        WHERE 1=1
+    """
+
+    params = []
+
+    if year_selected is not None:
+        sql += " AND strftime('%Y', fecha_alerta) = ?"
+        params.append(str(year_selected))
+
+    if month_selected is not None:
+        sql += " AND strftime('%m', fecha_alerta) = ?"
+        params.append(f"{month_selected:02d}")
+
+    sql += " ORDER BY id DESC"
+
+    rows = []
+    try:
+        conn = sqlite3.connect("sgsi.db")
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute(sql, tuple(params))
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+    except Exception:
+        rows = []
+
+    total_incidentes = len(rows)
+
+    por_estado = defaultdict(int)
+    por_clasificacion = defaultdict(int)
+    por_prioridad = defaultdict(int)
+    por_principio = defaultdict(int)
+    tiempos_cierre = []
+
+    def _parse_date(v):
+        if not v:
+            return None
+        s = str(v).strip()
+        if not s:
+            return None
+
+        for fmt in (
+            "%Y-%m-%d",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%d/%m/%Y",
+            "%d/%m/%Y %H:%M:%S",
+            "%d/%m/%Y %H:%M",
+        ):
+            try:
+                return datetime_module.datetime.strptime(s, fmt)
+            except Exception:
+                pass
+
+        try:
+            return datetime_module.datetime.fromisoformat(s.replace("Z", ""))
+        except Exception:
+            return None
+
+    for r in rows:
+        estado = (r.get("estado") or "Sin estado").strip()
+        clasificacion = (r.get("clasificacion_incidente") or "Sin clasificar").strip()
+        prioridad = (r.get("prioridad") or "Sin prioridad").strip()
+        principio = (r.get("principio") or "Sin principio").strip()
+
+        por_estado[estado] += 1
+        por_clasificacion[clasificacion] += 1
+        por_prioridad[prioridad] += 1
+        por_principio[principio] += 1
+
+        fa = _parse_date(r.get("fecha_alerta"))
+        fc = _parse_date(r.get("fecha_cierre"))
+
+        if fa and fc:
+            try:
+                dias = (fc.date() - fa.date()).days
+                if dias < 0:
+                    dias = 0
+                tiempos_cierre.append(dias)
+            except Exception:
+                pass
+
+    promedio_cierre = round(sum(tiempos_cierre) / len(tiempos_cierre), 2) if tiempos_cierre else 0
+
+    rows_estado = sorted(
+        [{"estado": k, "total": v} for k, v in por_estado.items()],
+        key=lambda x: x["total"],
+        reverse=True
+    )
+
+    rows_clasificacion = sorted(
+        [{"clasificacion": k, "total": v} for k, v in por_clasificacion.items()],
+        key=lambda x: x["total"],
+        reverse=True
+    )
+
+    rows_prioridad = sorted(
+        [{"prioridad": k, "total": v} for k, v in por_prioridad.items()],
+        key=lambda x: x["total"],
+        reverse=True
+    )
+
+    rows_principio = sorted(
+        [{"principio": k, "total": v} for k, v in por_principio.items()],
+        key=lambda x: x["total"],
+        reverse=True
+    )
+
+    sections = [
+        {
+            "subtitle": "Resumen ejecutivo",
+            "paragraphs": [
+                f"Total de incidentes evaluados: {total_incidentes}.",
+                f"Promedio de días de cierre: {promedio_cierre}.",
+            ]
+        },
+        {
+            "subtitle": "1) Incidentes por estado",
+            "table": {
+                "rows": rows_estado,
+                "cols": ["estado", "total"],
+                "labels": ["Estado", "Total"]
+            }
+        },
+        {
+            "subtitle": "2) Incidentes por clasificación",
+            "table": {
+                "rows": rows_clasificacion,
+                "cols": ["clasificacion", "total"],
+                "labels": ["Clasificación", "Total"]
+            }
+        },
+        {
+            "subtitle": "3) Incidentes por prioridad",
+            "table": {
+                "rows": rows_prioridad,
+                "cols": ["prioridad", "total"],
+                "labels": ["Prioridad", "Total"]
+            }
+        },
+        {
+            "subtitle": "4) Incidentes por principio afectado",
+            "table": {
+                "rows": rows_principio,
+                "cols": ["principio", "total"],
+                "labels": ["Principio", "Total"]
+            }
+        }
+    ]
+
+    return {
+        "title": "Métricas de Incidentes",
+        "filename": "metricas_incidentes",
+        "wide": True,
+        "sections": sections,
+        "sheets": []
+    }
+
+def _payload_metricas_riesgos(company=""):
+    cfg = MetricConfigRiesgos.query.first()
+    apetito = safe_appetite_level((cfg.apetito_residual_definido if cfg else None), default="Moderado")
+    tendencia = (cfg.tendencia_tiempo if cfg else "mensual") or "mensual"
+
+    riesgos_all = Riesgo.query.all()
+    total_archivados = sum(1 for r in riesgos_all if bool(getattr(r, "archivado", False)))
+    total_activos = len(riesgos_all) - total_archivados
+    riesgos = [r for r in riesgos_all if not bool(getattr(r, "archivado", False))]
+
+    profile = {
+        "inherente": {lvl: 0 for lvl in RISK_ORDER},
+        "residual": {lvl: 0 for lvl in RISK_ORDER},
+    }
+
+    outside_appetite_count = 0
+    top_candidates = []
+    by_tipo = defaultdict(int)
+    trend = defaultdict(lambda: {
+        "inherente": {lvl: 0 for lvl in RISK_ORDER},
+        "residual": {lvl: 0 for lvl in RISK_ORDER},
+    })
+
+    for r in riesgos:
+        lvl_inh = normalize_level(r.riesgo_inherente)
+        lvl_res = normalize_level(r.riesgo_residual)
+
+        if lvl_inh in profile["inherente"]:
+            profile["inherente"][lvl_inh] += 1
+        if lvl_res in profile["residual"]:
+            profile["residual"][lvl_res] += 1
+
+        if lvl_res and apetito and is_outside_appetite(lvl_res, apetito):
+            outside_appetite_count += 1
+            top_candidates.append(r)
+
+        tipo = (r.tipo_riesgo or "").strip() or "Sin clasificar"
+        by_tipo[tipo] += 1
+
+        dt = parse_any_date(r.fecha_identificacion) or parse_any_date(r.fecha_revision)
+        if dt:
+            pk = period_key(dt, tendencia)
+            if lvl_inh in trend[pk]["inherente"]:
+                trend[pk]["inherente"][lvl_inh] += 1
+            if lvl_res in trend[pk]["residual"]:
+                trend[pk]["residual"][lvl_res] += 1
+
+    def impact_value(rr):
+        try:
+            return int(rr.impacto_res or 0)
+        except Exception:
+            return int(rr.impacto or 0) if rr.impacto else 0
+
+    top_candidates_sorted = sorted(
+        top_candidates,
+        key=lambda rr: (level_rank(rr.riesgo_residual), impact_value(rr)),
+        reverse=True
+    )[:5]
+
+    trend_rows = []
+    for pk in sorted(trend.keys()):
+        inh_dom = dominant_level(trend[pk]["inherente"])
+        res_dom = dominant_level(trend[pk]["residual"])
+        trend_rows.append({
+            "periodo": pk,
+            "inh_dominante": inh_dom or "Sin dato",
+            "res_dominante": res_dom or "Sin dato",
+            "inh_total": sum(trend[pk]["inherente"].values()),
+            "res_total": sum(trend[pk]["residual"].values()),
+        })
+
+    tipo_rows = sorted(
+        [{"tipo": k, "total": v} for k, v in by_tipo.items()],
+        key=lambda x: x["total"],
+        reverse=True
+    )
+
+    trend_text = build_trend_text_dominant(trend_rows)
+
+    profile_rows = []
+    for lvl in RISK_ORDER:
+        profile_rows.append({
+            "criterio": lvl,
+            "total_inherente": profile["inherente"][lvl],
+            "total_residual": profile["residual"][lvl],
+        })
+
+    top5_rows = []
+    for r in top_candidates_sorted:
+        top5_rows.append({
+            "riesgo": getattr(r, "riesgo", ""),
+            "nivel_residual": normalize_level(getattr(r, "riesgo_residual", "")),
+            "impacto": getattr(r, "impacto_res_label", None) or getattr(r, "impacto_res", None) or getattr(r, "impacto", None) or "",
+            "tipo_riesgo": getattr(r, "tipo_riesgo", "") or "Sin clasificar",
+            "dueno": getattr(r, "propietario_riesgo", None) or getattr(r, "responsable", None) or "",
+        })
+
+    sections = [
+        {
+            "subtitle": "Resumen ejecutivo",
+            "paragraphs": [
+                f"Apetito residual: {apetito}.",
+                f"Tendencia configurada: {tendencia.capitalize()}.",
+                f"Riesgos fuera del apetito: {outside_appetite_count}.",
+                f"Riesgos activos: {total_activos}. Riesgos archivados: {total_archivados}.",
+            ]
+        },
+        {
+            "subtitle": "1) Perfil de riesgo global",
+            "table": {
+                "rows": profile_rows,
+                "cols": ["criterio", "total_inherente", "total_residual"],
+                "labels": ["Criterio", "Total Inherente", "Total Residual"]
+            }
+        },
+        {
+            "subtitle": "2) Top 5 riesgos críticos",
+            "paragraphs": [f"Riesgos con residual ≥ apetito ({apetito})."],
+            "table": {
+                "rows": top5_rows,
+                "cols": ["riesgo", "nivel_residual", "impacto", "tipo_riesgo", "dueno"],
+                "labels": ["Riesgo", "Nivel Residual", "Impacto", "Tipo de Riesgo", "Dueño"]
+            }
+        },
+        {
+            "subtitle": "3) Tendencia en el tiempo",
+            "paragraphs": [
+                f"Análisis de tendencia inherente: {trend_text['inherente']}",
+                f"Análisis de tendencia residual: {trend_text['residual']}",
+            ] + ([f"Análisis IA guardado: {cfg.tendencia_ai_text}"] if cfg and getattr(cfg, "tendencia_ai_text", None) else []),
+            "table": {
+                "rows": trend_rows,
+                "cols": ["periodo", "inh_dominante", "res_dominante", "inh_total", "res_total"],
+                "labels": ["Período", "Nivel dominante (Inherente)", "Nivel dominante (Residual)", "Total Inh", "Total Res"]
+            }
+        },
+        {
+            "subtitle": "4) Total de riesgos por Tipo de Riesgo",
+            "table": {
+                "rows": tipo_rows,
+                "cols": ["tipo", "total"],
+                "labels": ["Tipo de Riesgo", "Total"]
+            }
+        }
+    ]
+
+    return {
+        "title": "Métricas de Riesgos",
+        "filename": "metricas_riesgos",
+        "wide": True,
+        "sections": sections,
+        "sheets": []
+    }
+
+
+def _payload_metricas_vulnerabilidades(company=""):
+    year = request.args.get("year", type=int)
+    today = datetime_module.date.today()
+    if not year:
+        year = today.year
+
+    config = MetricasVulnerabilidadesConfig.query.first()
+    sla_por_clas_norm = {}
+
+    if config:
+        for fila in config.clasificaciones:
+            key = normalizar_clasificacion(fila.clasificacion)
+            if key and fila.tiempo_max_cierre_dias is not None:
+                sla_por_clas_norm[key] = fila.tiempo_max_cierre_dias
+
+    def get_sla_dias(cls_raw):
+        key = normalizar_clasificacion(cls_raw)
+        if not key:
+            return None
+        return sla_por_clas_norm.get(key)
+
+    inicio_dt = datetime_module.datetime(year, 1, 1)
+    fin_dt = datetime_module.datetime(year + 1, 1, 1)
+
+    cerradas = (
+        VulnerabilidadRegistro.query
+        .filter(VulnerabilidadRegistro.estado == 'Cerrado')
+        .filter(VulnerabilidadRegistro.fecha_identificacion.isnot(None))
+        .filter(
+            db.or_(
+                db.and_(
+                    VulnerabilidadRegistro.fecha_cierre.isnot(None),
+                    VulnerabilidadRegistro.fecha_cierre >= inicio_dt,
+                    VulnerabilidadRegistro.fecha_cierre < fin_dt,
+                ),
+                db.and_(
+                    VulnerabilidadRegistro.fecha_cierre.is_(None),
+                    VulnerabilidadRegistro.fecha_identificacion >= inicio_dt,
+                    VulnerabilidadRegistro.fecha_identificacion < fin_dt,
+                )
+            )
+        )
+        .all()
+    )
+
+    abiertas = (
+        VulnerabilidadRegistro.query
+        .filter(VulnerabilidadRegistro.estado == 'Abierto')
+        .filter(VulnerabilidadRegistro.fecha_identificacion.isnot(None))
+        .all()
+    )
+
+    cerradas_anio = []
+    anio_dentro_tiempo = 0
+    anio_fuera_tiempo = 0
+    mensual = {}
+    cerradas_fuera_sla = []
+    cerradas_fuera_por_clas = {}
+
+    for v in cerradas:
+        cierre = v.fecha_cierre or v.fecha_identificacion
+        if not cierre or cierre.year != year:
+            continue
+
+        cerradas_anio.append(v)
+        cls_label = v.clasificacion or 'Sin clasificar'
+        sla_dias = get_sla_dias(v.clasificacion)
+
+        dias_cierre = None
+        if v.fecha_identificacion:
+            dias_cierre = (cierre - v.fecha_identificacion).days
+            if dias_cierre < 0:
+                dias_cierre = 0
+
+        if sla_dias is not None and dias_cierre is not None:
+            if dias_cierre <= sla_dias:
+                anio_dentro_tiempo += 1
+            else:
+                anio_fuera_tiempo += 1
+                cerradas_fuera_sla.append({
+                    "codigo": v.codigo,
+                    "clasificacion": cls_label,
+                    "responsable": v.responsable,
+                    "fecha_identificacion": v.fecha_identificacion,
+                    "fecha_cierre": cierre,
+                    "dias_cierre": dias_cierre,
+                    "sla_dias": sla_dias,
+                })
+                info = cerradas_fuera_por_clas.setdefault(cls_label, {
+                    "sla_dias": sla_dias,
+                    "cantidad": 0
+                })
+                info["cantidad"] += 1
+
+        m = cierre.month
+        data_mes = mensual.setdefault(m, {'total': 0, 'dentro': 0, 'fuera': 0})
+        data_mes['total'] += 1
+        if sla_dias is not None and dias_cierre is not None:
+            if dias_cierre <= sla_dias:
+                data_mes['dentro'] += 1
+            else:
+                data_mes['fuera'] += 1
+
+    total_cerradas_anio = len(cerradas_anio)
+    pct_anio_dentro = round((anio_dentro_tiempo * 100.0 / total_cerradas_anio), 2) if total_cerradas_anio > 0 else 0.0
+    pct_anio_fuera = round((anio_fuera_tiempo * 100.0 / total_cerradas_anio), 2) if total_cerradas_anio > 0 else 0.0
+
+    vencidas = []
+    vencidas_por_clas = {}
+    for v in abiertas:
+        cls_label = v.clasificacion or 'Sin clasificar'
+        sla_dias = get_sla_dias(v.clasificacion)
+
+        if sla_dias is None or not v.fecha_identificacion:
+            continue
+
+        fi = v.fecha_identificacion
+        if hasattr(fi, "date"):
+            fi = fi.date()
+
+        dias_abierta = (today - fi).days
+        if dias_abierta > sla_dias:
+            vencidas.append({
+                'codigo': v.codigo,
+                'clasificacion': cls_label,
+                'responsable': v.responsable,
+                'fecha_identificacion': v.fecha_identificacion,
+                'dias_abierta': dias_abierta,
+                'sla_dias': sla_dias
+            })
+            info = vencidas_por_clas.setdefault(cls_label, {
+                'sla_dias': sla_dias,
+                'cantidad': 0
+            })
+            info['cantidad'] += 1
+
+    codigos = [x["codigo"] for x in vencidas]
+    analisis_map = {}
+    if codigos:
+        regs = VulnerabilidadAnalisis.query.filter(VulnerabilidadAnalisis.codigo.in_(codigos)).all()
+        analisis_map = {r.codigo: (r.analisis or "") for r in regs}
+    for x in vencidas:
+        x["analisis"] = analisis_map.get(x["codigo"], "")
+
+    codigos_cerradas = [x["codigo"] for x in cerradas_fuera_sla]
+    analisis_map_cerradas = {}
+    if codigos_cerradas:
+        regs = VulnerabilidadAnalisis.query.filter(VulnerabilidadAnalisis.codigo.in_(codigos_cerradas)).all()
+        analisis_map_cerradas = {r.codigo: (r.analisis or "") for r in regs}
+    for x in cerradas_fuera_sla:
+        x["analisis"] = analisis_map_cerradas.get(x["codigo"], "")
+
+    datos_metricas = {
+        "anio": year,
+        "resumen_anual": {
+            "total_cerradas": total_cerradas_anio,
+            "dentro_sla": anio_dentro_tiempo,
+            "fuera_sla": anio_fuera_tiempo,
+            "pct_dentro": pct_anio_dentro,
+            "pct_fuera": pct_anio_fuera,
+        },
+        "resumen_mensual": {
+            m: {
+                "total": data["total"],
+                "dentro": data["dentro"],
+                "fuera": data["fuera"],
+            }
+            for m, data in mensual.items()
+        },
+        "backlog": {
+            "total_vencidas": len(vencidas),
+            "por_clasificacion": {
+                cls: {
+                    "sla_dias": data["sla_dias"],
+                    "cantidad": data["cantidad"],
+                }
+                for cls, data in vencidas_por_clas.items()
+            },
+        },
+    }
+
+    analisis_ia = None
+    try:
+        analisis_ia = analizar_metricas_vuln_ia(datos_metricas)
+    except Exception:
+        analisis_ia = None
+
+    analisis_manual = session.get('analisis_vuln_manual')
+    if analisis_manual:
+        analisis_ia = analisis_manual
+
+    mensual_rows = []
+    for m in range(1, 13):
+        data = mensual.get(m, {'total': 0, 'dentro': 0, 'fuera': 0})
+        total = data['total']
+        dentro = data['dentro']
+        fuera = data['fuera']
+        pct_dentro = round((dentro * 100.0 / total), 2) if total > 0 else 0
+        pct_fuera = round((fuera * 100.0 / total), 2) if total > 0 else 0
+        mensual_rows.append({
+            "mes": f"{m:02d}",
+            "cerradas_mes": total,
+            "dentro_tiempo": dentro,
+            "fuera_tiempo": fuera,
+            "pct_dentro": pct_dentro,
+            "pct_fuera": pct_fuera,
+        })
+
+    cerradas_fuera_resumen_rows = []
+    for cls, data in cerradas_fuera_por_clas.items():
+        cerradas_fuera_resumen_rows.append({
+            "clasificacion": cls,
+            "sla_dias": data["sla_dias"],
+            "cantidad_fuera_sla": data["cantidad"],
+        })
+
+    backlog_rows = []
+    for cls, data in vencidas_por_clas.items():
+        backlog_rows.append({
+            "clasificacion": cls,
+            "sla_dias": data["sla_dias"],
+            "cantidad_abiertas_vencidas": data["cantidad"],
+        })
+
+    sections = [
+        {
+            "subtitle": "🤖 Análisis IA (Resumen ejecutivo)",
+            "paragraphs": [
+                analisis_ia or "No se pudo generar análisis IA o no hay datos suficientes."
+            ]
+        },
+        {
+            "subtitle": f"Cumplimiento mensual por tiempos de cierre (detalle anual {year})",
+            "table": {
+                "rows": mensual_rows,
+                "cols": ["mes", "cerradas_mes", "dentro_tiempo", "fuera_tiempo", "pct_dentro", "pct_fuera"],
+                "labels": ["Mes", "Cerradas en el mes", "Dentro del tiempo", "Fuera de tiempo", "% dentro", "% fuera"]
+            }
+        },
+        {
+            "subtitle": f"Vulnerabilidades cerradas fuera de SLA (año {year})",
+            "table": {
+                "rows": cerradas_fuera_resumen_rows,
+                "cols": ["clasificacion", "sla_dias", "cantidad_fuera_sla"],
+                "labels": ["Clasificación", "SLA cierre (días)", "Cerradas fuera de SLA"]
+            }
+        },
+        {
+            "subtitle": "Detalle de vulnerabilidades cerradas fuera de SLA",
+            "table": {
+                "rows": _safe_rows(cerradas_fuera_sla, ["codigo", "clasificacion", "responsable", "fecha_identificacion", "fecha_cierre", "dias_cierre", "sla_dias", "analisis"], {"analisis": 150}),
+                "cols": ["codigo", "clasificacion", "responsable", "fecha_identificacion", "fecha_cierre", "dias_cierre", "sla_dias", "analisis"],
+                "labels": ["Código", "Clasificación", "Responsable", "Fecha identificación", "Fecha cierre", "Días cierre", "SLA (días)", "Análisis"]
+            }
+        },
+        {
+            "subtitle": "Backlog de vulnerabilidades abiertas vencidas (fuera de SLA)",
+            "paragraphs": [f"Total abiertas vencidas: {len(vencidas)}"],
+            "table": {
+                "rows": backlog_rows,
+                "cols": ["clasificacion", "sla_dias", "cantidad_abiertas_vencidas"],
+                "labels": ["Clasificación", "SLA cierre (días)", "Vulnerabilidades abiertas vencidas"]
+            }
+        },
+        {
+            "subtitle": "Detalle de vulnerabilidades abiertas fuera de tiempo",
+            "table": {
+                "rows": _safe_rows(vencidas, ["codigo", "clasificacion", "responsable", "fecha_identificacion", "dias_abierta", "sla_dias", "analisis"], {"analisis": 150}),
+                "cols": ["codigo", "clasificacion", "responsable", "fecha_identificacion", "dias_abierta", "sla_dias", "analisis"],
+                "labels": ["Código", "Clasificación", "Responsable", "Fecha identificación", "Días abierta", "SLA (días)", "Análisis"]
+            }
+        }
+    ]
+
+    return {
+        "title": "Métricas de Tiempos de Cierre de Vulnerabilidades",
+        "filename": "metricas_vulnerabilidades",
+        "wide": True,
+        "sections": sections,
+        "sheets": []
+    }
+
+
+def _payload_metricas_cultura(company=""):
+    year_param = request.args.get("year", "", type=str)
+    month_param = request.args.get("month", "", type=str)
+
+    year_selected = None
+    month_selected = None
+
+    if year_param and year_param != "all":
+        try:
+            year_selected = int(year_param)
+        except ValueError:
+            year_selected = None
+
+    if month_param and month_param != "all":
+        try:
+            month_selected = int(month_param)
+        except ValueError:
+            month_selected = None
+
+    query = MetricasCultura.query
+
+    if year_selected is not None:
+        query = query.filter(MetricasCultura.anio == year_selected)
+
+    if month_selected is not None:
+        query = query.filter(MetricasCultura.mes == month_selected)
+
+    registros = (
+        query.order_by(MetricasCultura.anio.desc(), MetricasCultura.mes.desc()).all()
+    )
+
+    config_cultura = MetricasCulturaConfig.query.first()
+
+    matrix_rows = []
+    for r in registros:
+        matrix_rows.append({
+            "anio": r.anio,
+            "mes": f"{r.mes:02d}" if r.mes is not None else "",
+            "personas_contratadas": r.personas_contratadas or 0,
+            "formacion_inicial_aprobada": r.formacion_inicial_aprobada or 0,
+            "personas_reinduccion": r.personas_reinduccion or 0,
+            "reinduccion_aprobada": r.reinduccion_aprobada or 0,
+            "meta_formacion": round(r.meta_formacion or 0, 2),
+            "actividades_planeadas": r.actividades_planeadas or 0,
+            "actividades_ejecutadas": r.actividades_ejecutadas or 0,
+            "meta_actividades": round(r.meta_actividades or 0, 2),
+            "resultado_meta_general": round(r.resultado_meta_general or 0, 2),
+            "analisis_mensual": r.analisis_mensual or "",
+        })
+
+    total_registros = len(matrix_rows)
+
+    meta_fi = getattr(config_cultura, "meta_fi", None)
+    meta_ep = getattr(config_cultura, "meta_ep", None)
+    meta_general = getattr(config_cultura, "meta_general", None)
+
+    promedio_formacion = round(
+        sum(x["meta_formacion"] for x in matrix_rows) / total_registros, 2
+    ) if total_registros else 0.0
+
+    promedio_planeacion = round(
+        sum(x["meta_actividades"] for x in matrix_rows) / total_registros, 2
+    ) if total_registros else 0.0
+
+    promedio_general = round(
+        sum(x["resultado_meta_general"] for x in matrix_rows) / total_registros, 2
+    ) if total_registros else 0.0
+
+    cumple_formacion = 0
+    cumple_planeacion = 0
+    cumple_general = 0
+
+    if meta_fi is not None:
+        cumple_formacion = sum(1 for x in matrix_rows if (x["meta_formacion"] or 0) >= meta_fi)
+
+    if meta_ep is not None:
+        cumple_planeacion = sum(1 for x in matrix_rows if (x["meta_actividades"] or 0) >= meta_ep)
+
+    if meta_general is not None:
+        cumple_general = sum(1 for x in matrix_rows if (x["resultado_meta_general"] or 0) >= meta_general)
+
+    resumen_rows = [
+        {"indicador": "Cantidad de registros evaluados", "valor": total_registros},
+        {"indicador": "Meta formación inicial configurada", "valor": meta_fi if meta_fi is not None else "No definida"},
+        {"indicador": "Meta ejecución del plan configurada", "valor": meta_ep if meta_ep is not None else "No definida"},
+        {"indicador": "Meta general configurada", "valor": meta_general if meta_general is not None else "No definida"},
+        {"indicador": "Promedio meta formación (%)", "valor": f"{promedio_formacion}%"},
+        {"indicador": "Promedio meta planeación (%)", "valor": f"{promedio_planeacion}%"},
+        {"indicador": "Promedio resultado general (%)", "valor": f"{promedio_general}%"},
+        {"indicador": "Meses que cumplieron meta formación", "valor": cumple_formacion},
+        {"indicador": "Meses que cumplieron meta planeación", "valor": cumple_planeacion},
+        {"indicador": "Meses que cumplieron meta general", "valor": cumple_general},
+    ]
+
+    detalle_rows = []
+    for x in matrix_rows:
+        detalle_rows.append({
+            "anio": x["anio"],
+            "mes": x["mes"],
+            "meta_formacion": f'{x["meta_formacion"]}%',
+            "meta_actividades": f'{x["meta_actividades"]}%',
+            "resultado_meta_general": f'{x["resultado_meta_general"]}%',
+            "analisis_mensual": x["analisis_mensual"],
+        })
+
+    sections = [
+        {
+            "subtitle": "Resumen ejecutivo",
+            "paragraphs": [
+                "Vista ejecutiva de la métrica de cultura de seguridad.",
+                "Se presenta un consolidado de cumplimiento frente a las metas definidas y un detalle resumido por período."
+            ]
+        },
+        {
+            "subtitle": "Indicadores clave",
+            "table": {
+                "rows": resumen_rows,
+                "cols": ["indicador", "valor"],
+                "labels": ["Indicador", "Valor"],
+                "widths": [4.8 * inch, 2.2 * inch]
+            }
+        },
+        {
+            "subtitle": "Detalle resumido por período",
+            "table": {
+                "rows": _safe_rows(
+                    detalle_rows,
+                    ["anio", "mes", "meta_formacion", "meta_actividades", "resultado_meta_general", "analisis_mensual"],
+                    {"analisis_mensual": 160}
+                ),
+                "cols": ["anio", "mes", "meta_formacion", "meta_actividades", "resultado_meta_general", "analisis_mensual"],
+                "labels": ["Año", "Mes", "Meta formación", "Meta planeación", "Resultado general", "Análisis mensual"]
+            }
+        }
+    ]
+
+    return {
+        "title": "Métricas de Cultura de Seguridad",
+        "filename": "metricas_cultura",
+        "wide": True,
+        "sections": sections,
+        "sheets": []
+    }
+
+
+def _payload_metricas_mejora(company=""):
+    estado = func.lower(func.trim(MejoraPlanRegistro.estado_actividad))
+    eficacia = func.lower(func.trim(MejoraPlanRegistro.eficacia))
+    tipo = func.lower(func.trim(MejoraPlanRegistro.tipo_accion))
+
+    total = db.session.query(func.count(MejoraPlanRegistro.id)).scalar() or 0
+    abiertos = db.session.query(func.count(MejoraPlanRegistro.id)).filter(estado == "abierto").scalar() or 0
+    cerrados = db.session.query(func.count(MejoraPlanRegistro.id)).filter(estado == "cerrado").scalar() or 0
+    eficaces = db.session.query(func.count(MejoraPlanRegistro.id)).filter(estado == "cerrado", eficacia == "sí").scalar() or 0
+    no_eficaces = db.session.query(func.count(MejoraPlanRegistro.id)).filter(estado == "cerrado", eficacia == "no").scalar() or 0
+    sin_eficacia = db.session.query(func.count(MejoraPlanRegistro.id)).filter(
+        estado == "cerrado",
+        (MejoraPlanRegistro.eficacia == None) | (func.trim(MejoraPlanRegistro.eficacia) == "")
+    ).scalar() or 0
+
+    correctivos = db.session.query(func.count(MejoraPlanRegistro.id)).filter(tipo == "correctiva").scalar() or 0
+    mejoras = db.session.query(func.count(MejoraPlanRegistro.id)).filter(tipo == "mejora").scalar() or 0
+    sin_tipo = db.session.query(func.count(MejoraPlanRegistro.id)).filter(
+        (MejoraPlanRegistro.tipo_accion == None) | (func.trim(MejoraPlanRegistro.tipo_accion) == "")
+    ).scalar() or 0
+
+    cerrados_con_eficacia = eficaces + no_eficaces
+    pct_eficacia = round((eficaces / cerrados_con_eficacia) * 100, 2) if cerrados_con_eficacia else 0.0
+
+    sections = [
+        {
+            "subtitle": "Resumen ejecutivo",
+            "paragraphs": [
+                f"Total planes: {total}.",
+                f"Abiertos: {abiertos}. Cerrados: {cerrados}.",
+                f"Eficaces: {eficaces}. No eficaces: {no_eficaces}. Sin evaluar: {sin_eficacia}.",
+                f"% eficacia (sobre cerrados con evaluación): {pct_eficacia}%.",
+                f"Tipo de acción - Correctivos: {correctivos}. Mejora: {mejoras}. Sin tipo: {sin_tipo}.",
+            ]
+        },
+        {
+            "subtitle": "Indicadores clave",
+            "table": {
+                "rows": [{
+                    "total_planes": total,
+                    "abiertos": abiertos,
+                    "cerrados": cerrados,
+                    "eficaces": eficaces,
+                    "no_eficaces": no_eficaces,
+                    "sin_eficacia": sin_eficacia,
+                    "pct_eficacia": f"{pct_eficacia}%",
+                    "correctivos": correctivos,
+                    "mejoras": mejoras,
+                    "sin_tipo": sin_tipo,
+                }],
+                "cols": ["total_planes", "abiertos", "cerrados", "eficaces", "no_eficaces", "sin_eficacia", "pct_eficacia", "correctivos", "mejoras", "sin_tipo"],
+                "labels": ["Total planes", "Abiertos", "Cerrados", "Eficaces", "No eficaces", "Sin evaluar", "% eficacia", "Correctivos", "Mejora", "Sin tipo"]
+            }
+        }
+    ]
+
+    return {
+        "title": "Métricas – Planes de Mejora",
+        "filename": "metricas_mejora",
+        "wide": True,
+        "sections": sections,
+        "sheets": []
+    }
+
+
+# ============================================================
+# PAYLOADS NUEVOS SOLO EXCEL O DOFA
+# ============================================================
+
+def _payload_matriz_riesgos(company=""):
+    ver = (request.args.get("ver") or "activos").strip().lower()
+
+    if ver == "archivados":
+        riesgos = Riesgo.query.filter_by(archivado=True).order_by(Riesgo.id.desc()).all()
+    elif ver == "todos":
+        riesgos = Riesgo.query.order_by(Riesgo.archivado.asc(), Riesgo.id.desc()).all()
+    else:
+        riesgos = Riesgo.query.filter_by(archivado=False).order_by(Riesgo.id.desc()).all()
+
+    sel = session.get('riesgos_campos', RISK_DEFAULT_FIELDS)
+    label_map = _risk_label_map()
+
+    selected_cols = [k for k in sel if k in label_map]
+    if not selected_cols:
+        selected_cols = list(RISK_DEFAULT_FIELDS)
+
+    rows = []
+    for r in riesgos:
+        item = {}
+        for key in selected_cols:
+            item[key] = getattr(r, key, None)
+        rows.append(item)
+
+    labels = [label_map.get(k, k) for k in selected_cols]
+
+    return {
+        "title": "Matriz de Riesgos",
+        "filename": "matriz_riesgos",
+        "wide": True,
+        "sections": [],
+        "sheets": [{
+            "name": "MatrizRiesgos",
+            "title": "Matriz de Riesgos",
+            "rows": rows,
+            "cols": selected_cols,
+            "labels": labels
+        }]
+    }
+
+
+def _payload_registro_incidentes(company=""):
+    conn = sqlite3.connect('sgsi.db')
+    c = conn.cursor()
+
+    filtro = (request.args.get('filtro') or '').strip()
+    campo = (request.args.get('campo') or 'nombre_alerta').strip()
+
+    campos_validos = {
+        "nombre_alerta",
+        "descripcion_alerta",
+        "atacante",
+        "estado",
+        "principio",
+        "prioridad",
+        "id_incidente",
+        "clasificacion_incidente",
+        "cargo_responsable"
+    }
+    if campo not in campos_validos:
+        campo = "nombre_alerta"
+
+    base_query = """
+        SELECT
+            id,
+            fecha_alerta,
+            id_incidente,
+            nombre_alerta,
+            descripcion_alerta,
+            clasificacion_incidente,
+            cargo_responsable,
+            atacante,
+            ubicacion_atacante,
+            tipo_recurso_afectado,
+            nombre_recurso_id,
+            estado,
+            fecha_cierre,
+            descripcion_cierre,
+            principio,
+            prioridad,
+            se_requiere_contencion,
+            fecha_hora_contencion,
+            descripcion_contencion,
+            se_requiere_recuperacion,
+            fecha_hora_recuperacion,
+            descripcion_recuperacion
+        FROM registro_incidentes
+    """
+
+    params = ()
+    if filtro:
+        base_query += f" WHERE {campo} LIKE ?"
+        params = (f"%{filtro}%",)
+
+    base_query += " ORDER BY id DESC"
+    c.execute(base_query, params)
+    data = c.fetchall()
+    conn.close()
+
+    cols = [
+        "id",
+        "fecha_alerta",
+        "id_incidente",
+        "nombre_alerta",
+        "descripcion_alerta",
+        "clasificacion_incidente",
+        "cargo_responsable",
+        "atacante",
+        "ubicacion_atacante",
+        "tipo_recurso_afectado",
+        "nombre_recurso_id",
+        "estado",
+        "fecha_cierre",
+        "descripcion_cierre",
+        "principio",
+        "prioridad",
+        "se_requiere_contencion",
+        "fecha_hora_contencion",
+        "descripcion_contencion",
+        "se_requiere_recuperacion",
+        "fecha_hora_recuperacion",
+        "descripcion_recuperacion",
+    ]
+
+    labels = [
+        "ID",
+        "Fecha Alerta",
+        "ID Incidente",
+        "Nombre Alerta",
+        "Descripción Alerta",
+        "Clasificación",
+        "Cargo Responsable",
+        "Atacante",
+        "Ubicación Atacante",
+        "Tipo Recurso Afectado",
+        "Recurso / ID",
+        "Estado",
+        "Fecha Cierre",
+        "Descripción Cierre",
+        "Principio",
+        "Prioridad",
+        "Req. Contención",
+        "Fecha Contención",
+        "Desc. Contención",
+        "Req. Recuperación",
+        "Fecha Recuperación",
+        "Desc. Recuperación",
+    ]
+
+    rows = [dict(zip(cols, fila)) for fila in data]
+
+    return {
+        "title": "Registro de Incidentes",
+        "filename": "registro_incidentes",
+        "wide": True,
+        "sections": [],
+        "sheets": [{
+            "name": "RegistroIncidentes",
+            "title": "Registro de Incidentes",
+            "rows": rows,
+            "cols": cols,
+            "labels": labels
+        }]
+    }
+
+
+def _payload_planes_accion_sgsi(company=""):
+    sel = session.get('mejora_plan_cols') or DEFAULT_MEJORA_PLAN_COLS
+    label_map = _mejora_label_map()
+
+    selected_cols = [k for k in sel if k in label_map]
+    if not selected_cols:
+        selected_cols = list(DEFAULT_MEJORA_PLAN_COLS)
+
+    items = (
+        MejoraPlanRegistro.query
+        .options(selectinload(MejoraPlanRegistro.evidencias))
+        .order_by(MejoraPlanRegistro.id.desc())
+        .all()
+    )
+
+    rows = []
+    for it in items:
+        item = {}
+        for key in selected_cols:
+            if key == "evidencias":
+                item[key] = _join_evidence_names(getattr(it, "evidencias", []))
+            else:
+                item[key] = getattr(it, key, None)
+        rows.append(item)
+
+    labels = [label_map.get(k, k) for k in selected_cols]
+
+    return {
+        "title": "Planes de Acción del Sistema de Gestión (Mejora)",
+        "filename": "planes_accion_sgsi",
+        "wide": True,
+        "sections": [],
+        "sheets": [{
+            "name": "PlanesAccionSGSI",
+            "title": "Planes de Acción del SGSI",
+            "rows": rows,
+            "cols": selected_cols,
+            "labels": labels
+        }]
+    }
+
+
+def _payload_dofa(company=""):
+    dofa_id = request.args.get("dofa_id", type=int)
+
+    if dofa_id:
+        registros = [DofaAnalisis.query.get_or_404(dofa_id)]
+    else:
+        registros = DofaAnalisis.query.order_by(DofaAnalisis.id.desc()).all()
+
+    sections = []
+
+    for r in registros:
+        subtitle_meta = f"{r.titulo or 'DOFA'}"
+        meta_lines = [f"Fecha: {_fmt(r.fecha)}"]
+        if getattr(r, "creado_por", None):
+            meta_lines.append(f"Creado por: {r.creado_por}")
+
+        sections.append({
+            "render_mode": "dofa_cards",
+            "subtitle": subtitle_meta,
+            "paragraphs": meta_lines,
+            "cards_2x2": [
+                {"title": "✅ Fortalezas",      "text": r.fortalezas or "",      "bg": "#eaf7ef"},
+                {"title": "🌟 Oportunidades",   "text": r.oportunidades or "",   "bg": "#eef5ff"},
+                {"title": "⚠️ Debilidades",    "text": r.debilidades or "",     "bg": "#fff8e8"},
+                {"title": "🛡️ Amenazas",       "text": r.amenazas or "",        "bg": "#fdeeee"},
+            ],
+            "strategy_cards": [
+                {"title": "FO (Fortalezas + Oportunidades)",  "text": r.estrategias_fo or ""},
+                {"title": "FA (Fortalezas + Amenazas)",       "text": r.estrategias_fa or ""},
+                {"title": "DO (Debilidades + Oportunidades)", "text": r.estrategias_do or ""},
+                {"title": "DA (Debilidades + Amenazas)",      "text": r.estrategias_da or ""},
+            ],
+            "page_break": False
+        })
+
+    return {
+        "title": "DOFA",
+        "filename": "dofa",
+        "wide": True,
+        "sections": sections if sections else [{
+            "subtitle": "DOFA",
+            "paragraphs": ["No hay registros disponibles."]
+        }],
+        "sheets": []
+    }
+
+
+def _payload_partes_interesadas(company=""):
+    sel = session.get('partes_interesadas_cols') or list(DEFAULT_PARTES_INTERESADAS_COLS)
+    label_map = _partes_label_map()
+
+    selected_cols = [k for k in sel if k in label_map]
+    if not selected_cols:
+        selected_cols = list(DEFAULT_PARTES_INTERESADAS_COLS)
+
+    items = ParteInteresada.query.order_by(ParteInteresada.parte_interesada.asc()).all()
+
+    rows = []
+    for it in items:
+        item = {}
+        for key in selected_cols:
+            if key == "evidencias":
+                item[key] = _join_evidence_names(getattr(it, "evidencias", []))
+            else:
+                item[key] = getattr(it, key, None)
+        rows.append(item)
+
+    labels = [label_map.get(k, k) for k in selected_cols]
+
+    return {
+        "title": "Partes Interesadas",
+        "filename": "partes_interesadas",
+        "wide": True,
+        "sections": [],
+        "sheets": [{
+            "name": "PartesInteresadas",
+            "title": "Partes Interesadas",
+            "rows": rows,
+            "cols": selected_cols,
+            "labels": labels
+        }]
+    }
+
+
+# ============================================================
+# PAYLOADS - EXCEL GENÉRICO PARA LOS DEMÁS
+# ============================================================
+
+def _payload_excel_only_generic(key: str):
+    key = (key or "").strip().lower()
+
+    generic_map = {
+        "objetivos": ("objetivos_sgsi", "Objetivos del SGSI"),
+        "docs": ("doc_maestro_documentos", "Listado maestro de documentos"),
+        "rev_accesos": ("revision_accesos", "Revisión de accesos"),
+        "gestion_accesos": ("gestion_acceso", "Gestión de accesos"),
+        "legales": ("requisitos_legales", "Requisitos legales"),
+        "cambios": ("cambio_rfc_registro", "Gestión de cambios (RFC)"),
+        "vuln": ("vulnerabilidades_registro", "Registro de vulnerabilidades"),
+        "remediacion": ("planes_remediacion", "Plan de remediación"),
+        "concientizacion": ("plan_cf_registros", "Plan de concientización"),
+        "competencia": ("plan_remediacion_competencias", "Plan de competencia"),
+        "proveedores": ("proveedor_evaluaciones", "Registro de proveedores"),
+    }
+
+    if key not in generic_map:
+        return {
+            "title": "Reporte",
+            "filename": "reporte",
+            "sheets": [{
+                "name": "Reporte",
+                "title": "Reporte no encontrado",
+                "rows": [{"mensaje": f"El reporte '{key}' no está registrado."}],
+                "cols": ["mensaje"],
+                "labels": ["Mensaje"]
+            }]
+        }
+
+    table_name, title = generic_map[key]
+    rows = _sql_fetchall(f"SELECT * FROM {table_name} ORDER BY id DESC")
+    cols = list(rows[0].keys()) if rows else ["id"]
+
+    return {
+        "title": title,
+        "filename": key,
+        "sheets": [{
+            "name": "Datos",
+            "title": title,
+            "rows": rows[:1000],
+            "cols": cols,
+            "labels": cols
+        }]
+    }
+
+
+# ============================================================
+# INVENTARIOS DE ACTIVOS - REPORTES EXCEL
+# ============================================================
+
+_INVENTARIOS_EXCEL_TABLAS = {
+    "inventario_software": ("inventario_software", "Inventario de Software", "Inventario de Software"),
+    "inventario_informacion": ("inventario_informacion", "Inventario de Información", "Inventario de Información"),
+    "inventario_datos_personales": ("inventario_datos_personales", "Inventario de Datos Personales", "Inventario de Datos Personales"),
+    "inventario_fisico": ("inventario_fisico", "Inventario Físico", "Inventario Físico"),
+}
+_INVENTARIOS_EXCEL_PERMISOS = {
+    key: nombre for key, (_, nombre, _) in _INVENTARIOS_EXCEL_TABLAS.items()
+}
+_INVENTARIOS_EXCEL_PERMISOS["inventario_ia"] = "Inventario de IA"
+
+
+def _inventarios_excel_valor(v):
+    """Evita que fórmulas inyectadas desde registros se ejecuten en Excel."""
+    val = _fmt(v)
+    if isinstance(val, str) and val.lstrip().startswith(('=', '+', '-', '@', '\t', '\r')):
+        return "'" + val
+    return val
+
+
+def _payload_inventarios_activos(key):
+    if key == "inventario_ia":
+        # Base independiente: no usar el SQLAlchemy principal para esta matriz.
+        with _ai_inv_connection() as con:
+            raw = [dict(r) for r in con.execute('SELECT * FROM sistemas_ia ORDER BY id').fetchall()]
+        cols = ['codigo'] + list(_AI_INV_KEYS)
+        labels = ['Código'] + [label for _, label, _, _ in _AI_INV_FIELDS]
+        rows = [dict(codigo='IA-{:05d}'.format(r['id']), **{
+            k: _inventarios_excel_valor(r.get(k)) for k in _AI_INV_KEYS
+        }) for r in raw]
+        nombre = 'Inventario de IA (ISO 42001)'
+        filename = 'GRAC_Inventario_IA'
+        sheet_name = 'Inventario IA'
+    else:
+        tabla, nombre, _ = _INVENTARIOS_EXCEL_TABLAS[key]
+        # La tabla procede de una lista interna fija, nunca de entrada del usuario.
+        rows = _sql_fetchall('SELECT * FROM "{}" ORDER BY id'.format(tabla))
+        cols = list(rows[0].keys()) if rows else _table_columns(tabla)
+        rows = [{k: _inventarios_excel_valor(r.get(k)) for k in cols} for r in rows]
+        labels = list(cols)
+        filename = 'GRAC_' + key
+        sheet_name = 'Matriz'
+    return {
+        'title': nombre,
+        'filename': filename,
+        'sheets': [{
+            'name': sheet_name,
+            'title': nombre,
+            'rows': rows, 'cols': cols, 'labels': labels,
+        }],
+    }
+
+
+# ============================================================
+# FÁBRICA CENTRAL DE PAYLOAD
+# ============================================================
+
+def _get_report_payload(key: str):
+    key = (key or "").strip().lower()
+
+    if key in _INVENTARIOS_EXCEL_PERMISOS:
+        return _payload_inventarios_activos(key)
+
+    if key == "soa":
+        return _payload_soa()
+
+    if key == "incidentes":
+        return _payload_metricas_incidentes()
+
+    if key == "metricas_riesgos":
+        return _payload_metricas_riesgos()
+
+    if key == "metricas_vuln":
+        return _payload_metricas_vulnerabilidades()
+
+    if key == "metricas_cultura":
+        return _payload_metricas_cultura()
+
+    if key == "metricas_mejora":
+        return _payload_metricas_mejora()
+
+    if key == "matriz_riesgos":
+        return _payload_matriz_riesgos()
+
+    if key == "registro_incidentes":
+        return _payload_registro_incidentes()
+
+    if key == "planes_respuesta_incidentes":
+        return _ir_excel_payload()
+
+    if key == "planes_accion_sgsi":
+        return _payload_planes_accion_sgsi()
+
+    if key == "dofa":
+        return _payload_dofa()
+
+    if key == "partes_interesadas":
+        return _payload_partes_interesadas()
+
+    return _payload_excel_only_generic(key)
+
+
+# ============================================================
+# PANTALLA PRINCIPAL
+# ============================================================
+
+@app.route("/reportes")
+@login_required
+def reportes_home():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Reportes"):
+        flash("No tiene permiso para acceder al módulo de reportes.", "danger")
+        return redirect(url_for('menu'))
+
+    company_input = (request.args.get("company") or "").strip()
+    company = _resolve_company_name(company_input)
+
+    start_date = (request.args.get("start_date") or "").strip()
+    end_date = (request.args.get("end_date") or "").strip()
+
+    catalogo_visible = [r for r in REPORT_CATALOG if (
+        (r['key'] not in _INVENTARIOS_EXCEL_PERMISOS or
+         verificar_permiso_activos(user, _INVENTARIOS_EXCEL_PERMISOS[r['key']]))
+        and (r['key'] != 'planes_respuesta_incidentes' or verificar_permiso(user, 'Planes de Respuesta a Incidentes'))
+    )]
+
+    ir_categorias_reporte = []
+    if any(r['key'] == 'planes_respuesta_incidentes' for r in catalogo_visible):
+        _ir_init()
+        with _ir_db() as ir_con:
+            ir_categorias_reporte = [r['category'] for r in ir_con.execute(
+                "SELECT DISTINCT category FROM ir_plans WHERE TRIM(category) <> '' ORDER BY category COLLATE NOCASE"
+            )]
+
+    content = render_template_string("""
+    <div class="rep-shell">
+
+      <div class="rep-header-card">
+        <div class="rep-header-overlay">
+          <div class="rep-header-text">
+            <h3 class="rep-title m-0">Reportes del Sistema de Gestión</h3>
+            <div class="rep-subtitle">
+              La declaración de aplicabilidad, métricas y DOFA se exportan en PDF / Word.
+              Matriz de riesgos, registro de incidentes, planes de acción y partes interesadas se exportan en Excel.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rep-header-actions">
+        
+      </div>
+
+      <div class="rep-card p-4 mb-3">
+        <div class="rep-section-title">
+          Filtros de generación
+        </div>
+
+        <form method="GET" action="{{ url_for('reportes_home') }}">
+          <div class="row g-3 align-items-end">
+
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Empresa</label>
+              <input class="form-control"
+                     name="company"
+                     value="{{ company }}"
+                     placeholder="Nombre empresa">
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label fw-semibold">Desde</label>
+              <input type="date"
+                     class="form-control"
+                     name="start_date"
+                     value="{{ start_date }}">
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label fw-semibold">Hasta</label>
+              <input type="date"
+                     class="form-control"
+                     name="end_date"
+                     value="{{ end_date }}">
+            </div>
+
+            <div class="col-md-2 d-flex gap-2">
+              <button class="btn btn-primary rounded-pill px-3 w-100" type="submit">
+                Aplicar
+              </button>
+              <a class="btn btn-outline-secondary rounded-pill px-3 w-100"
+                 href="{{ url_for('reportes_home') }}">
+                Limpiar
+              </a>
+            </div>
+
+          </div>
+        </form>
+      </div>
+
+      <div class="row g-3">
+        {% for r in catalog %}
+          {% set allow_pdf_word = r.key in pdf_word_allowed %}
+          {% set allow_excel_only = r.key in excel_only_allowed %}
+          <div class="col-xl-4 col-lg-4 col-md-6 col-sm-12">
+            <div class="rep-report-card h-100">
+              <div class="rep-report-card-body d-flex flex-column h-100">
+
+                <div class="rep-report-top">
+                  <div class="rep-report-icon">
+                    <i class="bi {{ r.icon }}"></i>
+                  </div>
+
+                  <div class="rep-report-head-text">
+                    <div class="rep-report-title">{{ r.label }}</div>
+
+                    <div class="rep-report-desc">
+                      {% if r.key == 'soa' %}
+                        Reporte formal de la declaración de aplicabilidad del SGSI.
+                      {% elif r.key == 'incidentes' %}
+                        Presentación basada en el submódulo de métricas de incidentes.
+                      {% elif r.key == 'metricas_riesgos' %}
+                        Presentación basada en el submódulo de métricas de riesgos.
+                      {% elif r.key == 'metricas_vuln' %}
+                        Presentación basada en el submódulo de métricas de vulnerabilidades.
+                      {% elif r.key == 'metricas_cultura' %}
+                        Presentación basada en el submódulo de métricas de cultura.
+                      {% elif r.key == 'metricas_mejora' %}
+                        Presentación basada en el submódulo de métricas de planes de mejora.
+                      {% elif r.key == 'dofa' %}
+                        Exportación con estructura visual del módulo Ver DOFA.
+                      {% elif r.key == 'matriz_riesgos' %}
+                        Exportación de la matriz de riesgos en Excel.
+                      {% elif r.key == 'registro_incidentes' %}
+                        Exportación del registro de incidentes en Excel.
+                      {% elif r.key == 'planes_respuesta_incidentes' %}
+                        Catálogo y ejecuciones en Excel; plan operativo por categoría con diagrama de flujo para imprimir.
+                      {% elif r.key == 'planes_accion_sgsi' %}
+                        Exportación de planes de acción del sistema de gestión en Excel.
+                      {% elif r.key == 'partes_interesadas' %}
+                        Exportación de partes interesadas en Excel.
+                      {% elif r.key == 'inventario_ia' %}
+                        Matriz de inteligencia artificial, basada en ISO/IEC 42001, en Excel.
+                      {% else %}
+                        Disponible únicamente para exportación en Excel.
+                      {% endif %}
+                    </div>
+                  </div>
+                </div>
+
+                <div class="rep-report-meta mt-3">
+                  <div class="small text-muted">
+                    Formatos disponibles:
+                  </div>
+                  <div class="d-flex gap-2 flex-wrap mt-2">
+                    {% if allow_pdf_word %}
+                      <span class="rep-chip rep-chip-pdf">PDF</span>
+                      <span class="rep-chip rep-chip-word">WORD</span>
+                    {% endif %}
+                    {% if allow_excel_only %}
+                      <span class="rep-chip rep-chip-excel">EXCEL</span>
+                    {% endif %}
+                  </div>
+                </div>
+
+                {% if r.key == 'planes_respuesta_incidentes' %}
+                <form method="get" action="{{ url_for('ir_category_report_pdf') }}"
+                      target="_blank" class="mt-3 no-progress"
+                      data-no-progress="true" aria-label="Imprimir plan de respuesta por categoría">
+                  <input type="hidden" name="company" value="{{ company }}">
+                  <label class="form-label fw-semibold small" for="ir-report-category">Categoría del incidente</label>
+                  <select id="ir-report-category" class="form-select form-select-sm mb-2" name="categoria" required>
+                    <option value="__todas__">Todas las categorías</option>
+                    {% for categoria in ir_categorias_reporte %}
+                    <option value="{{ categoria }}">{{ categoria }}</option>
+                    {% endfor %}
+                  </select>
+                  <button type="submit" class="btn btn-primary btn-sm w-100 no-progress"
+                          data-no-progress="true">
+                    <i class="bi bi-diagram-3 me-1"></i> Imprimir plan y diagrama (PDF)
+                  </button>
+                  <div class="form-text">Incluye la versión vigente o borrador, fases, actividades e instrucciones.</div>
+                </form>
+                {% endif %}
+                <div class="rep-report-actions mt-auto pt-3 d-flex gap-2 flex-wrap">
+                  {% if allow_pdf_word %}
+                    <a class="btn btn-primary btn-sm rounded-pill px-3"
+                       target="_blank"
+                       href="{{ url_for('reportes_pdf', key=r.key, company=company, start_date=start_date, end_date=end_date, year=request.args.get('year', ''), month=request.args.get('month', ''), ver=request.args.get('ver', ''), campo=request.args.get('campo', ''), filtro=request.args.get('filtro', ''), dofa_id=request.args.get('dofa_id', '')) }}"
+                       onclick="showLoader(); setTimeout(hideLoader, 1200);">
+                      <i class="bi bi-printer me-1"></i> Imprimir PDF
+                    </a>
+
+                    <a class="btn btn-success btn-sm rounded-pill px-3"
+                       href="{{ url_for('reportes_docx', key=r.key, company=company, start_date=start_date, end_date=end_date, year=request.args.get('year', ''), month=request.args.get('month', ''), ver=request.args.get('ver', ''), campo=request.args.get('campo', ''), filtro=request.args.get('filtro', ''), dofa_id=request.args.get('dofa_id', '')) }}"
+                       onclick="showLoader(); window.open(this.href, '_blank', 'noopener'); setTimeout(hideLoader, 1200); return false;">
+                      <i class="bi bi-file-earmark-word me-1"></i> Descargar Word
+                    </a>
+                  {% endif %}
+
+                  {% if allow_excel_only %}
+                    <a class="btn btn-outline-success btn-sm rounded-pill px-3"
+                       href="{{ url_for('reportes_excel', key=r.key, company=company, start_date=start_date, end_date=end_date, year=request.args.get('year', ''), month=request.args.get('month', ''), ver=request.args.get('ver', ''), campo=request.args.get('campo', ''), filtro=request.args.get('filtro', ''), dofa_id=request.args.get('dofa_id', '')) }}"
+                       onclick="showLoader(); window.open(this.href, '_blank', 'noopener'); setTimeout(hideLoader, 1200); return false;">
+                      <i class="bi bi-file-earmark-excel me-1"></i> Descargar Excel
+                    </a>
+                  {% endif %}
+                </div>
+
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .rep-shell{
+        width:96%;
+        max-width:1350px;
+        margin:26px auto 24px auto;
+        overflow:hidden;
+      }
+
+      .rep-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }
+
+      .rep-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .rep-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        position:relative;
+        z-index:1;
+        min-width:0;
+      }
+
+      .rep-header-overlay::before{
+        content:"📊";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.4rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .rep-header-text{
+        max-width:1000px;
+        min-width:0;
+      }
+
+      .rep-header-text::before{
+        content:"SGSI · Centro de Reportes";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }
+
+      .rep-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        margin:0 !important;
+        text-shadow:0 4px 14px rgba(0,0,0,.45);
+        overflow-wrap:break-word;
+      }
+
+      .rep-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        line-height:1.25;
+        margin-top:3px;
+        overflow-wrap:break-word;
+      }
+
+      .rep-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .btn{
+        border-radius:10px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+        max-width:100%;
+      }
+
+      .rep-btn-main{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .rep-btn-main:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+      }
+
+      .rep-card{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+        width:100%;
+        max-width:100%;
+      }
+
+      .rep-card .card-body{
+        padding:22px;
+        overflow:hidden;
+      }
+
+      .rep-section-title{
+        font-weight:950;
+        font-size:.95rem;
+        color:#0b4a8f;
+        margin-bottom:16px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+        padding-bottom:8px;
+        overflow-wrap:break-word;
+      }
+
+      /* =========================
+         FILTROS / BOTÓN LIMPIAR FIX
+         ========================= */
+      .rep-card form,
+      .rep-filter-form{
+        width:100%;
+        max-width:100%;
+        overflow:hidden;
+      }
+
+      .rep-card form .row{
+        width:100%;
+        max-width:100%;
+        margin-left:0 !important;
+        margin-right:0 !important;
+        align-items:end;
+      }
+
+      .rep-card form [class*="col-"]{
+        min-width:0;
+      }
+
+      .rep-card form .col-auto,
+      .rep-card form .col-md-auto,
+      .rep-card form .col-lg-auto{
+        max-width:100%;
+      }
+
+      .rep-filter-actions,
+      .rep-card form .rep-filter-actions{
+        display:flex;
+        flex-wrap:wrap;
+        gap:6px;
+        align-items:center;
+        justify-content:flex-start;
+        width:100%;
+        max-width:100%;
+        min-width:0;
+      }
+
+      .rep-filter-actions .btn,
+      .rep-card form button,
+      .rep-card form a.btn,
+      .rep-card form input[type="submit"],
+      .rep-card form input[type="reset"]{
+        white-space:nowrap;
+        flex-shrink:0;
+        max-width:100%;
+      }
+
+      .rep-card form .btn{
+        margin-bottom:0;
+      }
+
+      .rep-report-card{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.14);
+        border:1px solid rgba(219,230,244,.9);
+        transition:all .22s ease;
+        overflow:hidden;
+        width:100%;
+        max-width:100%;
+        height:100%;
+      }
+
+      .rep-report-card:hover{
+        transform:translateY(-5px);
+        box-shadow:0 16px 30px rgba(15,23,42,.22);
+      }
+
+      .rep-report-card-body{
+        padding:20px;
+      }
+
+      .rep-report-top{
+        display:flex;
+        align-items:flex-start;
+        gap:14px;
+        min-width:0;
+      }
+
+      .rep-report-icon{
+        min-width:52px;
+        width:52px;
+        height:52px;
+        border-radius:14px;
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        color:#ffffff;
+        font-size:1.3rem;
+        box-shadow:0 8px 18px rgba(20,89,166,.28);
+        flex-shrink:0;
+      }
+
+      .rep-report-head-text{
+        flex:1;
+        min-width:0;
+      }
+
+      .rep-report-title{
+        font-weight:950;
+        font-size:1.03rem;
+        color:#0b4a8f;
+        line-height:1.25;
+        margin-bottom:6px;
+        overflow-wrap:break-word;
+      }
+
+      .rep-report-desc{
+        font-size:.78rem;
+        color:#475569;
+        line-height:1.45;
+        min-height:58px;
+        overflow-wrap:break-word;
+      }
+
+      .rep-report-meta{
+        background:#f8fbff;
+        border:1px solid #e2ebf5;
+        border-radius:14px;
+        padding:12px 14px;
+        overflow:hidden;
+      }
+
+      .rep-chip{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        padding:4px 10px;
+        border-radius:999px;
+        font-size:.75rem;
+        font-weight:900;
+        letter-spacing:.3px;
+        max-width:100%;
+        white-space:normal;
+        text-align:center;
+      }
+
+      .rep-chip-pdf{
+        background:#fee2e2;
+        color:#991b1b;
+        border:1px solid #fecaca;
+      }
+
+      .rep-chip-word{
+        background:#dcfce7;
+        color:#166534;
+        border:1px solid #bbf7d0;
+      }
+
+      .rep-chip-excel{
+        background:#dbeafe;
+        color:#1d4ed8;
+        border:1px solid #bfdbfe;
+      }
+
+      .rep-report-actions{
+        display:flex;
+        flex-wrap:wrap;
+        gap:6px;
+      }
+
+      .rep-report-actions .btn{
+        min-width:145px;
+        box-shadow:0 4px 10px rgba(0,0,0,.10);
+      }
+
+      .form-control,
+      .form-select{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        max-width:100%;
+      }
+
+      .form-control:focus,
+      .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
+        background:#ffffff;
+      }
+
+      h3{
+        color:#ffffff;
+        margin:0;
+      }
+
+      @media (max-width:992px){
+        .rep-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .rep-title{
+          font-size:1.20rem;
+          line-height:1.08;
+        }
+
+        .rep-subtitle{
+          font-size:.68rem;
+          line-height:1.12;
+        }
+
+        .rep-report-desc{
+          min-height:auto;
+        }
+
+        .rep-card .card-body{
+          padding:16px;
+        }
+      }
+
+      @media (max-width:768px){
+        .rep-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .rep-header-overlay::before{
+          margin:0;
+        }
+
+        .rep-title,
+        .rep-subtitle{
+          text-align:center;
+        }
+
+        .rep-header-actions .btn,
+        .rep-report-actions .btn,
+        .rep-filter-actions .btn,
+        .rep-card form button,
+        .rep-card form a.btn,
+        .rep-card form input[type="submit"],
+        .rep-card form input[type="reset"]{
+          width:100%;
+        }
+
+        .rep-report-top{
+          flex-direction:column;
+          align-items:center;
+          text-align:center;
+        }
+      }
+    </style>
+    """,
+    catalog=catalogo_visible,
+    pdf_word_allowed=REPORT_KEYS_PDF_WORD,
+    excel_only_allowed=REPORT_KEYS_EXCEL_ONLY,
+    ir_categorias_reporte=ir_categorias_reporte,
+    company=company,
+    start_date=start_date,
+    end_date=end_date,
+    request=request
+    )
+
+    return render_template_string(BASE, content=content)
+
+
+# ============================================================
+# RUTA PDF
+# ============================================================
+
+@app.route("/reportes/pdf/<key>")
+@login_required
+def reportes_pdf(key):
+    key = (key or "").strip().lower()
+
+    if key not in REPORT_KEYS_PDF_WORD:
+        flash("Este reporte no está disponible en PDF.", "warning")
+        return redirect(url_for("reportes_home"))
+
+    company = (request.args.get("company") or "").strip()
+    payload = _get_report_payload(key)
+
+    pdf_bytes = _build_pdf(
+        title=payload["title"],
+        sections=payload["sections"],
+        company_name=company,
+        wide=payload.get("wide", False)
+    )
+
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={payload.get('filename', 'reporte')}.pdf"}
+    )
+
+
+# ============================================================
+# RUTA DOCX
+# ============================================================
+
+@app.route("/reportes/docx/<key>")
+@login_required
+def reportes_docx(key):
+    key = (key or "").strip().lower()
+
+    if key not in REPORT_KEYS_PDF_WORD:
+        flash("Este reporte no está disponible en Word.", "warning")
+        return redirect(url_for("reportes_home"))
+
+    company = (request.args.get("company") or "").strip()
+    payload = _get_report_payload(key)
+
+    docx_bytes = _build_docx(
+        title=payload["title"],
+        sections=payload["sections"],
+        company_name=company
+    )
+
+    return Response(
+        docx_bytes,
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename={payload.get('filename', 'reporte')}.docx"}
+    )
+
+
+# ============================================================
+# RUTA EXCEL
+# ============================================================
+
+@app.route("/reportes/excel/<key>")
+@login_required
+def reportes_excel(key):
+    key = (key or "").strip().lower()
+
+    if key not in REPORT_KEYS_EXCEL_ONLY:
+        flash("Este reporte no está disponible en Excel.", "warning")
+        return redirect(url_for("reportes_home"))
+
+    usuario = db.session.get(User, session.get('user_id'))
+    if usuario is None or (usuario.role != 'admin' and not verificar_permiso(usuario, 'Reportes')):
+        abort(403, description='Sin acceso al Centro de Reportes.')
+    if key == 'planes_respuesta_incidentes' and not verificar_permiso(usuario, 'Planes de Respuesta a Incidentes'):
+        abort(403, description='Sin permiso para exportar planes de respuesta.')
+    permiso_inventario = _INVENTARIOS_EXCEL_PERMISOS.get(key)
+    if permiso_inventario and not verificar_permiso_activos(usuario, permiso_inventario):
+        abort(403, description='Sin permiso para exportar este inventario.')
+
+    company = (request.args.get("company") or "").strip()
+    payload = _get_report_payload(key)
+
+    xlsx_bytes = _build_excel(
+        filename=payload.get("filename", "reporte"),
+        sheets=payload.get("sheets", []),
+        company_name=company
+    )
+
+    return Response(
+        xlsx_bytes,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={payload.get('filename', 'reporte')}.xlsx"}
+    )
+
+
+# ============================================================================================================================================
+#                                                   FIN MÓDULO REPORTES (PDF / WORD / EXCEL)
+# ============================================================================================================================================
+
+
+# ==========================================================================================================================================
+#                                                               Módulo NIST
+# ==========================================================================================================================================
+
+# =====================================================================
+#                 MÓDULO NIVEL DE MADUREZ NIST CSF 2.0 vs ISO 27001
+# =====================================================================
+
+class NistAnalysisRun(db.Model):
+    __tablename__ = "nist_analysis_runs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    iso_analysis_id = db.Column(
+        db.Integer,
+        db.ForeignKey("analysis_runs.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    fecha_calculo = db.Column(db.DateTime, default=datetime.utcnow)
+    nivel_promedio_general = db.Column(db.Float)
+
+    # JSON con resultados por función
+    resultados_json = db.Column(db.Text)  # Guarda estructura completa
+
+    iso_analysis = db.relationship("AnalysisRun", backref="nist_runs")
+
+
+
+@app.route("/nist_madurez")
+@login_required
+def nist_madurez():
+
+    runs = NistAnalysisRun.query.order_by(
+        NistAnalysisRun.fecha_calculo.desc()
+    ).all()
+
+    html = render_template_string("""
+    <div class="menu-wrap">
+
+        <div class="plan-hero">
+            <h2 class="plan-title">🛡️ Nivel de Madurez NIST CSF 2.0</h2>
+        </div>
+
+        <div class="volver-center">
+            <a href="{{ url_for('menu') }}"
+               class="btn btn-light rounded-pill px-4 shadow-sm">
+               ⬅ Volver al menú
+            </a>
+        </div>
+
+        <div class="container mt-4">
+
+            <h4>📚 Historial de Revisiones</h4>
+
+            <table class="table table-striped mt-3">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Nivel Promedio General</th>
+                        <th>Acción</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in runs %}
+                    <tr>
+                        <td>{{ r.fecha_calculo.strftime('%Y-%m-%d') }}</td>
+                        <td><strong>{{ r.nivel_promedio_general }}</strong></td>
+                        <td>
+                            <a href="{{ url_for('ver_nist_detalle', run_id=r.id) }}"
+                               class="btn btn-primary btn-sm">
+                               Ver detalle
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+        </div>
+    </div>
+    """)
+
+    return html
+
+@app.route("/nist_madurez/<int:run_id>")
+@login_required
+def ver_nist_detalle(run_id):
+
+    run = NistAnalysisRun.query.get_or_404(run_id)
+    resultados = json.loads(run.resultados_json)
+
+    # ==========================
+    # ✅ RADAR NIST (AQUÍ VA)
+    # ==========================
+    labels = ["Govern", "Identify", "Protect", "Detect", "Respond", "Recover"]
+
+    values = []
+    for f in labels:
+        cats = resultados.get(f, {})  # {"GV.OC": 2.5, ...}
+        if cats:
+            values.append(round(sum(cats.values()) / len(cats), 2))
+        else:
+            values.append(0)
+
+    radar_nist_b64 = make_radar_base64(labels, values, title="Araña Consolidada – NIST CSF 2.0")
+
+    return render_template_string("""
+    <div class="container mt-4">
+        <h3>Detalle NIST CSF 2.0</h3>
+        <h5>Nivel General: {{ run.nivel_promedio_general }}</h5>
+
+        {% for funcion, categorias in resultados.items() %}
+            <div class="card mt-3 shadow-sm">
+                <div class="card-header bg-dark text-white">
+                    {{ funcion }}
+                </div>
+                <div class="card-body">
+                    <ul>
+                        {% for cat, nivel in categorias.items() %}
+                            <li><strong>{{ cat }}</strong>: {{ nivel }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        {% endfor %}
+
+        <div class="card mt-3 shadow-sm">
+          <div class="card-header bg-dark text-white">📈 Radar NIST CSF 2.0</div>
+          <div class="card-body text-center">
+            <img src="data:image/png;base64,{{ radar_nist_b64 }}" class="img-fluid" style="max-width: 900px;">
+          </div>
+        </div>
+
+        <a href="{{ url_for('nist_madurez') }}"
+           class="btn btn-secondary mt-3">
+           ⬅ Volver
+        </a>
+    </div>
+    """, run=run, resultados=resultados, radar_nist_b64=radar_nist_b64)
+
+
+
+def _nist_group_questions():
+    """
+    Retorna estructura:
+    {
+      "GOVERN": {
+         "GV.OC": {"categoria": "...", "items":[(pregunta), ...]},
+         ...
+      },
+      ...
+    }
+    """
+    qs = NistMadurezPregunta.query.filter_by(activo=True).order_by(
+        NistMadurezPregunta.orden.asc()
+    ).all()
+
+    data = {}
+    for q in qs:
+        f = (q.funcion or "OTROS").upper()
+        ccode = (q.categoria_codigo or "SIN_CATEGORIA").upper()
+        data.setdefault(f, {})
+        data[f].setdefault(ccode, {"categoria": q.categoria or "", "items": []})
+        data[f][ccode]["items"].append(q)
+
+    # ordena funciones
+    ordered = {}
+    for f in NIST_FUNC_ORDER:
+        if f in data:
+            ordered[f] = data[f]
+    # añade las que no estén en el orden
+    for f in data:
+        if f not in ordered:
+            ordered[f] = data[f]
+    return ordered
+
+
+# ==========================================================================================================================================
+#                                                       Módulo Nivel de Madurez — NIST CSF 2.0
+# ==========================================================================================================================================
+
+# ==============================
+# MODELOS - MADUREZ NIST CSF 2.0
+# ==============================
+
+class NistMadurezPregunta(db.Model):
+    __tablename__ = "nist_madurez_pregunta"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Estructura NIST
+    funcion = db.Column(db.String(40), nullable=False)        # "GOVERN", ...
+    funcion_codigo = db.Column(db.String(20), nullable=True)  # "GV"
+    categoria = db.Column(db.String(140), nullable=True)      # "Organizational Context"
+    categoria_codigo = db.Column(db.String(30), nullable=True) # "GV.OC"
+
+    orden = db.Column(db.Integer, nullable=False, default=0)
+
+    # Pregunta
+    pregunta_en = db.Column(db.Text, nullable=False)
+    pregunta_es = db.Column(db.Text, nullable=True)  # se llenará al importar (traducción)
+
+    activo = db.Column(db.Boolean, default=True)
+
+
+class NistMadurezRun(db.Model):
+    __tablename__ = "nist_madurez_runs"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = db.Column(
+        db.DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+    consecutivo = db.Column(db.String(255), nullable=False, index=True)
+
+    # NUEVOS
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    estado = db.Column(db.String(20), nullable=False, default="BORRADOR", index=True)  # BORRADOR / FINALIZADO
+    progreso_pct = db.Column(db.Integer, nullable=False, default=0)
+
+    # Resultados
+    resumen_json = db.Column(db.Text, nullable=False, default="{}")
+    pct_general = db.Column(db.Float, nullable=False, default=0.0)
+    radar_overall_b64 = db.Column(db.Text, nullable=True)
+
+    # INFORME EJECUTIVO
+    informe_ejecutivo_ai = db.Column(db.Text, nullable=True)
+    informe_ejecutivo_editado = db.Column(db.Text, nullable=True)
+    plan_trabajo_ai = db.Column(db.Text, nullable=True)
+    plan_trabajo_editado = db.Column(db.Text, nullable=True)
+
+
+class NistMadurezRespuesta(db.Model):
+    __tablename__ = "nist_madurez_respuesta"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    run_id = db.Column(db.Integer, db.ForeignKey("nist_madurez_runs.id"), nullable=False)
+    pregunta_id = db.Column(db.Integer, db.ForeignKey("nist_madurez_pregunta.id"), nullable=False)
+
+    estado = db.Column(db.String(20), nullable=False)  # "SI" | "PARCIAL" | "NO" | "NA"
+    comentario = db.Column(db.Text, nullable=True)
+
+    run = db.relationship("NistMadurezRun", backref=db.backref("respuestas", cascade="all, delete-orphan"))
+    pregunta = db.relationship("NistMadurezPregunta")
+
+class NistMadurezCategoriaAnalisis(db.Model):
+    __tablename__ = "nist_madurez_categoria_analisis"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    run_id = db.Column(db.Integer, db.ForeignKey("nist_madurez_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    funcion = db.Column(db.String(40), nullable=False, index=True)          # GOV, ID, PR, DE, RS, RC (o el nombre que uses)
+    categoria_codigo = db.Column(db.String(40), nullable=False, index=True) # GV.OC, ID.AM, etc.
+
+    # Campos del análisis
+    estado_actual = db.Column(db.Text, nullable=True)
+    estado_requerido = db.Column(db.Text, nullable=True)
+    plan_accion_ai = db.Column(db.Text, nullable=True)       # lo que devuelve la IA
+    plan_accion_editado = db.Column(db.Text, nullable=True)  # lo que edita el usuario (si quiere)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint("run_id", "funcion", "categoria_codigo", name="uq_nist_run_func_cat"),
+    )
+
+class SystemSecret(db.Model):
+    __tablename__ = "system_secrets"
+    id = db.Column(db.Integer, primary_key=True)
+    key_name = db.Column(db.String(120), unique=True, nullable=False)
+    value_enc = db.Column(db.Text, nullable=False)  # token Fernet (texto)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+NIST_MADUREZ_LEVELS = [
+    {
+        "nivel": "Nivel 1: Ejecutado (Performed)",
+        "descripcion": "La organización puede llevar a cabo prácticas de seguridad de manera ad hoc.",
+        "score": 1,
+        "rango_pct": "0% – 20%",
+        "logica": "Prácticas ad hoc"
+    },
+    {
+        "nivel": "Nivel 2: Documentado (Documented)",
+        "descripcion": "La organización ha establecido y documentado prácticas relacionadas con los requisitos de seguridad. Esta documentación permite que la organización las ejecute de manera repetible y logre los resultados esperados.",
+        "score": 2,
+        "rango_pct": "21% – 40%",
+        "logica": "Existe documentación"
+    },
+    {
+        "nivel": "Nivel 3: Gestionado (Managed)",
+        "descripcion": "La organización revisa el cumplimiento de las políticas y proporciona recursos adecuados para implementar y mantener los requisitos de seguridad.",
+        "score": 3,
+        "rango_pct": "41% – 60%",
+        "logica": "Se revisa cumplimiento"
+    },
+    {
+        "nivel": "Nivel 4: Gestionado Cuantitativamente (Quantitatively Managed)",
+        "descripcion": "La organización revisa y mide la efectividad de las prácticas. Se toman acciones correctivas cuando es necesario, y la alta dirección es informada periódicamente sobre el estado o los problemas identificados.",
+        "score": 4,
+        "rango_pct": "61% – 80%",
+        "logica": "Se mide efectividad"
+    },
+    {
+        "nivel": "Nivel 5: Optimizado (Optimizing)",
+        "descripcion": "La organización ha estandarizado y optimizado la implementación de procesos en toda la organización. Además, comunica y comparte información de mejora de manera transversal.",
+        "score": 5,
+        "rango_pct": "81% – 100%",
+        "logica": "Mejora continua institucionalizada"
+    },
+]
+
+# =========================================================
+# PUNTAJE DE RESPUESTAS NIST
+# =========================================================
+# Escala 0..1 para luego convertir a porcentaje multiplicando por 100
+
+NIST_STATUS_SCORE = {
+    "SI": 1.0,
+    "PARCIAL": 0.5,
+    "NO": 0.0,
+    "NA": None,   # N/A no suma ni resta; se excluye del cálculo
+}
+
+# =========================================================
+# HELPERS NIST
+# =========================================================
+
+def _normalizar_texto(v):
+    return (v or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+def _nist_limpiar_texto_rico_guardado(texto: str) -> str:
+    """
+    Limpia respuestas IA guardadas en NIST:
+    - quita JSON envolvente si viene {"informe_ejecutivo": "..."}
+    - quita fences ```json
+    - convierte <br> a saltos reales
+    - elimina tags HTML como <b>
+    - elimina títulos generados por Ollama como **INFORME EJECUTIVO**
+    """
+    txt = (texto or "").strip()
+    if not txt:
+        return ""
+
+    txt = txt.replace("\r\n", "\n").replace("\r", "\n")
+    txt = html.unescape(txt)
+    txt = txt.replace("```json", "").replace("```", "").strip()
+
+    # Si viene como JSON, extraer informe_ejecutivo
+    try:
+        obj = json.loads(txt)
+        if isinstance(obj, dict):
+            val = (obj.get("informe_ejecutivo") or "").strip()
+            if val:
+                txt = val
+    except Exception:
+        try:
+            start = txt.find("{")
+            end = txt.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                obj = json.loads(txt[start:end+1])
+                if isinstance(obj, dict):
+                    val = (obj.get("informe_ejecutivo") or "").strip()
+                    if val:
+                        txt = val
+        except Exception:
+            pass
+
+    txt = html.unescape(txt)
+    txt = re.sub(r"<\s*br\s*/?\s*>", "\n", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"<[^>]+>", "", txt)
+
+    # Quitar llaves sueltas si quedaron por JSON mal guardado
+    txt = re.sub(r'^\s*\{\s*"?informe_ejecutivo"?\s*:\s*"?', "", txt, flags=re.IGNORECASE)
+    txt = re.sub(r'"?\s*\}\s*$', "", txt)
+
+    # Quitar títulos que Ollama suele agregar
+    patrones_titulos = [
+        r"^\s*\*{1,3}\s*INFORME\s+EJECUTIVO\s*\*{1,3}\s*[:\-–—]?\s*",
+        r"^\s*#{1,6}\s*INFORME\s+EJECUTIVO\s*[:\-–—]?\s*",
+        r"^\s*INFORME\s+EJECUTIVO\s*[:\-–—]?\s*",
+        r"^\s*\*{1,3}\s*RESUMEN\s+EJECUTIVO\s*\*{1,3}\s*[:\-–—]?\s*",
+        r"^\s*#{1,6}\s*RESUMEN\s+EJECUTIVO\s*[:\-–—]?\s*",
+        r"^\s*RESUMEN\s+EJECUTIVO\s*[:\-–—]?\s*",
+    ]
+
+    for patron in patrones_titulos:
+        txt = re.sub(patron, "", txt, flags=re.IGNORECASE).strip()
+
+    # Quitar markdown residual
+    txt = txt.replace("**", "").replace("__", "")
+
+    txt = re.sub(r"[ \t]+\n", "\n", txt)
+    txt = re.sub(r"\n[ \t]+", "\n", txt)
+    txt = re.sub(r"\n{3,}", "\n\n", txt)
+
+    return txt.strip()
+
+def _contar_respuestas_run_nist(run_id: int) -> int:
+    if not run_id:
+        return 0
+    return NistMadurezRespuesta.query.filter_by(run_id=run_id).count()
+
+def _eliminar_runs_vacios_nist(user_id: int | None = None):
+    """
+    Limpia runs que quedaron creados sin respuestas.
+    """
+    q = NistMadurezRun.query
+    if user_id:
+        q = q.filter(NistMadurezRun.user_id == user_id)
+
+    runs = q.all()
+    eliminados = 0
+
+    for run in runs:
+        total_resp = NistMadurezRespuesta.query.filter_by(run_id=run.id).count()
+        if total_resp == 0:
+            NistMadurezCategoriaAnalisis.query.filter_by(run_id=run.id).delete(synchronize_session=False)
+            db.session.delete(run)
+            eliminados += 1
+
+    if eliminados:
+        db.session.commit()
+
+    return eliminados
+
+def _build_plan_accion_texto(plan_list) -> str:
+    if not isinstance(plan_list, list):
+        return ""
+
+    lines = []
+    for i, it in enumerate(plan_list, start=1):
+        accion = _normalizar_texto(it.get("accion"))
+        prioridad = _normalizar_texto(it.get("prioridad"))
+        responsable = _normalizar_texto(it.get("responsable_sugerido"))
+        plazo = _normalizar_texto(it.get("plazo"))
+        evidencia = _normalizar_texto(it.get("evidencia_esperada"))
+
+        bloque = (
+            f"{i}. Acción: {accion or 'Sin definir'}\n"
+            f"   Prioridad: {prioridad or 'Sin definir'}\n"
+            f"   Responsable sugerido: {responsable or 'Sin definir'}\n"
+            f"   Plazo: {plazo or 'Sin definir'}\n"
+            f"   Evidencia esperada: {evidencia or 'Sin definir'}"
+        )
+        lines.append(bloque)
+
+    return "\n\n".join(lines).strip()
+
+def _normalizar_plan_accion_nist_texto(texto_raw: str) -> str:
+    """
+    Convierte JSON crudo del análisis NIST a texto legible.
+    Si ya viene como texto, lo devuelve igual.
+    """
+    txt = (texto_raw or "").strip()
+    if not txt:
+        return ""
+
+    # Quitar fences tipo ```json ... ```
+    txt = txt.replace("```json", "").replace("```", "").strip()
+
+    obj = _extraer_json_objeto(txt)
+
+    if isinstance(obj, dict):
+        estado_actual = _normalizar_texto(obj.get("estado_actual") or "")
+        estado_requerido = _normalizar_texto(obj.get("estado_requerido") or "")
+
+        plan_list = None
+        if isinstance(obj.get("plan_accion"), list):
+            plan_list = obj.get("plan_accion")
+        elif isinstance(obj.get("plan"), list):
+            plan_list = obj.get("plan")
+        elif isinstance(obj.get("acciones"), list):
+            plan_list = obj.get("acciones")
+
+        plan_txt = _build_plan_accion_texto(plan_list or [])
+
+        # PRIORIDAD: mostrar SOLO el plan convertido si existe
+        if plan_txt:
+            return plan_txt.strip()
+
+        # Si no hay lista, mostrar bloques útiles
+        bloques = []
+        if estado_actual:
+            bloques.append(f"Estado actual:\n{estado_actual}")
+        if estado_requerido:
+            bloques.append(f"Estado requerido:\n{estado_requerido}")
+
+        if bloques:
+            return "\n\n".join(bloques).strip()
+
+    return txt
+
+
+def _extraer_json_objeto(raw: str) -> dict:
+    raw = (raw or "").strip()
+    if not raw:
+        return {}
+
+    # quitar fences tipo ```json ... ```
+    raw = raw.replace("```json", "").replace("```", "").strip()
+
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+
+    try:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(raw[start:end+1])
+    except Exception:
+        pass
+
+    return {}
+
+
+def calcular_progreso_nist(preguntas, form_data=None, respuestas_db=None):
+    total = len(preguntas)
+    respondidas = 0
+
+    for q in preguntas:
+        estado = ""
+        if form_data is not None:
+            estado = (form_data.get(f"st_{q.id}") or "").strip().upper()
+        elif respuestas_db is not None:
+            estado = (respuestas_db.get(q.id, {}).get("estado") or "").strip().upper()
+
+        if estado in ("SI", "PARCIAL", "NO", "NA"):
+            respondidas += 1
+
+    pct = int(round((respondidas / total) * 100)) if total > 0 else 0
+    return respondidas, total, pct
+
+
+def obtener_borrador_nist(user_id):
+    if not user_id:
+        return None
+
+    return (
+        NistMadurezRun.query
+        .filter(
+            NistMadurezRun.user_id == user_id,
+            NistMadurezRun.estado == "BORRADOR"
+        )
+        .order_by(NistMadurezRun.updated_at.desc(), NistMadurezRun.id.desc())
+        .first()
+    )
+
+
+def cargar_respuestas_nist(run_id):
+    out = {}
+    if not run_id:
+        return out
+
+    rows = NistMadurezRespuesta.query.filter_by(run_id=run_id).all()
+    for r in rows:
+        out[r.pregunta_id] = {
+            "estado": (r.estado or "").strip().upper(),
+            "comentario": (r.comentario or "").strip()
+        }
+    return out
+
+def _parse_rango_pct(rango: str):
+    # "0% – 20%" -> (0.0, 20.0)
+    if not rango:
+        return None, None
+    s = rango.replace("%", "").strip().replace("–", "-")
+    parts = [p.strip() for p in s.split("-")]
+    if len(parts) != 2:
+        return None, None
+    try:
+        return float(parts[0]), float(parts[1])
+    except Exception:
+        return None, None
+
+def nist_nivel_visual_por_pct(pct: float):
+    """
+    Devuelve:
+    {
+        "nivel": "Nivel 4: ...",
+        "score": 4,
+        "color": "#0d6efd"
+    }
+    """
+    try:
+        p = float(pct)
+    except Exception:
+        p = 0.0
+
+    if p < 0:
+        p = 0.0
+    if p > 100:
+        p = 100.0
+
+    for lvl in NIST_MADUREZ_LEVELS:
+        lo, hi = _parse_rango_pct(lvl.get("rango_pct", ""))
+        if lo is None or hi is None:
+            continue
+        if lo <= p <= hi:
+            score = lvl.get("score", 0)
+
+            # Colores por nivel
+            color_map = {
+                1: "#dc3545",  # rojo
+                2: "#fd7e14",  # naranja
+                3: "#ffc107",  # amarillo
+                4: "#0d6efd",  # azul
+                5: "#198754",  # verde
+            }
+
+            return {
+                "nivel": lvl.get("nivel", ""),
+                "score": score,
+                "color": color_map.get(score, "#6c757d")
+            }
+
+    return {
+        "nivel": "Nivel no definido",
+        "score": 0,
+        "color": "#6c757d"
+    }
+
+def nist_pct_por_funcion(resumen: dict, func_order: list[str]):
+    """
+    resumen: run.resumen_json (dict) con estructura:
+      { "GOVERN": { "GV.OC": {"pct": 55.2, "total": 10, ...}, ... }, ... }
+
+    Retorna: (labels, values)
+      labels: ["GOVERN", "IDENTIFY", ...]
+      values: [pct_func, pct_func, ...] 0..100
+    """
+    labels = []
+    values = []
+
+    for func in func_order:
+        cats = (resumen or {}).get(func, {}) or {}
+        if not cats:
+            labels.append(func)
+            values.append(0.0)
+            continue
+
+        # Promedio ponderado por "total" (items) de cada categoría
+        w_sum = 0.0
+        w_cnt = 0.0
+        for _cat_code, d in cats.items():
+            pct = float(d.get("pct", 0) or 0)
+            total = float(d.get("total", 0) or 0)
+            if total <= 0:
+                continue
+            w_sum += pct * total
+            w_cnt += total
+
+        pct_func = round((w_sum / w_cnt) if w_cnt else 0.0, 2)
+
+        labels.append(func)
+        values.append(pct_func)
+
+    return labels, values
+
+
+def nist_radar_b64(labels: list[str], values: list[float], title: str = "Radar NIST CSF 2.0"):
+    """
+    Genera PNG base64 (sin guardar archivo).
+    values debe venir en escala 0..100.
+    """
+    if not labels:
+        return ""
+
+    vals = [max(0.0, min(100.0, float(v))) for v in values]
+    N = len(labels)
+
+    angles = [n / float(N) * 2 * math.pi for n in range(N)]
+    angles += angles[:1]
+    plot_vals = vals + vals[:1]
+
+    # MÁS PEQUEÑO
+    fig = plt.figure(figsize=(3.55, 3.55), dpi=170)
+    ax = plt.subplot(111, polar=True)
+
+    ax.set_theta_offset(math.pi / 2)
+    ax.set_theta_direction(-1)
+
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(labels, fontsize=7.3)
+    ax.tick_params(axis="x", pad=10)
+
+    ax.set_ylim(0, 100)
+    ax.set_yticks([20, 40, 60, 80, 100])
+    ax.set_yticklabels(["20", "40", "60", "80", "100"], fontsize=7)
+    ax.tick_params(axis="y", pad=4)
+
+    ax.plot(angles, plot_vals, linewidth=2.0)
+    ax.fill(angles, plot_vals, alpha=0.16)
+
+    ax.set_title(title, fontsize=9.5, pad=14)
+
+    fig.subplots_adjust(top=0.83, bottom=0.10, left=0.10, right=0.90)
+
+    buf = io.BytesIO()
+    fig.savefig(
+        buf,
+        format="png",
+        transparent=True,
+        bbox_inches="tight",
+        pad_inches=0.22
+    )
+    plt.close(fig)
+
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+def _nist_build_pdf_run(run: "NistMadurezRun") -> io.BytesIO:
+    try:
+        resumen = json.loads(run.resumen_json or "{}")
+    except Exception:
+        resumen = {}
+
+    radar_labels, radar_values = nist_pct_por_funcion(resumen, NIST_FUNC_ORDER)
+    radar_b64 = nist_radar_b64(
+        radar_labels,
+        radar_values,
+        title="Radar por Función - NIST CSF 2.0"
+    )
+
+    buf = io.BytesIO()
+
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=landscape(A4),
+        leftMargin=1.2 * cm,
+        rightMargin=1.2 * cm,
+        topMargin=1.0 * cm,
+        bottomMargin=1.0 * cm,
+        title="NIST CSF 2.0 - Informe Ejecutivo"
+    )
+
+    styles = getSampleStyleSheet()
+
+    styles.add(ParagraphStyle(
+        name="SGSI_Title",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        textColor=colors.white,
+        alignment=TA_CENTER,
+        spaceAfter=8
+    ))
+
+    styles.add(ParagraphStyle(
+        name="SGSI_Section",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        textColor=colors.HexColor("#1d4f8f"),
+        spaceBefore=10,
+        spaceAfter=8
+    ))
+
+    styles.add(ParagraphStyle(
+        name="SGSI_Normal",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8.5,
+        leading=11,
+        textColor=colors.HexColor("#101827"),
+        spaceAfter=5
+    ))
+
+    styles.add(ParagraphStyle(
+        name="SGSI_Small",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=7.5,
+        leading=9,
+        textColor=colors.HexColor("#374151"),
+        spaceAfter=4
+    ))
+
+    def pdf_escape(v):
+        return html.escape(str(v or ""))
+
+    def nivel_color(pct):
+        try:
+            pct = float(pct or 0)
+        except Exception:
+            pct = 0
+
+        if pct >= 81:
+            return colors.HexColor("#198754")
+        if pct >= 61:
+            return colors.HexColor("#0d6efd")
+        if pct >= 41:
+            return colors.HexColor("#ffc107")
+        if pct >= 21:
+            return colors.HexColor("#fd7e14")
+        return colors.HexColor("#dc3545")
+
+    def nivel_nombre_corto(nivel_txt):
+        txt = str(nivel_txt or "")
+        if ":" in txt:
+            txt = txt.split(":", 1)[1].strip()
+        if "(" in txt:
+            txt = txt.split("(", 1)[0].strip()
+        return txt or "No definido"
+
+    def nivel_badge_pdf(pct, nivel_data):
+        c = nivel_color(pct)
+        score = nivel_data.get("score", 0)
+        nombre = nivel_nombre_corto(nivel_data.get("nivel", ""))
+
+        badge = Table(
+            [[
+                "",
+                Paragraph(
+                    f"<b>Nivel {score}</b> - {pdf_escape(nombre)}",
+                    styles["SGSI_Small"]
+                )
+            ]],
+            colWidths=[0.28 * cm, 4.25 * cm]
+        )
+
+        badge.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, 0), c),
+            ("BOX", (0, 0), (0, 0), 0.25, c),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 2),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]))
+
+        return badge
+
+    def add_section(title):
+        table = Table(
+            [[Paragraph(pdf_escape(title), styles["SGSI_Title"])]],
+            colWidths=[26.8 * cm]
+        )
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#3f86d6")),
+            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#1d4f8f")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 8))
+
+    def add_text_block(texto):
+        texto = _nist_limpiar_texto_rico_guardado(texto or "")
+        if not texto:
+            story.append(Paragraph("No hay información registrada.", styles["SGSI_Normal"]))
+            return
+
+        for parrafo in re.split(r"\n\s*\n", texto):
+            parrafo = parrafo.strip()
+            if parrafo:
+                story.append(Paragraph(pdf_escape(parrafo), styles["SGSI_Normal"]))
+
+    story = []
+
+    # =========================
+    # ENCABEZADO
+    # =========================
+    add_section("NIST CSF 2.0 - Informe de Madurez")
+
+    nivel_general = nist_nivel_visual_por_pct(run.pct_general)
+    nivel_nombre = nivel_nombre_corto(nivel_general.get("nivel", ""))
+
+    resumen_tbl = Table([
+        ["Consecutivo", pdf_escape(run.consecutivo)],
+        ["Fecha", run.created_at.strftime("%Y-%m-%d %H:%M")],
+        [
+            "Cumplimiento general",
+            f"{run.pct_general:.2f}% - Nivel {nivel_general.get('score', 0)} ({pdf_escape(nivel_nombre)})"
+        ],
+        ["Nivel de madurez", pdf_escape(nivel_general.get("nivel", ""))]
+    ], colWidths=[5.2 * cm, 21.6 * cm])
+
+    resumen_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f1fb")),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+
+    story.append(resumen_tbl)
+    story.append(Spacer(1, 12))
+
+    # =========================
+    # INFORME EJECUTIVO
+    # =========================
+    story.append(Paragraph("Informe Ejecutivo", styles["SGSI_Section"]))
+
+    informe_exec = (
+        run.informe_ejecutivo_editado
+        or run.informe_ejecutivo_ai
+        or ""
+    ).strip()
+
+    add_text_block(informe_exec)
+    story.append(Spacer(1, 10))
+
+    # =========================
+    # RADAR / ARAÑA
+    # =========================
+    story.append(Paragraph("Radar por Función NIST CSF 2.0", styles["SGSI_Section"]))
+
+    if radar_b64:
+        try:
+            radar_png = base64.b64decode(radar_b64)
+            img_buf = io.BytesIO(radar_png)
+            img = RLImage(img_buf, width=11.5 * cm, height=11.0 * cm)
+            story.append(img)
+            story.append(Spacer(1, 10))
+        except Exception as e:
+            story.append(
+                Paragraph(
+                    f"No se pudo renderizar el radar: {pdf_escape(e)}",
+                    styles["SGSI_Normal"]
+                )
+            )
+
+    # =========================
+    # TABLA GENERAL CON COLORIMETRÍA TIPO ISO
+    # =========================
+    story.append(Paragraph("Detalle por Función y Categoría", styles["SGSI_Section"]))
+
+    data = [[
+        "Función",
+        "Categoría",
+        "Nombre",
+        "% Cumplimiento",
+        "Nivel de madurez",
+        "Items"
+    ]]
+
+    for func in NIST_FUNC_ORDER:
+        cats = (resumen or {}).get(func, {}) or {}
+        if not cats:
+            continue
+
+        for cat_code, d in cats.items():
+            pct = float(d.get("pct", 0) or 0)
+            nivel_data = nist_nivel_visual_por_pct(pct)
+
+            data.append([
+                Paragraph(pdf_escape(func), styles["SGSI_Small"]),
+                Paragraph(pdf_escape(cat_code), styles["SGSI_Small"]),
+                Paragraph(pdf_escape(d.get("categoria") or ""), styles["SGSI_Small"]),
+                Paragraph(f"{pct:.2f}%", styles["SGSI_Small"]),
+                nivel_badge_pdf(pct, nivel_data),
+                Paragraph(str(int(d.get("total", 0) or 0)), styles["SGSI_Small"])
+            ])
+
+    tbl = Table(
+        data,
+        colWidths=[2.7 * cm, 2.8 * cm, 10.3 * cm, 3.0 * cm, 5.0 * cm, 2.0 * cm],
+        repeatRows=1
+    )
+
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3f86d6")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 8),
+        ("FONTSIZE", (0, 1), (-1, -1), 7.2),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (3, 1), (3, -1), "CENTER"),
+        ("ALIGN", (5, 1), (5, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+
+    story.append(tbl)
+
+    # =========================
+    # ANÁLISIS POR CATEGORÍA
+    # =========================
+    analisis_rows = NistMadurezCategoriaAnalisis.query.filter_by(
+        run_id=run.id
+    ).order_by(
+        NistMadurezCategoriaAnalisis.funcion.asc(),
+        NistMadurezCategoriaAnalisis.categoria_codigo.asc()
+    ).all()
+
+    if analisis_rows:
+        story.append(PageBreak())
+        add_section("Análisis Ejecutivo por Categoría")
+
+        for a in analisis_rows:
+            titulo_cat = f"{a.funcion} - {a.categoria_codigo}"
+            story.append(Paragraph(pdf_escape(titulo_cat), styles["SGSI_Section"]))
+
+            estado_actual = _normalizar_texto(a.estado_actual or "")
+            estado_requerido = _normalizar_texto(a.estado_requerido or "")
+            plan_accion = _normalizar_plan_accion_nist_texto(
+                a.plan_accion_editado or a.plan_accion_ai or ""
+            )
+
+            bloque = Table([
+                [
+                    Paragraph("<b>Estado actual</b>", styles["SGSI_Small"]),
+                    Paragraph(pdf_escape(estado_actual or "No registrado."), styles["SGSI_Small"])
+                ],
+                [
+                    Paragraph("<b>Estado requerido</b>", styles["SGSI_Small"]),
+                    Paragraph(pdf_escape(estado_requerido or "No registrado."), styles["SGSI_Small"])
+                ],
+                [
+                    Paragraph("<b>Plan de acción</b>", styles["SGSI_Small"]),
+                    Paragraph(pdf_escape(plan_accion or "No registrado."), styles["SGSI_Small"])
+                ],
+            ], colWidths=[4.2 * cm, 22.6 * cm])
+
+            bloque.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f1fb")),
+                ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")),
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]))
+
+            story.append(bloque)
+            story.append(Spacer(1, 10))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf
+
+def _nist_get_items_categoria(run_id: int, func_u: str, cat_u: str):
+    """
+    Retorna preguntas + estado + comentario de la categoría.
+    Solo devuelve filas válidas.
+    """
+    q = (
+        db.session.query(NistMadurezRespuesta, NistMadurezPregunta)
+        .join(NistMadurezPregunta, NistMadurezPregunta.id == NistMadurezRespuesta.pregunta_id)
+        .filter(NistMadurezRespuesta.run_id == run_id)
+        .filter(db.func.upper(NistMadurezPregunta.funcion) == func_u)
+        .filter(db.func.upper(NistMadurezPregunta.categoria_codigo) == cat_u)
+        .order_by(NistMadurezPregunta.orden.asc(), NistMadurezPregunta.id.asc())
+    )
+
+    items = []
+    for r, p in q.all():
+        estado = (r.estado or "").upper().strip()
+        if estado not in ("SI", "PARCIAL", "NO", "NA"):
+            continue
+
+        items.append({
+            "pregunta": _normalizar_texto(p.pregunta_es or p.pregunta_en or ""),
+            "estado": estado,
+            "comentario": _normalizar_texto(r.comentario or "")
+        })
+
+    return items
+
+
+
+def _nist_ai_prompt_categoria(func_u: str, cat_u: str, cat_nombre: str, pct: float, items: list[dict]):
+    bullets = []
+
+    for it in items[:80]:
+        pregunta = (it.get("pregunta") or "")[:280].replace("\n", " ")
+        comentario = (it.get("comentario") or "")[:350].replace("\n", " ")
+        estado = (it.get("estado") or "").strip().upper()
+
+        linea = f"- [{estado}] {pregunta}"
+        if comentario:
+            linea += f" | Evidencia / información adicional: {comentario}"
+        bullets.append(linea)
+
+    joined = "\n".join(bullets) if bullets else "- Sin evidencias registradas."
+
+    return f"""
+Eres un consultor experto en NIST CSF 2.0. Debes producir un análisis accionable y concreto.
+
+CONTEXTO
+- Función: {func_u}
+- Categoría: {cat_u}
+- Nombre categoría: {cat_nombre}
+- Cumplimiento actual: {pct:.2f}%
+
+EVIDENCIAS (preguntas, estado e información adicional)
+{joined}
+
+INSTRUCCIONES OBLIGATORIAS
+1) Devuelve SOLAMENTE JSON válido.
+2) No devuelvas markdown.
+3) No devuelvas texto antes ni después del JSON.
+4) Debes devolver SIEMPRE estas tres llaves:
+   - "estado_actual"
+   - "estado_requerido"
+   - "plan_accion"
+5) "estado_actual" y "estado_requerido" deben ser textos obligatorios, no vacíos.
+6) "plan_accion" debe ser un arreglo, aunque sea con 1 elemento.
+7) Si falta evidencia, igual debes llenar "estado_actual" y "estado_requerido" explicándolo claramente.
+
+FORMATO EXACTO DE SALIDA
+{{
+  "estado_actual": "texto obligatorio",
+  "estado_requerido": "texto obligatorio",
+  "plan_accion": [
+    {{
+      "accion": "texto",
+      "prioridad": "Alta",
+      "responsable_sugerido": "texto",
+      "plazo": "texto",
+      "evidencia_esperada": "texto"
+    }}
+  ]
+}}
+
+REGLAS
+- Usa explícitamente la información adicional escrita por el usuario cuando exista.
+- No inventes herramientas específicas si no aparecen.
+- Si hay muchos "NO" o "PARCIAL", prioriza quick wins y controles base.
+- Si no hay suficiente evidencia, dilo en "estado_actual" y plantea "estado_requerido" de forma objetiva.
+""".strip()
+
+
+def _nist_ai_text_openrouter(prompt: str, max_tokens: int = 1400) -> str:
+    """
+    Helper EXCLUSIVO para OpenRouter en NIST.
+    No toca Ollama.
+    Evita colisiones con otros módulos que también usan _ai_text.
+    """
+    api_key = get_openrouter_api_key()
+    if not api_key:
+        raise RuntimeError("No hay OpenRouter API Key configurada. Ve a Administración → OpenRouter API Key.")
+
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key
+    )
+
+    max_tokens_safe = max(600, min(int(max_tokens or 1400), 2200))
+
+    resp = client.chat.completions.create(
+        model="deepseek/deepseek-chat",
+        temperature=0.2,
+        max_tokens=max_tokens_safe,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Eres un consultor experto en ciberseguridad, PCI-DSS, ISO 27001 y NIST CSF 2.0. "
+                    "Debes responder únicamente con JSON válido, sin markdown, sin comentarios, "
+                    "sin texto adicional antes o después del JSON."
+                )
+            },
+            {"role": "user", "content": prompt},
+        ],
+    )
+
+    texto = (resp.choices[0].message.content or "").strip()
+    if not texto:
+        raise RuntimeError("OpenRouter respondió sin contenido.")
+
+    return texto
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_MODEL = "deepseek/deepseek-chat"
+
+def _ai_text(prompt: str, max_tokens: int = 900) -> str:
+    """
+    Helper central de IA para NIST.
+    Respeta el proveedor configurado en Administración:
+    - openrouter
+    - ollama
+    """
+    provider = (get_ai_provider() or "openrouter").strip().lower()
+
+    # =========================
+    # OLLAMA
+    # =========================
+    if provider == "ollama":
+        base_url = (get_ollama_base_url() or "http://localhost:11434").strip().rstrip("/")
+        model = (get_ollama_model() or "llama3.1").strip()
+
+        if not base_url:
+            raise RuntimeError("No hay OLLAMA_BASE_URL configurada en Administración.")
+        if not model:
+            raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
+
+        resp = requests.post(
+            f"{base_url}/api/generate",
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.2
+                }
+            },
+            timeout=300
+        )
+        resp.raise_for_status()
+
+        data = resp.json() or {}
+        texto = (data.get("response") or "").strip()
+
+        if not texto:
+            raise RuntimeError("Ollama respondió sin contenido.")
+        return texto
+
+    # =========================
+    # OPENROUTER
+    # =========================
+    api_key = get_openrouter_api_key()
+    if not api_key:
+        raise RuntimeError("No hay OpenRouter API Key configurada. Ve a Administración → OpenRouter API Key.")
+
+    client = OpenAI(
+        base_url=OPENROUTER_BASE_URL,
+        api_key=api_key
+    )
+
+    max_tokens_safe = max(300, min(int(max_tokens or 900), 2000))
+
+    resp = client.chat.completions.create(
+        model=OPENROUTER_MODEL,
+        temperature=0.2,
+        max_tokens=max_tokens_safe,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Eres un consultor experto en ciberseguridad, PCI-DSS, ISO 27001 y NIST CSF 2.0. "
+                    "Debes responder únicamente con JSON válido, sin markdown, sin comentarios, "
+                    "sin texto adicional antes o después del JSON."
+                )
+            },
+            {"role": "user", "content": prompt},
+        ],
+    )
+
+    texto = (resp.choices[0].message.content or "").strip()
+    if not texto:
+        raise RuntimeError("OpenRouter respondió sin contenido.")
+
+    return texto
+
+def _nist_prompt_informe_ejecutivo(run: "NistMadurezRun", resumen: dict) -> str:
+    partes = []
+    for func in NIST_FUNC_ORDER:
+        cats = (resumen or {}).get(func, {}) or {}
+        if not cats:
+            partes.append(f"- {func}: sin información.")
+            continue
+
+        lineas_cat = []
+        for cat_code, d in cats.items():
+            pct = float(d.get("pct", 0) or 0)
+            total = int(d.get("total", 0) or 0)
+            nombre = (d.get("categoria") or "").strip()
+            lineas_cat.append(
+                f"  * {cat_code} - {nombre}: {pct:.2f}% ({total} ítems)"
+            )
+
+        labels, vals = nist_pct_por_funcion(resumen, [func])
+        pct_func = vals[0] if vals else 0.0
+        partes.append(
+            f"- {func}: {pct_func:.2f}%\n" + "\n".join(lineas_cat[:20])
+        )
+
+    detalle = "\n".join(partes)
+
+    return f"""
+Eres un consultor senior en ciberseguridad y gobierno de seguridad. Debes redactar un INFORME EJECUTIVO para alta dirección, claro, breve, profesional y accionable, basado en una evaluación de madurez NIST CSF 2.0.
+
+DATOS GENERALES
+- Consecutivo: {run.consecutivo}
+- Cumplimiento general: {run.pct_general:.2f}%
+- Nivel general: {nist_nivel_visual_por_pct(run.pct_general).get("nivel","")}
+
+RESULTADOS POR FUNCIÓN Y CATEGORÍA
+{detalle}
+
+INSTRUCCIONES
+1. Devuelve solamente JSON válido.
+2. Debes devolver exactamente esta estructura:
+{{
+  "informe_ejecutivo": "texto"
+}}
+
+REGLAS DEL TEXTO:
+- Escribe en español.
+- Extensión aproximada: 4 a 7 párrafos cortos.
+- Incluye:
+  a) resumen general del nivel de madurez,
+  b) fortalezas principales,
+  c) brechas principales,
+  d) funciones/capítulos más débiles,
+  e) riesgos ejecutivos si no se actúa,
+  f) prioridades recomendadas para los próximos 90 días.
+- No inventes herramientas específicas.
+- Usa un tono ejecutivo, no técnico en exceso.
+- No uses markdown ni viñetas; redacta como informe.
+""".strip()
+
+def _nist_prompt_plan_trabajo(run: "NistMadurezRun", resumen: dict) -> str:
+    partes = []
+
+    for func in NIST_FUNC_ORDER:
+        cats = (resumen or {}).get(func, {}) or {}
+        if not cats:
+            continue
+
+        lineas_cat = []
+        for cat_code, d in cats.items():
+            pct = float(d.get("pct", 0) or 0)
+            total = int(d.get("total", 0) or 0)
+            nombre = (d.get("categoria") or "").strip()
+            brecha = round(100.0 - pct, 2)
+
+            lineas_cat.append(
+                f"  * {cat_code} - {nombre}: {pct:.2f}% | brecha {brecha:.2f}% | {total} ítems"
+            )
+
+        labels, vals = nist_pct_por_funcion(resumen, [func])
+        pct_func = vals[0] if vals else 0.0
+
+        partes.append(
+            f"- {func}: {pct_func:.2f}%\n" + "\n".join(lineas_cat[:25])
+        )
+
+    detalle = "\n".join(partes)
+
+    return f"""
+Eres un consultor senior en ciberseguridad y NIST CSF 2.0.
+Debes construir un PLAN DE TRABAJO GENERAL para cerrar brechas de madurez.
+
+DATOS GENERALES
+- Consecutivo: {run.consecutivo}
+- Cumplimiento general: {run.pct_general:.2f}%
+- Nivel general: {nist_nivel_visual_por_pct(run.pct_general).get("nivel","")}
+
+RESULTADOS POR FUNCIÓN Y CATEGORÍA
+{detalle}
+
+INSTRUCCIONES
+1. Devuelve solamente JSON válido.
+2. Debes devolver exactamente esta estructura:
+{{
+  "plan_trabajo": [
+    {{
+      "frente": "string",
+      "actividad": "string",
+      "prioridad": "Alta|Media|Baja",
+      "responsable_sugerido": "string",
+      "plazo": "string",
+      "entregable": "string"
+    }}
+  ]
+}}
+
+REGLAS
+- Genera entre 8 y 15 actividades.
+- Prioriza primero las funciones y categorías con menor cumplimiento.
+- Usa lenguaje ejecutivo y accionable.
+- No inventes herramientas específicas.
+""".strip()
+
+@nist_madurez_bp.route("/detalle/<int:run_id>/plan-trabajo/generar", methods=["POST"])
+@login_required
+def plan_trabajo_generar(run_id: int):
+    user = User.query.get(session.get("user_id"))
+
+    if user.role == "auditor":
+        flash("El perfil Auditor no puede generar el plan de trabajo con IA.", "danger")
+        return redirect(url_for("madurez_nist.detalle", run_id=run_id))
+
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de Madurez NIST CSF 2.0"):
+        flash("No tiene permiso para generar el plan de trabajo del módulo NIST CSF 2.0.", "danger")
+        return redirect(url_for('menu'))
+
+    run = NistMadurezRun.query.get_or_404(run_id)
+
+    if user.role != "admin" and run.user_id != user.id:
+        flash("No tiene permiso para generar IA sobre esta revisión.", "danger")
+        return redirect(url_for("madurez_nist.historial"))
+
+    try:
+        resumen = json.loads(run.resumen_json or "{}")
+    except Exception:
+        resumen = {}
+
+    if not resumen:
+        flash("⚠️ No hay resultados consolidados para generar el plan de trabajo.", "warning")
+        return redirect(url_for("madurez_nist.detalle", run_id=run.id))
+
+    prompt = _nist_prompt_plan_trabajo(run, resumen)
+
+    try:
+        raw = _nist_ai_text_openrouter(prompt, max_tokens=1800)
+    except Exception as e:
+        flash(f"❌ Error llamando IA para el plan de trabajo: {e}", "danger")
+        return redirect(url_for("madurez_nist.detalle", run_id=run.id))
+
+    plan_texto = ""
+    try:
+        obj = _extraer_json_objeto(raw)
+        plan_list = obj.get("plan_trabajo", []) if isinstance(obj, dict) else []
+
+        if isinstance(plan_list, list) and plan_list:
+            lines = []
+            for i, it in enumerate(plan_list, start=1):
+                frente = (it.get("frente") or "").strip()
+                actividad = (it.get("actividad") or "").strip()
+                prioridad = (it.get("prioridad") or "").strip()
+                responsable = (it.get("responsable_sugerido") or "").strip()
+                plazo = (it.get("plazo") or "").strip()
+                entregable = (it.get("entregable") or "").strip()
+
+                lines.append(
+                    f"{i}. Frente: {frente or 'Sin definir'}\n"
+                    f"   Actividad: {actividad or 'Sin definir'}\n"
+                    f"   Prioridad: {prioridad or 'Sin definir'}\n"
+                    f"   Responsable sugerido: {responsable or 'Sin definir'}\n"
+                    f"   Plazo: {plazo or 'Sin definir'}\n"
+                    f"   Entregable: {entregable or 'Sin definir'}"
+                )
+
+            plan_texto = "\n\n".join(lines).strip()
+    except Exception:
+        plan_texto = ""
+
+    if plan_texto and plan_texto.strip().startswith("{"):
+        plan_texto = ""
+
+    if not plan_texto:
+        plan_texto = "No se pudo generar correctamente el plan de trabajo. Regenera el análisis."
+
+    run.plan_trabajo_ai = plan_texto
+    run.plan_trabajo_editado = plan_texto
+
+    db.session.commit()
+    flash("✅ Plan de trabajo generado con IA.", "success")
+    return redirect(url_for("madurez_nist.detalle", run_id=run.id))
+
+@nist_madurez_bp.route("/detalle/<int:run_id>/plan-trabajo/editar", methods=["GET", "POST"])
+@login_required
+def plan_trabajo_editar(run_id: int):
+    user = User.query.get(session.get("user_id"))
+
+    if user.role == "auditor":
+        flash("El perfil Auditor no puede editar el plan de trabajo.", "danger")
+        return redirect(url_for("madurez_nist.detalle", run_id=run_id))
+
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de Madurez NIST CSF V.2.0"):
+        flash("No tiene permiso para editar el plan de trabajo del módulo NIST CSF 2.0.", "danger")
+        return redirect(url_for('menu'))
+
+    run = NistMadurezRun.query.get_or_404(run_id)
+
+    if user.role != "admin" and run.user_id != user.id:
+        flash("No tiene permiso para editar esta revisión.", "danger")
+        return redirect(url_for("madurez_nist.historial"))
+
+    texto_actual = (run.plan_trabajo_editado or run.plan_trabajo_ai or "").strip()
+
+    if request.method == "POST":
+        texto = (request.form.get("plan_trabajo") or "").strip()
+        run.plan_trabajo_editado = texto
+        db.session.commit()
+        flash("✅ Plan de trabajo actualizado.", "success")
+        return redirect(url_for("madurez_nist.detalle", run_id=run.id))
+
+    content = f"""
+    <div class="nistexec-shell">
+
+      <div class="nistexec-header-card">
+        <div class="nistexec-header-overlay">
+          <div class="nistexec-header-text">
+            <h3 class="nistexec-title m-0">🗂️ Editar Plan de Trabajo — NIST CSF 2.0</h3>
+            <div class="nistexec-subtitle">
+              Consecutivo: <b>{escape(run.consecutivo or '')}</b>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="nistexec-header-actions">
+        <a href="{url_for('madurez_nist.detalle', run_id=run.id)}"
+           class="btn nistexec-btn-main rounded-pill px-4 fw-bold">
+          <i class="bi bi-arrow-left me-2"></i>Volver al detalle
+        </a>
+      </div>
+
+      <div class="nistexec-card p-4">
+        <form method="POST">
+          <div class="nistexec-section-title">Plan de trabajo editable</div>
+
+          <textarea name="plan_trabajo"
+                    class="form-control nistexec-textarea"
+                    rows="20"
+                    placeholder="Escribe o ajusta aquí el plan de trabajo...">{escape(texto_actual)}</textarea>
+
+          <div class="d-flex justify-content-center mt-4">
+            <button type="submit" class="btn btn-primary rounded-pill px-5 fw-bold">
+              <i class="bi bi-save2 me-2"></i>Guardar cambios
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+    """
+    return render_template_string(BASE, title="Editar Plan de Trabajo NIST", content=content)
+
+def _extraer_json_objeto(raw: str) -> dict:
+    raw = (raw or "").strip()
+    if not raw:
+        return {}
+
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+
+    try:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(raw[start:end+1])
+    except Exception:
+        pass
+
+    return {}
+
+def _extraer_valor_json_texto(raw: str, clave: str) -> str:
+    """
+    Extrae un valor de texto desde un JSON crudo o semiformado.
+    Soporta respuestas con ```json ... ``` y JSON incompleto.
+    """
+    txt = (raw or "").strip()
+    if not txt:
+        return ""
+
+    txt = txt.replace("```json", "").replace("```", "").strip()
+
+    obj = _extraer_json_objeto(txt)
+    if isinstance(obj, dict):
+        return _normalizar_texto(obj.get(clave) or "")
+
+    try:
+        patron = rf'"{re.escape(clave)}"\s*:\s*"((?:[^"\\]|\\.)*)"'
+        m = re.search(patron, txt, re.DOTALL)
+        if m:
+            val = m.group(1)
+            val = val.encode("utf-8").decode("unicode_escape")
+            return _normalizar_texto(val)
+    except Exception:
+        pass
+
+    return ""
+
+def _nist_ai_text_categoria(prompt: str, max_tokens: int = 1600) -> str:
+    provider = (get_ai_provider() or "openrouter").strip().lower()
+
+    if provider == "ollama":
+        return _ai_text(prompt, max_tokens=max_tokens)
+
+    return _nist_ai_text_openrouter(prompt, max_tokens=max_tokens)
+
+def _nist_extraer_json_objeto_categoria(raw: str) -> dict:
+    txt = (raw or "").strip()
+    if not txt:
+        return {}
+
+    txt = txt.replace("```json", "").replace("```", "").strip()
+
+    try:
+        return json.loads(txt)
+    except Exception:
+        pass
+
+    try:
+        start = txt.find("{")
+        end = txt.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(txt[start:end+1])
+    except Exception:
+        pass
+
+    return {}
+
+# ================
+# Pagina Principal
+# ================
+
+@nist_madurez_bp.route("/", methods=["GET"])
+@login_required
+def home():
+    user = User.query.get(session.get('user_id'))
+
+    # Permisos
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de Madurez NIST CSF V.2.0"):
+        flash("No tiene permiso para acceder al módulo de plan de competencias.", "danger")
+        return redirect(url_for('menu'))
+
+    read_only = (user.role == 'auditor')
+
+    # Botón Ingresar la información
+    if read_only:
+        ingreso_btn = """
+          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled
+                  title="El rol Auditor no puede ingresar información">
+            <i class="bi bi-pencil-square me-2"></i>Ingresar la información
+          </button>
+        """
+    else:
+        ingreso_btn = f"""
+          <a href="{url_for('madurez_nist.ingreso')}" class="btn btn-primary rounded-pill px-4 fw-bold grac-nav-blue-btn">
+            <i class="bi bi-pencil-square me-2"></i>Ingresar la información
+          </a>
+        """
+
+    # Botón Parámetros
+    if read_only:
+        parametros_btn = """
+          <button class="btn btn-outline-secondary rounded-pill px-3" disabled
+                  title="El rol Auditor no tiene acceso a Parámetros">
+            <i class="bi bi-gear me-2"></i>Parámetros
+          </button>
+        """
+    else:
+        parametros_btn = f"""
+          <a href="{url_for('madurez_nist.parametros')}"
+             class="btn btn-outline-secondary rounded-pill px-3">
+            <i class="bi bi-gear me-2"></i>Parámetros
+          </a>
+        """
+    
+    total = NistMadurezPregunta.query.count()
+
+    # Estado visual del instrumento
+    if total == 0:
+        badge = '<span class="badge bg-danger ms-2">Instrumento NO cargado</span>'
+        hint = "Primero entra a Parámetros y realiza la importación del instrumento (1 vez)."
+    else:
+        badge = '<span class="badge bg-success ms-2">Instrumento cargado</span>'
+        hint = "Puedes ingresar la información o consultar el historial de revisiones."
+
+    content = f"""
+    <div class="nistmad-shell">
+
+      <!-- CABECERA -->
+      <div class="nistmad-header-card">
+        <div class="nistmad-header-overlay">
+          <div class="nistmad-header-text">
+            <h3 class="nistmad-title m-0">Nivel de Madurez — NIST CSF 2.0</h3>
+            <div class="nistmad-subtitle">
+              Evaluación por Función y Categoría del marco NIST CSF 2.0:
+              GOVERN, IDENTIFY, PROTECT, DETECT, RESPOND y RECOVER.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BOTONES PRINCIPALES -->
+      <div class="nistmad-header-actions">
+
+        {ingreso_btn}
+
+        <a href="{url_for('madurez_nist.historial')}"
+           class="btn nistmad-btn-soft rounded-pill px-4 historial-pill">
+          <span class="d-inline-flex align-items-center gap-2">
+            <span class="hist-dot"></span>
+            <i class="bi bi-clock-history"></i>
+            <span class="fw-semibold">Historial de Revisiones</span>
+          </span>
+        </a>
+      </div>
+
+      <!-- RESUMEN / ESTADO -->
+      <div class="row g-3 mt-2">
+
+        <div class="col-12 col-lg-8">
+          <div class="nistmad-card p-4 h-100">
+
+            <div class="nistmad-section-title">
+              Estado del instrumento
+            </div>
+
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+              <div>
+                <div class="fw-bold">
+                  Estado del instrumento {badge}
+                </div>
+
+                <div class="text-muted small mt-1">
+                  Preguntas cargadas: <b>{total}</b>
+                </div>
+
+                <div class="mt-2 small">
+                  {hint}
+                </div>
+              </div>
+
+              <div class="text-end">
+                <div class="text-muted small">Acceso rápido</div>
+                <div class="d-flex gap-2 flex-wrap justify-content-end mt-2">
+                  {parametros_btn}
+                </div>
+              </div>
+            </div>
+
+            <div class="alert alert-info mt-3 mb-0 small">
+              <b>Sugerencia:</b> Usa <b>Parámetros</b> para ver la definición de niveles 1–5
+              y gestionar la importación del instrumento.
+            </div>
+
+          </div>
+        </div>
+
+        <div class="col-12 col-lg-4">
+          <div class="nistmad-card p-4 h-100">
+
+            <div class="nistmad-section-title">
+              ¿Qué puedes hacer aquí?
+            </div>
+
+            <ul class="small mb-0 text-black ps-3">
+              <li><b>Ingresar la información:</b> diligenciar respuestas (Sí/Parcial/No/N/A) con evidencia.</li>
+              <li><b>Historial:</b> revisar evaluaciones previas y su porcentaje general.</li>
+              <li><b>Parámetros:</b> ver niveles de madurez y cargar el instrumento.</li>
+            </ul>
+
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <style>
+      .bg-purple{{ background-color:#6f42c1 !important; }}
+      .badge.bg-purple{{ color:#ffffff !important; }}
+
+      body{{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }}
+
+      .nistmad-shell{{
+        width:96%;
+        max-width:1600px;
+        margin:26px auto 24px auto;
+      }}
+
+      /* =========================
+         HEADER ESTÁNDAR NIST
+         ========================= */
+      .nistmad-header-card{{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }}
+
+      .nistmad-header-card::before{{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }}
+
+      .nistmad-header-overlay{{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }}
+
+      .nistmad-header-overlay::before{{
+        content:"🧭️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }}
+
+      .nistmad-header-text{{
+        max-width:1100px;
+        width:100%;
+        display:block !important;
+      }}
+
+      .nistmad-header-text::before{{
+        content:"SGSI · NIST CSF 2.0";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }}
+
+      .nistmad-title{{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        margin:0 !important;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+      }}
+
+      .nistmad-subtitle{{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+      }}
+
+      /* =========================
+         BOTONES
+         ========================= */
+      .nistmad-header-actions{{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }}
+
+      .nistmad-header-actions .btn,
+      .btn{{
+        border-radius:10px !important;
+        font-weight:900;
+      }}
+
+      .nistmad-btn-main{{
+        background:#ffffff;
+        color:#0f172a !important;
+        border:1px solid #cfd8e3 !important;
+      }}
+
+      .nistmad-btn-main:hover{{
+        background:#edf5ff;
+        color:#0b65d8 !important;
+      }}
+
+      .nistmad-btn-soft{{
+        background:rgba(255,255,255,.88);
+        color:#111 !important;
+        border:1px solid rgba(108,117,125,.35);
+      }}
+
+      /* =========================
+         CARDS
+         ========================= */
+      .nistmad-card,
+      .card{{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+      }}
+
+      .card-body{{
+        padding:18px;
+      }}
+
+      /* =========================
+         TABLAS
+         ========================= */
+      .table-responsive{{
+        max-height:72vh;
+        overflow:auto;
+        border-radius:14px;
+        background:#ffffff;
+      }}
+
+      .table thead th{{
+        position:sticky;
+        top:0;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-size:.78rem;
+        font-weight:900;
+        text-align:center;
+      }}
+
+      .table tbody td{{
+        font-size:.82rem;
+        padding:9px;
+      }}
+
+      .table tbody tr:nth-child(even){{
+        background:#f8fbff;
+      }}
+
+      .table tbody tr:hover{{
+        background:#eef6ff;
+      }}
+
+      /* =========================
+         FORMULARIOS
+         ========================= */
+      .form-control,
+      .form-select{{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+      }}
+
+      .form-control:focus,
+      .form-select:focus{{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+      }}
+
+      /* =========================
+         RESPONSIVE
+         ========================= */
+      @media (max-width:768px){{
+        .nistmad-header-overlay{{
+          flex-direction:column;
+          text-align:center;
+        }}
+
+        .nistmad-header-actions .btn{{
+          width:100%;
+        }}
+      }}
+    </style>
+    """
+    return render_template_string(BASE, title="Madurez NIST", content=content)
+
+
+# ================
+# Parametros
+# ================
+
+@nist_madurez_bp.route("/parametros", methods=["GET"])
+@login_required
+def parametros():
+    total = NistMadurezPregunta.query.count()
+
+    badge = ""
+    if total == 0:
+        badge = '<span class="badge bg-danger ms-2">Instrumento NO cargado</span>'
+    else:
+        badge = '<span class="badge bg-success ms-2">Instrumento cargado</span>'
+
+    rows = []
+
+    for lvl in NIST_MADUREZ_LEVELS:
+        rows.append(f"""
+        <tr>
+          <td class="fw-semibold">{escape(lvl["nivel"])}</td>
+          <td class="text-muted">{escape(lvl["descripcion"])}</td>
+          <td class="text-center fw-bold">{lvl["score"]}</td>
+          <td class="text-center">{escape(lvl.get("rango_pct",""))}</td>
+          <td class="text-muted">{escape(lvl.get("logica",""))}</td>
+        </tr>
+        """)
+
+    content = f"""
+    <div class="nistpar-shell">
+
+      <!-- CABECERA -->
+      <div class="nistpar-header-card">
+        <div class="nistpar-header-overlay">
+          <div class="nistpar-header-text">
+            <h3 class="nistpar-title m-0">Parámetros — Madurez NIST CSF 2.0</h3>
+            <div class="nistpar-subtitle">
+              Configuración del instrumento de evaluación y definición de los niveles
+              de madurez utilizados para el cálculo del resultado del módulo.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BOTÓN VOLVER -->
+      <div class="nistpar-header-actions">
+        <a href="{url_for('madurez_nist.home')}" class="btn nistpar-btn-main rounded-pill px-4 fw-bold">
+          <i class="bi bi-arrow-left me-2"></i>
+          Volver al Menú Principal de Madurez NIST
+        </a>
+      </div>
+
+      <div class="row g-3 mt-2">
+
+        <!-- CARD INSTRUMENTO -->
+        <div class="col-12 col-lg-5">
+          <div class="nistpar-card p-4 h-100">
+
+            <div class="nistpar-section-title">
+              Instrumento
+            </div>
+
+            <div class="text-muted small">
+              Preguntas cargadas: <b>{total}</b> {badge}
+            </div>
+
+            <div class="d-flex gap-2 flex-wrap mt-3">
+
+              <form method="POST" action="{url_for('madurez_nist.nist_importar_instrumento_admin')}">
+                <button class="btn btn-danger rounded-pill px-4">
+                  <i class="bi bi-database-add me-2"></i>
+                  Importar instrumento (1 vez)
+                </button>
+              </form>
+
+              <form method="POST" action="{url_for('madurez_nist.nist_importar_instrumento_admin', force=1)}">
+                <button class="btn btn-outline-danger rounded-pill px-4">
+                  <i class="bi bi-arrow-repeat me-2"></i>
+                  Re-importar (force)
+                </button>
+              </form>
+
+            </div>
+
+            <div class="alert alert-warning mt-3 mb-0 small">
+              <b>Nota:</b> “Re-importar (force)” elimina preguntas, runs y respuestas
+              del módulo NIST y vuelve a cargar el instrumento completo.
+            </div>
+
+            <div class="mt-3">
+              <a href="{url_for('madurez_nist.ingreso')}"
+                 class="btn btn-primary rounded-pill px-4 w-100 fw-semibold grac-nav-blue-btn">
+                <i class="bi bi-pencil-square me-2"></i>
+                Ir a Ingresar la información
+              </a>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- CARD TABLA NIVELES -->
+        <div class="col-12 col-lg-7">
+          <div class="nistpar-card p-4 h-100">
+
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+              <div class="nistpar-section-title mb-0">
+                📌 Niveles de Madurez
+              </div>
+
+              <span class="badge bg-secondary">
+                1 a 5
+              </span>
+            </div>
+
+            <div class="table-responsive nistpar-table-wrap">
+
+              <table class="table table-sm align-middle mb-0">
+
+                <thead class="nistpar-table-head">
+                  <tr>
+                    <th style="width: 28%;">Nivel de Madurez</th>
+                    <th>Descripción del Nivel</th>
+                    <th class="text-center" style="width:70px;">Score</th>
+                    <th class="text-center" style="width:110px;">Rango %</th>
+                    <th style="width:22%;">Lógica</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {''.join(rows)}
+                </tbody>
+
+              </table>
+
+            </div>
+
+            <div class="small text-muted mt-3">
+              Estos niveles describen la madurez del proceso organizacional.
+              El puntaje del módulo se calcula por cumplimiento (Sí/Parcial/No)
+              a nivel de preguntas del instrumento.
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+
+    <style>
+      .bg-purple{{ background-color:#6f42c1 !important; }}
+      .badge.bg-purple{{ color:#ffffff !important; }}
+
+      body{{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }}
+
+      .nistpar-shell{{
+        width:96%;
+        max-width:1600px;
+        margin:26px auto 24px auto;
+      }}
+
+      /* =========================
+         HEADER ESTÁNDAR NIST PARÁMETROS
+         ========================= */
+      .nistpar-header-card{{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }}
+
+      .nistpar-header-card::before{{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }}
+
+      .nistpar-header-overlay{{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }}
+
+      .nistpar-header-overlay::before{{
+        content:"⚙️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }}
+
+      .nistpar-header-text{{
+        max-width:1100px;
+        width:100%;
+        display:block !important;
+        transform:none !important;
+      }}
+
+      .nistpar-header-text::before{{
+        content:"SGSI · Parámetros NIST CSF 2.0";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }}
+
+      .nistpar-title{{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        margin:0 !important;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+      }}
+
+      .nistpar-subtitle{{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+        line-height:1.25;
+      }}
+
+      /* =========================
+         BOTONES
+         ========================= */
+      .nistpar-header-actions{{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }}
+
+      .nistpar-header-actions .btn,
+      .btn{{
+        border-radius:10px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }}
+
+      .nistpar-header-actions .btn{{
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }}
+
+      .nistpar-btn-main,
+      .btn-outline-light{{
+        background:#ffffff;
+        color:#0f172a !important;
+        border:1px solid #cfd8e3 !important;
+      }}
+
+      .nistpar-btn-main:hover,
+      .btn-outline-light:hover{{
+        background:#edf5ff;
+        color:#0b65d8 !important;
+        border-color:#9ec5fe !important;
+      }}
+
+      .nistpar-btn-soft{{
+        background:rgba(255,255,255,.88);
+        color:#111 !important;
+        border:1px solid rgba(108,117,125,.35);
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }}
+
+      .nistpar-btn-soft:hover{{
+        background:#edf5ff;
+        color:#0b65d8 !important;
+        border-color:#9ec5fe !important;
+      }}
+
+      .btn-purple{{
+        background:#6f42c1;
+        border-color:#6f42c1;
+        color:#ffffff;
+      }}
+
+      .btn-purple:hover{{
+        background:#5b34a4;
+        border-color:#5b34a4;
+        color:#ffffff;
+      }}
+
+      .btn.pill,
+      .btn.rounded-pill,
+      .pill{{
+        border-radius:999px !important;
+      }}
+
+      /* =========================
+         CARDS
+         ========================= */
+      .nistpar-card,
+      .card,
+      .card-soft,
+      .report-card{{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
+      }}
+
+      .nistpar-card.p-4{{
+        padding:1.5rem !important;
+      }}
+
+      .card-body{{
+        padding:18px;
+      }}
+
+      .nistpar-card .btn-primary,
+      .nistpar-card .btn-outline-danger,
+      .nistpar-card .btn-outline-primary{{
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }}
+
+      /* =========================
+         TÍTULOS DE SECCIÓN
+         ========================= */
+      .nistpar-section-title,
+      .section-head h5,
+      .card h5,
+      .card h6{{
+        font-weight:950;
+        font-size:.95rem;
+        color:#0b4a8f;
+        margin-bottom:0;
+      }}
+
+      .nistpar-section-title{{
+        padding-bottom:8px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+        margin-bottom:16px;
+      }}
+
+      .section-head{{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:12px;
+        flex-wrap:wrap;
+      }}
+
+      .section-sub,
+      .muted{{
+        color:#475569;
+        font-size:.82rem;
+      }}
+
+      /* =========================
+         TABLAS
+         ========================= */
+      .nistpar-table-wrap,
+      .table-responsive{{
+        max-height:72vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#ffffff;
+      }}
+
+      .table{{
+        margin-bottom:0;
+      }}
+
+      .nistpar-table-head th,
+      .table thead th{{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-size:.78rem;
+        font-weight:900;
+        border:none !important;
+        white-space:nowrap;
+        vertical-align:middle !important;
+        text-align:center;
+        padding:9px 8px;
+      }}
+
+      .table tbody td,
+      table td,
+      table th{{
+        vertical-align:top !important;
+        font-size:.82rem;
+        padding:9px 8px;
+        border-bottom:1px solid #e5edf7;
+        color:#101827;
+      }}
+
+      .table tbody tr:nth-child(even){{
+        background:#f8fbff;
+      }}
+
+      .table tbody tr:hover{{
+        background:#eef6ff;
+      }}
+
+      .table-tight th,
+      .table-tight td,
+      .cell-small{{
+        font-size:.78rem !important;
+      }}
+
+      .wrap{{
+        white-space:normal !important;
+        word-break:break-word;
+        overflow-wrap:anywhere;
+      }}
+
+      /* =========================
+         FORMULARIOS
+         ========================= */
+      .form-label{{
+        font-size:.72rem;
+        font-weight:900;
+        color:#0b4a8f;
+        text-transform:uppercase;
+        letter-spacing:.35px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        padding:6px 10px;
+        border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
+      }}
+
+      .form-control,
+      .form-select,
+      .report-textarea{{
+        border-radius:10px;
+        border:1px solid #d9e3f0;
+        min-height:40px;
+        font-size:.86rem;
+        background:#f8fafc;
+        box-shadow:none !important;
+      }}
+
+      textarea.form-control,
+      .report-textarea{{
+        min-height:90px;
+      }}
+
+      .form-control:focus,
+      .form-select:focus,
+      .report-textarea:focus{{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#ffffff;
+      }}
+
+      /* =========================
+         NIVELES / DOTS / BADGES
+         ========================= */
+      .nivel-dot{{
+        width:14px;
+        height:14px;
+        border-radius:50%;
+        display:inline-block;
+      }}
+
+      .badge{{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }}
+
+      /* =========================
+         RESPONSIVE
+         ========================= */
+      @media (max-width:991.98px){{
+        .nistpar-shell{{
+          width:98%;
+          margin:8px auto 22px auto;
+        }}
+
+        .nistpar-header-card{{
+          min-height:88px;
+        }}
+
+        .nistpar-title{{
+          font-size:1.20rem;
+        }}
+
+        .nistpar-subtitle{{
+          font-size:.68rem;
+        }}
+
+        .card-body{{
+          padding:8px 7px;
+        }}
+      }}
+
+      @media (max-width:768px){{
+        .nistpar-header-overlay{{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }}
+
+        .nistpar-header-overlay::before{{
+          margin:0;
+        }}
+
+        .nistpar-header-text::before{{
+          margin-left:auto;
+          margin-right:auto;
+        }}
+
+        .nistpar-title,
+        .nistpar-subtitle{{
+          text-align:center;
+        }}
+
+        .nistpar-header-actions .btn{{
+          width:100%;
+        }}
+      }}
+    </style>
+    """
+    return render_template_string(BASE, title="Parámetros Madurez NIST", content=content)
+
+# ==========================
+# Ingreso de Información CSF
+# ==========================
+
+@nist_madurez_bp.route("/ingreso", methods=["GET"])
 @login_required
 def ingreso():
     user = User.query.get(session.get("user_id"))
 
-    if user.role not in ("admin", "auditor") and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
-        flash("No tiene permiso para acceder al módulo PCI-DSS.", "danger")
-        return redirect(url_for("menu"))
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de Madurez NIST CSF 2.0"):
+        flash("No tiene permiso para acceder al módulo de nivel de madurez NIST CSF 2.0.", "danger")
+        return redirect(url_for('menu'))
 
     if user.role == "auditor":
         flash("El rol Auditor no puede ingresar la información en este módulo.", "warning")
-        return redirect(url_for("madurez_pci.inicio_pci"))
+        return redirect(url_for("madurez_nist.home"))
 
-    if PciMadurezPregunta.query.filter_by(tipo="q").count() == 0:
-        flash("⚠️ Primero debes importar el instrumento PCI-DSS.", "warning")
-        return redirect(url_for("madurez_pci.parametros"))
+    if NistMadurezPregunta.query.count() == 0:
+        flash("⚠️ Primero debes importar el instrumento NIST (1 vez).", "warning")
+        return redirect(url_for("madurez_nist.home"))
 
-    draft = obtener_borrador_pci(user.id if user else None)
-    respuestas_db = cargar_respuestas_pci(draft.id) if draft else {}
-
-    preguntas = PciMadurezPregunta.query.order_by(PciMadurezPregunta.orden.asc()).all()
-    preguntas_q = [p for p in preguntas if p.tipo == "q"]
-
-    _, _, progreso_inicial = calcular_progreso_pci(
-        preguntas_q,
-        respuestas_db=respuestas_db
+    preguntas = (
+        NistMadurezPregunta.query
+        .filter_by(activo=True)
+        .order_by(
+            NistMadurezPregunta.funcion.asc(),
+            NistMadurezPregunta.categoria_codigo.asc(),
+            NistMadurezPregunta.orden.asc()
+        )
+        .all()
     )
 
-    company_name = (draft.company_name if draft else "") or ""
-    draft_id = draft.id if draft else ""
-    tiene_consecutivo = bool(company_name.strip())
+    draft = obtener_borrador_nist(user.id if user else None)
+    respuestas_guardadas = cargar_respuestas_nist(draft.id) if draft else {}
 
-    bloques_map = {}
-    bloque_actual = "SIN_BLOQUE"
-    seccion_actual = "SIN_SECCION"
+    consecutivo_val = (draft.consecutivo if draft else "") or ""
 
-    for p in preguntas:
-        bloque_codigo = (p.bloque_codigo or "SIN_BLOQUE").strip()
-        bloque_nombre = (p.bloque_nombre or pci_block_title(bloque_codigo) or "Sin bloque").strip()
+    _, _, progreso_inicial = calcular_progreso_nist(
+        preguntas,
+        respuestas_db=respuestas_guardadas
+    )
 
-        if bloque_codigo not in bloques_map:
-            bloques_map[bloque_codigo] = {
-                "titulo": bloque_nombre,
-                "secciones": {}
-            }
-
-        if p.tipo == "h":
-            if p.seccion_codigo:
-                seccion_actual = p.seccion_codigo.strip()
-                bloques_map[bloque_codigo]["secciones"].setdefault(seccion_actual, {
-                    "titulo": (p.seccion_nombre or p.pregunta or p.seccion_codigo).strip(),
-                    "items": []
-                })
-            else:
-                seccion_actual = "GENERAL"
-                bloques_map[bloque_codigo]["secciones"].setdefault(seccion_actual, {
-                    "titulo": "Preguntas del bloque",
-                    "items": []
-                })
-
-            bloque_actual = bloque_codigo
-            continue
-
-        if p.tipo == "q":
-            bloque_destino = bloque_codigo or bloque_actual or "SIN_BLOQUE"
-            seccion_destino = (p.seccion_codigo or seccion_actual or "GENERAL").strip()
-
-            if seccion_destino not in bloques_map[bloque_destino]["secciones"]:
-                bloques_map[bloque_destino]["secciones"][seccion_destino] = {
-                    "titulo": (p.seccion_nombre or p.seccion_codigo or "Preguntas").strip(),
-                    "items": []
-                }
-
-            bloques_map[bloque_destino]["secciones"][seccion_destino]["items"].append(p)
-
-    def esc(x):
-        return escape(x or "")
+    grouped = _nist_group_questions()
 
     acc_html = []
     acc_id = 0
 
-    for bloque_codigo in PCI_BLOCK_ORDER:
-        data_bloque = bloques_map.get(bloque_codigo)
+    def esc(x):
+        return escape(x or "")
 
-        if not data_bloque:
-            continue
-
+    for func_name, cats in grouped.items():
         acc_id += 1
-        bloque_key = f"pci_bloque_{acc_id}"
+        func_key = f"func{acc_id}"
         inner = []
 
-        for _, sec in data_bloque["secciones"].items():
-            items = sec.get("items", [])
+        for cat_code, payload in cats.items():
+            rows = []
 
-            if not items:
-                continue
-
-            preguntas_html = []
-
-            for q in items:
-                saved = respuestas_db.get(q.id, {})
+            for q in payload["items"]:
+                saved = respuestas_guardadas.get(q.id, {})
                 saved_estado = (saved.get("estado") or "").strip().upper()
                 saved_com = esc(saved.get("comentario") or "")
-                pregunta_texto = (q.pregunta or "").strip()
+                qtext = q.pregunta_es or q.pregunta_en or ""
 
                 chk_na = "checked" if saved_estado == "NA" else ""
                 chk_si = "checked" if saved_estado == "SI" else ""
                 chk_pa = "checked" if saved_estado == "PARCIAL" else ""
                 chk_no = "checked" if saved_estado == "NO" else ""
 
-                preguntas_html.append(f"""
+                rows.append(f"""
                 <div class="col-12 col-xl-6">
-                  <div class="pciform-qcard h-100">
-                    <div class="pciform-qhead">
+                  <div class="nistform-qcard h-100">
+                    <div class="nistform-qhead">
                       <div class="d-flex align-items-center gap-2 flex-wrap">
                         <span class="badge rounded-pill text-bg-light border fw-semibold">
-                          {esc(q.seccion_codigo or bloque_codigo)}
+                          {esc(cat_code)}
                         </span>
                         <span class="badge rounded-pill text-bg-primary">
                           Orden {q.orden or 0}
@@ -122,36 +5407,36 @@ def ingreso():
                       </div>
                     </div>
 
-                    <div class="pciform-qtext">
-                      {esc(pregunta_texto)}
+                    <div class="nistform-qtext">
+                      {esc(qtext)}
                     </div>
 
-                    <div class="pciform-radio-row">
-                      <label class="pciform-radio-card">
-                        <input class="form-check-input pci-control-instrumento" type="radio" name="st_{q.id}" value="NA" {chk_na}>
+                    <div class="nistform-radio-row">
+                      <label class="nistform-radio-card">
+                        <input class="form-check-input" type="radio" name="st_{q.id}" value="NA" {chk_na}>
                         <span>N/A</span>
                       </label>
 
-                      <label class="pciform-radio-card">
-                        <input class="form-check-input pci-control-instrumento" type="radio" name="st_{q.id}" value="SI" {chk_si}>
+                      <label class="nistform-radio-card">
+                        <input class="form-check-input" type="radio" name="st_{q.id}" value="SI" {chk_si}>
                         <span>Sí</span>
                       </label>
 
-                      <label class="pciform-radio-card">
-                        <input class="form-check-input pci-control-instrumento" type="radio" name="st_{q.id}" value="PARCIAL" {chk_pa}>
+                      <label class="nistform-radio-card">
+                        <input class="form-check-input" type="radio" name="st_{q.id}" value="PARCIAL" {chk_pa}>
                         <span>Parcial</span>
                       </label>
 
-                      <label class="pciform-radio-card">
-                        <input class="form-check-input pci-control-instrumento" type="radio" name="st_{q.id}" value="NO" {chk_no}>
+                      <label class="nistform-radio-card">
+                        <input class="form-check-input" type="radio" name="st_{q.id}" value="NO" {chk_no}>
                         <span>No</span>
                       </label>
                     </div>
 
                     <div class="mt-3">
                       <label class="form-label small fw-bold text-black mb-1">Comentarios / evidencia</label>
-                      <textarea class="form-control form-control-sm pci-control-instrumento"
-                                name="c_{q.id}"
+                      <textarea class="form-control form-control-sm"
+                                name="cm_{q.id}"
                                 rows="3"
                                 placeholder="Comentarios / evidencia">{saved_com}</textarea>
                     </div>
@@ -160,46 +5445,47 @@ def ingreso():
                 """)
 
             inner.append(f"""
-            <div class="pciform-cat-block">
-              <div class="pciform-cat-title">
+            <div class="nistform-cat-block">
+              <div class="nistform-cat-title">
                 <div>
-                  <div class="pciform-cat-code">{esc(sec.get("titulo") or "Sección")}</div>
-                  <div class="pciform-cat-name">Preguntas de la sección</div>
+                  <div class="nistform-cat-code">{esc(cat_code)}</div>
+                  <div class="nistform-cat-name">{esc(payload.get('categoria', ''))}</div>
                 </div>
                 <div>
-                  <span class="badge rounded-pill text-bg-secondary">{len(items)} preguntas</span>
+                  <span class="badge rounded-pill text-bg-secondary">{len(payload["items"])} preguntas</span>
                 </div>
               </div>
 
               <div class="row g-3">
-                {''.join(preguntas_html)}
+                {''.join(rows)}
               </div>
             </div>
             """)
 
         acc_html.append(f"""
-        <div class="accordion-item pciform-acc-item">
-          <h2 class="accordion-header" id="h{bloque_key}">
-            <button class="accordion-button {'collapsed' if acc_id != 1 else ''} pciform-acc-btn"
+        <div class="accordion-item nistform-acc-item">
+          <h2 class="accordion-header" id="h{func_key}">
+            <button class="accordion-button {'collapsed' if acc_id != 1 else ''} nistform-acc-btn"
                     type="button"
                     data-bs-toggle="collapse"
-                    data-bs-target="#c{bloque_key}"
+                    data-bs-target="#c{func_key}"
                     aria-expanded="{str(acc_id == 1).lower()}"
-                    aria-controls="c{bloque_key}">
-              <div class="pciform-acc-inner">
-                <div class="pciform-acc-title-wrap">
+                    aria-controls="c{func_key}">
+              <div class="nistform-acc-inner">
+                <div class="nistform-acc-title-wrap">
                   <i class="bi bi-folder2-open me-2"></i>
-                  <span class="pciform-acc-title">{esc(data_bloque["titulo"])}</span>
+                  <span class="nistform-acc-title">{esc(func_name)}</span>
                 </div>
                 <span class="badge rounded-pill text-bg-light border">
-                  {sum(len(v["items"]) for v in data_bloque["secciones"].values())} preguntas
+                  {sum(len(v["items"]) for v in cats.values())} preguntas
                 </span>
               </div>
             </button>
           </h2>
 
-          <div id="c{bloque_key}" class="accordion-collapse collapse {'show' if acc_id == 1 else ''}">
-            <div class="accordion-body pciform-acc-body">
+          <div id="c{func_key}"
+               class="accordion-collapse collapse {'show' if acc_id == 1 else ''}">
+            <div class="accordion-body nistform-acc-body">
               {''.join(inner)}
             </div>
           </div>
@@ -216,81 +5502,72 @@ def ingreso():
         </div>
         """
 
-    disabled_analizar = "" if progreso_inicial == 100 and tiene_consecutivo else "disabled"
+    disabled_analizar = "" if progreso_inicial == 100 else "disabled"
 
     content = f"""
-    <div class="pciform-shell">
+    <div class="nistform-shell">
 
-      <div class="pciform-header-card">
-        <div class="pciform-header-overlay">
-          <div class="pciform-header-text">
-            <h3 class="pciform-title m-0">Diligenciamiento del Formulario</h3>
-            <div class="pciform-subtitle">
+      <div class="nistform-header-card">
+        <div class="nistform-header-overlay">
+          <div class="nistform-header-text">
+            <h3 class="nistform-title m-0">Nivel de Madurez — NIST CSF 2.0</h3>
+            <div class="nistform-subtitle">
               Registro de respuestas del instrumento de evaluación basado en
-              los 12 requerimientos y los apéndices A1 y A2 de PCI-DSS.
+              el marco NIST Cybersecurity Framework 2.0.
             </div>
           </div>
         </div>
       </div>
 
-      <div class="pciform-header-actions">
-          <a href="{url_for('madurez_pci.inicio_pci')}"
-             class="btn pciform-btn-main rounded-pill px-4 fw-bold">
-            <i class="bi bi-arrow-left me-2"></i>Volver a Madurez PCI-DSS
-          </a>
+      <div class="nistform-header-actions">
+        <a href="{url_for('madurez_nist.home')}"
+           class="btn nistform-btn-main rounded-pill px-4 fw-bold">
+          <i class="bi bi-arrow-left me-2"></i>Volver a Madurez NIST
+        </a>
       </div>
 
-      <div class="pciform-card p-4">
+      <div class="nistform-card p-4">
 
         {alerta_borrador}
 
-        <form id="pciIngresoForm"
+        <form id="nistIngresoForm"
               method="POST"
-              action="{url_for('madurez_pci.ingreso_guardar_pci')}"
+              action="{url_for('madurez_nist.ingreso_guardar')}"
               novalidate
-              autocomplete="off"
-              onsubmit="return pciValidarAntesDeEnviar(event);">
+              autocomplete="off">
 
-          <input type="hidden" name="draft_id" value="{draft_id}">
+          <input type="hidden" name="draft_id" value="{draft.id if draft else ''}">
 
-          <div class="pciform-section-title">
+          <div class="nistform-section-title">
             Información de la revisión
           </div>
 
           <div class="mb-4">
-            <label class="text-black form-label fw-semibold" for="pciConsecutivoRevision">
-              Consecutivo de la revisión <span class="text-danger">*</span>
+            <label class="text-black form-label fw-semibold" for="nistConsecutivoRevision">
+              Consecutivo de la Revisión <span class="text-danger">*</span>
             </label>
 
             <input type="text"
                    class="form-control"
-                   name="company_name"
-                   id="pciConsecutivoRevision"
-                   value="{esc(company_name)}"
+                   name="consecutivo"
+                   id="nistConsecutivoRevision"
+                   value="{esc(consecutivo_val)}"
                    autocomplete="off"
-                   required
-                   oninput="pciActualizarBloqueoPorConsecutivo();"
-                   onblur="pciValidarConsecutivoRevision();">
+                   required>
 
-            <div id="pciConsecutivoRevisionError"
+            <div id="nistConsecutivoRevisionError"
                  class="invalid-feedback d-none fw-bold mt-2">
               Debes ingresar el consecutivo de la Revisión.
             </div>
-
-            <div id="pciBloqueoAviso"
-                 class="alert alert-warning rounded-4 mt-3 {'d-none' if tiene_consecutivo else ''}">
-              <i class="bi bi-exclamation-triangle-fill me-2"></i>
-              Primero debes ingresar el <strong>Consecutivo de la revisión</strong> para habilitar el instrumento.
-            </div>
           </div>
 
-          <div class="pciform-section-title">
+          <div class="nistform-section-title">
             📊 Progreso del instrumento
           </div>
 
           <div class="mb-4">
-            <div class="progress pciform-progress">
-              <div id="pciProgressBar"
+            <div class="progress nistform-progress">
+              <div id="nistProgressBar"
                    class="progress-bar progress-bar-striped progress-bar-animated"
                    role="progressbar"
                    style="width:{progreso_inicial}%"
@@ -302,39 +5579,35 @@ def ingreso():
             </div>
 
             <div class="text-center small text-muted mt-2">
-              <span id="pciProgressText">{progreso_inicial}%</span> del instrumento completado
+              <span id="nistProgressText">{progreso_inicial}%</span> del instrumento completado
             </div>
           </div>
 
-          <div id="pciZonaInstrumento" class="{'pci-zona-bloqueada' if not tiene_consecutivo else ''}">
-            <div class="pciform-section-title">
-              Instrumento de evaluación
-            </div>
+          <div class="nistform-section-title">
+            Instrumento de evaluación
+          </div>
 
-            <div class="accordion pciform-accordion" id="accPCI">
-              {''.join(acc_html)}
-            </div>
+          <div class="accordion nistform-accordion" id="accNist">
+            {''.join(acc_html)}
           </div>
 
           <div class="d-flex justify-content-center gap-3 flex-wrap mt-4">
-            <button id="btnGuardarPCI"
-                    class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold pci-submit-btn"
+            <button id="btnGuardarNist"
+                    class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold nist-submit-btn"
                     type="submit"
                     name="accion"
                     value="guardar"
-                    data-accion="guardar"
-                    onclick="return pciValidarAntesDeEnviar(event);">
+                    data-accion="guardar">
               <i class="bi bi-save2 me-2"></i>
               Guardar
             </button>
 
-            <button id="btnAnalizarPCI"
-                    class="btn btn-primary btn-lg rounded-pill px-5 shadow fw-semibold pci-submit-btn"
+            <button id="btnAnalizarNist"
+                    class="btn btn-primary btn-lg rounded-pill px-5 shadow fw-semibold nist-submit-btn"
                     type="submit"
                     name="accion"
                     value="analizar"
                     data-accion="analizar"
-                    onclick="return pciValidarAntesDeEnviar(event);"
                     {disabled_analizar}>
               <i class="bi bi-bar-chart-line-fill me-2"></i>
               Analizar
@@ -348,264 +5621,231 @@ def ingreso():
     </div>
 
     <script>
-    var PCI_BLOQUEAR_LOADER = true;
+    (function() {{
 
-    function pciOcultarLoaderGlobal() {{
-        const ids = [
-            "SGSI_PROGRESS_GLOBAL",
-            "globalLoader",
-            "loader",
-            "progressOverlay",
-            "sgsiProgressGlobal",
-            "globalProgress",
-            "overlayProgress",
-            "loadingOverlay"
-        ];
+        let NIST_BLOQUEAR_LOADER = false;
 
-        ids.forEach(function(id) {{
-            const el = document.getElementById(id);
-            if (el) {{
+        function nistOcultarLoaderGlobal() {{
+            const ids = [
+                "SGSI_PROGRESS_GLOBAL",
+                "globalLoader",
+                "loader",
+                "progressOverlay",
+                "sgsiProgressGlobal",
+                "globalProgress",
+                "overlayProgress",
+                "loadingOverlay"
+            ];
+
+            ids.forEach(function(id) {{
+                const el = document.getElementById(id);
+                if (el) {{
+                    el.style.display = "none";
+                    el.style.visibility = "hidden";
+                    el.style.opacity = "0";
+                    el.style.pointerEvents = "none";
+                    el.classList.add("d-none");
+                    el.classList.remove("show");
+                }}
+            }});
+
+            document.querySelectorAll(
+                ".modal-backdrop, " +
+                ".progress-overlay, " +
+                ".loader-overlay, " +
+                ".sgsi-loader, " +
+                ".sgsi-progress, " +
+                ".loading-overlay, " +
+                ".global-loader, " +
+                ".global-progress, " +
+                ".progress-global"
+            ).forEach(function(el) {{
                 el.style.display = "none";
                 el.style.visibility = "hidden";
                 el.style.opacity = "0";
                 el.style.pointerEvents = "none";
                 el.classList.add("d-none");
                 el.classList.remove("show");
+            }});
+
+            document.body.classList.remove("modal-open");
+            document.body.style.overflow = "";
+            document.body.style.paddingRight = "";
+        }}
+
+        function nistValidarConsecutivoRevision() {{
+            const input = document.getElementById("nistConsecutivoRevision");
+            const error = document.getElementById("nistConsecutivoRevisionError");
+
+            const valor = input ? input.value.trim() : "";
+
+            if (!valor) {{
+                NIST_BLOQUEAR_LOADER = true;
+                nistOcultarLoaderGlobal();
+
+                if (input) {{
+                    input.classList.add("is-invalid");
+                    input.setAttribute("aria-invalid", "true");
+                    input.focus();
+                }}
+
+                if (error) {{
+                    error.classList.remove("d-none");
+                    error.style.display = "block";
+                }}
+
+                return false;
             }}
-        }});
 
-        document.querySelectorAll(
-            ".modal-backdrop, " +
-            ".progress-overlay, " +
-            ".loader-overlay, " +
-            ".sgsi-loader, " +
-            ".sgsi-progress, " +
-            ".loading-overlay, " +
-            ".global-loader, " +
-            ".global-progress, " +
-            ".progress-global"
-        ).forEach(function(el) {{
-            el.style.display = "none";
-            el.style.visibility = "hidden";
-            el.style.opacity = "0";
-            el.style.pointerEvents = "none";
-            el.classList.add("d-none");
-            el.classList.remove("show");
-        }});
-
-        document.body.classList.remove("modal-open");
-        document.body.style.overflow = "";
-        document.body.style.paddingRight = "";
-    }}
-
-    function pciTieneConsecutivo() {{
-        const input = document.getElementById("pciConsecutivoRevision");
-        return !!(input && input.value && input.value.trim().length > 0);
-    }}
-
-    function pciValidarConsecutivoRevision() {{
-        const input = document.getElementById("pciConsecutivoRevision");
-        const error = document.getElementById("pciConsecutivoRevisionError");
-
-        if (!pciTieneConsecutivo()) {{
-            PCI_BLOQUEAR_LOADER = true;
-            pciOcultarLoaderGlobal();
+            NIST_BLOQUEAR_LOADER = false;
 
             if (input) {{
-                input.classList.add("is-invalid");
-                input.setAttribute("aria-invalid", "true");
-                input.focus();
+                input.classList.remove("is-invalid");
+                input.setAttribute("aria-invalid", "false");
             }}
 
             if (error) {{
-                error.classList.remove("d-none");
-                error.style.display = "block";
+                error.classList.add("d-none");
+                error.style.display = "none";
             }}
 
-            return false;
+            return true;
         }}
 
-        PCI_BLOQUEAR_LOADER = false;
+        function actualizarProgresoNist() {{
+            const radios = document.querySelectorAll('input[type="radio"][name^="st_"]');
+            const nombres = [...new Set(Array.from(radios).map(r => r.name))];
+            const total = nombres.length;
 
-        if (input) {{
-            input.classList.remove("is-invalid");
-            input.setAttribute("aria-invalid", "false");
+            let respondidas = 0;
+
+            nombres.forEach(function(nombre) {{
+                const marcado = document.querySelector('input[name="' + nombre + '"]:checked');
+                if (marcado) {{
+                    respondidas++;
+                }}
+            }});
+
+            const porcentaje = total > 0 ? Math.round((respondidas / total) * 100) : 0;
+
+            const bar = document.getElementById("nistProgressBar");
+            const text = document.getElementById("nistProgressText");
+            const btnAnalizar = document.getElementById("btnAnalizarNist");
+
+            if (bar) {{
+                bar.style.width = porcentaje + "%";
+                bar.innerText = porcentaje + "%";
+                bar.setAttribute("aria-valuenow", porcentaje);
+            }}
+
+            if (text) {{
+                text.innerText = porcentaje + "%";
+            }}
+
+            if (btnAnalizar) {{
+                btnAnalizar.disabled = porcentaje < 100;
+                btnAnalizar.classList.toggle("disabled", porcentaje < 100);
+            }}
         }}
 
-        if (error) {{
-            error.classList.add("d-none");
-            error.style.display = "none";
-        }}
+        const posiblesLoaders = [
+            "showLoader",
+            "mostrarLoader",
+            "showGlobalLoader",
+            "mostrarProgresoGlobal",
+            "showProgress",
+            "openLoader",
+            "activarLoader",
+            "SGSI_showLoader"
+        ];
 
-        return true;
-    }}
+        posiblesLoaders.forEach(function(nombreFuncion) {{
+            const original = window[nombreFuncion];
 
-    function pciActualizarBloqueoPorConsecutivo() {{
-        const habilitar = pciTieneConsecutivo();
-        const zona = document.getElementById("pciZonaInstrumento");
-        const aviso = document.getElementById("pciBloqueoAviso");
-        const btnGuardar = document.getElementById("btnGuardarPCI");
+            if (typeof original === "function" && !original.__nistInterceptado) {{
+                const wrapper = function() {{
+                    if (NIST_BLOQUEAR_LOADER || !nistValidarConsecutivoRevision()) {{
+                        nistOcultarLoaderGlobal();
+                        return false;
+                    }}
 
-        PCI_BLOQUEAR_LOADER = !habilitar;
+                    return original.apply(this, arguments);
+                }};
 
-        document.querySelectorAll(".pci-control-instrumento").forEach(function(el) {{
-            el.disabled = !habilitar;
+                wrapper.__nistInterceptado = true;
+                window[nombreFuncion] = wrapper;
+            }}
         }});
 
-        if (zona) {{
-            zona.classList.toggle("pci-zona-bloqueada", !habilitar);
-        }}
-
-        if (aviso) {{
-            aviso.classList.toggle("d-none", habilitar);
-        }}
-
-        if (btnGuardar) {{
-            btnGuardar.disabled = !habilitar;
-            btnGuardar.classList.toggle("disabled", !habilitar);
-        }}
-
-        actualizarProgresoPCI();
-
-        if (!habilitar) {{
-            pciOcultarLoaderGlobal();
-        }}
-    }}
-
-    function actualizarProgresoPCI() {{
-        const radios = document.querySelectorAll('input[type="radio"][name^="st_"]');
-        const nombres = [...new Set(Array.from(radios).map(r => r.name))];
-        const total = nombres.length;
-
-        let respondidas = 0;
-
-        nombres.forEach(function(nombre) {{
-            const marcado = document.querySelector('input[name="' + nombre + '"]:checked');
-            if (marcado) {{
-                respondidas++;
+        document.addEventListener("change", function(e) {{
+            if (e.target.matches('input[type="radio"][name^="st_"]')) {{
+                actualizarProgresoNist();
             }}
         }});
 
-        const porcentaje = total > 0 ? Math.round((respondidas / total) * 100) : 0;
+        document.addEventListener("click", function(e) {{
+            const btn = e.target.closest(".nist-submit-btn");
 
-        const bar = document.getElementById("pciProgressBar");
-        const text = document.getElementById("pciProgressText");
-        const btnAnalizar = document.getElementById("btnAnalizarPCI");
-
-        if (bar) {{
-            bar.style.width = porcentaje + "%";
-            bar.innerText = porcentaje + "%";
-            bar.setAttribute("aria-valuenow", porcentaje);
-        }}
-
-        if (text) {{
-            text.innerText = porcentaje + "%";
-        }}
-
-        if (btnAnalizar) {{
-            const bloquear = !pciTieneConsecutivo() || porcentaje < 100;
-            btnAnalizar.disabled = bloquear;
-            btnAnalizar.classList.toggle("disabled", bloquear);
-        }}
-    }}
-
-    function pciValidarAntesDeEnviar(e) {{
-        if (!pciValidarConsecutivoRevision()) {{
-            if (e) {{
-                e.preventDefault();
-                e.stopPropagation();
-                if (typeof e.stopImmediatePropagation === "function") {{
-                    e.stopImmediatePropagation();
-                }}
+            if (!btn) {{
+                return;
             }}
 
-            PCI_BLOQUEAR_LOADER = true;
-            pciOcultarLoaderGlobal();
-            return false;
-        }}
-
-        PCI_BLOQUEAR_LOADER = false;
-        return true;
-    }}
-
-    document.addEventListener("change", function(e) {{
-        if (!pciTieneConsecutivo() && e.target.matches(".pci-control-instrumento")) {{
-            e.preventDefault();
-            e.stopPropagation();
-            pciValidarConsecutivoRevision();
-            return false;
-        }}
-
-        if (e.target.matches('input[type="radio"][name^="st_"]')) {{
-            actualizarProgresoPCI();
-        }}
-    }}, true);
-
-    document.addEventListener("click", function(e) {{
-        const objetivo = e.target;
-
-        if (!pciTieneConsecutivo()) {{
-            if (
-                objetivo.closest(".pci-submit-btn") ||
-                objetivo.closest(".pciform-radio-card") ||
-                objetivo.closest("#pciZonaInstrumento")
-            ) {{
+            if (!nistValidarConsecutivoRevision()) {{
                 e.preventDefault();
                 e.stopPropagation();
-                if (typeof e.stopImmediatePropagation === "function") {{
-                    e.stopImmediatePropagation();
-                }}
+                e.stopImmediatePropagation();
 
-                pciValidarConsecutivoRevision();
-                pciOcultarLoaderGlobal();
+                NIST_BLOQUEAR_LOADER = true;
+                nistOcultarLoaderGlobal();
+
                 return false;
             }}
-        }}
-    }}, true);
+        }}, true);
 
-    window.addEventListener("DOMContentLoaded", function() {{
-        pciActualizarBloqueoPorConsecutivo();
-        actualizarProgresoPCI();
-        pciOcultarLoaderGlobal();
-    }});
+        window.addEventListener("DOMContentLoaded", function() {{
+            const form = document.getElementById("nistIngresoForm");
+            const input = document.getElementById("nistConsecutivoRevision");
 
-    window.addEventListener("pageshow", function() {{
-        pciActualizarBloqueoPorConsecutivo();
-        pciOcultarLoaderGlobal();
-    }});
+            if (input) {{
+                input.addEventListener("input", function() {{
+                    nistValidarConsecutivoRevision();
+                }});
 
-    const pciLoadersExternos = [
-        "showLoader",
-        "mostrarLoader",
-        "showGlobalLoader",
-        "mostrarProgresoGlobal",
-        "showProgress",
-        "openLoader",
-        "activarLoader",
-        "SGSI_showLoader"
-    ];
+                input.addEventListener("blur", function() {{
+                    nistValidarConsecutivoRevision();
+                }});
+            }}
 
-    pciLoadersExternos.forEach(function(nombreFuncion) {{
-        const original = window[nombreFuncion];
+            if (form) {{
+                form.addEventListener("submit", function(e) {{
+                    if (!nistValidarConsecutivoRevision()) {{
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
 
-        if (typeof original === "function" && !original.__pciInterceptado) {{
-            const wrapper = function() {{
-                if (PCI_BLOQUEAR_LOADER || !pciTieneConsecutivo()) {{
-                    pciValidarConsecutivoRevision();
-                    pciOcultarLoaderGlobal();
-                    return false;
-                }}
+                        NIST_BLOQUEAR_LOADER = true;
+                        nistOcultarLoaderGlobal();
 
-                return original.apply(this, arguments);
-            }};
+                        return false;
+                    }}
+                }}, true);
+            }}
 
-            wrapper.__pciInterceptado = true;
-            window[nombreFuncion] = wrapper;
-        }}
-    }});
+            actualizarProgresoNist();
+            nistOcultarLoaderGlobal();
+        }});
+
+        window.addEventListener("pageshow", function() {{
+            nistOcultarLoaderGlobal();
+        }});
+
+    }})();
     </script>
 
     <style>
+      .bg-purple{{ background-color:#6f42c1 !important; }}
+      .badge.bg-purple{{ color:#ffffff !important; }}
+
       body{{
         background-image:url('/static/img/ccsgsi.jpg');
         background-size:cover;
@@ -614,13 +5854,13 @@ def ingreso():
         background-repeat:no-repeat;
       }}
 
-      .pciform-shell{{
+      .nistform-shell{{
         width:96%;
-        max-width:1700px;
+        max-width:1600px;
         margin:26px auto 24px auto;
       }}
 
-      .pciform-header-card{{
+      .nistform-header-card{{
         background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
@@ -634,7 +5874,7 @@ def ingreso():
         margin-bottom:14px;
       }}
 
-      .pciform-header-card::before{{
+      .nistform-header-card::before{{
         content:"";
         position:absolute;
         inset:0;
@@ -644,7 +5884,7 @@ def ingreso():
         pointer-events:none;
       }}
 
-      .pciform-header-overlay{{
+      .nistform-header-overlay{{
         width:100%;
         display:flex;
         align-items:center;
@@ -656,8 +5896,8 @@ def ingreso():
         z-index:1;
       }}
 
-      .pciform-header-overlay::before{{
-        content:"💳";
+      .nistform-header-overlay::before{{
+        content:"📝";
         width:54px;
         height:54px;
         min-width:54px;
@@ -672,8 +5912,15 @@ def ingreso():
         margin-right:14px;
       }}
 
-      .pciform-header-text::before{{
-        content:"SGSI · Evaluación PCI-DSS";
+      .nistform-header-text{{
+        max-width:1100px;
+        width:100%;
+        display:block !important;
+        transform:none !important;
+      }}
+
+      .nistform-header-text::before{{
+        content:"SGSI · Evaluación NIST CSF 2.0";
         display:inline-block;
         background:rgba(255,255,255,.18);
         border-radius:999px;
@@ -684,19 +5931,23 @@ def ingreso():
         color:#ffffff;
       }}
 
-      .pciform-title{{
+      .nistform-title{{
         color:#ffffff !important;
         font-weight:950;
         font-size:1.32rem;
+        line-height:1.1;
+        margin:0 !important;
         text-shadow:0 3px 10px rgba(0,0,0,.35);
       }}
 
-      .pciform-subtitle{{
+      .nistform-subtitle{{
         color:rgba(255,255,255,.95);
         font-size:.78rem;
+        margin-top:4px;
+        line-height:1.25;
       }}
 
-      .pciform-header-actions{{
+      .nistform-header-actions{{
         display:flex;
         justify-content:center;
         gap:10px;
@@ -704,37 +5955,69 @@ def ingreso():
         margin:10px 0 14px;
       }}
 
-      .pciform-btn-main{{
+      .nistform-header-actions .btn,
+      .btn{{
+        border-radius:10px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }}
+
+      .nistform-header-actions .btn{{
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }}
+
+      .nistform-btn-main,
+      .btn-outline-light{{
         background:#ffffff;
         color:#0f172a !important;
         border:1px solid #cfd8e3 !important;
-        font-weight:900;
       }}
 
-      .pciform-card{{
+      .nistform-btn-main:hover,
+      .btn-outline-light:hover{{
+        background:#edf5ff;
+        color:#0b65d8 !important;
+        border-color:#9ec5fe !important;
+      }}
+
+      .nistform-card,
+      .card,
+      .card-soft,
+      .report-card{{
         background:rgba(255,255,255,.96) !important;
         border-radius:18px !important;
         backdrop-filter:blur(8px);
         box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
         border:1px solid rgba(219,230,244,.9) !important;
         overflow:hidden;
+      }}
+
+      .nistform-card.p-4{{
         padding:1.5rem !important;
       }}
 
-      .pciform-section-title{{
+      .nistform-section-title{{
         font-weight:950;
         font-size:.95rem;
         color:#0b4a8f;
-        margin-bottom:14px;
         padding-bottom:8px;
         border-bottom:2px solid rgba(59,130,246,.18);
+        margin-bottom:16px;
       }}
 
-      .pciform-progress{{
+      .nistform-progress{{
         height:22px;
         border-radius:999px;
         overflow:hidden;
         background:#e5edf7;
+        box-shadow:inset 0 1px 3px rgba(15,23,42,.12);
+      }}
+
+      .progress-bar{{
+        font-weight:900;
       }}
 
       .form-label{{
@@ -747,13 +6030,32 @@ def ingreso():
         border:1px solid #d9eaff;
         padding:6px 10px;
         border-radius:10px;
+        display:inline-block;
+        margin-bottom:6px;
       }}
 
-      .form-control{{
+      .form-control,
+      .form-select,
+      .report-textarea{{
         border-radius:10px;
         border:1px solid #d9e3f0;
         min-height:40px;
+        font-size:.86rem;
         background:#f8fafc;
+        box-shadow:none !important;
+      }}
+
+      textarea.form-control,
+      .report-textarea{{
+        min-height:90px;
+      }}
+
+      .form-control:focus,
+      .form-select:focus,
+      .report-textarea:focus{{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#ffffff;
       }}
 
       .form-control.is-invalid{{
@@ -770,37 +6072,67 @@ def ingreso():
         padding:8px 12px;
       }}
 
-      .pci-zona-bloqueada{{
-        opacity:.45;
-        filter:grayscale(.25);
-        pointer-events:none;
-        user-select:none;
+      .nistform-accordion{{
+        --bs-accordion-border-color:transparent;
+        --bs-accordion-btn-focus-box-shadow:0 0 0 .2rem rgba(63,134,214,.12);
       }}
 
-      .pciform-acc-item{{
+      .nistform-acc-item,
+      .accordion-item{{
         border:1px solid #dbe6f4 !important;
-        background:#ffffff !important;
-        margin-bottom:14px;
-        border-radius:18px !important;
+        border-radius:0 20px 20px 0 !important;
         overflow:hidden;
+        margin-bottom:12px;
+        background:#ffffff !important;
+        box-shadow:0 6px 14px rgba(15,23,42,.06);
       }}
 
-      .pciform-acc-btn{{
+      .nistform-acc-btn,
+      .accordion-button{{
         background:#eef5ff !important;
         color:#0f172a !important;
         font-weight:900;
         padding:18px 22px !important;
+        box-shadow:none !important;
+        border-bottom:1px solid #dbe6f4;
       }}
 
-      .pciform-acc-inner{{
+      .nistform-acc-btn:not(.collapsed),
+      .accordion-button:not(.collapsed){{
+        background:#dbeafe !important;
+        color:#0b4a8f !important;
+        box-shadow:none !important;
+      }}
+
+      .nistform-acc-inner{{
         width:100%;
         display:flex;
         justify-content:space-between;
         align-items:center;
         gap:12px;
+        padding-right:10px;
       }}
 
-      .pciform-cat-block{{
+      .nistform-acc-title-wrap{{
+        display:flex;
+        align-items:center;
+        gap:6px;
+        min-width:0;
+      }}
+
+      .nistform-acc-title{{
+        font-size:1rem;
+        font-weight:950;
+        color:#1e293b;
+      }}
+
+      .nistform-acc-body,
+      .accordion-body{{
+        background:rgba(255,255,255,.96) !important;
+        padding:18px !important;
+      }}
+
+      .nistform-cat-block{{
         background:#f8fafc;
         border:1px solid #dbe6f4;
         border-radius:16px;
@@ -808,43 +6140,68 @@ def ingreso():
         margin-bottom:16px;
       }}
 
-      .pciform-cat-title{{
+      .nistform-cat-title{{
         display:flex;
         justify-content:space-between;
+        align-items:flex-start;
         gap:12px;
         margin-bottom:14px;
         padding-bottom:10px;
         border-bottom:1px solid #dbe6f4;
       }}
 
-      .pciform-cat-code{{
+      .nistform-cat-code{{
         font-size:.92rem;
         font-weight:950;
         color:#0b4a8f;
+        line-height:1.15;
       }}
 
-      .pciform-qcard{{
+      .nistform-cat-name{{
+        font-size:.78rem;
+        color:#334155;
+        margin-top:3px;
+        line-height:1.25;
+      }}
+
+      .nistform-qcard{{
         background:#ffffff;
         border:1px solid #dbe6f4;
         border-radius:16px;
         padding:8px 7px;
+        box-shadow:0 4px 10px rgba(15,23,42,.05);
+        height:100%;
+        transition:.2s ease;
       }}
 
-      .pciform-qtext{{
+      .nistform-qcard:hover{{
+        transform:translateY(-2px);
+        box-shadow:0 8px 20px rgba(15,23,42,.10);
+      }}
+
+      .nistform-qhead{{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:10px;
+        margin-bottom:10px;
+      }}
+
+      .nistform-qtext{{
         font-size:.92rem;
         color:#0f172a;
         font-weight:700;
         line-height:1.45;
       }}
 
-      .pciform-radio-row{{
+      .nistform-radio-row{{
         display:grid;
         grid-template-columns:repeat(4,1fr);
         gap:10px;
         margin-top:14px;
       }}
 
-      .pciform-radio-card{{
+      .nistform-radio-card{{
         display:flex;
         align-items:center;
         justify-content:center;
@@ -854,7 +6211,19 @@ def ingreso():
         border-radius:12px;
         min-height:46px;
         font-weight:900;
+        color:#101827;
         cursor:pointer;
+        transition:.2s;
+        padding:8px 10px;
+      }}
+
+      .nistform-radio-card:hover{{
+        background:#eef6ff;
+        border-color:#93c5fd;
+      }}
+
+      .nistform-radio-card input[type="radio"]{{
+        transform:scale(1.08);
       }}
 
       .badge{{
@@ -865,3883 +6234,137 @@ def ingreso():
       }}
 
       @media (max-width:1200px){{
-        .pciform-radio-row{{
+        .nistform-radio-row{{
           grid-template-columns:repeat(2,1fr);
         }}
       }}
 
+      @media (max-width:991.98px){{
+        .nistform-shell{{
+          width:98%;
+          margin:8px auto 22px auto;
+        }}
+
+        .nistform-header-card{{
+          min-height:88px;
+        }}
+
+        .nistform-title{{
+          font-size:1.20rem;
+        }}
+
+        .nistform-subtitle{{
+          font-size:.68rem;
+        }}
+      }}
+
       @media (max-width:768px){{
-        .pciform-radio-row{{
+        .nistform-header-overlay{{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }}
+
+        .nistform-header-overlay::before{{
+          margin:0;
+        }}
+
+        .nistform-header-text::before{{
+          margin-left:auto;
+          margin-right:auto;
+        }}
+
+        .nistform-title,
+        .nistform-subtitle{{
+          text-align:center;
+        }}
+
+        .nistform-header-actions .btn{{
+          width:100%;
+        }}
+
+        .nistform-acc-inner,
+        .nistform-cat-title{{
+          flex-direction:column;
+          align-items:flex-start;
+        }}
+
+        .nistform-radio-row{{
           grid-template-columns:1fr;
         }}
-
-        .pciform-header-overlay{{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }}
       }}
     </style>
     """
 
-    return render_template_string(BASE, title="Ingreso PCI-DSS", content=content)
+    return render_template_string(BASE, title="Ingreso NIST", content=content)
 
-# =====================================================================
-# PARÁMETROS PCI-DSS
-# =====================================================================
 
-@pci_madurez_bp.route("/parametros", methods=["GET"], endpoint="parametros")
-@login_required
-def parametros():
-    user = User.query.get(session.get("user_id"))
+# =========================================================
+# INGRESO NIST - GUARDAR / ANALIZAR
+# REEMPLAZAR COMPLETO
+# =========================================================
 
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
-        flash("No tiene permiso para acceder a los parámetros de PCI-DSS.", "danger")
-        return redirect(url_for('menu'))
-
-    read_only = (user.role == 'auditor')
-
-    # Botón importar
-    if read_only:
-        importar_btn = """
-          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled
-                  title="El rol Auditor no puede importar instrumentos">
-            <i class="bi bi-upload me-2"></i>Importar instrumento
-          </button>
-        """
-        reimportar_btn = ""
-    else:
-        importar_btn = f"""
-          <form method="POST" action="{url_for('madurez_pci.importar_instrumento_pci')}" class="d-inline">
-            <button type="submit" class="btn btn-primary rounded-pill px-4 fw-bold">
-              <i class="bi bi-upload me-2"></i>Importar instrumento
-            </button>
-          </form>
-        """
-        reimportar_btn = f"""
-          <form method="POST"
-                action="{url_for('madurez_pci.importar_instrumento_pci')}?force=1"
-                class="d-inline"
-                onsubmit="return confirm('Esto borrará el instrumento PCI cargado y lo volverá a importar. ¿Desea continuar?');">
-            <button type="submit" class="btn btn-outline-danger rounded-pill px-4 fw-bold">
-              <i class="bi bi-arrow-repeat me-2"></i>Reimportar instrumento
-            </button>
-          </form>
-        """
-
-    params = PciMadurezParametro.query.order_by(PciMadurezParametro.orden.asc()).all()
-    total_preguntas = PciMadurezPregunta.query.filter_by(tipo="q").count()
-
-    rows = ""
-    for p in params:
-        rows += f"""
-        <tr>
-          <td class="text-center fw-bold">{p.orden}</td>
-          <td class="fw-semibold">{xml_escape(p.nivel)}</td>
-          <td class="text-center">{float(p.rango_desde):.2f}%</td>
-          <td class="text-center">{float(p.rango_hasta):.2f}%</td>
-          <td class="text-center">
-              <span class="badge rounded-pill px-3 py-2"
-                    style="background:{p.color or '#6c757d'};">
-              </span>
-           </td>
-          <td>{xml_escape(p.descripcion or '')}</td>
-        </tr>
-        """
-
-    if not rows:
-        rows = """
-        <tr>
-          <td colspan="6" class="text-center text-muted py-4">
-            No hay parámetros cargados aún.
-          </td>
-        </tr>
-        """
-
-    estado_badge = (
-        '<span class="badge bg-success ms-2">Instrumento cargado</span>'
-        if total_preguntas > 0 else
-        '<span class="badge bg-danger ms-2">Instrumento NO cargado</span>'
-    )
-
-    content = f"""
-    <div class="pcipar-shell">
-
-      <div class="pcipar-header-card">
-        <div class="pcipar-header-overlay">
-          <div class="pcipar-header-text">
-            <h3 class="pcipar-title m-0">Parámetros — Nivel de Madurez PCI-DSS</h3>
-            <div class="pcipar-subtitle">
-              Configuración base del instrumento, escala de medición y administración de la importación del cuestionario.
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="pcipar-header-actions">
-        <a href="{url_for('madurez_pci.inicio_pci')}" class="btn pcipar-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left-circle me-2"></i>Volver
-        </a>
-        {importar_btn}
-        {reimportar_btn}
-      </div>
-
-      <div class="row g-3 mt-2">
-        <div class="col-12 col-lg-4">
-          <div class="pcipar-card p-4 h-100">
-            <div class="pcipar-section-title">Estado del instrumento</div>
-            <div class="fw-bold">Preguntas evaluables: <b>{total_preguntas}</b> {estado_badge}</div>
-            <div class="mt-3 small text-muted">
-              El instrumento se importa desde el archivo Excel de PCI-DSS sin traducción, respetando los textos originales.
-            </div>
-
-            <div class="alert alert-info mt-3 mb-0 small">
-              <b>Nota:</b> la reimportación elimina las preguntas PCI actuales y vuelve a cargar el instrumento desde cero.
-            </div>
-          </div>
-        </div>
-
-        <div class="col-12 col-lg-8">
-          <div class="pcipar-card p-4 h-100">
-            <div class="pcipar-section-title">Escala de madurez</div>
-            <div class="table-responsive">
-              <table class="table table-sm align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th class="text-center">Orden</th>
-                    <th>Nivel</th>
-                    <th class="text-center">Desde</th>
-                    <th class="text-center">Hasta</th>
-                    <th class="text-center">Color</th>
-                    <th>Descripción</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .pcipar-shell{{
-        width:96%;
-        max-width:1600px;
-        margin:26px auto 24px auto;
-      }}
-
-      .pcipar-header-card{{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }}
-
-      .pcipar-header-card::before{{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }}
-
-      .pcipar-header-overlay{{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }}
-
-      .pcipar-header-overlay::before{{
-        content:"⚙️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }}
-
-      .pcipar-header-text{{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }}
-
-      .pcipar-header-text::before{{
-        content:"SGSI · Parámetros PCI-DSS";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }}
-
-      .pcipar-title{{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        margin:0 !important;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-      }}
-
-      .pcipar-subtitle{{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }}
-
-      .pcipar-header-actions{{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }}
-
-      .pcipar-header-actions .btn,
-      .btn{{
-        border-radius:10px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
-
-      .pcipar-btn-main,
-      .btn-outline-light{{
-        background:#ffffff;
-        color:#0f172a !important;
-        border:1px solid #cfd8e3 !important;
-      }}
-
-      .pcipar-btn-main:hover,
-      .btn-outline-light:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-      }}
-
-      .pcipar-card,
-      .card{{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
-        overflow:hidden;
-      }}
-
-      .pcipar-card.p-4{{
-        padding:1.5rem !important;
-      }}
-
-      .pcipar-section-title,
-      .card h5,
-      .card h6{{
-        font-weight:950;
-        font-size:.95rem;
-        color:#0b4a8f;
-        margin-bottom:16px;
-      }}
-
-      .pcipar-section-title{{
-        padding-bottom:8px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-      }}
-
-      .table-responsive{{
-        max-height:72vh;
-        overflow-y:auto;
-        overflow-x:auto;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:#ffffff;
-      }}
-
-      .table{{
-        margin-bottom:0;
-      }}
-
-      .pcipar-card table thead th,
-      .table thead th{{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#ffffff !important;
-        font-size:.78rem;
-        font-weight:900 !important;
-        border:none !important;
-        white-space:nowrap;
-        vertical-align:middle !important;
-        text-align:center;
-        padding:9px 8px;
-      }}
-
-      table td,
-      table th,
-      .table tbody td{{
-        vertical-align:middle !important;
-        font-size:.82rem;
-        padding:9px 8px;
-        border-bottom:1px solid #e5edf7;
-        color:#101827;
-      }}
-
-      .table tbody tr:nth-child(even){{
-        background:#f8fbff;
-      }}
-
-      .pcipar-card table tbody tr:hover,
-      .table tbody tr:hover{{
-        background:#eef6ff;
-      }}
-
-      .form-label{{
-        font-size:.72rem;
-        font-weight:900;
-        color:#0b4a8f;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        padding:6px 10px;
-        border-radius:10px;
-        display:inline-block;
-        margin-bottom:6px;
-      }}
-
-      .form-control,
-      .form-select{{
-        border-radius:10px;
-        border:1px solid #d9e3f0;
-        min-height:40px;
-        font-size:.86rem;
-        background:#f8fafc;
-        box-shadow:none !important;
-      }}
-
-      .form-control:focus,
-      .form-select:focus{{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
-      }}
-
-      .badge{{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }}
-
-      @media (max-width:991.98px){{
-        .pcipar-shell{{
-          width:98%;
-          margin:8px auto 22px auto;
-        }}
-
-        .pcipar-header-card{{
-          min-height:88px;
-        }}
-
-        .pcipar-title{{
-          font-size:1.20rem;
-        }}
-
-        .pcipar-subtitle{{
-          font-size:.68rem;
-        }}
-      }}
-
-      @media (max-width:768px){{
-        .pcipar-header-overlay{{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }}
-
-        .pcipar-header-overlay::before{{
-          margin:0;
-        }}
-
-        .pcipar-header-text::before{{
-          margin-left:auto;
-          margin-right:auto;
-        }}
-
-        .pcipar-title,
-        .pcipar-subtitle{{
-          text-align:center;
-        }}
-
-        .pcipar-header-actions .btn{{
-          width:100%;
-        }}
-      }}
-    </style>
-    """
-    return render_template_string(BASE, title="Parámetros PCI-DSS", content=content)
-
-# =====================================================================
-# HISTORIAL PCI-DSS
-# =====================================================================
-
-@pci_madurez_bp.route("/historial", methods=["GET"], endpoint="historial")
-@login_required
-def historial():
-    user = User.query.get(session.get("user_id"))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
-        flash("No tiene permiso para acceder al historial de PCI-DSS.", "danger")
-        return redirect(url_for('menu'))
-
-    runs = (
-        PciAnalysisRun.query
-        .order_by(PciAnalysisRun.fecha_calculo.desc(), PciAnalysisRun.id.desc())
-        .limit(200)
-        .all()
-    )
-
-    rows = ""
-    for r in runs:
-        nivel = pci_resolver_nivel(r.nivel_promedio_general or 0)
-
-        if user.role == 'auditor':
-            boton_eliminar = ""
-        else:
-            company_name_safe = escape(r.company_name or '')
-            eliminar_url = url_for('madurez_pci.historial_eliminar', run_id=r.id)
-            boton_eliminar = f"""
-                <form method="POST"
-                      action="{eliminar_url}"
-                      class="m-0"
-                      onsubmit="return confirm('¿Seguro que deseas eliminar esta revisión PCI-DSS?\\n\\nConsecutivo: {company_name_safe}');">
-                  <button class="btn btn-sm btn-danger rounded-pill" type="submit">
-                    <i class="bi bi-trash3 me-1"></i>Eliminar
-                  </button>
-                </form>
-            """
-
-        rows += f"""
-        <tr>
-          <td>{escape(r.fecha_calculo.strftime('%Y-%m-%d %H:%M')) if r.fecha_calculo else ''}</td>
-          <td>{escape(r.company_name or '')}</td>
-          <td class="text-center">
-            <div class="d-flex flex-column align-items-center justify-content-center">
-              <div class="fw-bold">{float(r.nivel_promedio_general or 0):.2f}%</div>
-              <div class="d-flex align-items-center gap-2 mt-1 flex-wrap justify-content-center">
-                <span class="badge rounded-pill" style="background:{nivel['color']}; font-size:11px;">
-                  {escape(nivel['nivel'])}
-                </span>
-              </div>
-            </div>
-          </td>
-          <td class="text-center">
-            <div class="d-flex justify-content-center gap-2 flex-nowrap">
-              <a class="btn btn-sm btn-primary rounded-pill"
-                 href="{url_for('madurez_pci.resultado', run_id=r.id)}">
-                <i class="bi bi-eye me-1"></i>Ver
-              </a>
-
-              <a class="btn btn-sm btn-outline-danger rounded-pill"
-                 href="{url_for('madurez_pci.exportar_pdf', run_id=r.id)}" target="_blank">
-                <i class="bi bi-file-earmark-pdf me-1"></i>PDF
-              </a>
-
-              {boton_eliminar}
-            </div>
-          </td>
-        </tr>
-        """
-
-    if not rows:
-        rows = """
-        <tr>
-          <td colspan="4" class="text-center text-muted py-4">
-            No hay revisiones PCI-DSS registradas.
-          </td>
-        </tr>
-        """
-
-    content = f"""
-    <div class="pcihist-shell">
-
-      <div class="pcihist-header-card">
-        <div class="pcihist-header-overlay">
-          <div class="pcihist-header-text">
-            <h3 class="pcihist-title m-0">Historial de Revisiones — PCI-DSS</h3>
-            <div class="pcihist-subtitle">
-              Consulta las evaluaciones ejecutadas, porcentajes de madurez y acciones disponibles.
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="pcihist-header-actions">
-        <a href="{url_for('madurez_pci.inicio_pci')}" class="btn pcihist-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left-circle me-2"></i>Volver al Inicio
-        </a>
-      </div>
-
-      <div class="pcihist-card p-4">
-        <div class="pcihist-section-title">Listado de revisiones</div>
-
-        <div class="table-responsive">
-          <table class="table align-middle mb-0">
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>Consecutivo</th>
-                <th class="text-center">Madurez General</th>
-                <th class="text-center">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .pcihist-shell{{
-        width:96%;
-        max-width:1600px;
-        margin:26px auto 24px auto;
-      }}
-
-      .pcihist-header-card{{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }}
-
-      .pcihist-header-card::before{{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }}
-
-      .pcihist-header-overlay{{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }}
-
-      .pcihist-header-overlay::before{{
-        content:"📄";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }}
-
-      .pcihist-header-text{{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }}
-
-      .pcihist-header-text::before{{
-        content:"SGSI · Historial PCI-DSS";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }}
-
-      .pcihist-title{{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        margin:0 !important;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-      }}
-
-      .pcihist-subtitle{{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }}
-
-      .pcihist-header-actions{{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }}
-
-      .pcihist-header-actions .btn,
-      .btn{{
-        border-radius:10px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
-
-      .pcihist-btn-main,
-      .btn-outline-light{{
-        background:#ffffff;
-        color:#0f172a !important;
-        border:1px solid #cfd8e3 !important;
-      }}
-
-      .pcihist-btn-main:hover,
-      .btn-outline-light:hover{{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-      }}
-
-      .pcihist-card,
-      .card{{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
-        overflow:hidden;
-      }}
-
-      .pcihist-card.p-4{{
-        padding:1.5rem !important;
-      }}
-
-      .pcihist-section-title,
-      .card h5,
-      .card h6{{
-        font-weight:950;
-        font-size:.95rem;
-        color:#0b4a8f;
-        margin-bottom:16px;
-      }}
-
-      .pcihist-section-title{{
-        padding-bottom:8px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-      }}
-
-      .table-responsive{{
-        max-height:72vh;
-        overflow-y:auto;
-        overflow-x:auto;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:#ffffff;
-      }}
-
-      .table{{
-        margin-bottom:0;
-      }}
-
-      .pcihist-card table thead th,
-      .table thead th{{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#ffffff !important;
-        font-size:.78rem;
-        font-weight:900 !important;
-        border:none !important;
-        white-space:nowrap;
-        vertical-align:middle !important;
-        text-align:center;
-        padding:9px 8px;
-      }}
-
-      table td,
-      table th,
-      .table tbody td{{
-        vertical-align:middle !important;
-        font-size:.82rem;
-        padding:9px 8px;
-        border-bottom:1px solid #e5edf7;
-        color:#101827;
-      }}
-
-      .table tbody tr:nth-child(even){{
-        background:#f8fbff;
-      }}
-
-      .pcihist-card table tbody tr:hover,
-      .table tbody tr:hover{{
-        background:#eef6ff;
-      }}
-
-      .badge{{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }}
-
-      .form-control,
-      .form-select{{
-        border-radius:10px;
-        border:1px solid #d9e3f0;
-        min-height:40px;
-        font-size:.86rem;
-        background:#f8fafc;
-        box-shadow:none !important;
-      }}
-
-      .form-control:focus,
-      .form-select:focus{{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
-      }}
-
-      @media (max-width:991.98px){{
-        .pcihist-shell{{
-          width:98%;
-          margin:8px auto 22px auto;
-        }}
-
-        .pcihist-header-card{{
-          min-height:88px;
-        }}
-
-        .pcihist-title{{
-          font-size:1.20rem;
-        }}
-
-        .pcihist-subtitle{{
-          font-size:.68rem;
-        }}
-      }}
-
-      @media (max-width:768px){{
-        .pcihist-header-overlay{{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }}
-
-        .pcihist-header-overlay::before{{
-          margin:0;
-        }}
-
-        .pcihist-header-text::before{{
-          margin-left:auto;
-          margin-right:auto;
-        }}
-
-        .pcihist-title,
-        .pcihist-subtitle{{
-          text-align:center;
-        }}
-
-        .pcihist-header-actions .btn{{
-          width:100%;
-        }}
-      }}
-    </style>
-    """
-    return render_template_string(BASE, title="Historial PCI-DSS", content=content)
-
-# =====================================================================
-# ELIMINAR REVISIÓN PCI-DSS
-# =====================================================================
-
-@pci_madurez_bp.route("/historial/<int:run_id>/eliminar", methods=["POST"], endpoint="historial_eliminar")
-@login_required
-def historial_eliminar(run_id):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede eliminar revisiones.", "danger")
-        return redirect(url_for('madurez_pci.historial'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
-        flash("No tiene permiso para eliminar revisiones PCI-DSS.", "danger")
-        return redirect(url_for('madurez_pci.historial'))
-
-    ar = PciAnalysisRun.query.get_or_404(run_id)
-    run_base = PciMadurezRun.query.filter_by(id=ar.pci_run_id).first()
-
-    try:
-        db.session.delete(ar)
-
-        if run_base:
-            PciMadurezRespuesta.query.filter_by(run_id=run_base.id).delete()
-            db.session.delete(run_base)
-
-        db.session.commit()
-        flash("✅ Revisión PCI-DSS eliminada correctamente.", "success")
-    except Exception as e:
-        db.session.rollback()
-        flash(f"⚠️ Error eliminando la revisión PCI-DSS: {e}", "danger")
-
-    return redirect(url_for('madurez_pci.historial'))
-
-
-@pci_madurez_bp.route("/resultado/<int:run_id>/plan-trabajo/editar", methods=["GET", "POST"])
-@login_required
-def plan_trabajo_editar_pci(run_id: int):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role not in ("admin", "auditor") and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
-        flash("No tiene permiso para editar el plan de trabajo de PCI-DSS.", "danger")
-        return redirect(url_for("menu"))
-
-    if user.role == "auditor":
-        flash("El perfil Auditor no puede editar el plan de trabajo.", "danger")
-        return redirect(url_for("madurez_pci.resultado", run_id=run_id))
-
-    run = PciAnalysisRun.query.get_or_404(run_id)
-    texto_actual = (run.plan_trabajo_editado or run.plan_trabajo_ai or "").strip()
-
-    if request.method == "POST":
-        texto = (request.form.get("plan_trabajo") or "").strip()
-        run.plan_trabajo_editado = texto
-        db.session.commit()
-        flash("✅ Plan de trabajo PCI-DSS actualizado.", "success")
-        return redirect(url_for("madurez_pci.resultado", run_id=run.id))
-
-    content = f"""
-    <div class="datstd-shell">
-
-      <!-- HEADER -->
-      <div class="datstd-header-card">
-        <div class="datstd-header-overlay">
-          <div class="datstd-header-text">
-            <h3 class="datstd-title m-0">Editar Plan de Trabajo — PCI-DSS</h3>
-            <div class="datstd-subtitle">
-              Revisión: <b>{escape(run.company_name or '')}</b>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOTÓN VOLVER -->
-      <div class="datstd-header-actions">
-        <a href="{url_for('madurez_pci.resultado', run_id=run.id)}"
-           class="btn datstd-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left me-2"></i>Volver al resultado
-        </a>
-      </div>
-
-      <!-- CARD -->
-      <div class="datstd-card p-4">
-        <form method="POST">
-
-          <div class="datstd-section-title">Plan de trabajo editable</div>
-
-          <div class="text-muted small mb-3">
-            Ajusta el contenido del plan de trabajo PCI-DSS y guarda los cambios.
-          </div>
-
-          <textarea name="plan_trabajo"
-                    class="form-control datstd-textarea"
-                    rows="20"
-                    placeholder="Escribe o ajusta aquí el plan de trabajo...">{escape(texto_actual)}</textarea>
-
-          <div class="d-flex justify-content-center mt-4">
-            <button type="submit" class="btn btn-primary rounded-pill px-5 fw-bold">
-              <i class="bi bi-save2 me-2"></i>Guardar cambios
-            </button>
-          </div>
-
-        </form>
-      </div>
-
-    </div>
-
-    <style>
-      body {{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .datstd-shell {{
-        width:96%;
-        max-width:1600px;
-        margin:26px auto 30px auto;
-      }}
-
-      .datstd-header-card {{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }}
-
-      .datstd-header-card::before {{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }}
-
-      .datstd-header-overlay {{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }}
-
-      .datstd-header-overlay::before {{
-        content:"🛡️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }}
-
-      .datstd-header-text {{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }}
-
-      .datstd-header-text::before {{
-        content:"SGSI · Protección de Datos Personales";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }}
-
-      .datstd-title {{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        margin:0 !important;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-      }}
-
-      .datstd-subtitle {{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }}
-
-      .datstd-header-actions {{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 16px;
-      }}
-
-      .datstd-header-actions .btn,
-      .btn {{
-        border-radius:10px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
-
-      .datstd-btn-main,
-      .btn-outline-light {{
-        background:#ffffff;
-        color:#0f172a !important;
-        border:1px solid #cfd8e3 !important;
-      }}
-
-      .datstd-btn-main:hover,
-      .btn-outline-light:hover {{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-      }}
-
-      .datstd-card,
-      .card {{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
-        overflow:hidden;
-      }}
-
-      .datstd-card.p-4 {{
-        padding:1.5rem !important;
-      }}
-
-      .datstd-section-title,
-      .card h5,
-      .card h6 {{
-        font-weight:950;
-        font-size:.95rem;
-        color:#0b4a8f;
-        margin-bottom:16px;
-      }}
-
-      .datstd-section-title {{
-        padding-bottom:8px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-      }}
-
-      .datstd-textarea,
-      textarea.form-control {{
-        min-height:420px;
-        border-radius:14px;
-        border:1px solid #d9e3f0;
-        resize:vertical;
-        background:#f8fafc;
-        font-size:.90rem;
-        line-height:1.45;
-        box-shadow:none !important;
-      }}
-
-      .datstd-textarea:focus,
-      textarea.form-control:focus {{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
-      }}
-
-      .form-label {{
-        font-size:.72rem;
-        font-weight:900;
-        color:#0b4a8f;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        padding:6px 10px;
-        border-radius:10px;
-        display:inline-block;
-        margin-bottom:6px;
-      }}
-
-      .form-control,
-      .form-select {{
-        border-radius:10px;
-        border:1px solid #d9e3f0;
-        min-height:40px;
-        font-size:.86rem;
-        background:#f8fafc;
-        box-shadow:none !important;
-      }}
-
-      .form-control:focus,
-      .form-select:focus {{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
-      }}
-
-      .badge {{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }}
-
-      .btn.rounded-pill {{
-        border-radius:999px !important;
-      }}
-
-      @media (max-width:991.98px) {{
-        .datstd-shell {{
-          width:98%;
-          margin:8px auto 22px auto;
-        }}
-
-        .datstd-header-card {{
-          min-height:88px;
-        }}
-
-        .datstd-title {{
-          font-size:1.20rem;
-        }}
-
-        .datstd-subtitle {{
-          font-size:.68rem;
-        }}
-
-        .datstd-textarea {{
-          min-height:320px;
-        }}
-      }}
-
-      @media (max-width:768px) {{
-        .datstd-header-overlay {{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }}
-
-        .datstd-header-overlay::before {{
-          margin:0;
-        }}
-
-        .datstd-header-text::before {{
-          margin-left:auto;
-          margin-right:auto;
-        }}
-
-        .datstd-title,
-        .datstd-subtitle {{
-          text-align:center;
-        }}
-
-        .datstd-header-actions .btn {{
-          width:100%;
-        }}
-      }}
-    </style>
-    """
-
-    return render_template_string(BASE, title="Editar Plan de Trabajo PCI-DSS", content=content)
-
-@pci_madurez_bp.route("/resultado/<int:run_id>/plan-trabajo/generar", methods=["POST"])
-@login_required
-def plan_trabajo_generar_pci(run_id: int):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role == "auditor":
-        flash("El perfil Auditor no puede generar el plan de trabajo con IA.", "danger")
-        return redirect(url_for("madurez_pci.resultado", run_id=run_id))
-
-    if user.role != "admin" and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
-        flash("No tiene permiso para generar el plan de trabajo de PCI-DSS.", "danger")
-        return redirect(url_for("menu"))
-
-    run = PciAnalysisRun.query.get_or_404(run_id)
-
-    try:
-        resultados = json.loads(run.resultados_json or "{}")
-    except Exception:
-        resultados = {}
-
-    if not resultados:
-        flash("⚠️ No hay resultados consolidados para generar el plan de trabajo.", "warning")
-        return redirect(url_for("madurez_pci.resultado", run_id=run.id))
-
-    prompt = _pci_prompt_plan_trabajo(run, resultados)
-
-    try:
-        raw = _ai_text(prompt, max_tokens=1800)
-    except Exception as e:
-        flash(f"❌ Error llamando IA para el plan de trabajo: {e}", "danger")
-        return redirect(url_for("madurez_pci.resultado", run_id=run.id))
-
-    obj = _extraer_json_objeto(raw)
-
-    plan_ai = ""
-    if isinstance(obj, dict):
-        plan_list = obj.get("plan_trabajo", [])
-        if isinstance(plan_list, list):
-            lines = []
-            for i, it in enumerate(plan_list, start=1):
-                if not isinstance(it, dict):
-                    continue
-
-                frente = pci_normalizar_texto_rico_guardado(it.get("frente") or "")
-                actividad = pci_normalizar_texto_rico_guardado(it.get("actividad") or "")
-                prioridad = pci_normalizar_texto_rico_guardado(it.get("prioridad") or "")
-                responsable = pci_normalizar_texto_rico_guardado(it.get("responsable_sugerido") or "")
-                plazo = pci_normalizar_texto_rico_guardado(it.get("plazo") or "")
-                entregable = pci_normalizar_texto_rico_guardado(it.get("entregable") or "")
-
-                lines.append(
-                    f"{i}. Frente: {frente or 'Sin definir'}\n"
-                    f"   Actividad: {actividad or 'Sin definir'}\n"
-                    f"   Prioridad: {prioridad or 'Sin definir'}\n"
-                    f"   Responsable sugerido: {responsable or 'Sin definir'}\n"
-                    f"   Plazo: {plazo or 'Sin definir'}\n"
-                    f"   Entregable: {entregable or 'Sin definir'}"
-                )
-
-            plan_ai = "\n\n".join(lines).strip()
-
-    plan_ai = pci_normalizar_texto_rico_guardado(plan_ai)
-
-    if not plan_ai:
-        flash("⚠️ La IA respondió, pero no devolvió un plan_trabajo JSON válido. Regenera nuevamente.", "warning")
-        return redirect(url_for("madurez_pci.resultado", run_id=run.id))
-
-    run.plan_trabajo_ai = plan_ai
-    run.plan_trabajo_editado = plan_ai
-
-    db.session.commit()
-    flash("✅ Plan de trabajo PCI-DSS generado con IA.", "success")
-    return redirect(url_for("madurez_pci.resultado", run_id=run.id))
-
-@pci_madurez_bp.route("/resultado/<int:run_id>/informe-ejecutivo/editar", methods=["GET", "POST"])
-@login_required
-def informe_ejecutivo_editar_pci(run_id: int):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role == "auditor":
-        flash("El perfil Auditor no puede editar el informe ejecutivo.", "danger")
-        return redirect(url_for("madurez_pci.resultado", run_id=run_id))
-
-    if user.role != "admin" and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
-        flash("No tiene permiso para editar el informe ejecutivo PCI-DSS.", "danger")
-        return redirect(url_for("menu"))
-
-    run = PciAnalysisRun.query.get_or_404(run_id)
-    texto_actual = (run.informe_ejecutivo_editado or run.informe_ejecutivo_ai or "").strip()
-
-    if request.method == "POST":
-        texto = (request.form.get("informe_ejecutivo") or "").strip()
-
-        print("=== DEBUG EDITAR INFORME PCI ===")
-        print("run_id:", run.id)
-        print("texto recibido:", texto[:500])
-        print("antes run.informe_ejecutivo_editado:", (run.informe_ejecutivo_editado or "")[:500])
-
-        run.informe_ejecutivo_editado = texto
-        db.session.add(run)
-        db.session.flush()
-        db.session.commit()
-
-        # Recargar desde BD para validar que sí quedó guardado
-        db.session.refresh(run)
-
-        print("despues run.informe_ejecutivo_editado:", (run.informe_ejecutivo_editado or "")[:500])
-        print("=== FIN DEBUG EDITAR INFORME PCI ===")
-
-        flash("✅ Informe ejecutivo PCI-DSS actualizado.", "success")
-        return redirect(url_for("madurez_pci.resultado", run_id=run.id))
-
-    content = f"""
-    <div class="pciexec-shell">
-
-      <div class="pciexec-header-card">
-        <div class="pciexec-header-overlay">
-          <div class="pciexec-header-text">
-            <h3 class="pciexec-title m-0">Editar Informe Ejecutivo — PCI-DSS</h3>
-            <div class="pciexec-subtitle">
-              Revisión: <b>{escape(run.company_name or '')}</b>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="pciexec-header-actions">
-        <a href="{url_for('madurez_pci.resultado', run_id=run.id)}"
-           class="btn pciexec-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left me-2"></i>Volver al resultado
-        </a>
-      </div>
-
-      <div class="pciexec-card p-4">
-        <form method="POST">
-          <div class="pciexec-section-title">Informe ejecutivo editable</div>
-
-          <div class="text-muted small mb-3">
-            Ajusta el contenido del informe ejecutivo y guarda los cambios.
-          </div>
-
-          <textarea name="informe_ejecutivo"
-                    class="form-control pciexec-textarea"
-                    rows="20"
-                    placeholder="Escribe o ajusta aquí el informe ejecutivo...">{escape(texto_actual)}</textarea>
-
-          <div class="d-flex justify-content-center mt-4">
-            <button type="submit" class="btn btn-primary rounded-pill px-5 fw-bold">
-              <i class="bi bi-save2 me-2"></i>Guardar cambios
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <style>
-      body {{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .pciexec-shell {{
-        width:96%;
-        max-width:1600px;
-        margin:26px auto 30px auto;
-      }}
-
-      .pciexec-header-card {{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }}
-
-      .pciexec-header-card::before {{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }}
-
-      .pciexec-header-overlay {{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }}
-
-      .pciexec-header-overlay::before {{
-        content:"📊";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }}
-
-      .pciexec-header-text {{
-        max-width:1100px;
-        width:100%;
-        display:block !important;
-        transform:none !important;
-      }}
-
-      .pciexec-header-text::before {{
-        content:"SGSI · Informe Ejecutivo PCI-DSS";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }}
-
-      .pciexec-title {{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        margin:0 !important;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-      }}
-
-      .pciexec-subtitle {{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }}
-
-      .pciexec-header-actions {{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 16px;
-      }}
-
-      .pciexec-header-actions .btn,
-      .btn {{
-        border-radius:10px !important;
-        font-weight:900;
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-      }}
-
-      .pciexec-btn-main,
-      .btn-outline-light {{
-        background:#ffffff;
-        color:#0f172a !important;
-        border:1px solid #cfd8e3 !important;
-      }}
-
-      .pciexec-btn-main:hover,
-      .btn-outline-light:hover {{
-        background:#edf5ff;
-        color:#0b65d8 !important;
-      }}
-
-      .pciexec-card,
-      .card {{
-        background:rgba(255,255,255,.96) !important;
-        border-radius:18px !important;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-        border:1px solid rgba(219,230,244,.9) !important;
-        overflow:hidden;
-      }}
-
-      .pciexec-card.p-4 {{
-        padding:1.5rem !important;
-      }}
-
-      .pciexec-section-title,
-      .card h5,
-      .card h6 {{
-        font-weight:950;
-        font-size:.95rem;
-        color:#0b4a8f;
-        margin-bottom:16px;
-      }}
-
-      .pciexec-section-title {{
-        padding-bottom:8px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-      }}
-
-      .pciexec-textarea,
-      textarea.form-control {{
-        min-height:420px;
-        border-radius:14px;
-        border:1px solid #d9e3f0;
-        resize:vertical;
-        background:#f8fafc;
-        font-size:.90rem;
-        line-height:1.45;
-        box-shadow:none !important;
-      }}
-
-      .pciexec-textarea:focus,
-      textarea.form-control:focus {{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
-      }}
-
-      .form-label {{
-        font-size:.72rem;
-        font-weight:900;
-        color:#0b4a8f;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        padding:6px 10px;
-        border-radius:10px;
-        display:inline-block;
-        margin-bottom:6px;
-      }}
-
-      .form-control,
-      .form-select {{
-        border-radius:10px;
-        border:1px solid #d9e3f0;
-        min-height:40px;
-        font-size:.86rem;
-        background:#f8fafc;
-        box-shadow:none !important;
-      }}
-
-      .form-control:focus,
-      .form-select:focus {{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-        background:#ffffff;
-      }}
-
-      .badge {{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }}
-
-      .btn.rounded-pill {{
-        border-radius:999px !important;
-      }}
-
-      @media (max-width:991.98px) {{
-        .pciexec-shell {{
-          width:98%;
-          margin:8px auto 22px auto;
-        }}
-
-        .pciexec-header-card {{
-          min-height:88px;
-        }}
-
-        .pciexec-title {{
-          font-size:1.20rem;
-        }}
-
-        .pciexec-subtitle {{
-          font-size:.68rem;
-        }}
-      }}
-
-      @media (max-width:768px) {{
-        .pciexec-header-overlay {{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }}
-
-        .pciexec-header-overlay::before {{
-          margin:0;
-        }}
-
-        .pciexec-header-text::before {{
-          margin-left:auto;
-          margin-right:auto;
-        }}
-
-        .pciexec-title,
-        .pciexec-subtitle {{
-          text-align:center;
-        }}
-
-        .pciexec-header-actions .btn {{
-          width:100%;
-        }}
-      }}
-    </style>
-    """
-    return render_template_string(BASE, title="Editar Informe Ejecutivo PCI", content=content)
-
-
-
-
-@pci_madurez_bp.route("/resultado/<int:analysis_id>", methods=["GET"])
-@login_required
-def detalle_resultado_pci(analysis_id: int):
-    user = User.query.get(session.get("user_id"))
-
-    if user.role not in ("admin", "auditor") and not verificar_permiso(user, "Nivel de madurez PCI-DSS"):
-        flash("No tiene permiso para acceder al resultado PCI-DSS.", "danger")
-        return redirect(url_for("menu"))
-
-    ar = PciAnalysisRun.query.get_or_404(analysis_id)
-
-    try:
-        resultados = json.loads(ar.resultados_json or "{}")
-    except Exception:
-        resultados = {}
-
-    def esc(x):
-        return escape(x or "")
-
-    def _nl2br(s: str) -> str:
-        return (s or "").replace("\n", "<br>")
-
-    # Radar simple desde resultados
-    radar_b64 = None
-    try:
-        labels = []
-        values = []
-        for code in PCI_BLOCK_ORDER:
-            item = resultados.get(code)
-            if not item:
-                continue
-            labels.append(code)
-            values.append(float(item.get("pct", 0) or 0))
-
-        if labels and values:
-            fig = plt.figure(figsize=(3.55, 3.55), dpi=170)
-            ax = plt.subplot(111, polar=True)
-
-            angles = [n / float(len(labels)) * 2 * math.pi for n in range(len(labels))]
-            angles += angles[:1]
-            vals = values + values[:1]
-
-            ax.set_theta_offset(math.pi / 2)
-            ax.set_theta_direction(-1)
-            ax.set_xticks(angles[:-1])
-            ax.set_xticklabels(labels, fontsize=7.2)
-            ax.tick_params(axis="x", pad=10)
-
-            ax.set_ylim(0, 100)
-            ax.set_yticks([20, 40, 60, 80, 100])
-            ax.set_yticklabels(["20", "40", "60", "80", "100"], fontsize=7)
-            ax.plot(angles, vals, linewidth=2.0)
-            ax.fill(angles, vals, alpha=0.16)
-            ax.set_title("Radar PCI-DSS", fontsize=9.5, pad=14)
-
-            buf = io.BytesIO()
-            fig.savefig(buf, format="png", transparent=True, bbox_inches="tight", pad_inches=0.22)
-            plt.close(fig)
-            radar_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-    except Exception:
-        radar_b64 = None
-
-    informe_ai = (ar.informe_ejecutivo_ai or "").strip()
-    informe_editado = (ar.informe_ejecutivo_editado or "").strip()
-    informe_mostrar = informe_editado or informe_ai
-
-    top_html = f"""
-    <div class="row g-3 mb-4">
-      <div class="col-12 col-xl-5">
-        <div class="pcidet-card p-4 h-100">
-          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
-            <div>
-              <div class="pcidet-card-title">📊 Radar general PCI-DSS</div>
-              <div class="text-muted small">
-                Resultado consolidado por requerimiento y apéndice.
-              </div>
-            </div>
-
-            <div class="text-end">
-              <div class="badge rounded-pill px-3 py-2"
-                   style="background:#0d6efd; color:#fff; font-size:.82rem;">
-                {float(ar.nivel_promedio_general or 0):.2f}%
-              </div>
-              <div class="small text-muted mt-1">Promedio general</div>
-            </div>
-          </div>
-
-          <div class="text-center mt-3 pcidet-radar-wrap">
-            {f'<img class="img-fluid pcidet-radar-small" src="data:image/png;base64,{radar_b64}">' if radar_b64 else '<div class="alert alert-warning mb-0">No fue posible generar el radar.</div>'}
-          </div>
-        </div>
-      </div>
-
-      <div class="col-12 col-xl-7">
-        <div class="pcidet-card p-4 h-100">
-          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <div>
-              <div class="pcidet-card-title">🧾 Informe ejecutivo</div>
-              <div class="text-muted small">
-                Síntesis ejecutiva generada con IA a partir de los resultados PCI-DSS.
-              </div>
-            </div>
-
-            <div class="d-flex gap-2 flex-wrap">
-              <form method="POST"
-                    action="{url_for('madurez_pci.informe_ejecutivo_generar_pci', analysis_id=ar.id)}"
-                    class="m-0">
-                <button type="submit" class="btn pcidet-btn-success rounded-pill px-4 fw-bold">
-                  <i class="bi bi-magic me-2"></i>Generar con IA
-                </button>
-              </form>
-
-              <a href="{url_for('madurez_pci.informe_ejecutivo_editar_pci', analysis_id=ar.id)}"
-                 class="btn btn-primary rounded-pill px-4 fw-bold">
-                <i class="bi bi-pencil-square me-2"></i>Editar
-              </a>
-            </div>
-          </div>
-
-          <div class="pcidet-exec-box mt-3">
-            {f'<div class="pcidet-exec-text">{_nl2br(esc(informe_mostrar))}</div>' if informe_mostrar else '''
-              <div class="text-center py-4">
-                <div class="mb-2" style="font-size:2rem;">&#129302;</div>>
-                <div class="fw-bold text-black">Aún no hay informe ejecutivo</div>
-                <div class="text-muted small mt-1">
-                  Presiona <b>Generar con IA</b> para construir el informe con base en el resultado de PCI-DSS.
-                </div>
-              </div>
-            '''}
-          </div>
-        </div>
-      </div>
-    </div>
-    """
-
-    tarjetas = []
-    for code in PCI_BLOCK_ORDER:
-        item = resultados.get(code)
-        if not item:
-            continue
-
-        pct = float(item.get("pct", 0) or 0)
-        counts = item.get("counts", {}) or {}
-        color = item.get("color", "#6c757d")
-        madurez = item.get("madurez", "")
-        brecha = float(item.get("brecha_pct", 0) or 0)
-
-        tarjetas.append(f"""
-        <div class="col-12 col-lg-6">
-          <div class="pcidet-card p-4 h-100">
-            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
-              <div>
-                <div class="pcidet-domain-title">{esc(pci_block_title(code))}</div>
-                <div class="small text-muted">Ítems evaluados: <b>{int(item.get('total', 0) or 0)}</b></div>
-              </div>
-
-              <div class="text-end">
-                <span class="badge rounded-pill px-3 py-2"
-                      style="background:{color}; color:#fff;">
-                  {pct:.2f}%
-                </span>
-                <div class="small text-muted mt-1">{esc(madurez)}</div>
-              </div>
-            </div>
-
-            <div class="row g-2 mt-1">
-              <div class="col-6 col-md-3">
-                <div class="mini-stat bg-success-subtle text-success-emphasis">Sí<br><b>{counts.get('SI',0)}</b></div>
-              </div>
-              <div class="col-6 col-md-3">
-                <div class="mini-stat bg-warning-subtle text-dark">Parcial<br><b>{counts.get('PARCIAL',0)}</b></div>
-              </div>
-              <div class="col-6 col-md-3">
-                <div class="mini-stat bg-danger-subtle text-danger-emphasis">No<br><b>{counts.get('NO',0)}</b></div>
-              </div>
-              <div class="col-6 col-md-3">
-                <div class="mini-stat bg-secondary-subtle text-secondary-emphasis">N/A<br><b>{counts.get('NA',0)}</b></div>
-              </div>
-            </div>
-
-            <div class="small text-muted mt-3">
-              Brecha estimada: <b>{brecha:.2f}%</b>
-            </div>
-          </div>
-        </div>
-        """)
-
-    content = f"""
-    <div class="pcidet-shell">
-
-      <div class="pcidet-header-card">
-        <div class="pcidet-header-overlay">
-          <div class="pcidet-header-text">
-            <h3 class="pcidet-title m-0">Resultado — PCI-DSS</h3>
-            <div class="pcidet-subtitle">
-              Revisión: <b>{esc(ar.company_name or '')}</b>
-              · Promedio general: <b>{float(ar.nivel_promedio_general or 0):.2f}%</b>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="pcidet-header-actions">
-        <a href="{url_for('madurez_pci.historial_pci')}"
-           class="btn pcidet-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left me-2"></i>Volver al historial
-        </a>
-
-        <a href="{url_for('madurez_pci.inicio_pci')}"
-           class="btn pcidet-btn-soft rounded-pill px-4 fw-bold">
-          <i class="bi bi-house-door-fill me-2"></i>Volver al módulo
-        </a>
-      </div>
-
-      {top_html}
-
-      <div class="row g-3">
-        {''.join(tarjetas)}
-      </div>
-
-    </div>
-
-    <style>
-      body{{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }}
-
-      .pcidet-shell{{
-        width:96%;
-        max-width:1600px;
-        margin:26px auto 24px auto;
-      }}
-
-      /* =========================
-         HEADER SGSI REAL (UNIFICADO)
-      ========================= */
-      .pcidet-header-card{{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }}
-
-      .pcidet-header-card::before{{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }}
-
-      .pcidet-header-overlay{{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        position:relative;
-        z-index:1;
-      }}
-
-      .pcidet-header-overlay::before{{
-        content:"📊";
-        width:54px;
-        height:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }}
-
-      .pcidet-header-text::before{{
-        content:"SGSI · Resultado PCI-DSS";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }}
-
-      .pcidet-title{{
-        color:#ffffff;
-        font-weight:950;
-        font-size:1.32rem;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-      }}
-
-      .pcidet-subtitle{{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-      }}
-
-      /* =========================
-         BOTONES SGSI
-      ========================= */
-      .pcidet-header-actions{{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }}
-
-      .pcidet-header-actions .btn{{
-        border-radius:10px;
-        padding:8px 22px;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }}
-
-      .btn-outline-light{{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }}
-
-      .btn-outline-light:hover{{
-        background:#edf5ff;
-        color:#0b65d8;
-      }}
-
-      .pcidet-btn-success{{
-        background:#198754;
-        color:#fff;
-        border:1px solid #198754;
-      }}
-
-      .pcidet-btn-success:hover{{
-        background:#157347;
-      }}
-
-      /* =========================
-         CARDS SGSI
-      ========================= */
-      .pcidet-card,
-      .card{{
-        background:rgba(255,255,255,.96);
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-      }}
-
-      .pcidet-card.p-4{{
-        padding:18px !important;
-      }}
-
-      .pcidet-card-title,
-      .card h5,
-      .card h6{{
-        font-weight:950;
-        color:#0b4a8f;
-      }}
-
-      /* =========================
-         RADAR
-      ========================= */
-      .pcidet-radar-wrap{{
-        min-height:310px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-      }}
-
-      .pcidet-radar-small{{
-        max-width:300px;
-        width:100%;
-      }}
-
-      /* =========================
-         INFORME EJECUTIVO
-      ========================= */
-      .pcidet-exec-box{{
-        background:#f8fbff;
-        border:1px solid #dbe6f4;
-        border-radius:16px;
-        padding:18px;
-      }}
-
-      .pcidet-exec-text{{
-        font-size:.92rem;
-        line-height:1.6;
-        color:#101827;
-      }}
-
-      /* =========================
-         MINI KPI
-      ========================= */
-      .mini-stat{{
-        border-radius:12px;
-        padding:8px 7px;
-        text-align:center;
-        font-size:.84rem;
-        font-weight:900;
-        background:#eef5ff;
-        color:#0b4a8f;
-        box-shadow:0 4px 10px rgba(15,23,42,.08);
-      }}
-
-      .badge{{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }}
-
-      /* =========================
-         RESPONSIVE
-      ========================= */
-      @media (max-width:768px){{
-        .pcidet-header-overlay{{
-          flex-direction:column;
-          text-align:center;
-        }}
-
-        .pcidet-header-overlay::before{{
-          margin:0;
-        }}
-
-        .pcidet-header-actions .btn{{
-          width:100%;
-        }}
-      }}
-    </style>
-    """
-
-    return render_template_string(BASE, title="Resultado PCI-DSS", content=content)
-
-# ==========================================================================================================================================
-#                                                   Fin Módulo de Madurez PCI-DSS
-# ==========================================================================================================================================
-
-# ==========================================================================================================================================
-#                                                   Módulo de Madurez SOC 2 — Diseño NIST
-# ==========================================================================================================================================
-
-soc2_madurez_bp = Blueprint("madurez_soc2", __name__, url_prefix="/madurez_soc2")
-
-# GRAC-RAM: colors se carga bajo demanda
-from reportlab.lib.enums import TA_CENTER
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.units import cm
-# GRAC-RAM: importación diferida: from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-Image = _GRACDeferredSymbol("reportlab.platypus", "Image")
-
-# ============================================================
-# BASE DE DATOS INDEPENDIENTE — SOC 2
-# ============================================================
-SOC2_DB_PATH = os.path.join(app.instance_path, "soc2_madurez.db")
-os.makedirs(app.instance_path, exist_ok=True)
-
-app.config.setdefault("SQLALCHEMY_BINDS", {})
-app.config["SQLALCHEMY_BINDS"]["soc2_madurez"] = "sqlite:///" + SOC2_DB_PATH
-
-SOC2_PERMISSION_NAME = "Nivel de madurez SOC 2"
-SOC2_INSTRUMENTO_TEMPLATE_XLSX = os.path.join(BASE_DIR, "static", "templates", "Matriz SOC 2.xlsx")
-
-SOC2_STATUS_SCORE = {
-    "SI": 100,
-    "PARCIAL": 50,
-    "NO": 0,
-    "NA": None,  # N/A no suma ni resta; se excluye del cálculo
-}
-
-SOC2_BLOCK_ORDER = [
-    "SEGURIDAD",
-    "DISPONIBILIDAD",
-    "CONFIDENCIALIDAD",
-    "INTEGRIDAD",
-    "PRIVACIDAD",
-]
-
-SOC2_BLOCK_TITLES = {
-    "SEGURIDAD": "Seguridad",
-    "DISPONIBILIDAD": "Disponibilidad",
-    "CONFIDENCIALIDAD": "Confidencialidad",
-    "INTEGRIDAD": "Integridad del procesamiento",
-    "PRIVACIDAD": "Privacidad",
-}
-
-SOC2_MADUREZ_LEVELS = [
-    {
-        "nivel": "Nivel 1: Inicial",
-        "descripcion": "No existe implementación formal o es mínima; las prácticas son ad hoc.",
-        "score": 1,
-        "rango_pct": "0% – 20%",
-        "logica": "Prácticas no formalizadas"
-    },
-    {
-        "nivel": "Nivel 2: Repetible",
-        "descripcion": "Existen prácticas parciales y repetibles, pero con documentación o control limitado.",
-        "score": 2,
-        "rango_pct": "21% – 40%",
-        "logica": "Prácticas parciales"
-    },
-    {
-        "nivel": "Nivel 3: Definido",
-        "descripcion": "El proceso está definido, documentado y comunicado para su ejecución consistente.",
-        "score": 3,
-        "rango_pct": "41% – 60%",
-        "logica": "Proceso documentado"
-    },
-    {
-        "nivel": "Nivel 4: Gestionado",
-        "descripcion": "El proceso se mide, gestiona, controla y tiene seguimiento periódico.",
-        "score": 4,
-        "rango_pct": "61% – 80%",
-        "logica": "Proceso medido y gestionado"
-    },
-    {
-        "nivel": "Nivel 5: Optimizado",
-        "descripcion": "El proceso es eficaz, sostenido y mejorado continuamente con evidencia trazable.",
-        "score": 5,
-        "rango_pct": "81% – 100%",
-        "logica": "Mejora continua"
-    },
-]
-
-
-# ============================================================
-# MODELOS DB — SOC 2
-# ============================================================
-class Soc2MadurezParametro(db.Model):
-    __bind_key__ = "soc2_madurez"
-    __tablename__ = "soc2_madurez_parametros"
-
-    id = db.Column(db.Integer, primary_key=True)
-    nivel = db.Column(db.String(80), nullable=False)
-    rango_desde = db.Column(db.Float, nullable=False)
-    rango_hasta = db.Column(db.Float, nullable=False)
-    color = db.Column(db.String(20), nullable=True)
-    descripcion = db.Column(db.Text, nullable=True)
-    orden = db.Column(db.Integer, default=0)
-
-
-class Soc2MadurezPregunta(db.Model):
-    __bind_key__ = "soc2_madurez"
-    __tablename__ = "soc2_madurez_preguntas"
-
-    id = db.Column(db.Integer, primary_key=True)
-    bloque_codigo = db.Column(db.String(50), index=True, nullable=True)
-    bloque_nombre = db.Column(db.String(255), nullable=True)
-    seccion_codigo = db.Column(db.String(50), index=True, nullable=True)
-    seccion_nombre = db.Column(db.Text, nullable=True)
-    pregunta_codigo = db.Column(db.String(50), index=True, nullable=True)
-    pregunta = db.Column(db.Text, nullable=False)
-    tipo = db.Column(db.String(5), nullable=False, default="q")  # h / q
-    orden = db.Column(db.Integer, default=0)
-    activo = db.Column(db.Boolean, default=True)
-
-
-class Soc2MadurezRun(db.Model):
-    __bind_key__ = "soc2_madurez"
-    __tablename__ = "soc2_madurez_runs"
-
-    id = db.Column(db.Integer, primary_key=True)
-    consecutivo = db.Column(db.String(255), nullable=False, index=True)
-    company_name = db.Column(db.String(255), nullable=True)
-    user_id = db.Column(db.Integer, nullable=True)  # DB independiente: no FK cruzada
-    estado = db.Column(db.String(20), nullable=False, default="BORRADOR", index=True)
-    progreso_pct = db.Column(db.Integer, nullable=False, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-    resumen_json = db.Column(db.Text, nullable=False, default="{}")
-    pct_general = db.Column(db.Float, nullable=False, default=0.0)
-    radar_overall_b64 = db.Column(db.Text, nullable=True)
-
-    informe_ejecutivo_ai = db.Column(db.Text, nullable=True)
-    informe_ejecutivo_editado = db.Column(db.Text, nullable=True)
-    plan_trabajo_ai = db.Column(db.Text, nullable=True)
-    plan_trabajo_editado = db.Column(db.Text, nullable=True)
-
-
-class Soc2MadurezRespuesta(db.Model):
-    __bind_key__ = "soc2_madurez"
-    __tablename__ = "soc2_madurez_respuestas"
-
-    id = db.Column(db.Integer, primary_key=True)
-    run_id = db.Column(db.Integer, db.ForeignKey("soc2_madurez_runs.id", ondelete="CASCADE"), nullable=False, index=True)
-    pregunta_id = db.Column(db.Integer, db.ForeignKey("soc2_madurez_preguntas.id", ondelete="CASCADE"), nullable=False, index=True)
-    estado = db.Column(db.String(20), nullable=False)  # SI / PARCIAL / NO / NA
-    comentario = db.Column(db.Text, nullable=True)
-
-
-class Soc2MadurezCriterioAnalisis(db.Model):
-    __bind_key__ = "soc2_madurez"
-    __tablename__ = "soc2_madurez_criterio_analisis"
-
-    id = db.Column(db.Integer, primary_key=True)
-    run_id = db.Column(db.Integer, db.ForeignKey("soc2_madurez_runs.id", ondelete="CASCADE"), nullable=False, index=True)
-    bloque_codigo = db.Column(db.String(50), nullable=False, index=True)
-    bloque_nombre = db.Column(db.String(255), nullable=True)
-    estado_actual = db.Column(db.Text, nullable=True)
-    estado_requerido = db.Column(db.Text, nullable=True)
-    plan_accion_ai = db.Column(db.Text, nullable=True)
-    plan_accion_editado = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-    __table_args__ = (
-        db.UniqueConstraint("run_id", "bloque_codigo", name="uq_soc2_run_bloque"),
-    )
-
-
-# ============================================================
-# INICIALIZACIÓN DB INDEPENDIENTE
-# ============================================================
-def init_soc2_madurez_db():
-    try:
-        os.makedirs(app.instance_path, exist_ok=True)
-        app.config.setdefault("SQLALCHEMY_BINDS", {})
-        app.config["SQLALCHEMY_BINDS"]["soc2_madurez"] = "sqlite:///" + SOC2_DB_PATH
-        with app.app_context():
-            db.create_all(bind_key="soc2_madurez")
-            seed_soc2_parametros()
-        print(f"✅ Base de datos SOC 2 inicializada correctamente: {SOC2_DB_PATH}")
-    except Exception as e:
-        print(f"❌ Error inicializando base de datos SOC 2: {repr(e)}")
-        raise
-
-
-# ============================================================
-# HELPERS GENERALES
-# ============================================================
-def soc2_block_title(code: str) -> str:
-    return SOC2_BLOCK_TITLES.get((code or "").strip().upper(), code or "")
-
-
-def soc2_safe_str(x):
-    if x is None:
-        return ""
-    try:
-        if pd.isna(x):
-            return ""
-    except Exception:
-        pass
-    return str(x).strip()
-
-
-def _soc2_norm(s: str) -> str:
-    s = soc2_safe_str(s)
-    s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
-    s = s.upper()
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
-
-
-def soc2_normalizar_texto_excel(texto: str) -> str:
-    t = soc2_safe_str(texto)
-    if not t:
-        return ""
-    t = t.replace("\ufeff", " ").replace("\xa0", " ")
-    t = t.replace("\r\n", "\n").replace("\r", "\n")
-    t = re.sub(r"[ \t]+", " ", t).strip()
-    return t
-
-
-def soc2_detectar_bloque(texto: str):
-    n = _soc2_norm(texto)
-    mapa = {
-        "SEGURIDAD": "SEGURIDAD",
-        "DISPONIBILIDAD": "DISPONIBILIDAD",
-        "CONFIDENCIALIDAD": "CONFIDENCIALIDAD",
-        "INTEGRIDAD": "INTEGRIDAD",
-        "INTEGRIDAD DEL PROCESAMIENTO": "INTEGRIDAD",
-        "PRIVACIDAD": "PRIVACIDAD",
-    }
-    code = mapa.get(n)
-    if code:
-        return code, SOC2_BLOCK_TITLES[code]
-    return None, None
-
-
-def seed_soc2_parametros():
-    if Soc2MadurezParametro.query.first():
-        return
-    params = [
-        {"nivel": "Nivel 1: Inicial", "rango_desde": 0, "rango_hasta": 20.99, "color": "#dc3545", "descripcion": "No existe implementación formal o es mínima.", "orden": 1},
-        {"nivel": "Nivel 2: Repetible", "rango_desde": 21, "rango_hasta": 40.99, "color": "#fd7e14", "descripcion": "Existen prácticas parciales y repetibles.", "orden": 2},
-        {"nivel": "Nivel 3: Definido", "rango_desde": 41, "rango_hasta": 60.99, "color": "#ffc107", "descripcion": "El proceso está definido y documentado.", "orden": 3},
-        {"nivel": "Nivel 4: Gestionado", "rango_desde": 61, "rango_hasta": 80.99, "color": "#0d6efd", "descripcion": "El proceso se mide, gestiona y controla.", "orden": 4},
-        {"nivel": "Nivel 5: Optimizado", "rango_desde": 81, "rango_hasta": 100, "color": "#198754", "descripcion": "Proceso eficaz, sostenido y mejorado continuamente.", "orden": 5},
-    ]
-    for p in params:
-        db.session.add(Soc2MadurezParametro(**p))
-    db.session.commit()
-
-
-def soc2_resolver_nivel(pct: float):
-    try:
-        pct = float(pct or 0)
-    except Exception:
-        pct = 0.0
-    pct = max(0.0, min(100.0, pct))
-    rows = Soc2MadurezParametro.query.order_by(Soc2MadurezParametro.orden.asc()).all()
-    for r in rows:
-        if float(r.rango_desde) <= pct <= float(r.rango_hasta):
-            return {"nivel": r.nivel, "score": r.orden, "color": r.color or "#6c757d", "descripcion": r.descripcion or ""}
-    return {"nivel": "Nivel no definido", "score": 0, "color": "#6c757d", "descripcion": ""}
-
-
-def soc2_resumen_instrumento():
-    total_q = Soc2MadurezPregunta.query.filter_by(tipo="q").count()
-    total_h = Soc2MadurezPregunta.query.filter_by(tipo="h").count()
-    por_bloque = (
-        db.session.query(Soc2MadurezPregunta.bloque_codigo, func.count(Soc2MadurezPregunta.id))
-        .filter(Soc2MadurezPregunta.tipo == "q")
-        .group_by(Soc2MadurezPregunta.bloque_codigo)
-        .all()
-    )
-    return {"total_preguntas": total_q, "total_headers": total_h, "por_bloque": {k: v for k, v in por_bloque}}
-
-
-def cargar_respuestas_soc2(run_id):
-    out = {}
-    if not run_id:
-        return out
-    rows = Soc2MadurezRespuesta.query.filter_by(run_id=run_id).all()
-    for r in rows:
-        out[r.pregunta_id] = {"estado": (r.estado or "").strip().upper(), "comentario": (r.comentario or "").strip()}
-    return out
-
-
-def calcular_progreso_soc2(preguntas, form_data=None, respuestas_db=None):
-    total = len(preguntas)
-    respondidas = 0
-    for q in preguntas:
-        estado = ""
-        if form_data is not None:
-            estado = (form_data.get(f"st_{q.id}") or "").strip().upper()
-        elif respuestas_db is not None:
-            estado = (respuestas_db.get(q.id, {}).get("estado") or "").strip().upper()
-        if estado in ("SI", "PARCIAL", "NO", "NA"):
-            respondidas += 1
-    pct = int(round((respondidas / total) * 100)) if total > 0 else 0
-    return respondidas, total, pct
-
-
-def obtener_borrador_soc2(user_id):
-    if not user_id:
-        return None
-    return (
-        Soc2MadurezRun.query
-        .filter(Soc2MadurezRun.user_id == user_id, Soc2MadurezRun.estado == "BORRADOR")
-        .order_by(Soc2MadurezRun.updated_at.desc(), Soc2MadurezRun.id.desc())
-        .first()
-    )
-
-
-def _contar_respuestas_run_soc2(run_id: int) -> int:
-    if not run_id:
-        return 0
-    return Soc2MadurezRespuesta.query.filter_by(run_id=run_id).count()
-
-
-def _eliminar_runs_vacios_soc2(user_id: int | None = None):
-    q = Soc2MadurezRun.query
-    if user_id:
-        q = q.filter(Soc2MadurezRun.user_id == user_id)
-    eliminados = 0
-    for run in q.all():
-        if Soc2MadurezRespuesta.query.filter_by(run_id=run.id).count() == 0:
-            Soc2MadurezCriterioAnalisis.query.filter_by(run_id=run.id).delete(synchronize_session=False)
-            db.session.delete(run)
-            eliminados += 1
-    if eliminados:
-        db.session.commit()
-    return eliminados
-
-
-def soc2_pct_from_estados(estados: list[str]) -> float:
-    vals = []
-    for e in estados:
-        estado = (e or "").strip().upper()
-
-        # N/A no suma ni afecta el promedio
-        if estado == "NA":
-            continue
-
-        v = SOC2_STATUS_SCORE.get(estado)
-        if v is not None:
-            vals.append(v)
-
-    return round(sum(vals) / len(vals), 2) if vals else 0.0
-
-
-def _parse_rango_pct_soc2(rango: str):
-    if not rango:
-        return None, None
-    s = rango.replace("%", "").strip().replace("–", "-")
-    parts = [p.strip() for p in s.split("-")]
-    if len(parts) != 2:
-        return None, None
-    try:
-        return float(parts[0]), float(parts[1])
-    except Exception:
-        return None, None
-
-
-def soc2_nivel_visual_por_pct(pct: float):
-    return soc2_resolver_nivel(pct)
-
-
-def _soc2_group_questions():
-    preguntas = (
-        Soc2MadurezPregunta.query
-        .filter_by(activo=True, tipo="q")
-        .order_by(Soc2MadurezPregunta.bloque_codigo.asc(), Soc2MadurezPregunta.orden.asc(), Soc2MadurezPregunta.id.asc())
-        .all()
-    )
-    grouped = {}
-    for q in preguntas:
-        bloque = (q.bloque_codigo or "SIN_BLOQUE").strip().upper()
-        if bloque not in grouped:
-            grouped[bloque] = {
-                "titulo": q.bloque_nombre or soc2_block_title(bloque) or bloque,
-                "items": []
-            }
-        grouped[bloque]["items"].append(q)
-    ordered = {}
-    for code in SOC2_BLOCK_ORDER:
-        if code in grouped:
-            ordered[code] = grouped[code]
-    for code, val in grouped.items():
-        if code not in ordered:
-            ordered[code] = val
-    return ordered
-
-
-def _soc2_build_resumen(run_id: int) -> dict:
-    q = (
-        db.session.query(Soc2MadurezRespuesta, Soc2MadurezPregunta)
-        .join(Soc2MadurezPregunta, Soc2MadurezPregunta.id == Soc2MadurezRespuesta.pregunta_id)
-        .filter(Soc2MadurezRespuesta.run_id == run_id)
-        .filter(Soc2MadurezPregunta.tipo == "q")
-        .order_by(Soc2MadurezPregunta.bloque_codigo.asc(), Soc2MadurezPregunta.orden.asc())
-    )
-    por_bloque = {}
-    for r, p in q.all():
-        b = (p.bloque_codigo or "SIN_BLOQUE").strip().upper()
-        por_bloque.setdefault(b, {
-            "bloque": b,
-            "nombre": p.bloque_nombre or soc2_block_title(b) or b,
-            "total": 0,
-            "validas": 0,
-            "SI": 0,
-            "PARCIAL": 0,
-            "NO": 0,
-            "NA": 0,
-            "items": [],
-        })
-        estado = (r.estado or "").strip().upper()
-        por_bloque[b]["total"] += 1
-        if estado in ("SI", "PARCIAL", "NO", "NA"):
-            por_bloque[b][estado] += 1
-        score = SOC2_STATUS_SCORE.get(estado)
-        if score is not None:
-            por_bloque[b]["validas"] += 1
-        por_bloque[b]["items"].append({
-            "pregunta_id": p.id,
-            "pregunta_codigo": p.pregunta_codigo,
-            "pregunta": p.pregunta,
-            "estado": estado,
-            "comentario": r.comentario or "",
-        })
-
-    resumen = {}
-    for b, d in por_bloque.items():
-        estados = [it["estado"] for it in d["items"]]
-        pct = soc2_pct_from_estados(estados)
-        nivel = soc2_resolver_nivel(pct)
-        d["pct"] = pct
-        d["madurez"] = nivel["nivel"]
-        d["score"] = nivel.get("score", 0)
-        d["color"] = nivel["color"]
-        d["descripcion"] = nivel.get("descripcion", "")
-        d["brecha_pct"] = round(100.0 - pct, 2)
-        resumen[b] = d
-    return resumen
-
-
-def soc2_pct_por_criterio(resumen: dict, order: list[str] = None):
-    order = order or SOC2_BLOCK_ORDER
-    labels, values = [], []
-    for b in order:
-        if b in (resumen or {}):
-            labels.append(soc2_block_title(b) or b)
-            values.append(float((resumen or {}).get(b, {}).get("pct", 0) or 0))
-    for b, d in (resumen or {}).items():
-        if b not in order:
-            labels.append(d.get("nombre") or b)
-            values.append(float(d.get("pct", 0) or 0))
-    return labels, values
-
-
-def soc2_radar_b64(labels: list[str], values: list[float], title: str = "Radar SOC 2"):
-    if not labels:
-        return ""
-    vals = [max(0.0, min(100.0, float(v))) for v in values]
-    N = len(labels)
-    angles = [n / float(N) * 2 * math.pi for n in range(N)]
-    angles += angles[:1]
-    plot_vals = vals + vals[:1]
-
-    fig = plt.figure(figsize=(3.55, 3.55), dpi=170)
-    ax = plt.subplot(111, polar=True)
-    ax.set_theta_offset(math.pi / 2)
-    ax.set_theta_direction(-1)
-    ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels, fontsize=7.3)
-    ax.tick_params(axis="x", pad=10)
-    ax.set_ylim(0, 100)
-    ax.set_yticks([20, 40, 60, 80, 100])
-    ax.set_yticklabels(["20", "40", "60", "80", "100"], fontsize=7)
-    ax.tick_params(axis="y", pad=4)
-    ax.plot(angles, plot_vals, linewidth=2.0)
-    ax.fill(angles, plot_vals, alpha=0.16)
-    ax.set_title(title, fontsize=9.5, pad=14)
-    fig.subplots_adjust(top=0.83, bottom=0.10, left=0.10, right=0.90)
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", transparent=True, bbox_inches="tight", pad_inches=0.22)
-    plt.close(fig)
-    return base64.b64encode(buf.getvalue()).decode("utf-8")
-
-
-def generar_soc2_velocimetro_png_bytes(titulo, valor, nivel="", color="#6c757d"):
-    try:
-        valor = max(0, min(100, float(valor or 0)))
-        fig = plt.figure(figsize=(7.2, 4.2), dpi=220)
-        ax = plt.axes([0.04, 0.08, 0.92, 0.84])
-        ax.set_aspect("equal")
-        ax.axis("off")
-        ax.set_xlim(-1.18, 1.18)
-        ax.set_ylim(-0.28, 1.18)
-        fig.patch.set_facecolor("white")
-        ax.set_facecolor("white")
-        rangos = [(180, 144, "#d9534f"), (144, 108, "#f0ad4e"), (108, 72, "#f7d154"), (72, 36, "#5bc0de"), (36, 0, "#5cb85c")]
-        for theta1, theta2, c in rangos:
-            ax.add_patch(Wedge((0, 0), 1.00, theta2, theta1, width=0.18, facecolor=c, edgecolor="white", linewidth=2))
-        for pct in range(0, 101, 10):
-            ang = math.radians(180 - (pct / 100.0) * 180.0)
-            ax.plot([math.cos(ang) * 0.78, math.cos(ang) * 0.88], [math.sin(ang) * 0.78, math.sin(ang) * 0.88], linewidth=1.2, color="#4b5563")
-        for pct in [0, 25, 50, 75, 100]:
-            ang = math.radians(180 - (pct / 100.0) * 180.0)
-            ax.text(math.cos(ang) * 0.63, math.sin(ang) * 0.63, f"{pct}", ha="center", va="center", fontsize=10, fontweight="bold", color="#374151")
-        ang = math.radians(180 - (valor / 100.0) * 180.0)
-        ax.add_patch(FancyArrowPatch((0, 0), (math.cos(ang) * 0.72, math.sin(ang) * 0.72), arrowstyle="-|>", mutation_scale=18, linewidth=2.4, color="#0b1220", zorder=5))
-        ax.add_patch(Circle((0, 0), radius=0.065, facecolor="#0b1220", edgecolor="white", linewidth=1.0, zorder=6))
-        titulo_corto = (titulo or "").strip()
-        if len(titulo_corto) > 42:
-            titulo_corto = titulo_corto[:39] + "..."
-        ax.text(0, 1.06, titulo_corto, ha="center", va="center", fontsize=13, fontweight="bold", color="#0f3d68")
-        ax.text(0, 0.30, f"{valor:.1f}%", ha="center", va="center", fontsize=24, fontweight="bold", color=color)
-        if nivel:
-            ax.text(0, 0.12, str(nivel)[:30], ha="center", va="center", fontsize=11, fontweight="bold", color="#374151")
-        buf = io.BytesIO()
-        canvas = FigureCanvas(fig)
-        canvas.print_png(buf)
-        plt.close(fig)
-        buf.seek(0)
-        return buf.getvalue()
-    except Exception:
-        plt.close("all")
-        return None
-
-
-def generar_soc2_velocimetro_base64(label: str, pct: float, nivel: str, color: str):
-    b = generar_soc2_velocimetro_png_bytes(label, pct, nivel, color)
-    if not b:
-        return None
-    return base64.b64encode(b).decode("utf-8")
-
-
-def soc2_normalizar_texto_rico_guardado(texto: str) -> str:
-    txt = (texto or "").strip()
-
-    if not txt:
-        return ""
-
-    txt = txt.replace("\r\n", "\n").replace("\r", "\n")
-    txt = html.unescape(txt)
-    txt = txt.replace("```json", "").replace("```", "").strip()
-
-    # Extrae JSON aunque venga como:
-    # { "informe_ejecutivo": "texto..." }
-    # { "plan_trabajo": "texto..." }
-    # { "texto": "texto..." }
-    obj = None
-
-    try:
-        obj = json.loads(txt)
-    except Exception:
-        try:
-            start = txt.find("{")
-            end = txt.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                obj = json.loads(txt[start:end + 1])
-        except Exception:
-            obj = None
-
-    if isinstance(obj, dict):
-        val = (
-            obj.get("informe_ejecutivo")
-            or obj.get("informe")
-            or obj.get("resumen_ejecutivo")
-            or obj.get("plan_trabajo")
-            or obj.get("plan_accion")
-            or obj.get("texto")
-            or ""
-        )
-
-        if isinstance(val, list):
-            val = _build_plan_accion_soc2_texto(val)
-
-        if isinstance(val, dict):
-            val = json.dumps(val, ensure_ascii=False, indent=2)
-
-        if isinstance(val, str) and val.strip():
-            txt = val.strip()
-
-    txt = html.unescape(txt)
-
-    # Si aún quedaron llaves al inicio y contiene informe_ejecutivo,
-    # intenta extraer por regex como último recurso.
-    m = re.search(
-        r'"informe_ejecutivo"\s*:\s*"(?P<txt>.*)"\s*\}?\s*$',
-        txt,
-        flags=re.IGNORECASE | re.DOTALL
-    )
-
-    if m:
-        extraido = m.group("txt")
-
-        try:
-            # Solo interpreta secuencias JSON reales (\n, \u00f3, etc.)
-            extraido = json.loads(f'"{extraido}"')
-        except Exception:
-            pass
-
-        txt = extraido.strip()
-
-    txt = re.sub(r"<\s*br\s*/?\s*>", "\n", txt, flags=re.IGNORECASE)
-    txt = re.sub(r"<[^>]+>", "", txt)
-
-    patrones = [
-        r"^\s*\{\s*",
-        r"^\s*\"informe_ejecutivo\"\s*:\s*\"?",
-        r"^\s*\"resumen_ejecutivo\"\s*:\s*\"?",
-        r"^\s*\*{0,3}\s*INFORME\s+EJECUTIVO\s*(DE\s+MADUREZ\s+SOC\s*2)?\s*\*{0,3}\s*[:\-–—]?\s*",
-        r"^\s*#{1,6}\s*INFORME\s+EJECUTIVO\s*(DE\s+MADUREZ\s+SOC\s*2)?\s*[:\-–—]?\s*",
-        r"^\s*RESUMEN\s+EJECUTIVO\s*[:\-–—]?\s*",
-        r"^\s*PLAN\s+DE\s+TRABAJO\s*[:\-–—]?\s*",
-    ]
-
-    for p in patrones:
-        txt = re.sub(p, "", txt, flags=re.IGNORECASE).strip()
-
-    txt = re.sub(r'"\s*\}\s*$', "", txt).strip()
-    txt = txt.replace("\\n", "\n")
-    txt = txt.replace('\\"', '"')
-    txt = txt.replace("**", "").replace("__", "")
-
-    txt = re.sub(r"[ \t]+\n", "\n", txt)
-    txt = re.sub(r"\n[ \t]+", "\n", txt)
-    txt = re.sub(r"\n{3,}", "\n\n", txt)
-
-    return txt.strip()
-
-
-def _extraer_json_objeto_soc2(raw: str) -> dict:
-    raw = (raw or "").strip().replace("```json", "").replace("```", "").strip()
-    if not raw:
-        return {}
-    try:
-        return json.loads(raw)
-    except Exception:
-        pass
-    try:
-        start = raw.find("{")
-        end = raw.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return json.loads(raw[start:end + 1])
-    except Exception:
-        pass
-    return {}
-
-
-def _build_plan_accion_soc2_texto(plan_list) -> str:
-    if not isinstance(plan_list, list):
-        return ""
-    lines = []
-    for i, it in enumerate(plan_list, start=1):
-        accion = (it.get("accion") or it.get("actividad") or "").strip()
-        prioridad = (it.get("prioridad") or "").strip()
-        responsable = (it.get("responsable_sugerido") or "").strip()
-        plazo = (it.get("plazo") or "").strip()
-        evidencia = (it.get("evidencia_esperada") or it.get("entregable") or "").strip()
-        lines.append(
-            f"{i}. Acción: {accion or 'Sin definir'}\n"
-            f"   Prioridad: {prioridad or 'Sin definir'}\n"
-            f"   Responsable sugerido: {responsable or 'Sin definir'}\n"
-            f"   Plazo: {plazo or 'Sin definir'}\n"
-            f"   Evidencia esperada: {evidencia or 'Sin definir'}"
-        )
-    return "\n\n".join(lines).strip()
-
-
-def _normalizar_plan_accion_soc2_texto(texto_raw: str) -> str:
-    txt = (texto_raw or "").strip().replace("```json", "").replace("```", "").strip()
-    if not txt:
-        return ""
-    obj = _extraer_json_objeto_soc2(txt)
-    if isinstance(obj, dict):
-        for key in ("plan_accion", "plan_trabajo", "plan", "acciones"):
-            if isinstance(obj.get(key), list):
-                return _build_plan_accion_soc2_texto(obj.get(key))
-    return soc2_normalizar_texto_rico_guardado(txt)
-
-# ============================================================
-# SOC 2 — PROMPT PLAN DE TRABAJO IA
-# ============================================================
-
-def _soc2_prompt_plan_trabajo(run: "Soc2MadurezRun", resumen: dict) -> str:
-    """
-    Prompt para generar plan de trabajo SOC 2.
-    Lo usa plan_trabajo_generar().
-    """
-
-    lineas = []
-
-    for code in SOC2_BLOCK_ORDER:
-        d = (resumen or {}).get(code)
-        if not d:
-            continue
-
-        lineas.append(
-            f"- {d.get('nombre') or soc2_block_title(code) or code}: "
-            f"{float(d.get('pct', 0) or 0):.2f}% | "
-            f"Nivel: {d.get('madurez') or ''} | "
-            f"Brecha: {float(d.get('brecha_pct', 0) or 0):.2f}% | "
-            f"NO: {d.get('NO', 0)} | "
-            f"Parcial: {d.get('PARCIAL', 0)}"
-        )
-
-    criterios_txt = "\n".join(lineas) if lineas else "Sin resultados consolidados."
-
-    return f"""
-Eres un consultor senior experto en SOC 2 y preparación para auditoría.
-
-Genera un plan de trabajo priorizado para cerrar brechas SOC 2.
-
-DATOS
-Consecutivo: {run.consecutivo}
-Cumplimiento general: {float(run.pct_general or 0):.2f}%
-
-RESULTADOS POR CRITERIO
-{criterios_txt}
-
-RESPONDE ÚNICAMENTE JSON VÁLIDO.
-No uses markdown.
-No agregues texto antes ni después del JSON.
-
-Formato exacto:
-{{
-  "plan_trabajo": [
-    {{
-      "accion": "texto",
-      "prioridad": "Alta|Media|Baja",
-      "responsable_sugerido": "texto",
-      "plazo": "texto",
-      "evidencia_esperada": "texto"
-    }}
-  ]
-}}
-
-REGLAS:
-- Genera entre 8 y 12 acciones.
-- Prioriza criterios con menor cumplimiento.
-- Las acciones deben ser auditables y verificables.
-- La evidencia esperada debe ser concreta.
-- No inventes herramientas específicas.
-""".strip()
-
-# ============================================================
-# IA — SOC 2
-# ============================================================
-def _soc2_ai_text(prompt: str, max_tokens: int = 900) -> str:
-    """
-    IA exclusiva para SOC 2.
-    Corrige timeout de Ollama:
-    - Reduce num_predict
-    - Aumenta timeout
-    - No usa stream
-    - Mantiene OpenRouter si está configurado como proveedor
-    """
-
-    provider = (get_ai_provider() or "openrouter").strip().lower()
-
-    # =========================
-    # OLLAMA
-    # =========================
-    if provider == "ollama":
-        base_url = (get_ollama_base_url() or "http://localhost:11434").strip().rstrip("/")
-        model = (get_ollama_model() or "llama3.1").strip()
-
-        if not base_url:
-            raise RuntimeError("No hay OLLAMA_BASE_URL configurada.")
-        if not model:
-            raise RuntimeError("No hay OLLAMA_MODEL configurado.")
-
-        try:
-            resp = requests.post(
-                f"{base_url}/api/generate",
-                json={
-                    "model": model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.15,
-                        "num_predict": int(max_tokens or 700),
-                        "top_p": 0.9
-                    }
-                },
-                timeout=600
-            )
-
-            resp.raise_for_status()
-            data = resp.json() or {}
-            texto = (data.get("response") or "").strip()
-
-            if not texto:
-                raise RuntimeError("Ollama respondió sin contenido.")
-
-            return texto
-
-        except requests.exceptions.ReadTimeout:
-            raise RuntimeError(
-                "Ollama tardó demasiado en responder. "
-                "Se recomienda reducir el número de preguntas enviadas o usar OpenRouter para este análisis."
-            )
-
-        except requests.exceptions.ConnectionError:
-            raise RuntimeError(
-                "No fue posible conectar con Ollama. "
-                "Verifica que Ollama esté activo en http://localhost:11434."
-            )
-
-    # =========================
-    # OPENROUTER
-    # =========================
-    if "_ai_text" in globals():
-        return _ai_text(prompt, max_tokens=max_tokens)
-
-    raise RuntimeError("No se encontró helper global _ai_text para OpenRouter/Ollama.")
-
-
-def _soc2_ai_prompt_criterio(
-    run: "Soc2MadurezRun",
-    bloque_codigo: str,
-    bloque_nombre: str,
-    pct: float,
-    items: list[dict]
-):
-    """
-    Prompt SOC 2 mejorado:
-    - Evita respuestas demasiado cortas.
-    - Mantiene límite para no generar timeout en Ollama.
-    - Obliga estado actual y requerido con análisis real.
-    """
-
-    bullets = []
-
-    for it in items[:30]:
-        pregunta = (it.get("pregunta") or "")[:260].replace("\n", " ")
-        comentario = (it.get("comentario") or "")[:260].replace("\n", " ")
-        estado = (it.get("estado") or "").strip().upper()
-
-        linea = f"- [{estado}] {pregunta}"
-        if comentario:
-            linea += f" | Evidencia/Comentario: {comentario}"
-
-        bullets.append(linea)
-
-    joined = "\n".join(bullets) if bullets else "- Sin evidencias registradas."
-
-    return f"""
-Eres un consultor senior experto en SOC 2, Trust Services Criteria, auditoría de controles, seguridad de la información y gobierno de riesgos.
-
-Debes generar un análisis ejecutivo, claro y accionable para el criterio evaluado.
-
-CONTEXTO DE LA EVALUACIÓN
-Consecutivo: {run.consecutivo}
-Criterio SOC 2: {bloque_codigo} - {bloque_nombre}
-Cumplimiento actual: {pct:.2f}%
-
-EVIDENCIAS Y RESPUESTAS DEL CRITERIO
-{joined}
-
-INSTRUCCIONES OBLIGATORIAS
-Responde únicamente JSON válido.
-No uses markdown.
-No agregues texto antes ni después del JSON.
-
-Debes devolver exactamente estas llaves:
-{{
-  "estado_actual": "texto",
-  "estado_requerido": "texto",
-  "plan_accion": [
-    {{
-      "accion": "texto",
-      "prioridad": "Alta|Media|Baja",
-      "responsable_sugerido": "texto",
-      "plazo": "texto",
-      "evidencia_esperada": "texto"
-    }}
-  ]
-}}
-
-REGLAS PARA estado_actual:
-- No respondas solo con el porcentaje.
-- Redacta entre 2 y 4 párrafos.
-- Explica qué tan maduro está el criterio actualmente.
-- Menciona fortalezas visibles según respuestas SI.
-- Menciona brechas según respuestas NO y PARCIAL.
-- Usa los comentarios/evidencias cuando existan.
-- Si hay pocas evidencias, dilo claramente.
-- No inventes herramientas ni controles que no estén soportados por las respuestas.
-
-REGLAS PARA estado_requerido:
-- No respondas solo con "100% de cumplimiento".
-- Redacta entre 2 y 4 párrafos.
-- Describe el estado objetivo esperado para SOC 2.
-- Explica qué controles, evidencias, formalización, monitoreo y mejora deberían existir.
-- Relaciona el estado requerido con auditoría, trazabilidad, evidencia y operación sostenida.
-- No inventes marcas ni herramientas específicas.
-
-REGLAS PARA plan_accion:
-- Genera entre 5 y 8 acciones.
-- Prioriza primero respuestas NO y PARCIAL.
-- Cada acción debe ser concreta, auditable y verificable.
-- La evidencia esperada debe ser un entregable real: política, procedimiento, matriz, registro, acta, reporte, evidencia de monitoreo, prueba de control, etc.
-- Usa prioridades Alta, Media o Baja.
-
-TONO
-Profesional, ejecutivo y consultivo.
-Enfocado en madurez SOC 2 y preparación para auditoría.
-""".strip()
-
-
-# ============================================================
-# IMPORTAR INSTRUMENTO
-# ============================================================
-@soc2_madurez_bp.route("/admin/importar_instrumento", methods=["POST"])
-@login_required
-def importar_instrumento_soc2():
-    user = User.query.get(session.get("user_id"))
-    if user.role == "auditor":
-        flash("El rol Auditor no puede importar instrumentos.", "danger")
-        return redirect(url_for("madurez_soc2.parametros"))
-    if user.role != "admin" and not verificar_permiso(user, SOC2_PERMISSION_NAME):
-        flash("No tiene permiso para importar el instrumento SOC 2.", "danger")
-        return redirect(url_for("menu"))
-
-    force = (request.args.get("force") == "1") or (request.form.get("force") == "1")
-    try:
-        if force:
-            Soc2MadurezCriterioAnalisis.query.delete()
-            Soc2MadurezRespuesta.query.delete()
-            Soc2MadurezRun.query.delete()
-            Soc2MadurezPregunta.query.delete()
-            db.session.commit()
-            flash("🧹 Instrumento SOC 2 anterior borrado. Reimportando…", "info")
-
-        if Soc2MadurezPregunta.query.first() and not force:
-            flash("El instrumento SOC 2 ya está cargado en la base de datos.", "warning")
-            return redirect(url_for("madurez_soc2.parametros"))
-
-        alternativas = [
-            SOC2_INSTRUMENTO_TEMPLATE_XLSX,
-            os.path.join(BASE_DIR, "static", "templates", "Matriz SOC 2(2).xlsx"),
-            os.path.join(BASE_DIR, "static", "templates", "SOC 2.xlsx"),
-            os.path.join(BASE_DIR, "static", "templates", "SOC2.xlsx"),
-        ]
-        xlsx_path = next((p for p in alternativas if os.path.exists(p)), None)
-        if not xlsx_path:
-            flash("No se encontró el Excel SOC 2 en static/templates. Usa: Matriz SOC 2.xlsx", "danger")
-            return redirect(url_for("madurez_soc2.parametros"))
-
-        df = pd.read_excel(xlsx_path, sheet_name=0, header=0)
-        col_pregunta = None
-        for c in df.columns:
-            if _soc2_norm(c) in ("PREGUNTAS", "PREGUNTA"):
-                col_pregunta = c
-                break
-        if not col_pregunta:
-            flash("El Excel SOC 2 no contiene la columna 'Preguntas'.", "danger")
-            return redirect(url_for("madurez_soc2.parametros"))
-
-        orden = 1
-        bloque_codigo = None
-        bloque_nombre = None
-        creadas_q = 0
-        creadas_h = 0
-        ignoradas = 0
-
-        for _, row in df.iterrows():
-            txt = soc2_normalizar_texto_excel(row.get(col_pregunta))
-            if not txt or _soc2_norm(txt) in ("PREGUNTAS", "PREGUNTA"):
-                continue
-            bc, bn = soc2_detectar_bloque(txt)
-            if bc:
-                bloque_codigo = bc
-                bloque_nombre = bn
-                db.session.add(Soc2MadurezPregunta(
-                    bloque_codigo=bloque_codigo,
-                    bloque_nombre=bloque_nombre,
-                    seccion_codigo=bloque_codigo,
-                    seccion_nombre=bloque_nombre,
-                    pregunta=bn,
-                    tipo="h",
-                    orden=orden,
-                    activo=True
-                ))
-                orden += 1
-                creadas_h += 1
-                continue
-            if not bloque_codigo:
-                ignoradas += 1
-                continue
-            pregunta_codigo = f"{bloque_codigo[:3]}-{creadas_q + 1:03d}"
-            db.session.add(Soc2MadurezPregunta(
-                bloque_codigo=bloque_codigo,
-                bloque_nombre=bloque_nombre,
-                seccion_codigo=bloque_codigo,
-                seccion_nombre=bloque_nombre,
-                pregunta_codigo=pregunta_codigo,
-                pregunta=txt,
-                tipo="q",
-                orden=orden,
-                activo=True
-            ))
-            orden += 1
-            creadas_q += 1
-
-        db.session.commit()
-        seed_soc2_parametros()
-        flash(f"✅ Instrumento SOC 2 importado correctamente. Cabeceras: {creadas_h} | Preguntas: {creadas_q} | Ignoradas: {ignoradas}", "success")
-        return redirect(url_for("madurez_soc2.parametros"))
-    except Exception as e:
-        db.session.rollback()
-        traceback.print_exc()
-        flash(f"❌ Error importando instrumento SOC 2: {e}", "danger")
-        return redirect(url_for("madurez_soc2.parametros"))
-
-
-# ============================================================
-# CONSOLIDAR ANÁLISIS
-# ============================================================
-def run_analysis_from_soc2_run(soc2_run_id: int):
-    run = Soc2MadurezRun.query.get_or_404(soc2_run_id)
-    resumen = _soc2_build_resumen(run.id)
-    valores = [float(v.get("pct", 0) or 0) for v in resumen.values()]
-    pct_general = round(sum(valores) / len(valores), 2) if valores else 0.0
-    labels, values = soc2_pct_por_criterio(resumen, SOC2_BLOCK_ORDER)
-    run.resumen_json = json.dumps(resumen, ensure_ascii=False)
-    run.pct_general = pct_general
-    run.radar_overall_b64 = soc2_radar_b64(labels, values, title="Radar por Criterio - SOC 2")
-    run.company_name = run.consecutivo
-    run.updated_at = datetime.utcnow()
-    db.session.commit()
-    return run.id
-
-# ============================================================
-# PERMISOS SOC 2 — ADMIN / USUARIO CON PERMISO / AUDITOR
-# ============================================================
-
-def soc2_user_can_access(user):
-    """
-    Puede VER el módulo:
-    - admin
-    - auditor
-    - usuario con permiso Nivel de madurez SOC 2
-    """
-    return bool(
-        user and (
-            user.role in ("admin", "auditor")
-            or verificar_permiso(user, SOC2_PERMISSION_NAME)
-        )
-    )
-
-
-def soc2_user_can_execute(user):
-    """
-    Puede EJECUTAR / MODIFICAR:
-    - admin
-    - usuario con permiso Nivel de madurez SOC 2
-
-    Auditor NO puede:
-    - editar
-    - eliminar
-    - generar IA
-    - exportar PDF
-    - importar instrumento
-    - guardar / analizar
-    """
-    return bool(
-        user
-        and user.role != "auditor"
-        and (
-            user.role == "admin"
-            or verificar_permiso(user, SOC2_PERMISSION_NAME)
-        )
-    )
-
-
-def soc2_check_access_or_redirect(user, msg="No tiene permiso para acceder al módulo SOC 2."):
-    if not soc2_user_can_access(user):
-        flash(msg, "danger")
-        return redirect(url_for("menu"))
-    return None
-
-
-def soc2_check_execute_or_redirect(user, msg="No tiene permiso para ejecutar esta acción en SOC 2."):
-    if not soc2_user_can_execute(user):
-        flash(msg, "danger")
-        return redirect(url_for("madurez_soc2.inicio_soc2"))
-    return None
-
-
-# Alias para compatibilidad con bloques anteriores
-def soc2_deny_access(msg="No tiene permiso para acceder al módulo SOC 2."):
-    flash(msg, "danger")
-    return redirect(url_for("menu"))
-
-
-def soc2_deny_execute(msg="No tiene permiso para ejecutar esta acción en SOC 2."):
-    flash(msg, "danger")
-    return redirect(url_for("madurez_soc2.inicio_soc2"))
-
-
-# ============================================================
-# PANTALLA PRINCIPAL — MISMO DISEÑO NIST
-# ============================================================
-
-@soc2_madurez_bp.route("/", methods=["GET"], endpoint="inicio_soc2")
-@login_required
-def inicio_soc2():
-    user = User.query.get(session.get("user_id"))
-
-    if not soc2_user_can_access(user):
-        return soc2_deny_access("No tiene permiso para acceder al módulo de nivel de madurez SOC 2.")
-
-    read_only = user.role == "auditor"
-
-    ingreso_btn = """
-      <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled title="El rol Auditor no puede ingresar información">
-        <i class="bi bi-pencil-square me-2"></i>Ingresar la información
-      </button>
-    """ if read_only else f"""
-      <a href="{url_for('madurez_soc2.ingreso')}" class="btn nistmad-btn-primary rounded-pill px-4 fw-bold">
-        <i class="bi bi-pencil-square me-2"></i>Ingresar la información
-      </a>
-    """
-
-    parametros_btn = """
-      <button class="btn btn-outline-secondary rounded-pill px-3" disabled title="El rol Auditor no puede modificar parámetros">
-        <i class="bi bi-gear me-2"></i>Parámetros
-      </button>
-    """ if read_only else f"""
-      <a href="{url_for('madurez_soc2.parametros')}" class="btn btn-outline-secondary rounded-pill px-3">
-        <i class="bi bi-gear me-2"></i>Parámetros
-      </a>
-    """
-
-    total = Soc2MadurezPregunta.query.filter_by(tipo="q").count()
-    badge = '<span class="badge bg-success ms-2">Instrumento cargado</span>' if total else '<span class="badge bg-danger ms-2">Instrumento NO cargado</span>'
-    hint = "Puedes ingresar la información, analizar la evaluación o consultar el historial." if total else "Primero entra a Parámetros e importa el instrumento SOC 2."
-
-    content = f"""
-<div class="nistmad-shell">
-
-  <div class="nistmad-header-card">
-    <div class="nistmad-header-overlay">
-      <div class="nistmad-header-text">
-        <h3 class="nistmad-title m-0">Nivel de Madurez — SOC 2</h3>
-        <div class="nistmad-subtitle">
-          Evaluación por criterios SOC 2: Seguridad, Disponibilidad, Confidencialidad,
-          Integridad del procesamiento y Privacidad.
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="nistmad-header-actions">
-    {ingreso_btn}
-    <a href="{url_for('madurez_soc2.historial')}" class="btn nistmad-btn-soft rounded-pill px-4 historial-pill">
-      <span class="d-inline-flex align-items-center gap-2">
-        <span class="hist-dot"></span>
-        <i class="bi bi-clock-history"></i>
-        <span class="fw-semibold">Historial de Revisiones</span>
-      </span>
-    </a>
-  </div>
-
-  <div class="row g-3 mt-2">
-    <div class="col-12 col-lg-8">
-      <div class="nistmad-card p-4 h-100">
-        <div class="nistmad-section-title">Estado del instrumento</div>
-        <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
-          <div>
-            <div class="fw-bold">Estado del instrumento {badge}</div>
-            <div class="text-muted small mt-1">Preguntas cargadas: <b>{total}</b></div>
-            <div class="mt-2 small">{hint}</div>
-          </div>
-          <div class="text-end">
-            <div class="text-muted small">Acceso rápido</div>
-            <div class="d-flex gap-2 flex-wrap justify-content-end mt-2">
-              {parametros_btn}
-            </div>
-          </div>
-        </div>
-        <div class="alert alert-info mt-3 mb-0 small">
-          <b>Sugerencia:</b> Usa <b>Parámetros</b> para ver la definición de niveles 1–5
-          y gestionar la importación del instrumento SOC 2.
-        </div>
-      </div>
-    </div>
-
-    <div class="col-12 col-lg-4">
-      <div class="nistmad-card p-4 h-100">
-        <div class="nistmad-section-title">¿Qué puedes hacer aquí?</div>
-        <ul class="small mb-0 text-black ps-3">
-          <li><b>Ingresar la información:</b> diligenciar respuestas con evidencia.</li>
-          <li><b>Historial:</b> revisar evaluaciones previas y resultados.</li>
-          <li><b>Parámetros:</b> gestionar niveles e instrumento, excepto auditor.</li>
-        </ul>
-      </div>
-    </div>
-  </div>
-</div>
-{soc2_nist_css('nistmad', '🛡️')}
-"""
-    return render_template_string(BASE, title="Madurez SOC 2", content=content)
-
-# ============================================================
-# PARÁMETROS — USUARIO CON PERMISO PUEDE MODIFICAR / AUDITOR NO
-# ============================================================
-
-@soc2_madurez_bp.route("/parametros", methods=["GET", "POST"])
-@login_required
-def parametros():
-    user = User.query.get(session.get("user_id"))
-
-    if not soc2_user_can_execute(user):
-        return soc2_deny_execute("No tiene permiso para administrar parámetros SOC 2.")
-
-    seed_soc2_parametros()
-
-    if request.method == "POST":
-        try:
-            for r in Soc2MadurezParametro.query.all():
-                r.nivel = (request.form.get(f"nivel_{r.id}") or r.nivel).strip()
-                r.rango_desde = float(request.form.get(f"desde_{r.id}") or r.rango_desde)
-                r.rango_hasta = float(request.form.get(f"hasta_{r.id}") or r.rango_hasta)
-                r.color = (request.form.get(f"color_{r.id}") or r.color).strip()
-                r.descripcion = (request.form.get(f"descripcion_{r.id}") or "").strip()
-            db.session.commit()
-            flash("✅ Parámetros SOC 2 guardados correctamente.", "success")
-        except Exception as e:
-            db.session.rollback()
-            flash(f"Error guardando parámetros SOC 2: {e}", "danger")
-        return redirect(url_for("madurez_soc2.parametros"))
-
-    rows = []
-    for r in Soc2MadurezParametro.query.order_by(Soc2MadurezParametro.orden.asc()).all():
-        rows.append(f"""
-        <tr>
-          <td><input class="form-control" name="nivel_{r.id}" value="{escape(r.nivel or '')}"></td>
-          <td class="text-center"><input class="form-control text-center" name="desde_{r.id}" value="{r.rango_desde}"></td>
-          <td class="text-center"><input class="form-control text-center" name="hasta_{r.id}" value="{r.rango_hasta}"></td>
-          <td class="text-center"><input type="color" class="form-control form-control-color mx-auto" name="color_{r.id}" value="{escape(r.color or '#6c757d')}"></td>
-          <td><textarea class="form-control" name="descripcion_{r.id}" rows="2">{escape(r.descripcion or '')}</textarea></td>
-        </tr>
-        """)
-
-    resumen = soc2_resumen_instrumento()
-
-    content = f"""
-<div class="nistpar-shell">
-  <div class="nistpar-header-card">
-    <div class="nistpar-header-overlay">
-      <div class="nistpar-header-text">
-        <h3 class="nistpar-title m-0">Parámetros de Madurez — SOC 2</h3>
-        <div class="nistpar-subtitle">Configuración de niveles, rangos de madurez e importación del instrumento.</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="nistpar-header-actions">
-    <a href="{url_for('madurez_soc2.inicio_soc2')}" class="btn nistpar-btn-main rounded-pill px-4 fw-bold">
-      <i class="bi bi-arrow-left me-2"></i>Volver
-    </a>
-    <form method="POST" action="{url_for('madurez_soc2.importar_instrumento_soc2')}" class="m-0">
-      <button class="btn btn-success rounded-pill px-4 fw-bold">
-        <i class="bi bi-upload me-2"></i>Importar instrumento
-      </button>
-    </form>
-    <form method="POST" action="{url_for('madurez_soc2.importar_instrumento_soc2')}?force=1" class="m-0" onsubmit="return confirm('¿Borrar e importar de nuevo el instrumento SOC 2?')">
-      <button class="btn btn-danger rounded-pill px-4 fw-bold">
-        <i class="bi bi-arrow-repeat me-2"></i>Reimportar
-      </button>
-    </form>
-  </div>
-
-  <div class="nistpar-card p-4 mb-3">
-    <div class="nistpar-section-title">Resumen instrumento</div>
-    <div class="small text-black">
-      Preguntas: <b>{resumen['total_preguntas']}</b> · Cabeceras: <b>{resumen['total_headers']}</b> · Por criterio: <b>{escape(str(resumen['por_bloque']))}</b>
-    </div>
-  </div>
-
-  <form method="POST" class="nistpar-card p-4">
-    <div class="nistpar-section-title">Niveles de madurez</div>
-    <div class="table-responsive">
-      <table class="table table-hover align-middle nistpar-table">
-        <thead class="nistpar-table-head">
-          <tr>
-            <th style="width:28%;">Nivel de Madurez</th>
-            <th class="text-center" style="width:110px;">Desde %</th>
-            <th class="text-center" style="width:110px;">Hasta %</th>
-            <th class="text-center" style="width:90px;">Color</th>
-            <th>Descripción del Nivel</th>
-          </tr>
-        </thead>
-        <tbody>{''.join(rows)}</tbody>
-      </table>
-    </div>
-    <div class="text-end mt-3">
-      <button class="btn btn-primary rounded-pill px-4 fw-bold">
-        <i class="bi bi-save me-2"></i>Guardar parámetros
-      </button>
-    </div>
-  </form>
-</div>
-{soc2_nist_css('nistpar', '⚙️')}
-"""
-    return render_template_string(BASE, title="Parámetros SOC 2", content=content)
-
-
-# ============================================================
-# INGRESO DE INFORMACIÓN SOC 2 — SIN LOADER GLOBAL EN VALIDACIÓN
-# ============================================================
-
-@soc2_madurez_bp.route("/ingreso", methods=["GET"])
-@login_required
-def ingreso():
-    user = User.query.get(session.get("user_id"))
-
-    if not soc2_user_can_execute(user):
-        return soc2_deny_execute("No tiene permiso para ingresar información SOC 2.")
-
-    if Soc2MadurezPregunta.query.filter_by(tipo="q").count() == 0:
-        flash("⚠️ Primero debes importar el instrumento SOC 2.", "warning")
-        return redirect(url_for("madurez_soc2.parametros"))
-
-    preguntas = (
-        Soc2MadurezPregunta.query
-        .filter_by(activo=True, tipo="q")
-        .order_by(
-            Soc2MadurezPregunta.bloque_codigo.asc(),
-            Soc2MadurezPregunta.seccion_codigo.asc(),
-            Soc2MadurezPregunta.orden.asc(),
-            Soc2MadurezPregunta.id.asc()
-        )
-        .all()
-    )
-
-    draft = obtener_borrador_soc2(user.id if user else None)
-    respuestas_guardadas = cargar_respuestas_soc2(draft.id) if draft else {}
-    consecutivo_val = (draft.consecutivo if draft else "") or ""
-
-    grouped = _soc2_group_questions()
-    acc_html = []
-    acc_id = 0
-
-    def esc(x):
-        return escape(str(x or ""))
-
-    for bloque_codigo, payload in grouped.items():
-        acc_id += 1
-        func_key = f"soc2func{acc_id}"
-        titulo_bloque = payload.get("titulo") or soc2_block_title(bloque_codigo) or bloque_codigo
-        rows = []
-
-        for q in payload.get("items", []):
-            saved = respuestas_guardadas.get(q.id, {})
-            saved_estado = (saved.get("estado") or "").strip().upper()
-            saved_com = esc(saved.get("comentario") or "")
-            qtext = q.pregunta or ""
-            cat_code = q.pregunta_codigo or q.seccion_codigo or bloque_codigo
-
-            rows.append(f"""
-            <div class="col-12 col-xl-6">
-              <div class="nistform-qcard h-100">
-                <div class="nistform-qhead">
-                  <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <span class="badge rounded-pill text-bg-light border fw-semibold">{esc(cat_code)}</span>
-                    <span class="badge rounded-pill text-bg-primary">Orden {q.orden or 0}</span>
-                  </div>
-                </div>
-
-                <div class="nistform-qtext">{esc(qtext)}</div>
-
-                <div class="nistform-radio-row">
-                  <label class="nistform-radio-card">
-                    <input class="form-check-input" type="radio" name="st_{q.id}" value="NA" {"checked" if saved_estado == "NA" else ""}>
-                    <span>N/A</span>
-                  </label>
-
-                  <label class="nistform-radio-card">
-                    <input class="form-check-input" type="radio" name="st_{q.id}" value="SI" {"checked" if saved_estado == "SI" else ""}>
-                    <span>Sí</span>
-                  </label>
-
-                  <label class="nistform-radio-card">
-                    <input class="form-check-input" type="radio" name="st_{q.id}" value="PARCIAL" {"checked" if saved_estado == "PARCIAL" else ""}>
-                    <span>Parcial</span>
-                  </label>
-
-                  <label class="nistform-radio-card">
-                    <input class="form-check-input" type="radio" name="st_{q.id}" value="NO" {"checked" if saved_estado == "NO" else ""}>
-                    <span>No</span>
-                  </label>
-                </div>
-
-                <div class="mt-3">
-                  <label class="form-label small fw-bold text-black mb-1">Comentarios / evidencia</label>
-                  <textarea class="form-control form-control-sm"
-                            name="cm_{q.id}"
-                            rows="3"
-                            placeholder="Comentarios / evidencia">{saved_com}</textarea>
-                </div>
-              </div>
-            </div>
-            """)
-
-        acc_html.append(f"""
-        <div class="accordion-item nistform-acc-item">
-          <h2 class="accordion-header" id="h{func_key}">
-            <button class="accordion-button {'collapsed' if acc_id != 1 else ''}"
-                    type="button"
-                    data-bs-toggle="collapse"
-                    data-bs-target="#c{func_key}">
-              <div class="nistform-acc-inner">
-                <div>
-                  <div class="nistform-func-title">{esc(titulo_bloque)}</div>
-                  <div class="nistform-func-subtitle">Criterio SOC 2 · {esc(bloque_codigo)}</div>
-                </div>
-                <span class="badge rounded-pill text-bg-primary">{len(payload.get('items', []))} preguntas</span>
-              </div>
-            </button>
-          </h2>
-
-          <div id="c{func_key}" class="accordion-collapse collapse {'show' if acc_id == 1 else ''}">
-            <div class="accordion-body nistform-acc-body">
-              <div class="nistform-cat-block">
-                <div class="nistform-cat-title">
-                  <span>{esc(bloque_codigo)}</span>
-                  <small>{esc(titulo_bloque)}</small>
-                </div>
-                <div class="row g-3">{''.join(rows)}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-        """)
-
-    alerta_borrador = ""
-    if draft:
-        alerta_borrador = """
-        <div class="alert alert-info rounded-4 border-0 shadow-sm">
-          <i class="bi bi-info-circle-fill me-2"></i>
-          Tienes un borrador SOC 2 cargado automáticamente.
-        </div>
-        """
-
-    content = f"""
-    <div class="nistform-shell soc2-no-global-loader">
-
-      <style>
-        #SGSI_PROGRESS_GLOBAL,
-        #globalLoader,
-        #loader,
-        #progressOverlay,
-        .modal-backdrop,
-        .progress-overlay,
-        .loader-overlay,
-        .sgsi-loader,
-        .sgsi-progress {{
-          display: none !important;
-          visibility: hidden !important;
-          opacity: 0 !important;
-          pointer-events: none !important;
-        }}
-      </style>
-
-      <div class="nistform-header-card">
-        <div class="nistform-header-overlay">
-          <div class="nistform-header-text">
-            <h3 class="nistform-title m-0">Nivel de Madurez — SOC 2</h3>
-            <div class="nistform-subtitle">Ingreso de información del instrumento SOC 2</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="nistform-header-actions">
-        <a href="{url_for('madurez_soc2.inicio_soc2')}" class="btn btn-light rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left me-2"></i>Volver
-        </a>
-
-        <a href="{url_for('madurez_soc2.historial')}" class="btn btn-outline-primary rounded-pill px-4 fw-bold">
-          <i class="bi bi-clock-history me-2"></i>Historial
-        </a>
-      </div>
-
-      <div class="nistform-card p-4">
-        {alerta_borrador}
-
-        <form id="soc2IngresoForm"
-              method="POST"
-              action="{url_for('madurez_soc2.ingreso_guardar')}"
-              novalidate>
-
-          <input type="hidden" name="draft_id" value="{draft.id if draft else ''}">
-          <input type="hidden" name="accion" id="soc2Accion" value="guardar">
-
-          <div class="nistform-section-title">Información de la revisión</div>
-
-          <div class="mb-4">
-            <label class="text-black form-label fw-semibold">
-              Consecutivo de la Revisión <span class="text-danger">*</span>
-            </label>
-
-            <input type="text"
-                   class="form-control form-control-lg rounded-pill"
-                   name="consecutivo"
-                   id="soc2Consecutivo"
-                   value="{esc(consecutivo_val)}"
-                   autocomplete="off">
-
-            <div id="soc2ConsecutivoError"
-                 class="invalid-feedback d-none fw-bold mt-2">
-              Debes ingresar el consecutivo de la Revisión.
-            </div>
-          </div>
-
-          <div class="nistform-section-title">Instrumento de evaluación</div>
-
-          <div class="accordion nistform-accordion" id="accSoc2">
-            {''.join(acc_html)}
-          </div>
-
-          <div class="d-flex justify-content-center gap-3 flex-wrap mt-4">
-            <button class="btn btn-outline-primary btn-lg rounded-pill px-5 shadow fw-semibold"
-                    type="button"
-                    id="btnGuardarSoc2">
-              <i class="bi bi-save2 me-2"></i>Guardar
-            </button>
-
-            <button id="btnAnalizarSoc2"
-                    class="btn btn-primary btn-lg rounded-pill px-5 shadow fw-semibold"
-                    type="button">
-              <i class="bi bi-bar-chart-line-fill me-2"></i>Analizar
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <script>
-    (function () {{
-
-      const total = {len(preguntas)};
-
-      function hideLoader() {{
-        const ids = ["SGSI_PROGRESS_GLOBAL", "globalLoader", "loader", "progressOverlay"];
-        ids.forEach(function(id) {{
-          const el = document.getElementById(id);
-          if (el) {{
-            el.style.display = "none";
-            el.style.visibility = "hidden";
-            el.style.opacity = "0";
-            el.style.pointerEvents = "none";
-            el.classList.add("d-none");
-          }}
-        }});
-
-        document.querySelectorAll(".modal-backdrop, .progress-overlay, .loader-overlay, .sgsi-loader, .sgsi-progress").forEach(function(el) {{
-          el.style.display = "none";
-          el.style.visibility = "hidden";
-          el.style.opacity = "0";
-          el.style.pointerEvents = "none";
-          el.classList.add("d-none");
-        }});
-      }}
-
-      function marcadas() {{
-        const names = new Set();
-        document.querySelectorAll('input[type="radio"][name^="st_"]:checked').forEach(function(r) {{
-          names.add(r.name);
-        }});
-        return names.size;
-      }}
-
-      function validarConsecutivo() {{
-        const consecutivo = document.getElementById("soc2Consecutivo");
-        const msg = document.getElementById("soc2ConsecutivoError");
-
-        if (!consecutivo || !consecutivo.value.trim()) {{
-          hideLoader();
-
-          if (consecutivo) {{
-            consecutivo.classList.add("is-invalid");
-            consecutivo.focus();
-          }}
-
-          if (msg) {{
-            msg.classList.remove("d-none");
-            msg.style.display = "block";
-          }}
-
-          return false;
-        }}
-
-        consecutivo.classList.remove("is-invalid");
-
-        if (msg) {{
-          msg.classList.add("d-none");
-          msg.style.display = "none";
-        }}
-
-        return true;
-      }}
-
-      function enviarSoc2(accion) {{
-        hideLoader();
-
-        if (!validarConsecutivo()) {{
-          hideLoader();
-          return false;
-        }}
-
-        if (accion === "analizar" && marcadas() < total) {{
-          hideLoader();
-          alert("Para analizar debes completar el 100% del instrumento.");
-          return false;
-        }}
-
-        const form = document.getElementById("soc2IngresoForm");
-        const accionInput = document.getElementById("soc2Accion");
-
-        if (!form) {{
-          return false;
-        }}
-
-        if (accionInput) {{
-          accionInput.value = accion;
-        }}
-
-        hideLoader();
-
-        HTMLFormElement.prototype.submit.call(form);
-        return false;
-      }}
-
-      window.soc2GuardarSinLoader = function(e) {{
-        if (e) {{
-          e.preventDefault();
-          e.stopPropagation();
-          e.stopImmediatePropagation();
-        }}
-        return enviarSoc2("guardar");
-      }};
-
-      window.soc2AnalizarSinLoader = function(e) {{
-        if (e) {{
-          e.preventDefault();
-          e.stopPropagation();
-          e.stopImmediatePropagation();
-        }}
-        return enviarSoc2("analizar");
-      }};
-
-      document.addEventListener("DOMContentLoaded", function () {{
-        hideLoader();
-
-        const btnGuardar = document.getElementById("btnGuardarSoc2");
-        const btnAnalizar = document.getElementById("btnAnalizarSoc2");
-        const consecutivo = document.getElementById("soc2Consecutivo");
-        const form = document.getElementById("soc2IngresoForm");
-
-        if (btnGuardar) {{
-          btnGuardar.onclick = soc2GuardarSinLoader;
-        }}
-
-        if (btnAnalizar) {{
-          btnAnalizar.onclick = soc2AnalizarSinLoader;
-        }}
-
-        if (consecutivo) {{
-          consecutivo.addEventListener("input", function() {{
-            validarConsecutivo();
-            hideLoader();
-          }});
-        }}
-
-        if (form) {{
-          form.addEventListener("submit", function(e) {{
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            hideLoader();
-            return false;
-          }}, true);
-        }}
-
-        hideLoader();
-        setInterval(hideLoader, 250);
-      }});
-    }})();
-    </script>
-
-    {soc2_nistform_css()}
-    """
-
-    return render_template_string(BASE, title="Ingreso SOC 2", content=content)
-
-
-# ============================================================
-# GUARDAR / ANALIZAR — SOC 2
-# ============================================================
-
-@soc2_madurez_bp.route("/ingreso/guardar", methods=["POST"])
+@nist_madurez_bp.route("/ingreso/guardar", methods=["POST"])
 @login_required
 def ingreso_guardar():
     user = User.query.get(session.get("user_id"))
 
-    if not soc2_user_can_execute(user):
-        return soc2_deny_execute("No tiene permiso para guardar ni analizar información SOC 2.")
-
-    consecutivo = (request.form.get("consecutivo") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    consecutivo = _normalizar_texto(request.form.get("consecutivo"))
     accion = (request.form.get("accion") or "guardar").strip().lower()
     draft_id = (request.form.get("draft_id") or "").strip()
 
     if not consecutivo:
         flash("Debes ingresar el consecutivo de la Revisión.", "warning")
-        return redirect(url_for("madurez_soc2.ingreso"))
+        return redirect(url_for("madurez_nist.ingreso"))
 
     preguntas = (
-        Soc2MadurezPregunta.query
-        .filter_by(activo=True, tipo="q")
+        NistMadurezPregunta.query
+        .filter_by(activo=True)
         .order_by(
-            Soc2MadurezPregunta.bloque_codigo.asc(),
-            Soc2MadurezPregunta.orden.asc(),
-            Soc2MadurezPregunta.id.asc()
+            NistMadurezPregunta.funcion.asc(),
+            NistMadurezPregunta.categoria_codigo.asc(),
+            NistMadurezPregunta.orden.asc(),
+            NistMadurezPregunta.id.asc()
         )
         .all()
     )
 
     if not preguntas:
-        flash("⚠️ No hay preguntas activas cargadas en el instrumento SOC 2.", "warning")
-        return redirect(url_for("madurez_soc2.inicio_soc2"))
+        flash("⚠️ No hay preguntas activas cargadas en el instrumento NIST.", "warning")
+        return redirect(url_for("madurez_nist.home"))
 
-    respondidas, total, progreso_pct = calcular_progreso_soc2(preguntas, form_data=request.form)
+    respondidas, total, progreso_pct = calcular_progreso_nist(
+        preguntas,
+        form_data=request.form
+    )
 
     try:
         run = None
 
         if draft_id and draft_id.isdigit():
-            run = Soc2MadurezRun.query.filter_by(id=int(draft_id)).first()
+            run = NistMadurezRun.query.filter_by(id=int(draft_id)).first()
+            if run and user and run.user_id != user.id:
+                flash("No tienes permiso para modificar este borrador.", "danger")
+                return redirect(url_for("madurez_nist.ingreso"))
 
         if not run:
-            run = obtener_borrador_soc2(user.id if user else None)
+            run = obtener_borrador_nist(user.id if user else None)
 
         if respondidas == 0:
-            if run and _contar_respuestas_run_soc2(run.id) == 0:
-                Soc2MadurezRespuesta.query.filter_by(run_id=run.id).delete(synchronize_session=False)
-                Soc2MadurezCriterioAnalisis.query.filter_by(run_id=run.id).delete(synchronize_session=False)
-                db.session.delete(run)
-                db.session.commit()
+            if run and _contar_respuestas_run_nist(run.id) == 0:
+                try:
+                    NistMadurezCategoriaAnalisis.query.filter_by(run_id=run.id).delete(synchronize_session=False)
+                    db.session.delete(run)
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
 
             flash("⚠️ Debes responder al menos una pregunta antes de guardar o analizar.", "warning")
-            return redirect(url_for("madurez_soc2.ingreso"))
+            return redirect(url_for("madurez_nist.ingreso"))
 
         if not run:
-            run = Soc2MadurezRun(
+            run = NistMadurezRun(
                 consecutivo=consecutivo,
-                company_name=consecutivo,
                 user_id=user.id if user else None,
                 estado="BORRADOR",
                 progreso_pct=0,
@@ -4753,21 +6376,20 @@ def ingreso_guardar():
             db.session.flush()
 
         run.consecutivo = consecutivo
-        run.company_name = consecutivo
-        run.user_id = user.id if user else run.user_id
         run.progreso_pct = progreso_pct
-        run.updated_at = datetime.utcnow()
+        run.updated_at = datetime.now(timezone.utc)
 
-        Soc2MadurezRespuesta.query.filter_by(run_id=run.id).delete(synchronize_session=False)
+        NistMadurezRespuesta.query.filter_by(run_id=run.id).delete(synchronize_session=False)
+        NistMadurezCategoriaAnalisis.query.filter_by(run_id=run.id).delete(synchronize_session=False)
 
         respuestas_insertadas = 0
 
         for q in preguntas:
             st = (request.form.get(f"st_{q.id}") or "").strip().upper()
-            cm = (request.form.get(f"cm_{q.id}") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+            cm = _normalizar_texto(request.form.get(f"cm_{q.id}"))
 
             if st in ("SI", "PARCIAL", "NO", "NA"):
-                db.session.add(Soc2MadurezRespuesta(
+                db.session.add(NistMadurezRespuesta(
                     run_id=run.id,
                     pregunta_id=q.id,
                     estado=st,
@@ -4775,256 +6397,333 @@ def ingreso_guardar():
                 ))
                 respuestas_insertadas += 1
 
+        db.session.flush()
+
+        if respuestas_insertadas == 0:
+            db.session.rollback()
+            flash("⚠️ No se encontraron respuestas válidas para guardar.", "warning")
+            return redirect(url_for("madurez_nist.ingreso"))
+
+        if accion == "guardar":
+            run.estado = "BORRADOR"
+            run.resumen_json = "{}"
+            run.pct_general = 0.0
+            run.radar_overall_b64 = None
+            db.session.commit()
+
+            flash(
+                f"✅ Borrador NIST guardado correctamente. "
+                f"Preguntas respondidas: {respuestas_insertadas}/{total}. "
+                f"Progreso actual: {progreso_pct}%.",
+                "success"
+            )
+            return redirect(url_for("madurez_nist.ingreso"))
+
         if accion == "analizar":
-            if progreso_pct < 100:
+            if progreso_pct < 100 or respondidas < total:
                 db.session.commit()
-                flash("⚠️ Para analizar debes completar el 100% del instrumento.", "warning")
-                return redirect(url_for("madurez_soc2.ingreso"))
+                flash(
+                    f"⚠️ El análisis solo se habilita cuando el instrumento esté al 100%. "
+                    f"Actualmente llevas {progreso_pct}% ({respondidas}/{total}).",
+                    "warning"
+                )
+                return redirect(url_for("madurez_nist.ingreso"))
+
+            respuestas = (
+                db.session.query(NistMadurezRespuesta, NistMadurezPregunta)
+                .join(NistMadurezPregunta, NistMadurezPregunta.id == NistMadurezRespuesta.pregunta_id)
+                .filter(NistMadurezRespuesta.run_id == run.id)
+                .order_by(
+                    NistMadurezPregunta.funcion.asc(),
+                    NistMadurezPregunta.categoria_codigo.asc(),
+                    NistMadurezPregunta.orden.asc(),
+                    NistMadurezPregunta.id.asc()
+                )
+                .all()
+            )
+
+            if not respuestas:
+                db.session.rollback()
+                flash("❌ No fue posible consolidar el análisis porque no existen respuestas guardadas.", "danger")
+                return redirect(url_for("madurez_nist.ingreso"))
+
+            acc = {}
+            sum_all = 0.0
+            cnt_all = 0.0
+
+            for r, q in respuestas:
+                st = (r.estado or "").strip().upper()
+                score = NIST_STATUS_SCORE.get(st, None)
+
+                # Si es N/A o no existe, no entra al cálculo
+                if score is None:
+                    continue
+
+                func = (q.funcion or "OTROS").upper().strip()
+                cat = (q.categoria_codigo or "SIN_CATEGORIA").upper().strip()
+
+                if func not in acc:
+                    acc[func] = {}
+
+                if cat not in acc[func]:
+                    acc[func][cat] = {
+                        "sum": 0.0,
+                        "count": 0.0,
+                        "categoria": (q.categoria or "").strip()
+                    }
+
+                acc[func][cat]["sum"] += float(score)
+                acc[func][cat]["count"] += 1.0
+
+                sum_all += float(score)
+                cnt_all += 1.0
+
+            resumen = {}
+            for func, cats in acc.items():
+                resumen[func] = {}
+                for cat, d in cats.items():
+                    count = float(d.get("count", 0) or 0)
+                    pct = round((float(d.get("sum", 0.0)) / count) * 100.0, 2) if count > 0 else 0.0
+
+                    resumen[func][cat] = {
+                        "categoria": d.get("categoria", ""),
+                        "pct": pct,
+                        "total": int(count)
+                    }
+
+            pct_general = round((sum_all / cnt_all) * 100.0, 2) if cnt_all > 0 else 0.0
+
+            for r, q in respuestas:
+                st = (r.estado or "").strip().upper()
+                score = NIST_STATUS_SCORE.get(st)
+                if score is None:
+                    continue
+
+                func = (q.funcion or "OTROS").upper().strip()
+                cat = (q.categoria_codigo or "SIN_CATEGORIA").upper().strip()
+
+                if func not in acc:
+                    acc[func] = {}
+
+                if cat not in acc[func]:
+                    acc[func][cat] = {
+                        "sum": 0.0,
+                        "count": 0,
+                        "categoria": (q.categoria or "").strip()
+                    }
+
+                acc[func][cat]["sum"] += float(score)
+                acc[func][cat]["count"] += 1
+                sum_all += float(score)
+                cnt_all += 1
+
+            resumen = {}
+            for func, cats in acc.items():
+                resumen[func] = {}
+                for cat, d in cats.items():
+                    count = int(d.get("count", 0) or 0)
+                    pct = round((float(d.get("sum", 0.0)) / count) * 100.0, 2) if count > 0 else 0.0
+
+                    resumen[func][cat] = {
+                        "categoria": d.get("categoria", ""),
+                        "pct": pct,
+                        "total": count
+                    }
+
+            pct_general = round((sum_all / cnt_all) * 100.0, 2) if cnt_all > 0 else 0.0
+            radar_labels, radar_values = nist_pct_por_funcion(resumen, NIST_FUNC_ORDER)
+            radar_b64 = nist_radar_b64(radar_labels, radar_values, title="Radar por Función")
 
             run.estado = "FINALIZADO"
             run.progreso_pct = 100
+            run.resumen_json = json.dumps(resumen, ensure_ascii=False)
+            run.pct_general = pct_general
+            run.radar_overall_b64 = radar_b64
+
             db.session.commit()
 
-            run_id = run_analysis_from_soc2_run(run.id)
-
-            flash(f"✅ Revisión SOC 2 analizada correctamente. Se consolidaron {respuestas_insertadas} respuestas.", "success")
-            return redirect(url_for("madurez_soc2.detalle", run_id=run_id))
+            flash(
+                f"✅ Revisión NIST analizada correctamente. "
+                f"Se consolidaron {cnt_all} respuestas válidas.",
+                "success"
+            )
+            return redirect(url_for("madurez_nist.historial"))
 
         db.session.commit()
-        flash("✅ Información SOC 2 guardada correctamente.", "success")
-        return redirect(url_for("madurez_soc2.ingreso"))
+        flash("✅ Información procesada correctamente.", "success")
+        return redirect(url_for("madurez_nist.ingreso"))
 
     except Exception as e:
         db.session.rollback()
-        traceback.print_exc()
-        flash(f"❌ Error guardando la revisión SOC 2: {e}", "danger")
-        return redirect(url_for("madurez_soc2.ingreso"))
-
-# ============================================================
-# HISTORIAL SOC 2 — COMPACTO SIN LOADER
-# ============================================================
-
-@soc2_madurez_bp.route("/historial", methods=["GET"])
+        flash(f"❌ Error guardando la revisión NIST: {e}", "danger")
+        return redirect(url_for("madurez_nist.ingreso"))
+    
+# =========================================================
+# Historial NIST
+# =========================================================
+@nist_madurez_bp.route("/historial", methods=["GET"])
 @login_required
 def historial():
-
     user = User.query.get(session.get("user_id"))
 
-    denied = soc2_check_access_or_redirect(
-        user,
-        "No tiene permiso para ver historial SOC 2."
-    )
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de Madurez NIST CSF 2.0"):
+        flash("No tiene permiso para acceder al historial del módulo NIST CSF 2.0.", "danger")
+        return redirect(url_for('menu'))
 
-    if denied:
-        return denied
-
-    runs = (
-        Soc2MadurezRun.query
-        .filter(Soc2MadurezRun.estado == "FINALIZADO")
-        .order_by(
-            Soc2MadurezRun.created_at.desc(),
-            Soc2MadurezRun.id.desc()
-        )
-        .all()
-    )
+    read_only = (user.role == "auditor")
 
     # =========================================================
-    # BOTÓN NUEVA REVISIÓN
+    # IMPORTANTE:
+    # NO eliminar automáticamente runs vacíos al abrir historial
+    # porque puede hacer desaparecer revisiones que sí quieres ver.
     # =========================================================
-    nueva_revision_btn = ""
+    # try:
+    #     _eliminar_runs_vacios_nist(user.id if user and user.role != "admin" else None)
+    # except Exception:
+    #     db.session.rollback()
 
-    if soc2_user_can_execute(user):
-
-        nueva_revision_btn = f"""
-        <a href="{url_for('madurez_soc2.ingreso')}"
-           class="btn btn-primary btn-sm rounded-pill px-3 fw-bold shadow-sm soc2-no-loader">
-
-          <i class="bi bi-plus-circle me-1"></i>
-          Nueva revisión
-
-        </a>
-        """
+    q = NistMadurezRun.query
 
     # =========================================================
-    # FILAS
+    # Si quieres que Auditor vea TODO el historial, no filtres por user_id.
+    # Si prefieres que vea solo lo suyo, vuelve a activar el filtro.
     # =========================================================
-    rows = []
+    # if user.role != "admin":
+    #     q = q.filter(NistMadurezRun.user_id == user.id)
+
+    runs = q.order_by(
+        NistMadurezRun.created_at.desc(),
+        NistMadurezRun.id.desc()
+    ).all()
+
+    rows_html = ""
 
     for run in runs:
+        total_preguntas = NistMadurezRespuesta.query.filter_by(run_id=run.id).count()
 
-        nivel = soc2_resolver_nivel(run.pct_general or 0)
+        # =========================================================
+        # NO ocultar la revisión si no tiene respuestas
+        # =========================================================
+        # if total_preguntas == 0:
+        #     continue
 
-        badge = f"""
-        <span class="soc2hist-badge"
-              style="background:{nivel.get('color','#6c757d')};">
+        estado_txt = (run.estado or "BORRADOR").upper().strip()
+        estado_badge = {
+            "BORRADOR": "secondary",
+            "FINALIZADO": "success"
+        }.get(estado_txt, "secondary")
 
-          {escape(nivel.get('nivel','Sin nivel'))}
+        try:
+            pct_general = float(run.pct_general or 0)
+        except Exception:
+            pct_general = 0.0
 
-        </span>
-        """
+        nivel_info = nist_nivel_visual_por_pct(pct_general)
+        nivel_txt = nivel_info.get("nivel", "") if total_preguntas > 0 else "Sin respuestas registradas"
+        pct_txt = f"{pct_general:.2f}%" if total_preguntas > 0 else "0.00%"
 
-        eliminar_btn = ""
-
-        if soc2_user_can_execute(user):
-
-            eliminar_btn = f"""
+        if read_only:
+            btn_eliminar = """
+            <button class="btn btn-sm btn-outline-secondary rounded-pill" type="button" disabled
+                    title="El perfil Auditor no puede eliminar revisiones">
+              Eliminar
+            </button>
+            """
+        else:
+            btn_eliminar = f"""
             <form method="POST"
-                  action="{url_for('madurez_soc2.eliminar_run', run_id=run.id)}"
-                  class="d-inline soc2-no-loader"
-                  onsubmit="return confirm('¿Seguro que deseas eliminar esta revisión SOC 2?');">
-
-              <button type="submit"
-                      class="btn btn-danger btn-xs soc2hist-btn">
-
-                <i class="bi bi-trash"></i>
+                  action="{url_for('madurez_nist.eliminar_revision', run_id=run.id)}"
+                  style="display:inline;"
+                  onsubmit="return confirm('¿Eliminar la revisión NIST #{run.id} - {escape(run.consecutivo or '')}?');">
+              <button class="btn btn-sm btn-outline-danger rounded-pill" type="submit">
                 Eliminar
-
               </button>
-
             </form>
             """
 
-        rows.append(f"""
+        rows_html += f"""
         <tr>
-
-          <td class="fw-semibold soc2hist-text-main">
-            {escape(run.consecutivo or '')}
-          </td>
-
-          <td class="text-center soc2hist-text">
-            {run.created_at.strftime('%Y-%m-%d %H:%M') if run.created_at else ''}
-          </td>
-
-          <td class="text-center">
-            <span class="soc2hist-pct">
-              {float(run.pct_general or 0):.2f}%
+          <td class="text-muted">{run.id}</td>
+          <td>{escape(run.consecutivo or "")}</td>
+          <td>
+            <span class="badge bg-{estado_badge}">
+              {escape(estado_txt)}
             </span>
           </td>
-
-          <td class="text-center">
-            {badge}
+          <td>{pct_txt}</td>
+          <td class="wrap">{escape(nivel_txt)}</td>
+          <td class="text-muted">
+            {run.created_at.strftime('%Y-%m-%d %H:%M') if run.created_at else ''}
           </td>
-
           <td class="text-center">
-
-            <div class="d-flex justify-content-center gap-1 flex-wrap">
-
-              <a href="{url_for('madurez_soc2.detalle', run_id=run.id)}"
-                 class="btn btn-primary btn-xs soc2hist-btn soc2-no-loader">
-
-                <i class="bi bi-eye"></i>
-                Ver
-
-              </a>
-
-              {eliminar_btn}
-
-            </div>
-
+            {total_preguntas}
           </td>
+          <td class="text-end">
+            <a class="btn btn-sm btn-outline-primary rounded-pill"
+               href="{url_for('madurez_nist.detalle', run_id=run.id)}">
+              Ver detalle
+            </a>
 
-        </tr>
-        """)
+            <a class="btn btn-sm btn-outline-warning rounded-pill"
+               href="{url_for('madurez_nist.detalle_pdf', run_id=run.id)}">
+              PDF
+            </a>
 
-    # =========================================================
-    # VACÍO
-    # =========================================================
-    if not rows:
-
-        rows.append("""
-        <tr>
-          <td colspan="5"
-              class="text-center text-muted py-4">
-
-            No existen revisiones SOC 2 finalizadas.
-
+            {btn_eliminar}
           </td>
         </tr>
-        """)
+        """
 
-    # =========================================================
-    # HTML
-    # =========================================================
     content = f"""
+    <div class="nisthist-shell">
 
-    <div class="soc2hist-shell">
-
-      <!-- HEADER -->
-      <div class="soc2hist-header-card">
-
-        <div class="soc2hist-header-overlay">
-
-          <div class="soc2hist-header-text">
-
-            <h3 class="soc2hist-title m-0">
-              Historial de Revisiones — SOC 2
-            </h3>
-
-            <div class="soc2hist-subtitle">
-              Consulta de evaluaciones históricas y resultados consolidados.
+      <div class="nisthist-header-card">
+        <div class="nisthist-header-overlay">
+          <div class="nisthist-header-text">
+            <h3 class="nisthist-title m-0">Historial de Revisiones — NIST CSF 2.0</h3>
+            <div class="nisthist-subtitle">
+              Consulta revisiones previas, su porcentaje general, nivel de madurez y detalle.
             </div>
-
           </div>
-
         </div>
-
       </div>
 
-      <!-- BOTONES -->
-      <div class="soc2hist-header-actions">
-
-        <a href="{url_for('madurez_soc2.inicio_soc2')}"
-           class="btn btn-light btn-sm rounded-pill px-3 fw-bold shadow-sm soc2-no-loader">
-
-          <i class="bi bi-arrow-left me-1"></i>
-          Volver
-
+      <div class="nisthist-header-actions">
+        <a href="{url_for('madurez_nist.home')}"
+           class="btn nisthist-btn-main rounded-pill px-4 fw-bold">
+          <i class="bi bi-arrow-left me-2"></i>Volver al inicio
         </a>
-
-        {nueva_revision_btn}
-
       </div>
 
-      <!-- TABLA -->
-      <div class="soc2hist-card">
+      {"<div class='alert alert-info'>🔒 El perfil Auditor puede ver el historial y el detalle, pero no puede eliminar ni generar/editar contenido con IA.</div>" if read_only else ""}
 
-        <div class="soc2hist-section-title">
-          Revisiones finalizadas
-        </div>
+      <div class="nisthist-card p-4">
+        <div class="nisthist-section-title">Revisiones guardadas</div>
 
-        <div class="table-responsive">
-
-          <table class="table table-hover align-middle soc2hist-table">
-
-            <thead>
+        <div class="table-responsive nisthist-table-wrap" style="max-height:620px; overflow:auto;">
+          <table class="table table-sm align-middle table-hover mb-0">
+            <thead class="nisthist-table-head">
               <tr>
+                <th>ID</th>
                 <th>Consecutivo</th>
-                <th class="text-center">Fecha</th>
-                <th class="text-center">% Cumplimiento</th>
-                <th class="text-center">Nivel</th>
-                <th class="text-center">Acciones</th>
+                <th>Estado</th>
+                <th>% General</th>
+                <th>Nivel</th>
+                <th>Fecha</th>
+                <th>Respuestas</th>
+                <th></th>
               </tr>
             </thead>
-
             <tbody>
-              {''.join(rows)}
+              {rows_html if rows_html else "<tr><td colspan='8' class='text-muted'>Aún no hay revisiones NIST guardadas.</td></tr>"}
             </tbody>
-
           </table>
-
         </div>
-
       </div>
-
     </div>
 
-    <!-- =================================================== -->
-    <!-- CSS -->
-    <!-- =================================================== -->
-
     <style>
-
-      body {{
+      body{{
         background-image:url('/static/img/ccsgsi.jpg');
         background-size:cover;
         background-position:center;
@@ -5032,549 +6731,391 @@ def historial():
         background-repeat:no-repeat;
       }}
 
-      .soc2hist-shell {{
-        width:94%;
-        max-width:1180px;
-        margin:8px auto 24px auto;
+      .nisthist-shell{{
+        width:96%;
+        max-width:1500px;
+        margin:26px auto 24px auto;
       }}
 
-      .soc2hist-header-card {{
-        background:linear-gradient(
-          135deg,
-          #2f6fb6 0%,
-          #3f86d6 55%,
-          #5aa3ea 100%
-        );
-
-        height:72px;
-
+      /* =========================
+         HEADER ESTÁNDAR HISTORIAL NIST
+         ========================= */
+      .nisthist-header-card{{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
         display:flex;
         align-items:center;
-        justify-content:center;
-
-        border-radius:16px;
-
-        box-shadow:0 10px 24px rgba(0,0,0,.24);
-
-        margin-bottom:10px;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
         overflow:hidden;
+        margin-bottom:14px;
       }}
 
-      .soc2hist-header-overlay {{
+      .nisthist-header-card::before{{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }}
+
+      .nisthist-header-overlay{{
         width:100%;
-        height:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        position:relative;
+        z-index:1;
+      }}
 
+      .nisthist-header-overlay::before{{
+        content:"📚";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
-
-        text-align:center;
-
-        background:rgba(0,0,0,.08);
-
-        padding:6px 18px;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
       }}
 
-      .soc2hist-title {{
-        color:#fff;
-        font-size:1.28rem;
+      .nisthist-header-text{{
+        max-width:1000px;
+        width:100%;
+        display:block !important;
+        transform:none !important;
+      }}
+
+      .nisthist-header-text::before{{
+        content:"SGSI · Historial NIST CSF 2.0";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
         font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }}
+
+      .nisthist-title{{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
         line-height:1.1;
-        text-shadow:0 2px 8px rgba(0,0,0,.28);
+        margin:0 !important;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
       }}
 
-      .soc2hist-subtitle {{
-        color:rgba(248,252,255,.96);
+      .nisthist-subtitle{{
+        color:rgba(255,255,255,.95);
         font-size:.78rem;
-        margin-top:3px;
-        font-weight:500;
+        margin-top:4px;
+        line-height:1.25;
       }}
 
-      .soc2hist-header-actions {{
+      /* =========================
+         BOTONES
+         ========================= */
+      .nisthist-header-actions{{
         display:flex;
         justify-content:center;
-        align-items:center;
-        gap:6px;
+        gap:10px;
         flex-wrap:wrap;
-        margin:8px 0 10px 0;
+        margin:10px 0 14px;
       }}
 
-      .soc2hist-card {{
-        background:rgba(255,255,255,.95);
-        border:1px solid rgba(255,255,255,.60);
-        border-radius:16px;
-        box-shadow:0 10px 24px rgba(0,0,0,.20);
-        padding:12px;
+      .nisthist-header-actions .btn,
+      .btn{{
+        border-radius:999px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }}
+
+      .nisthist-header-actions .btn{{
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }}
+
+      .nisthist-btn-main,
+      .btn-outline-light{{
+        background:#ffffff;
+        color:#0f172a !important;
+        border:1px solid #cfd8e3 !important;
+        border-radius:999px !important;
+      }}
+
+      .nisthist-btn-main:hover,
+      .btn-outline-light:hover{{
+        background:#edf5ff;
+        color:#0b65d8 !important;
+        border-color:#9ec5fe !important;
+      }}
+
+      /* =========================
+         CARDS
+         ========================= */
+      .nisthist-card,
+      .card,
+      .card-soft,
+      .report-card{{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
         overflow:hidden;
       }}
 
-      .soc2hist-section-title {{
-        color:#0f3d68;
-        font-size:.92rem;
-        font-weight:800;
-        margin-bottom:8px;
-        padding-bottom:6px;
-        border-bottom:1px solid rgba(15,61,104,.12);
+      .card-body{{
+        padding:18px;
       }}
 
-      .soc2hist-table {{
+      /* =========================
+         TÍTULOS
+         ========================= */
+      .nisthist-section-title,
+      .section-head h5,
+      .card h5,
+      .card h6{{
+        font-weight:950;
+        font-size:.95rem;
+        color:#0b4a8f;
         margin-bottom:0;
-        font-size:.80rem;
       }}
 
-      .soc2hist-table thead th {{
-        background:#0f3d68;
-        color:#fff;
-        font-size:.74rem;
-        font-weight:800;
-        padding:7px 8px;
-        vertical-align:middle;
+      .nisthist-section-title{{
+        padding-bottom:8px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+        margin-bottom:16px;
+      }}
+
+      /* =========================
+         TABLAS
+         ========================= */
+      .nisthist-table-wrap,
+      .table-responsive{{
+        max-height:72vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#ffffff;
+      }}
+
+      .nisthist-table-wrap .table,
+      .table{{
+        margin-bottom:0;
+      }}
+
+      .nisthist-table-wrap thead th,
+      .nisthist-table-head th,
+      .table thead th{{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-size:.78rem;
+        font-weight:900;
+        border:none !important;
         white-space:nowrap;
+        vertical-align:middle !important;
+        text-align:center;
+        padding:9px 8px;
       }}
 
-      .soc2hist-table tbody td {{
-        padding:6px 8px;
+      .nisthist-table-wrap tbody td,
+      .table tbody td{{
         vertical-align:middle;
-        background:rgba(255,255,255,.96);
-        border-bottom:1px solid rgba(15,61,104,.08);
+        font-size:.82rem;
+        padding:9px 8px;
+        border-bottom:1px solid #e5edf7;
+        color:#101827;
       }}
 
-      .soc2hist-table tbody tr:hover td {{
+      .table tbody tr:nth-child(even){{
+        background:#f8fbff;
+      }}
+
+      .table tbody tr:hover{{
         background:#eef6ff;
       }}
 
-      .soc2hist-text-main {{
-        color:#0b1220;
-        font-size:.80rem;
+      .wrap{{
+        white-space:normal !important;
+        word-break:break-word;
+        overflow-wrap:anywhere;
       }}
 
-      .soc2hist-text {{
-        color:#374151;
-        font-size:.68rem;
-      }}
-
-      .soc2hist-pct {{
-        color:#0d6efd;
-        font-weight:800;
-        font-size:.80rem;
-      }}
-
-      .soc2hist-badge {{
-        display:inline-block;
-        color:#fff;
-        font-size:.68rem;
-        font-weight:800;
-        padding:4px 8px;
+      .badge{{
         border-radius:999px;
-        line-height:1;
-        white-space:nowrap;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
       }}
 
-      .soc2hist-btn {{
-        border-radius:999px !important;
-        padding:3px 8px !important;
-        font-size:.64rem !important;
-        font-weight:700 !important;
-        line-height:1.2 !important;
+      /* =========================
+         RESPONSIVE
+         ========================= */
+      @media (max-width:991.98px){{
+        .nisthist-shell{{
+          width:98%;
+          margin:8px auto 22px auto;
+        }}
+
+        .nisthist-header-card{{
+          min-height:88px;
+        }}
+
+        .nisthist-title{{
+          font-size:1.20rem;
+        }}
+
+        .nisthist-subtitle{{
+          font-size:.68rem;
+        }}
+
+        .card-body{{
+          padding:8px 7px;
+        }}
       }}
 
-      .btn-xs {{
-        --bs-btn-padding-y:.16rem;
-        --bs-btn-padding-x:.40rem;
-        --bs-btn-font-size:.70rem;
-      }}
+      @media (max-width:768px){{
+        .nisthist-header-overlay{{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }}
 
+        .nisthist-header-overlay::before{{
+          margin:0;
+        }}
+
+        .nisthist-header-text::before{{
+          margin-left:auto;
+          margin-right:auto;
+        }}
+
+        .nisthist-title,
+        .nisthist-subtitle{{
+          text-align:center;
+        }}
+
+        .nisthist-header-actions .btn{{
+          width:100%;
+        }}
+      }}
     </style>
-
-    <!-- =================================================== -->
-    <!-- DESACTIVAR LOADER -->
-    <!-- =================================================== -->
-
-    <script>
-
-      document.addEventListener("DOMContentLoaded", function() {{
-
-        // ==========================================
-        // QUITAR OVERLAY GLOBAL
-        // ==========================================
-        const overlays = [
-          "SGSI_PROGRESS_GLOBAL",
-          "globalLoader",
-          "loader",
-          "progressOverlay"
-        ];
-
-        overlays.forEach(function(id) {{
-
-          const el = document.getElementById(id);
-
-          if (el) {{
-            el.style.display = "none";
-            el.style.visibility = "hidden";
-            el.classList.add("d-none");
-          }}
-
-        }});
-
-        // ==========================================
-        // DESACTIVAR SHOWLOADER
-        // ==========================================
-        document.querySelectorAll(".soc2-no-loader").forEach(function(el) {{
-
-          el.removeAttribute("onclick");
-          el.onclick = null;
-
-        }});
-
-      }});
-
-    </script>
     """
 
-    return render_template_string(
-        BASE,
-        title="Historial SOC 2",
-        content=content
-    )
+    return render_template_string(BASE, title="Historial NIST", content=content)
 
-
-# ============================================================
-# SOC 2 — DETALLE POR CRITERIO
-# ============================================================
-
-@soc2_madurez_bp.route("/detalle/<int:run_id>/criterio/<bloque_codigo>", methods=["GET"])
+@nist_madurez_bp.route("/historial/<int:run_id>/eliminar", methods=["POST"])
 @login_required
-def detalle_criterio(run_id: int, bloque_codigo: str):
+def eliminar_revision(run_id: int):
     user = User.query.get(session.get("user_id"))
 
-    if not soc2_user_can_access(user):
-        return soc2_deny_access("No tiene permiso para ver el detalle del criterio SOC 2.")
+    if user.role == "auditor":
+        flash("El perfil Auditor no puede eliminar revisiones NIST.", "danger")
+        return redirect(url_for("madurez_nist.historial"))
 
-    run = Soc2MadurezRun.query.get_or_404(run_id)
-    bloque_codigo = (bloque_codigo or "").strip().upper()
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de Madurez NIST CSF 2.0"):
+        flash("No tiene permiso para eliminar revisiones del módulo NIST CSF 2.0.", "danger")
+        return redirect(url_for('menu'))
+
+    run = NistMadurezRun.query.get_or_404(run_id)
+
+    if user.role != "admin" and run.user_id != user.id:
+        flash("No tiene permiso para eliminar esta revisión.", "danger")
+        return redirect(url_for("madurez_nist.historial"))
 
     try:
-        resumen = json.loads(run.resumen_json or "{}")
-    except Exception:
-        resumen = {}
+        NistMadurezCategoriaAnalisis.query.filter_by(run_id=run.id).delete(synchronize_session=False)
+        NistMadurezRespuesta.query.filter_by(run_id=run.id).delete(synchronize_session=False)
+        db.session.delete(run)
+        db.session.commit()
+        flash("🗑️ Revisión NIST eliminada correctamente.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"❌ Error eliminando la revisión NIST: {e}", "danger")
 
-    d = resumen.get(bloque_codigo)
-    if not d:
-        flash("No se encontró información para este criterio SOC 2.", "warning")
-        return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
-
-    items = d.get("items", []) or []
-    nombre = d.get("nombre") or soc2_block_title(bloque_codigo) or bloque_codigo
-    pct = float(d.get("pct", 0) or 0)
-    nivel = soc2_nivel_visual_por_pct(pct)
-
-    rows = []
-    for it in items:
-        estado = (it.get("estado") or "").upper()
-        color = {
-            "SI": "success",
-            "PARCIAL": "warning text-dark",
-            "NO": "danger",
-            "NA": "secondary"
-        }.get(estado, "secondary")
-
-        rows.append(f"""
-        <tr>
-          <td style="width:120px;">
-            <span class="badge bg-light text-primary border">
-              {escape(it.get("pregunta_codigo") or "")}
-            </span>
-          </td>
-          <td>
-            <div class="fw-bold text-dark">{escape(it.get("pregunta") or "")}</div>
-            <div class="small text-muted mt-1">{escape(it.get("comentario") or "")}</div>
-          </td>
-          <td class="text-center" style="width:110px;">
-            <span class="badge bg-{color}">{escape(estado)}</span>
-          </td>
-        </tr>
-        """)
-
-    content = f"""
-    <div class="nistdet-shell">
-
-      <div class="nistdet-header-card">
-        <div class="nistdet-header-overlay">
-          <div class="nistdet-header-text">
-            <h3 class="nistdet-title m-0">Preguntas SOC 2 — {escape(nombre)}</h3>
-            <div class="nistdet-subtitle">
-              Consecutivo: <b>{escape(run.consecutivo or '')}</b>
-              · Cumplimiento: <b>{pct:.2f}%</b>
-              · Nivel: <b>{escape(nivel.get("nivel",""))}</b>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="nistdet-header-actions">
-        <a href="{url_for('madurez_soc2.detalle', run_id=run.id)}"
-           class="btn nistdet-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left me-2"></i>Volver al detalle
-        </a>
-      </div>
-
-      <div class="nistdet-card p-4">
-        <div class="nistdet-section-title mb-3">{escape(nombre)}</div>
-
-        <div class="table-responsive">
-          <table class="table table-sm table-hover align-middle mb-0">
-            <thead class="table-light">
-              <tr>
-                <th>Código</th>
-                <th>Pregunta / Evidencia</th>
-                <th class="text-center">Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {''.join(rows)}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    {soc2_nist_css('nistdet', '📊')}
-    """
-
-    return render_template_string(BASE, title="Detalle criterio SOC 2", content=content)
+    return redirect(url_for("madurez_nist.historial"))
 
 
-# ============================================================
-# SOC 2 — ANÁLISIS POR CRITERIO
-# ============================================================
-
-@soc2_madurez_bp.route("/detalle/<int:run_id>/criterio/<bloque_codigo>/analisis", methods=["GET", "POST"])
+@nist_madurez_bp.route("/historial/eliminar/<int:run_id>", methods=["POST"])
 @login_required
-def analisis_criterio(run_id: int, bloque_codigo: str):
-    user = User.query.get(session.get("user_id"))
-
-    if not soc2_user_can_access(user):
-        return soc2_deny_access("No tiene permiso para ver el análisis SOC 2.")
-
-    run = Soc2MadurezRun.query.get_or_404(run_id)
-    bloque_codigo = (bloque_codigo or "").strip().upper()
+def historial_eliminar(run_id: int):
+    run = NistMadurezRun.query.get_or_404(run_id)
 
     try:
-        resumen = json.loads(run.resumen_json or "{}")
-    except Exception:
-        resumen = {}
+        # 1) Borrar análisis IA por categoría (si existe)
+        NistMadurezCategoriaAnalisis.query.filter_by(run_id=run.id).delete(synchronize_session=False)
 
-    d = resumen.get(bloque_codigo)
-    if not d:
-        flash("No se encontró información para este criterio SOC 2.", "warning")
-        return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
+        # 2) Borrar respuestas del run
+        NistMadurezRespuesta.query.filter_by(run_id=run.id).delete(synchronize_session=False)
 
-    nombre = d.get("nombre") or soc2_block_title(bloque_codigo) or bloque_codigo
-    pct = float(d.get("pct", 0) or 0)
-    items = d.get("items", []) or []
+        # 3) Borrar el run
+        db.session.delete(run)
+        db.session.commit()
 
-    analisis = Soc2MadurezCriterioAnalisis.query.filter_by(
-        run_id=run.id,
-        bloque_codigo=bloque_codigo
-    ).first()
+        flash("🗑️ Revisión eliminada correctamente.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"❌ Error eliminando la revisión: {e}", "danger")
 
-    if request.method == "POST":
-        if not soc2_user_can_execute(user):
-            return soc2_deny_execute("El rol Auditor no puede generar análisis con IA.")
+    return redirect(url_for("madurez_nist.historial"))
 
-        prompt = _soc2_ai_prompt_criterio(run, bloque_codigo, nombre, pct, items)
+# ================
+# Detalle
+# ================
 
-        try:
-            raw = _soc2_ai_text(prompt, max_tokens=1200)
-            obj = _extraer_json_objeto_soc2(raw)
-
-            estado_actual = (obj.get("estado_actual") or "").strip() if isinstance(obj, dict) else ""
-            estado_requerido = (obj.get("estado_requerido") or "").strip() if isinstance(obj, dict) else ""
-            plan_raw = json.dumps(obj.get("plan_accion", []), ensure_ascii=False) if isinstance(obj, dict) else raw
-            plan_txt = _build_plan_accion_soc2_texto(obj.get("plan_accion", [])) if isinstance(obj, dict) else raw
-
-            if not analisis:
-                analisis = Soc2MadurezCriterioAnalisis(
-                    run_id=run.id,
-                    bloque_codigo=bloque_codigo,
-                    bloque_nombre=nombre
-                )
-                db.session.add(analisis)
-
-            analisis.estado_actual = estado_actual
-            analisis.estado_requerido = estado_requerido
-            analisis.plan_accion_ai = plan_txt or plan_raw
-            analisis.plan_accion_editado = plan_txt or plan_raw
-            db.session.commit()
-
-            flash("✅ Análisis SOC 2 generado con IA.", "success")
-
-        except Exception as e:
-            db.session.rollback()
-            traceback.print_exc()
-            flash(f"❌ Error generando análisis SOC 2: {e}", "danger")
-
-        return redirect(url_for("madurez_soc2.analisis_criterio", run_id=run.id, bloque_codigo=bloque_codigo))
-
-    estado_actual = analisis.estado_actual if analisis else ""
-    estado_requerido = analisis.estado_requerido if analisis else ""
-    plan_accion = _normalizar_plan_accion_soc2_texto(
-        (analisis.plan_accion_editado or analisis.plan_accion_ai) if analisis else ""
-    )
-
-    boton_generar = ""
-    if soc2_user_can_execute(user):
-        boton_generar = """
-        <form method="POST" class="m-0">
-          <button type="submit" class="btn nistdet-btn-success rounded-pill px-4 fw-bold">
-            <i class="bi bi-magic me-2"></i>Generar análisis IA
-          </button>
-        </form>
-        """
-    else:
-        boton_generar = """
-        <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
-          <i class="bi bi-lock me-2"></i>Solo lectura
-        </button>
-        """
-
-    content = f"""
-    <div class="nistdet-shell">
-
-      <div class="nistdet-header-card">
-        <div class="nistdet-header-overlay">
-          <div class="nistdet-header-text">
-            <h3 class="nistdet-title m-0">Análisis SOC 2 — {escape(nombre)}</h3>
-            <div class="nistdet-subtitle">
-              Consecutivo: <b>{escape(run.consecutivo or '')}</b>
-              · Cumplimiento: <b>{pct:.2f}%</b>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="nistdet-header-actions">
-        <a href="{url_for('madurez_soc2.detalle', run_id=run.id)}"
-           class="btn nistdet-btn-main rounded-pill px-4 fw-bold">
-          <i class="bi bi-arrow-left me-2"></i>Volver al detalle
-        </a>
-        {boton_generar}
-      </div>
-
-      <div class="row g-3">
-        <div class="col-12 col-xl-6">
-          <div class="nistdet-card p-4 h-100">
-            <div class="nistdet-section-title">Estado actual</div>
-            <div class="nistdet-exec-box mt-3">
-              {escape(estado_actual) if estado_actual else "No se ha generado análisis."}
-            </div>
-          </div>
-        </div>
-
-        <div class="col-12 col-xl-6">
-          <div class="nistdet-card p-4 h-100">
-            <div class="nistdet-section-title">Estado requerido</div>
-            <div class="nistdet-exec-box mt-3">
-              {escape(estado_requerido) if estado_requerido else "No se ha generado análisis."}
-            </div>
-          </div>
-        </div>
-
-        <div class="col-12">
-          <div class="nistdet-card p-4">
-            <div class="nistdet-section-title">Plan de acción</div>
-            <div class="nistdet-exec-box mt-3">
-              <pre class="mb-0" style="white-space:pre-wrap;font-family:inherit;">{escape(plan_accion) if plan_accion else "No se ha generado plan de acción."}</pre>
-            </div>
-          </div>
-        </div>
-      </div>
-
-    </div>
-
-    {soc2_nist_css('nistdet', '📊')}
-    """
-
-    return render_template_string(BASE, title="Análisis criterio SOC 2", content=content)
-
-# ============================================================
-# DETALLE SOC 2 — MISMO DISEÑO NIST
-# ============================================================
-
-@soc2_madurez_bp.route("/detalle/<int:run_id>", methods=["GET"])
+@nist_madurez_bp.route("/detalle/<int:run_id>", methods=["GET"])
 @login_required
 def detalle(run_id: int):
-    user = User.query.get(session.get("user_id"))
-
-    if not soc2_user_can_access(user):
-        return soc2_deny_access("No tiene permiso para ver el detalle SOC 2.")
-
-    run = Soc2MadurezRun.query.get_or_404(run_id)
+    run = NistMadurezRun.query.get_or_404(run_id)
 
     try:
         resumen = json.loads(run.resumen_json or "{}")
     except Exception:
         resumen = {}
 
-    if not resumen:
-        run_analysis_from_soc2_run(run.id)
-        run = Soc2MadurezRun.query.get_or_404(run.id)
-        try:
-            resumen = json.loads(run.resumen_json or "{}")
-        except Exception:
-            resumen = {}
-
-    def _nl2br_soc2(s: str) -> str:
-        txt = soc2_normalizar_texto_rico_guardado(s or "")
+    def _nl2br(s: str) -> str:
+        txt = _nist_limpiar_texto_rico_guardado(s or "")
         return txt.replace("\n", "<br>")
 
-    radar_labels, radar_values = soc2_pct_por_criterio(resumen, SOC2_BLOCK_ORDER)
-    radar_b64 = run.radar_overall_b64 or soc2_radar_b64(
-        radar_labels,
-        radar_values,
-        title="Radar por Criterio"
-    )
+    # =========================
+    # Radar por función
+    # =========================
+    radar_labels, radar_values = nist_pct_por_funcion(resumen, NIST_FUNC_ORDER)
+    radar_b64 = nist_radar_b64(radar_labels, radar_values, title="Radar por Función")
 
-    informe_ai = soc2_normalizar_texto_rico_guardado(run.informe_ejecutivo_ai or "")
-    informe_editado = soc2_normalizar_texto_rico_guardado(run.informe_ejecutivo_editado or "")
+    informe_ai = _nist_limpiar_texto_rico_guardado(run.informe_ejecutivo_ai or "")
+    informe_editado = _nist_limpiar_texto_rico_guardado(run.informe_ejecutivo_editado or "")
     informe_mostrar = informe_editado if informe_editado else informe_ai
 
-    nivel_general = soc2_nivel_visual_por_pct(run.pct_general)
+    nivel_general = nist_nivel_visual_por_pct(run.pct_general)
     nivel_general_texto = (nivel_general.get("nivel") or "").strip()
     nivel_general_nombre = nivel_general_texto.split(":", 1)[1].strip() if ":" in nivel_general_texto else nivel_general_texto
 
-    botones_ia = ""
-    if soc2_user_can_execute(user):
-        botones_ia = f"""
-          <form method="POST"
-                  action="{url_for('madurez_soc2.informe_ejecutivo_generar', run_id=run.id)}"
-                  class="m-0">
-              <button type="submit" class="btn nistdet-btn-success rounded-pill px-4 fw-bold">
-                <i class="bi bi-magic me-2"></i>Generar con IA
-              </button>
-            </form>
-
-            <a href="{url_for('madurez_soc2.informe_ejecutivo_editar', run_id=run.id)}"
-               class="btn btn-primary rounded-pill px-4 fw-bold">
-              <i class="bi bi-pencil-square me-2"></i>Editar
-            </a>
-        """
-    else:
-        botones_ia = """
-          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
-            <i class="bi bi-lock me-2"></i>Solo lectura
-          </button>
-        """
-
-    pdf_btn = ""
-    if soc2_user_can_access(user):
-        pdf_btn = f"""
-        <a href="{url_for('madurez_soc2.exportar_pdf', run_id=run.id)}"
-           class="btn btn-danger rounded-pill px-4 fw-bold">
-          <i class="bi bi-file-earmark-pdf me-2"></i>Exportar PDF
-        </a>
-        """
-
+    # =========================
+    # Tarjeta superior
+    # =========================
     top_html = f"""
     <div class="row g-3 mb-4">
 
@@ -5582,9 +7123,9 @@ def detalle(run_id: int):
         <div class="nistdet-card p-4 h-100">
           <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
             <div>
-              <div class="nistdet-card-title">📊 Radar por Criterio General</div>
+              <div class="nistdet-card-title">📊 Radar por Capítulo General</div>
               <div class="text-muted small">
-                Resultado consolidado por criterios SOC 2.
+                Resultado consolidado por función NIST CSF 2.0.
               </div>
             </div>
 
@@ -5609,22 +7150,33 @@ def detalle(run_id: int):
             <div>
               <div class="nistdet-card-title">🧾 Informe ejecutivo</div>
               <div class="text-muted small">
-                Síntesis ejecutiva generada con IA a partir de los resultados por criterio SOC 2.
+                Síntesis ejecutiva generada con IA a partir de los resultados por capítulo y categoría.
               </div>
             </div>
 
             <div class="d-flex gap-2 flex-wrap">
-              {botones_ia}
+              <form method="POST"
+                      action="{url_for('madurez_nist.informe_ejecutivo_generar', run_id=run.id)}"
+                      class="m-0">
+                  <button type="submit" class="btn nistdet-btn-success rounded-pill px-4 fw-bold">
+                    <i class="bi bi-magic me-2"></i>Generar con IA
+                  </button>
+                </form>
+
+                <a href="{url_for('madurez_nist.informe_ejecutivo_editar', run_id=run.id)}"
+                   class="btn btn-primary rounded-pill px-4 fw-bold">
+                  <i class="bi bi-pencil-square me-2"></i>Editar
+                </a>
             </div>
           </div>
 
           <div class="nistdet-exec-box mt-3">
-            {f'<div class="nistdet-exec-text">{_nl2br_soc2(escape(informe_mostrar))}</div>' if informe_mostrar else '''
+            {f'<div class="nistdet-exec-text">{_nl2br(escape(informe_mostrar))}</div>' if informe_mostrar else '''
               <div class="text-center py-4">
-                <div class="mb-2" style="font-size:2rem;">&#129302;</div>
+                <div class="mb-2" style="font-size:2rem;">&#129302;</div>>
                 <div class="fw-bold text-black">Aún no hay informe ejecutivo</div>
                 <div class="text-muted small mt-1">
-                  No se ha generado informe ejecutivo para esta revisión.
+                  Presiona <b>Generar con IA</b> para construir el informe con base en el resultado de los capítulos NIST.
                 </div>
               </div>
             '''}
@@ -5635,6 +7187,9 @@ def detalle(run_id: int):
     </div>
     """
 
+    # =========================
+    # Gauge
+    # =========================
     def gauge_svg_categoria(pct, color="#2f6fb6"):
         try:
             pct = max(0, min(100, float(pct or 0)))
@@ -5661,121 +7216,140 @@ def detalle(run_id: int):
         </svg>
         """
 
-    criterio_cards = []
+    # =========================
+    # Capítulos y categorías
+    # =========================
+    capitulo_cards = []
 
-    for code in SOC2_BLOCK_ORDER:
-        if code not in resumen:
+    for func in NIST_FUNC_ORDER:
+        if func not in resumen:
             continue
 
-        d = resumen.get(code, {}) or {}
+        cats = resumen.get(func, {}) or {}
 
-        pct = float(d.get("pct", 0) or 0)
-        total = int(d.get("total", 0) or 0)
-        nombre_criterio = (d.get("nombre") or soc2_block_title(code) or code).strip()
+        # promedio del capítulo
+        pct_func_list = []
+        for _, d in cats.items():
+            try:
+                pct_func_list.append(float(d.get("pct", 0) or 0))
+            except Exception:
+                pct_func_list.append(0.0)
 
-        nivel_data = soc2_nivel_visual_por_pct(pct)
-        nivel_score = nivel_data.get("score", "")
-        nivel_texto = (nivel_data.get("nivel") or "").strip()
-        nivel_nombre = nivel_texto.split(":", 1)[1].strip() if ":" in nivel_texto else nivel_texto
+        pct_func = (sum(pct_func_list) / len(pct_func_list)) if pct_func_list else 0.0
+        nivel_func = nist_nivel_visual_por_pct(pct_func)
+        nivel_func_texto = (nivel_func.get("nivel") or "").strip()
+        nivel_func_nombre = nivel_func_texto.split(":", 1)[1].strip() if ":" in nivel_func_texto else nivel_func_texto
 
-        gauge_html = gauge_svg_categoria(pct, nivel_data.get("color", "#2f6fb6"))
+        subcards = []
 
-        criterio_cards.append(f"""
-        <div class="col-12 col-md-6 col-xl-4">
-          <div class="nistdet-subcard h-100">
+        for cat_code, d in cats.items():
+            pct = float(d.get("pct", 0) or 0)
+            total = int(d.get("total", 0) or 0)
+            nombre_categoria = (d.get("categoria") or "").strip()
+            nivel_data = nist_nivel_visual_por_pct(pct)
 
-            <div class="nistdet-subcard-top">
-              <div class="text-center">
-                {gauge_html}
+            nivel_score = nivel_data.get("score", "")
+            nivel_texto = (nivel_data.get("nivel") or "").strip()
+            nivel_nombre = nivel_texto.split(":", 1)[1].strip() if ":" in nivel_texto else nivel_texto
+
+            gauge_html = gauge_svg_categoria(pct, nivel_data.get("color", "#2f6fb6"))
+
+            subcards.append(f"""
+            <div class="col-12 col-md-6 col-xl-4">
+              <div class="nistdet-subcard h-100">
+
+                <div class="nistdet-subcard-top">
+                  <div class="text-center">
+                    {gauge_html}
+                  </div>
+                </div>
+
+                <div class="nistdet-subcard-body">
+                  <div class="nistdet-row">
+                    <div class="nistdet-label">Categoría</div>
+                    <div class="nistdet-value fw-bold">{escape(cat_code)}</div>
+                  </div>
+
+                  <div class="nistdet-row">
+                    <div class="nistdet-label">Nombre</div>
+                    <div class="nistdet-value nistdet-value-wrap">{escape(nombre_categoria)}</div>
+                  </div>
+
+                  <div class="nistdet-row">
+                    <div class="nistdet-label">% Cumplimiento</div>
+                    <div class="nistdet-value fw-bold">{pct:.2f}%</div>
+                  </div>
+
+                  <div class="nistdet-row">
+                    <div class="nistdet-label">Nivel de Madurez</div>
+                    <div class="nistdet-value">
+                      <div class="d-flex align-items-center gap-2 flex-wrap mb-1">
+                        <span class="nivel-dot"
+                              style="background-color:{nivel_data.get('color','#6c757d')} !important;"></span>
+                        <span class="fw-bold">Nivel {nivel_score}</span>
+                      </div>
+                      <div class="text-muted small nistdet-value-wrap">
+                        {escape(nivel_nombre)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="nistdet-row">
+                    <div class="nistdet-label">Ítems</div>
+                    <div class="nistdet-value fw-bold">{total}</div>
+                  </div>
+
+                  <div class="nistdet-row nistdet-row-actions">
+                    <div class="nistdet-label">Acciones</div>
+                    <div class="nistdet-value">
+                      <div class="d-flex flex-wrap gap-2">
+                        <a class="btn btn-sm btn-outline-primary rounded-pill"
+                           href="{url_for('madurez_nist.detalle_categoria', run_id=run.id, func=func, cat_code=cat_code)}">
+                          <i class="bi bi-list-check me-1"></i>Ver preguntas
+                        </a>
+
+                        <a class="btn btn-sm btn-outline-dark rounded-pill"
+                           href="{url_for('madurez_nist.analisis_categoria', run_id=run.id, func=func, cat_code=cat_code)}">
+                          <i class="bi bi-cpu me-1"></i>Análisis
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+            """)
+
+        capitulo_cards.append(f"""
+        <div class="nistdet-card p-4 mb-4">
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">
+            <div>
+              <div class="nistdet-section-title">{escape(func)}</div>
+              <div class="text-muted small">
+                Resultado detallado por categorías del capítulo {escape(func)}.
               </div>
             </div>
 
-            <div class="nistdet-subcard-body">
-              <div class="nistdet-row">
-                <div class="nistdet-label">Criterio</div>
-                <div class="nistdet-value fw-bold">{escape(code)}</div>
+            <div class="nistdet-capitulo-resumen">
+              <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
+                <span class="badge rounded-pill px-3 py-2"
+                      style="background:{nivel_func.get('color','#6c757d')}; color:#fff;">
+                  Nivel {nivel_func.get('score', 0)}
+                </span>
+                <span class="fw-bold text-dark">{pct_func:.2f}%</span>
               </div>
-
-              <div class="nistdet-row">
-                <div class="nistdet-label">Nombre</div>
-                <div class="nistdet-value nistdet-value-wrap">{escape(nombre_criterio)}</div>
-              </div>
-
-              <div class="nistdet-row">
-                <div class="nistdet-label">% Cumplimiento</div>
-                <div class="nistdet-value fw-bold">{pct:.2f}%</div>
-              </div>
-
-              <div class="nistdet-row">
-                <div class="nistdet-label">Nivel de Madurez</div>
-                <div class="nistdet-value">
-                  <div class="d-flex align-items-center gap-2 flex-wrap mb-1">
-                    <span class="nivel-dot"
-                          style="background-color:{nivel_data.get('color','#6c757d')} !important;"></span>
-                    <span class="fw-bold">Nivel {nivel_score}</span>
-                  </div>
-                  <div class="text-muted small nistdet-value-wrap">
-                    {escape(nivel_nombre)}
-                  </div>
-                </div>
-              </div>
-
-              <div class="nistdet-row">
-                <div class="nistdet-label">Ítems</div>
-                <div class="nistdet-value fw-bold">{total}</div>
-              </div>
-
-              <div class="nistdet-row nistdet-row-actions">
-                <div class="nistdet-label">Acciones</div>
-                <div class="nistdet-value">
-                  <div class="d-flex flex-wrap gap-2">
-                    <a class="btn btn-sm btn-outline-primary rounded-pill"
-                       href="{url_for('madurez_soc2.detalle_criterio', run_id=run.id, bloque_codigo=code)}">
-                      <i class="bi bi-list-check me-1"></i>Ver preguntas
-                    </a>
-
-                    <a class="btn btn-sm btn-outline-dark rounded-pill"
-                       href="{url_for('madurez_soc2.analisis_criterio', run_id=run.id, bloque_codigo=code)}">
-                      <i class="bi bi-cpu me-1"></i>Análisis
-                    </a>
-                  </div>
-                </div>
+              <div class="small text-muted text-end mt-1">
+                {escape(nivel_func_nombre)}
               </div>
             </div>
+          </div>
 
+          <div class="row g-3">
+            {''.join(subcards)}
           </div>
         </div>
         """)
-
-    capitulo_cards = f"""
-    <div class="nistdet-card p-4 mb-4">
-      <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">
-        <div>
-          <div class="nistdet-section-title">SOC 2 — Trust Services Criteria</div>
-          <div class="text-muted small">
-            Resultado detallado por criterios SOC 2.
-          </div>
-        </div>
-
-        <div class="nistdet-capitulo-resumen">
-          <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
-            <span class="badge rounded-pill px-3 py-2"
-                  style="background:{nivel_general.get('color','#6c757d')}; color:#fff;">
-              Nivel {nivel_general.get('score', 0)}
-            </span>
-            <span class="fw-bold text-dark">{run.pct_general:.2f}%</span>
-          </div>
-          <div class="small text-muted text-end mt-1">
-            {escape(nivel_general_nombre)}
-          </div>
-        </div>
-      </div>
-
-      <div class="row g-3">
-        {''.join(criterio_cards)}
-      </div>
-    </div>
-    """
 
     content = f"""
     <div class="nistdet-shell">
@@ -5783,7 +7357,7 @@ def detalle(run_id: int):
       <div class="nistdet-header-card">
         <div class="nistdet-header-overlay">
           <div class="nistdet-header-text">
-            <h3 class="nistdet-title m-0">Resultado de Madurez — SOC 2</h3>
+            <h3 class="nistdet-title m-0">Resultado de Madurez — NIST CSF 2.0</h3>
             <div class="nistdet-subtitle">
               Consecutivo: <b>{escape(run.consecutivo or '')}</b>
               · Cumplimiento general: <b>{run.pct_general:.2f}%</b>
@@ -5794,829 +7368,39 @@ def detalle(run_id: int):
       </div>
 
       <div class="nistdet-header-actions">
-        <a href="{url_for('madurez_soc2.historial')}"
+        <a href="{url_for('madurez_nist.historial')}"
            class="btn nistdet-btn-main rounded-pill px-4 fw-bold">
           <i class="bi bi-arrow-left me-2"></i>Volver al historial
         </a>
 
-        <a href="{url_for('madurez_soc2.inicio_soc2')}"
+        <a href="{url_for('madurez_nist.home')}"
            class="btn nistdet-btn-soft rounded-pill px-4 fw-bold">
           <i class="bi bi-house-door-fill me-2"></i>Volver al módulo
         </a>
-
-        {pdf_btn}
       </div>
 
       {top_html}
 
-      {capitulo_cards}
+      {''.join(capitulo_cards)}
 
     </div>
 
-    {soc2_nist_css('nistdet', '📊')}
-    """
-    return render_template_string(BASE, title="Detalle SOC 2", content=content)
-
-
-# Alias por compatibilidad si tu menú anterior apuntaba a resultado
-@soc2_madurez_bp.route("/resultado/<int:run_id>", methods=["GET"])
-@login_required
-def resultado(run_id: int):
-    return detalle(run_id)
-
-# ============================================================
-# SOC 2 — PROMPT INFORME EJECUTIVO IA
-# ============================================================
-
-def _soc2_prompt_informe_ejecutivo(run: "Soc2MadurezRun", resumen: dict) -> str:
-    """
-    Prompt para generar informe ejecutivo SOC 2.
-    Lo usa informe_ejecutivo_generar().
-    """
-
-    lineas = []
-
-    for code in SOC2_BLOCK_ORDER:
-        d = (resumen or {}).get(code)
-        if not d:
-            continue
-
-        lineas.append(
-            f"- {d.get('nombre') or soc2_block_title(code) or code}: "
-            f"{float(d.get('pct', 0) or 0):.2f}% | "
-            f"Nivel: {d.get('madurez') or ''} | "
-            f"SI: {d.get('SI', 0)} | "
-            f"Parcial: {d.get('PARCIAL', 0)} | "
-            f"NO: {d.get('NO', 0)} | "
-            f"N/A: {d.get('NA', 0)} | "
-            f"Total: {d.get('total', 0)}"
-        )
-
-    criterios_txt = "\n".join(lineas) if lineas else "Sin resultados consolidados."
-
-    return f"""
-Eres un consultor senior experto en SOC 2, auditoría de controles, gobierno de seguridad de la información y Trust Services Criteria.
-
-Genera un informe ejecutivo profesional para alta dirección.
-
-DATOS DE LA EVALUACIÓN
-Consecutivo: {run.consecutivo}
-Cumplimiento general: {float(run.pct_general or 0):.2f}%
-
-RESULTADOS POR CRITERIO
-{criterios_txt}
-
-RESPONDE ÚNICAMENTE JSON VÁLIDO.
-No uses markdown.
-No agregues texto antes ni después del JSON.
-
-Formato exacto:
-{{
-  "informe_ejecutivo": "texto"
-}}
-
-REGLAS:
-- El informe debe tener entre 5 y 8 párrafos.
-- No repitas el título "Informe Ejecutivo".
-- Explica el estado general de madurez SOC 2.
-- Menciona fortalezas principales.
-- Menciona brechas o criterios con menor cumplimiento.
-- Explica riesgos ejecutivos asociados.
-- Incluye recomendaciones estratégicas.
-- No inventes datos que no estén en los resultados.
-- Redacción clara, ejecutiva y consultiva.
-""".strip()
-
-# ============================================================
-# IA — INFORME / PLAN
-# ============================================================
-
-@soc2_madurez_bp.route("/detalle/<int:run_id>/informe-ejecutivo/generar", methods=["POST"])
-@login_required
-def informe_ejecutivo_generar(run_id: int):
-    user = User.query.get(session.get("user_id"))
-
-    if not soc2_user_can_execute(user):
-        return soc2_deny_execute("El perfil Auditor no puede generar el informe ejecutivo con IA.")
-
-    run = Soc2MadurezRun.query.get_or_404(run_id)
-
-    try:
-        resumen = json.loads(run.resumen_json or "{}")
-    except Exception:
-        resumen = {}
-
-    if not resumen:
-        flash("⚠️ No hay resultados consolidados para generar el informe ejecutivo.", "warning")
-        return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
-
-    try:
-        raw = _soc2_ai_text(
-            _soc2_prompt_informe_ejecutivo(run, resumen),
-            max_tokens=1200
-        )
-
-        obj = _extraer_json_objeto_soc2(raw)
-
-        if isinstance(obj, dict):
-            informe_ai = (
-                obj.get("informe_ejecutivo")
-                or obj.get("informe")
-                or obj.get("resumen_ejecutivo")
-                or obj.get("texto")
-                or ""
-            )
-        else:
-            informe_ai = raw or ""
-
-        informe_ai = soc2_normalizar_texto_rico_guardado(informe_ai)
-
-        if not informe_ai:
-            raise RuntimeError("La IA no devolvió un informe válido.")
-
-        run.informe_ejecutivo_ai = informe_ai
-        run.informe_ejecutivo_editado = informe_ai
-        run.updated_at = datetime.utcnow()
-
-        db.session.add(run)
-        db.session.commit()
-
-        flash("✅ Informe ejecutivo SOC 2 generado con IA.", "success")
-
-    except Exception as e:
-        db.session.rollback()
-        flash(f"❌ Error llamando IA para el informe ejecutivo: {e}", "danger")
-
-    return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
-
-
-@soc2_madurez_bp.route("/detalle/<int:run_id>/informe-ejecutivo/editar", methods=["GET", "POST"])
-@login_required
-def informe_ejecutivo_editar(run_id: int):
-    user = User.query.get(session.get("user_id"))
-
-    if not soc2_user_can_execute(user):
-        return soc2_deny_execute("El perfil Auditor no puede editar el informe ejecutivo.")
-
-    run = Soc2MadurezRun.query.get_or_404(run_id)
-
-    if request.method == "POST":
-        texto_form = request.form.get("informe") or ""
-        texto_limpio = soc2_normalizar_texto_rico_guardado(texto_form)
-
-        run.informe_ejecutivo_editado = texto_limpio
-        run.updated_at = datetime.utcnow()
-
-        db.session.add(run)
-        db.session.commit()
-
-        flash("✅ Informe ejecutivo SOC 2 actualizado.", "success")
-        return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
-
-    texto = run.informe_ejecutivo_editado or run.informe_ejecutivo_ai or ""
-    texto = soc2_normalizar_texto_rico_guardado(texto)
-
-    # Limpia en base de datos si venía guardado como JSON literal
-    if texto and texto != (run.informe_ejecutivo_editado or run.informe_ejecutivo_ai or ""):
-        run.informe_ejecutivo_editado = texto
-        db.session.add(run)
-        db.session.commit()
-
-    content = f"""
-<div class="nistdet-shell">
-  <div class="nistdet-header-card">
-    <div class="nistdet-header-overlay">
-      <div class="nistdet-header-text">
-        <h3 class="nistdet-title m-0">Editar Informe Ejecutivo — SOC 2</h3>
-      </div>
-    </div>
-  </div>
-
-  <form method="POST" class="nistdet-card p-4">
-    <textarea name="informe" rows="18" class="form-control">{escape(texto)}</textarea>
-
-    <div class="text-end mt-3">
-      <a href="{url_for('madurez_soc2.detalle', run_id=run.id)}"
-         class="btn btn-secondary rounded-pill px-4">
-        Cancelar
-      </a>
-
-      <button class="btn btn-primary rounded-pill px-4 fw-bold">
-        Guardar
-      </button>
-    </div>
-  </form>
-</div>
-{soc2_nist_css('nistdet', '✍️')}
-"""
-    return render_template_string(BASE, title="Editar Informe Ejecutivo SOC 2", content=content)
-
-
-@soc2_madurez_bp.route("/detalle/<int:run_id>/plan-trabajo/generar", methods=["POST"])
-@login_required
-def plan_trabajo_generar(run_id: int):
-    user = User.query.get(session.get("user_id"))
-
-    if not soc2_user_can_execute(user):
-        return soc2_deny_execute("El perfil Auditor no puede generar el plan de trabajo con IA.")
-
-    run = Soc2MadurezRun.query.get_or_404(run_id)
-    resumen = json.loads(run.resumen_json or "{}")
-
-    try:
-        raw = _soc2_ai_text(_soc2_prompt_plan_trabajo(run, resumen), max_tokens=1600)
-        obj = _extraer_json_objeto_soc2(raw)
-        plan = obj.get("plan_trabajo") if isinstance(obj, dict) else None
-        plan_txt = _build_plan_accion_soc2_texto(plan) if isinstance(plan, list) else raw
-        plan_txt = soc2_normalizar_texto_rico_guardado(plan_txt)
-
-        if not plan_txt:
-            raise RuntimeError("La IA no devolvió un plan válido.")
-
-        run.plan_trabajo_ai = plan_txt
-        run.plan_trabajo_editado = plan_txt
-        db.session.commit()
-
-        flash("✅ Plan de trabajo SOC 2 generado con IA.", "success")
-
-    except Exception as e:
-        db.session.rollback()
-        flash(f"❌ Error generando plan de trabajo: {e}", "danger")
-
-    return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
-
-
-@soc2_madurez_bp.route("/detalle/<int:run_id>/plan-trabajo/editar", methods=["GET", "POST"])
-@login_required
-def plan_trabajo_editar(run_id: int):
-    user = User.query.get(session.get("user_id"))
-
-    if not soc2_user_can_execute(user):
-        return soc2_deny_execute("El perfil Auditor no puede editar el plan de trabajo.")
-
-    run = Soc2MadurezRun.query.get_or_404(run_id)
-
-    if request.method == "POST":
-        run.plan_trabajo_editado = (request.form.get("plan") or "").strip()
-        db.session.commit()
-        flash("✅ Plan de trabajo SOC 2 actualizado.", "success")
-        return redirect(url_for("madurez_soc2.detalle", run_id=run.id))
-
-    texto = run.plan_trabajo_editado or run.plan_trabajo_ai or ""
-
-    content = f"""
-<div class="nistdet-shell">
-  <div class="nistdet-header-card">
-    <div class="nistdet-header-overlay">
-      <div class="nistdet-header-text">
-        <h3 class="nistdet-title m-0">Editar Plan de Trabajo — SOC 2</h3>
-      </div>
-    </div>
-  </div>
-
-  <form method="POST" class="nistdet-card p-4">
-    <textarea name="plan" rows="18" class="form-control">{escape(texto)}</textarea>
-    <div class="text-end mt-3">
-      <a href="{url_for('madurez_soc2.detalle', run_id=run.id)}" class="btn btn-secondary rounded-pill px-4">Cancelar</a>
-      <button class="btn btn-success rounded-pill px-4 fw-bold">Guardar</button>
-    </div>
-  </form>
-</div>
-{soc2_nist_css('nistdet', '✍️')}
-"""
-    return render_template_string(BASE, title="Editar Plan SOC 2", content=content)
-
-# ============================================================
-# PDF EJECUTIVO SOC 2
-# ============================================================
-
-def _soc2_build_pdf_run(run: "Soc2MadurezRun") -> io.BytesIO:
-    try:
-        resumen = json.loads(run.resumen_json or "{}")
-    except Exception:
-        resumen = {}
-
-    labels, values = soc2_pct_por_criterio(resumen, SOC2_BLOCK_ORDER)
-    radar_b64 = run.radar_overall_b64 or soc2_radar_b64(
-        labels,
-        values,
-        title="Radar por Criterio - SOC 2"
-    )
-
-    buf = io.BytesIO()
-
-    doc = SimpleDocTemplate(
-        buf,
-        pagesize=landscape(A4),
-        leftMargin=1.2 * cm,
-        rightMargin=1.2 * cm,
-        topMargin=1.0 * cm,
-        bottomMargin=1.0 * cm,
-        title="SOC 2 - Informe Ejecutivo"
-    )
-
-    styles = getSampleStyleSheet()
-
-    styles.add(ParagraphStyle(
-        name="SOC2_Title",
-        parent=styles["Title"],
-        fontName="Helvetica-Bold",
-        fontSize=18,
-        textColor=colors.white,
-        alignment=TA_CENTER,
-        spaceAfter=8
-    ))
-
-    styles.add(ParagraphStyle(
-        name="SOC2_Section",
-        parent=styles["Heading2"],
-        fontName="Helvetica-Bold",
-        fontSize=12,
-        textColor=colors.HexColor("#1d4f8f"),
-        spaceBefore=10,
-        spaceAfter=8
-    ))
-
-    styles.add(ParagraphStyle(
-        name="SOC2_Normal",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=8.5,
-        leading=11,
-        textColor=colors.HexColor("#101827"),
-        spaceAfter=5
-    ))
-
-    styles.add(ParagraphStyle(
-        name="SOC2_Small",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=7.5,
-        leading=9,
-        textColor=colors.HexColor("#374151"),
-        spaceAfter=4
-    ))
-
-    def pdf_escape(v):
-        return html.escape(str(v or ""))
-
-    story = []
-
-    title_tbl = Table(
-        [[Paragraph("SOC 2 - Informe de Madurez", styles["SOC2_Title"])]],
-        colWidths=[26.8 * cm]
-    )
-    title_tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#3f86d6")),
-        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#1d4f8f")),
-        ("TOPPADDING", (0, 0), (-1, -1), 8),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-    ]))
-    story.append(title_tbl)
-    story.append(Spacer(1, 8))
-
-    nivel_general = soc2_resolver_nivel(run.pct_general)
-
-    resumen_tbl = Table([
-        ["Consecutivo", pdf_escape(run.consecutivo)],
-        ["Fecha", run.created_at.strftime("%Y-%m-%d %H:%M") if run.created_at else ""],
-        ["Cumplimiento general", f"{float(run.pct_general or 0):.2f}% - {pdf_escape(nivel_general.get('nivel',''))}"],
-    ], colWidths=[5.2 * cm, 21.6 * cm])
-
-    resumen_tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f1fb")),
-        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#1d4f8f")),
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-    ]))
-    story.append(resumen_tbl)
-    story.append(Spacer(1, 10))
-
-    story.append(Paragraph("Informe Ejecutivo", styles["SOC2_Section"]))
-
-    informe = soc2_normalizar_texto_rico_guardado(
-        run.informe_ejecutivo_editado or run.informe_ejecutivo_ai or ""
-    )
-
-    if informe:
-        for parrafo in re.split(r"\n\s*\n", informe):
-            if parrafo.strip():
-                story.append(Paragraph(pdf_escape(parrafo.strip()), styles["SOC2_Normal"]))
-    else:
-        story.append(Paragraph("No hay informe ejecutivo registrado.", styles["SOC2_Normal"]))
-
-    story.append(Spacer(1, 8))
-    story.append(Paragraph("Radar por Criterio SOC 2", styles["SOC2_Section"]))
-
-    if radar_b64:
-        try:
-            img = RLImage(
-                io.BytesIO(base64.b64decode(radar_b64)),
-                width=11.5 * cm,
-                height=11.0 * cm
-            )
-            story.append(img)
-        except Exception:
-            story.append(Paragraph("No fue posible insertar el radar.", styles["SOC2_Normal"]))
-
-    story.append(Paragraph("Detalle por Criterio", styles["SOC2_Section"]))
-
-    data = [[
-        "Criterio",
-        "% Cumplimiento",
-        "Nivel",
-        "SI",
-        "Parcial",
-        "NO",
-        "N/A",
-        "Ítems"
-    ]]
-
-    for code in SOC2_BLOCK_ORDER:
-        d = resumen.get(code)
-        if not d:
-            continue
-
-        data.append([
-            Paragraph(pdf_escape(d.get("nombre") or code), styles["SOC2_Small"]),
-            Paragraph(f"{float(d.get('pct', 0) or 0):.2f}%", styles["SOC2_Small"]),
-            Paragraph(pdf_escape(d.get("madurez") or ""), styles["SOC2_Small"]),
-            str(d.get("SI", 0)),
-            str(d.get("PARCIAL", 0)),
-            str(d.get("NO", 0)),
-            str(d.get("NA", 0)),
-            str(d.get("total", 0)),
-        ])
-
-    tbl = Table(
-        data,
-        colWidths=[
-            7.2 * cm,
-            3.0 * cm,
-            5.0 * cm,
-            1.5 * cm,
-            2.0 * cm,
-            1.5 * cm,
-            1.5 * cm,
-            2.0 * cm
-        ],
-        repeatRows=1
-    )
-
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3f86d6")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8e3")),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-    ]))
-
-    story.append(tbl)
-
-    plan = _normalizar_plan_accion_soc2_texto(
-        run.plan_trabajo_editado or run.plan_trabajo_ai or ""
-    )
-
-    if plan:
-        story.append(PageBreak())
-        story.append(Paragraph("Plan de Trabajo", styles["SOC2_Section"]))
-
-        for parrafo in re.split(r"\n\s*\n", plan):
-            if parrafo.strip():
-                story.append(Paragraph(pdf_escape(parrafo.strip()), styles["SOC2_Normal"]))
-
-    doc.build(story)
-    buf.seek(0)
-    return buf
-
-# ============================================================
-# EXPORTAR PDF — ADMIN / USUARIO CON PERMISO / AUDITOR
-# ============================================================
-
-@soc2_madurez_bp.route("/detalle/<int:run_id>/pdf", methods=["GET"])
-@login_required
-def exportar_pdf(run_id: int):
-    user = User.query.get(session.get("user_id"))
-
-    # ✅ Auditor también puede exportar/imprimir PDF
-    denied = soc2_check_access_or_redirect(
-        user,
-        "No tiene permiso para exportar PDF SOC 2."
-    )
-    if denied:
-        return denied
-
-    run = Soc2MadurezRun.query.get_or_404(run_id)
-
-    pdf = _soc2_build_pdf_run(run)
-
-    filename = f"SOC2_Madurez_{re.sub(r'[^A-Za-z0-9_-]+', '_', run.consecutivo or str(run.id))}.pdf"
-
-    return send_file(
-        pdf,
-        mimetype="application/pdf",
-        as_attachment=True,
-        download_name=filename
-    )
-
-
-# ============================================================
-# ELIMINAR — AUDITOR NO PUEDE
-# ============================================================
-
-@soc2_madurez_bp.route("/detalle/<int:run_id>/eliminar", methods=["POST"])
-@login_required
-def eliminar_run(run_id: int):
-    user = User.query.get(session.get("user_id"))
-
-    if not soc2_user_can_execute(user):
-        return soc2_deny_execute("El perfil Auditor no puede eliminar revisiones SOC 2.")
-
-    run = Soc2MadurezRun.query.get_or_404(run_id)
-
-    try:
-        Soc2MadurezCriterioAnalisis.query.filter_by(run_id=run.id).delete(synchronize_session=False)
-        Soc2MadurezRespuesta.query.filter_by(run_id=run.id).delete(synchronize_session=False)
-        db.session.delete(run)
-        db.session.commit()
-        flash("✅ Revisión SOC 2 eliminada correctamente.", "success")
-
-    except Exception as e:
-        db.session.rollback()
-        flash(f"❌ Error eliminando revisión SOC 2: {e}", "danger")
-
-    return redirect(url_for("madurez_soc2.historial"))
-
-
-# ============================================================
-# CSS — COPIA DE PATRÓN NIST
-# ============================================================
-def soc2_nist_css(prefix, icon, subtitle_label="SOC 2"):
-    return f"""
-<style>
-  body{{
-    background-image:url('/static/img/ccsgsi.jpg');
-    background-size:cover;
-    background-position:center;
-    background-attachment:fixed;
-    background-repeat:no-repeat;
-  }}
-
-  .{prefix}-shell{{
-    width:96%;
-    max-width:1600px;
-    margin:26px auto 24px auto;
-  }}
-
-  .{prefix}-header-card{{
-    background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-    border-radius:18px;
-    padding:16px 24px;
-    min-height:94px;
-    display:flex;
-    align-items:center;
-    justify-content:flex-start;
-    box-shadow:0 12px 24px rgba(15,23,42,.25);
-    position:relative;
-    overflow:hidden;
-    margin-bottom:14px;
-  }}
-
-  .{prefix}-header-card::before{{
-    content:"";
-    position:absolute;
-    inset:0;
-    background:
-      radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-      repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-    pointer-events:none;
-  }}
-
-  .{prefix}-header-overlay{{
-    width:100%;
-    display:flex;
-    align-items:center;
-    justify-content:flex-start;
-    text-align:left;
-    background:transparent !important;
-    padding:0 !important;
-    position:relative;
-    z-index:1;
-  }}
-
-  .{prefix}-header-overlay::before{{
-    content:"{icon}";
-    width:54px;
-    height:54px;
-    min-width:54px;
-    border-radius:14px;
-    background:#ffffff;
-    color:#0b4a8f;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    font-size:1.45rem;
-    box-shadow:0 8px 18px rgba(0,0,0,.25);
-    margin-right:14px;
-  }}
-
-  .{prefix}-header-text{{
-    max-width:1100px;
-    width:100%;
-    display:block !important;
-    transform:none !important;
-  }}
-
-  .{prefix}-header-text::before{{
-    content:"SGSI · {subtitle_label}";
-    display:inline-block;
-    background:rgba(255,255,255,.18);
-    border-radius:999px;
-    padding:3px 10px;
-    font-size:.65rem;
-    font-weight:800;
-    margin-bottom:4px;
-    color:#ffffff;
-  }}
-
-  .{prefix}-title{{
-    color:#ffffff !important;
-    font-weight:950;
-    font-size:1.32rem;
-    line-height:1.1;
-    text-shadow:0 3px 10px rgba(0,0,0,.35);
-    margin:0 !important;
-  }}
-
-  .{prefix}-subtitle{{
-    color:rgba(255,255,255,.95);
-    font-size:.78rem;
-    margin-top:4px;
-    line-height:1.25;
-    font-weight:800;
-  }}
-
-  .{prefix}-header-actions{{
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    flex-wrap:wrap;
-    gap:10px;
-    margin:10px 0 14px;
-  }}
-
-  .{prefix}-header-actions .btn,
-  .{prefix}-btn-main,
-  .{prefix}-btn-primary,
-  .{prefix}-btn-soft,
-  .btn{{
-    border-radius:10px !important;
-    min-height:32px;
-    padding:8px 22px !important;
-    font-size:.82rem;
-    font-weight:900;
-    box-shadow:0 8px 16px rgba(15,23,42,.15);
-  }}
-
-  .{prefix}-btn-main,
-  .{prefix}-btn-primary{{
-    background:#0b4a8f !important;
-    border:1px solid #0b4a8f !important;
-    color:#ffffff !important;
-  }}
-
-  .{prefix}-btn-main:hover,
-  .{prefix}-btn-primary:hover{{
-    background:#0f4f94 !important;
-    color:#ffffff !important;
-  }}
-
-  .{prefix}-btn-soft{{
-    background:#ffffff !important;
-    border:1px solid #cfd8e3 !important;
-    color:#0f172a !important;
-  }}
-
-  .{prefix}-btn-soft:hover{{
-    background:#edf5ff !important;
-    color:#0b65d8 !important;
-  }}
-
-  .{prefix}-card,
-  .card{{
-    background:rgba(255,255,255,.96) !important;
-    border-radius:18px !important;
-    backdrop-filter:blur(8px);
-    box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
-    border:1px solid rgba(219,230,244,.9) !important;
-    overflow:hidden;
-  }}
-
-  .{prefix}-section-title,
-  .card h5,
-  .card h6{{
-    font-weight:950;
-    font-size:.95rem;
-    color:#0b4a8f;
-    margin:8px 0 14px 0;
-    padding-bottom:8px;
-    border-bottom:2px solid rgba(59,130,246,.18);
-  }}
-
-  .form-control,
-  .form-select{{
-    border-radius:10px;
-    border:1px solid #d9e3f0;
-    min-height:40px;
-    font-size:.86rem;
-    background:#f8fafc;
-    box-shadow:none !important;
-  }}
-
-  .form-control:focus,
-  .form-select:focus{{
-    border-color:#3f86d6;
-    box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
-    background:#ffffff;
-  }}
-
-  .badge{{
-    border-radius:999px;
-    font-size:.70rem;
-    padding:.35rem .65rem;
-    font-weight:900;
-  }}
-
-  @media(max-width:991.98px){{
-    .{prefix}-shell{{
-      width:98%;
-      margin:8px auto 22px auto;
-    }}
-
-    .{prefix}-header-card{{
-      min-height:88px;
-    }}
-
-    .{prefix}-title{{
-      font-size:1.20rem;
-    }}
-
-    .{prefix}-subtitle{{
-      font-size:.68rem;
-    }}
-  }}
-
-  @media(max-width:768px){{
-    .{prefix}-header-overlay{{
-      flex-direction:column;
-      text-align:center;
-      gap:10px;
-    }}
-
-    .{prefix}-header-overlay::before{{
-      margin:0;
-    }}
-
-    .{prefix}-header-text::before{{
-      margin-left:auto;
-      margin-right:auto;
-    }}
-
-    .{prefix}-title,
-    .{prefix}-subtitle{{
-      text-align:center;
-    }}
-
-    .{prefix}-header-actions .btn{{
-      width:100%;
-    }}
-  }}
-</style>
-"""
-
-
-def soc2_nistform_css():
-    return """
     <style>
-      body{
+      body{{
         background-image:url('/static/img/ccsgsi.jpg');
         background-size:cover;
         background-position:center;
         background-attachment:fixed;
         background-repeat:no-repeat;
-      }
+      }}
 
-      .nistform-shell{
+      .nistdet-shell{{
         width:96%;
-        max-width:1600px;
+        max-width:1580px;
         margin:26px auto 24px auto;
-      }
+      }}
 
-      .nistform-header-card{
+      .nistdet-header-card{{
         background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
         border-radius:18px;
         padding:16px 24px;
@@ -6628,9 +7412,9 @@ def soc2_nistform_css():
         position:relative;
         overflow:hidden;
         margin-bottom:14px;
-      }
+      }}
 
-      .nistform-header-card::before{
+      .nistdet-header-card::before{{
         content:"";
         position:absolute;
         inset:0;
@@ -6638,9 +7422,9 @@ def soc2_nistform_css():
           radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
           repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
         pointer-events:none;
-      }
+      }}
 
-      .nistform-header-overlay{
+      .nistdet-header-overlay{{
         width:100%;
         display:flex;
         align-items:center;
@@ -6650,10 +7434,10 @@ def soc2_nistform_css():
         padding:0 !important;
         position:relative;
         z-index:1;
-      }
+      }}
 
-      .nistform-header-overlay::before{
-        content:"🛡️";
+      .nistdet-header-overlay::before{{
+        content:"📊";
         width:54px;
         height:54px;
         min-width:54px;
@@ -6666,17 +7450,16 @@ def soc2_nistform_css():
         font-size:1.45rem;
         box-shadow:0 8px 18px rgba(0,0,0,.25);
         margin-right:14px;
-      }
+      }}
 
-      .nistform-header-text{
-        max-width:1100px;
+      .nistdet-header-text{{
         width:100%;
         display:block !important;
         transform:none !important;
-      }
+      }}
 
-      .nistform-header-text::before{
-        content:"SGSI · Evaluación NIST CSF 2.0";
+      .nistdet-header-text::before{{
+        content:"SGSI · Resultado NIST CSF 2.0";
         display:inline-block;
         background:rgba(255,255,255,.18);
         border-radius:999px;
@@ -6685,235 +7468,1187 @@ def soc2_nistform_css():
         font-weight:800;
         margin-bottom:4px;
         color:#ffffff;
-      }
+      }}
 
-      .nistform-title{
+      .nistdet-title{{
         color:#ffffff !important;
         font-weight:950;
         font-size:1.32rem;
         line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
         margin:0 !important;
-      }
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+      }}
 
-      .nistform-subtitle{
+      .nistdet-subtitle{{
         color:rgba(255,255,255,.95);
         font-size:.78rem;
         margin-top:4px;
         line-height:1.25;
-        font-weight:800;
-      }
+      }}
 
-      .nistform-header-actions{
+      .nistdet-header-actions{{
         display:flex;
         justify-content:center;
-        align-items:center;
-        flex-wrap:wrap;
         gap:10px;
+        flex-wrap:wrap;
         margin:10px 0 14px;
-      }
+      }}
 
-      .nistform-header-actions .btn,
-      .btn{
+      .nistdet-header-actions .btn,
+      .btn{{
         border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }}
+
+      .nistdet-btn-main,
+      .btn-outline-light{{
+        background:#ffffff;
+        color:#0f172a !important;
+        border:1px solid #cfd8e3 !important;
+      }}
+
+      .nistdet-btn-main:hover,
+      .btn-outline-light:hover{{
+        background:#edf5ff;
+        color:#0b65d8 !important;
+      }}
+
+      .nistdet-btn-soft{{
+        background:rgba(255,255,255,.88);
+        color:#111 !important;
+        border:1px solid rgba(108,117,125,.35);
+      }}
+
+      .nistdet-btn-success{{
+        background:#198754;
+        color:#ffffff !important;
+        border:1px solid #198754;
+      }}
+
+      .nistdet-card,
+      .card{{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+      }}
+
+      .nistdet-card-title,
+      .nistdet-section-title{{
+        font-weight:950;
+        color:#0b4a8f;
+      }}
+
+      .nistdet-section-title{{
+        font-size:1rem;
+        padding-bottom:8px;
+        border-bottom:2px solid rgba(59,130,246,.18);
+      }}
+
+      .nistdet-radar-img-small{{
+        max-width:290px;
+        width:100%;
+        height:auto;
+        display:inline-block;
+      }}
+
+      .nistdet-exec-box{{
+        min-height:310px;
+        background:linear-gradient(180deg,rgba(248,250,252,.94),rgba(255,255,255,.98));
+        border:1px solid rgba(63,134,214,.16);
+        border-radius:16px;
+        padding:18px;
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.60);
+      }}
+
+      .nistdet-exec-text{{
+        font-size:.96rem;
+        line-height:1.65;
+        color:#101827;
+        white-space:normal;
+      }}
+
+      .nistdet-subcard{{
+        background:#ffffff;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        padding:8px 7px;
+        box-shadow:0 6px 18px rgba(15,23,42,.08);
+      }}
+
+      .nistdet-subcard-top{{
+        border-bottom:1px solid rgba(0,0,0,.06);
+        padding-bottom:8px;
+        margin-bottom:10px;
+      }}
+
+      .nistdet-subcard-body{{
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+      }}
+
+      .nistdet-row{{
+        display:grid;
+        grid-template-columns:125px 1fr;
+        gap:10px;
+        align-items:start;
+      }}
+
+      .nistdet-label{{
         font-size:.82rem;
         font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
+        color:#334155;
+      }}
 
-      .nistform-card,
-      .card{
+      .nistdet-value{{
+        font-size:.78rem;
+        color:#0f172a;
+      }}
+
+      .nistdet-value-wrap{{
+        word-break:break-word;
+        white-space:normal;
+      }}
+
+      .nivel-dot{{
+        width:12px;
+        height:12px;
+        border-radius:50%;
+        display:inline-block;
+        box-shadow:0 0 0 3px rgba(0,0,0,.06);
+      }}
+
+      @media (max-width:991.98px){{
+        .nistdet-shell{{
+          width:98%;
+          margin:8px auto 22px auto;
+        }}
+
+        .nistdet-header-card{{
+          min-height:88px;
+        }}
+
+        .nistdet-title{{
+          font-size:1.20rem;
+        }}
+
+        .nistdet-subtitle{{
+          font-size:.68rem;
+        }}
+
+        .nistdet-radar-img-small{{
+          max-width:255px;
+        }}
+
+        .nistdet-exec-box{{
+          min-height:240px;
+        }}
+
+        .nistdet-row{{
+          grid-template-columns:1fr;
+          gap:3px;
+        }}
+      }}
+    </style>
+    """
+    return render_template_string(BASE, title="Detalle NIST", content=content)
+
+
+# ================
+# PDF
+# ================
+
+@nist_madurez_bp.route("/detalle/<int:run_id>/pdf", methods=["GET"])
+@login_required
+def detalle_pdf(run_id: int):
+    run = NistMadurezRun.query.get_or_404(run_id)
+
+    filename = f"NIST_CSF2_{(run.consecutivo or 'revision').replace(' ', '_')}.pdf"
+
+    return send_file(
+        _nist_build_pdf_run(run),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=filename
+    )
+
+
+# ================
+# Categorias
+# ================
+
+@nist_madurez_bp.route("/detalle/<int:run_id>/categoria/<string:func>/<string:cat_code>", methods=["GET"])
+@login_required
+def detalle_categoria(run_id: int, func: str, cat_code: str):
+    run = NistMadurezRun.query.get_or_404(run_id)
+
+    func_u = (func or "").upper().strip()
+    cat_u  = (cat_code or "").upper().strip()
+
+    # Trae todas las respuestas de esa revisión, filtradas por función y categoría de la pregunta
+    q = (
+        db.session.query(NistMadurezRespuesta, NistMadurezPregunta)
+        .join(NistMadurezPregunta, NistMadurezPregunta.id == NistMadurezRespuesta.pregunta_id)
+        .filter(NistMadurezRespuesta.run_id == run.id)
+        .filter(db.func.upper(NistMadurezPregunta.funcion) == func_u)
+        .filter(db.func.upper(NistMadurezPregunta.categoria_codigo) == cat_u)
+        .order_by(NistMadurezPregunta.orden.asc())
+    )
+
+    rows = []
+    total_preguntas = 0
+
+    for r, p in q.all():
+        total_preguntas += 1
+
+        qtext = p.pregunta_es or p.pregunta_en or ""
+        estado = (r.estado or "").upper().strip()
+        comentario = r.comentario or ""
+
+        badge = {
+            "SI": "success",
+            "PARCIAL": "warning",
+            "NO": "danger",
+            "NA": "secondary"
+        }.get(estado, "secondary")
+
+        estado_texto = {
+            "SI": "Sí",
+            "PARCIAL": "Parcial",
+            "NO": "No",
+            "NA": "N/A"
+        }.get(estado, estado)
+
+        rows.append(f"""
+        <tr>
+          <td class="catdet-pregunta">{escape(qtext)}</td>
+          <td class="text-center">
+            <span class="badge bg-{badge} rounded-pill px-3 py-2">
+              {escape(estado_texto)}
+            </span>
+          </td>
+          <td class="catdet-comentario">{escape(comentario)}</td>
+        </tr>
+        """)
+
+    content = f"""
+    <div class="catdet-shell">
+
+      <!-- CABECERA -->
+      <div class="catdet-header-card">
+        <div class="catdet-header-overlay">
+          <div class="catdet-header-text">
+            <h3 class="catdet-title m-0">Preguntas por Categoría — NIST CSF 2.0</h3>
+            <div class="catdet-subtitle">
+              Consecutivo: <b>{escape(run.consecutivo or '')}</b>
+              · Función: <b>{escape(func_u)}</b>
+              · Categoría: <b>{escape(cat_u)}</b>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BOTÓN VOLVER -->
+      <div class="catdet-header-actions">
+        <a href="{url_for('madurez_nist.detalle', run_id=run.id)}"
+           class="btn catdet-btn-main rounded-pill px-4 fw-bold">
+          <i class="bi bi-arrow-left me-2"></i>
+          Volver al Detalle
+        </a>
+      </div>
+
+      <!-- TARJETA PRINCIPAL -->
+      <div class="catdet-card p-4">
+
+        <div class="catdet-resumen mb-3">
+          <div class="catdet-resumen-title">Resumen de la categoría</div>
+          <div class="catdet-resumen-text">
+            Total de preguntas registradas: <b>{total_preguntas}</b>
+          </div>
+        </div>
+
+        <div class="table-responsive catdet-table-wrap">
+          <table class="table table-sm align-middle table-hover mb-0 catdet-table">
+            <thead class="catdet-table-head">
+              <tr>
+                <th>Pregunta</th>
+                <th class="text-center col-estado">Estado</th>
+                <th>Comentario / Evidencia</th>
+              </tr>
+            </thead>
+            <tbody>
+              {''.join(rows) if rows else "<tr><td colspan='3' class='text-muted text-center py-4'>Sin registros.</td></tr>"}
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+
+    </div>
+
+   <style>
+      body{{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }}
+
+      .catdet-shell{{
+        width:96%;
+        max-width:1500px;
+        margin:26px auto 24px auto;
+      }}
+
+      .catdet-header-card{{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }}
+
+      .catdet-header-card::before{{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }}
+
+      .catdet-header-overlay{{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
+        border-radius:18px;
+        position:relative;
+        z-index:1;
+      }}
+
+      .catdet-header-overlay::before{{
+        content:"📂";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }}
+
+      .catdet-header-text{{
+        max-width:1100px;
+        width:100%;
+        display:block !important;
+        transform:none !important;
+      }}
+
+      .catdet-header-text::before{{
+        content:"SGSI · Detalle de Categoría NIST CSF 2.0";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }}
+
+      .catdet-title{{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        margin:0 !important;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+      }}
+
+      .catdet-subtitle{{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+        line-height:1.25;
+      }}
+
+      .catdet-header-actions{{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }}
+
+      .catdet-header-actions .btn,
+      .btn{{
+        border-radius:10px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }}
+
+      .catdet-btn-main,
+      .btn-outline-light{{
+        background:#ffffff;
+        color:#0f172a !important;
+        border:1px solid #cfd8e3 !important;
+      }}
+
+      .catdet-btn-main:hover,
+      .btn-outline-light:hover{{
+        background:#edf5ff;
+        color:#0b65d8 !important;
+      }}
+
+      .catdet-card,
+      .card{{
         background:rgba(255,255,255,.96) !important;
         border-radius:18px !important;
         backdrop-filter:blur(8px);
         box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
         border:1px solid rgba(219,230,244,.9) !important;
         overflow:hidden;
-      }
+      }}
 
-      .nistform-section-title,
-      .card h5,
-      .card h6{
-        font-weight:950;
-        font-size:.95rem;
-        color:#0b4a8f;
-        margin:8px 0 14px 0;
-        padding-bottom:8px;
-        border-bottom:2px solid rgba(59,130,246,.18);
-      }
+      .catdet-card.p-4{{
+        padding:1.5rem !important;
+      }}
 
-      .nistform-progress{
-        height:24px;
-        border-radius:999px;
-        background:#dbe6f4;
-        overflow:hidden;
-        box-shadow:inset 0 2px 6px rgba(0,0,0,.12);
-      }
-
-      .nistform-progress .progress-bar{
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1);
-        font-weight:900;
-      }
-
-      .nistform-accordion{
-        display:flex;
-        flex-direction:column;
-        gap:12px;
-      }
-
-      .nistform-acc-item{
+      .catdet-resumen{{
         border:1px solid #dbe6f4;
-        border-radius:18px!important;
-        overflow:hidden;
-        box-shadow:0 8px 18px rgba(15,23,42,.08);
-      }
+        border-radius:14px;
+        background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
+        padding:14px 16px;
+      }}
 
-      .nistform-acc-item .accordion-button{
-        background:linear-gradient(135deg,#eef6ff,#ffffff);
-        color:#101827;
-        font-weight:900;
-        box-shadow:none;
-        padding:16px 18px;
-      }
-
-      .nistform-acc-item .accordion-button:not(.collapsed){
-        background:linear-gradient(135deg,#dceeff,#ffffff);
+      .catdet-resumen-title{{
+        font-weight:950;
+        font-size:1rem;
         color:#0b4a8f;
-      }
+        margin-bottom:4px;
+      }}
 
-      .nistform-acc-inner{
+      .catdet-resumen-text{{
+        color:#44576b;
+        font-size:.95rem;
+      }}
+
+      .catdet-table-wrap,
+      .table-responsive{{
+        max-height:72vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#ffffff;
+      }}
+
+      .catdet-table,
+      .table{{
+        width:100%;
+        margin-bottom:0 !important;
+        table-layout:fixed;
+      }}
+
+      .catdet-table-head th,
+      .table thead th{{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff !important;
+        font-size:.78rem;
+        font-weight:900 !important;
+        border:none !important;
+        white-space:nowrap;
+        vertical-align:middle !important;
+        text-align:center;
+        padding:9px 8px;
+      }}
+
+      .catdet-table th,
+      .catdet-table td,
+      .table tbody td{{
+        vertical-align:middle !important;
+        font-size:.82rem;
+        padding:9px 8px;
+        border-bottom:1px solid #e5edf7;
+        color:#101827;
+      }}
+
+      .catdet-table .col-estado{{
+        width:140px;
+      }}
+
+      .catdet-pregunta{{
+        min-width:380px;
+        white-space:normal;
+        word-break:break-word;
+        overflow-wrap:anywhere;
+      }}
+
+      .catdet-comentario{{
+        min-width:320px;
+        white-space:normal;
+        word-break:break-word;
+        overflow-wrap:anywhere;
+      }}
+
+      .table tbody tr:nth-child(even){{
+        background:#f8fbff;
+      }}
+
+      .table-hover tbody tr:hover,
+      .table tbody tr:hover{{
+        background:#eef6ff;
+      }}
+
+      .badge{{
+        border-radius:999px;
+        font-size:.70rem;
+        padding:.35rem .65rem;
+        font-weight:900;
+      }}
+
+      @media (max-width:991.98px){{
+        .catdet-shell{{
+          width:98%;
+          margin:8px auto 22px auto;
+        }}
+
+        .catdet-header-card{{
+          min-height:88px;
+        }}
+
+        .catdet-title{{
+          font-size:1.20rem;
+        }}
+
+        .catdet-subtitle{{
+          font-size:.68rem;
+        }}
+
+        .catdet-table{{
+          table-layout:auto;
+        }}
+      }}
+
+      @media (max-width:768px){{
+        .catdet-header-overlay{{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }}
+
+        .catdet-header-overlay::before{{
+          margin:0;
+        }}
+
+        .catdet-header-text::before{{
+          margin-left:auto;
+          margin-right:auto;
+        }}
+
+        .catdet-title,
+        .catdet-subtitle{{
+          text-align:center;
+        }}
+
+        .catdet-header-actions .btn{{
+          width:100%;
+        }}
+      }}
+    </style>
+    """
+
+    return render_template_string(BASE, title="Preguntas por Categoría", content=content)
+
+# ===================
+# Analisis Categorias
+# ===================
+
+@nist_madurez_bp.route("/detalle/<int:run_id>/analisis/<string:func>/<string:cat_code>", methods=["GET", "POST"])
+@login_required
+def analisis_categoria(run_id: int, func: str, cat_code: str):
+    user = User.query.get(session.get("user_id"))
+
+    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Nivel de Madurez NIST CSF 2.0"):
+        flash("No tiene permiso para acceder al análisis por categoría del módulo NIST CSF 2.0.", "danger")
+        return redirect(url_for('menu'))
+
+    run = NistMadurezRun.query.get_or_404(run_id)
+
+    if user.role not in ("admin", "auditor"):
+        if run.user_id and run.user_id != user.id:
+            flash("No tiene permiso para acceder a esta revisión.", "danger")
+            return redirect(url_for("madurez_nist.historial"))
+
+    read_only = (user.role == "auditor")
+
+    func_u = (func or "").upper().strip()
+    cat_u  = (cat_code or "").upper().strip()
+
+    modo_edicion = request.args.get("editar", "0") == "1"
+
+    if read_only and modo_edicion:
+        return redirect(
+            url_for(
+                "madurez_nist.analisis_categoria",
+                run_id=run.id,
+                func=func_u,
+                cat_code=cat_u
+            )
+        )
+
+    try:
+        resumen = json.loads(run.resumen_json or "{}")
+    except Exception:
+        resumen = {}
+
+    d = (((resumen or {}).get(func_u, {}) or {}).get(cat_u, {}) or {})
+    pct = float(d.get("pct", 0) or 0)
+    cat_nombre = (d.get("categoria") or "").strip()
+
+    ana = (
+        NistMadurezCategoriaAnalisis.query
+        .filter_by(run_id=run.id, funcion=func_u, categoria_codigo=cat_u)
+        .first()
+    )
+
+    if request.method == "POST":
+        if read_only:
+            flash("El perfil Auditor no puede guardar cambios en el análisis por categoría.", "danger")
+            return redirect(
+                url_for(
+                    "madurez_nist.analisis_categoria",
+                    run_id=run.id,
+                    func=func_u,
+                    cat_code=cat_u
+                )
+            )
+
+        estado_actual = (request.form.get("estado_actual") or "").strip()
+        estado_req    = (request.form.get("estado_requerido") or "").strip()
+        plan_editado  = _normalizar_plan_accion_nist_texto(
+            (request.form.get("plan_accion_editado") or "").strip()
+        )
+
+        if not ana:
+            ana = NistMadurezCategoriaAnalisis(
+                run_id=run.id,
+                funcion=func_u,
+                categoria_codigo=cat_u
+            )
+            db.session.add(ana)
+
+        ana.estado_actual = estado_actual
+        ana.estado_requerido = estado_req
+        ana.plan_accion_editado = plan_editado
+
+        db.session.commit()
+        flash("✅ Análisis guardado.", "success")
+        return redirect(
+            url_for(
+                "madurez_nist.analisis_categoria",
+                run_id=run.id,
+                func=func_u,
+                cat_code=cat_u
+            )
+        )
+
+    estado_actual = (ana.estado_actual if ana else "") or ""
+    estado_requerido = (ana.estado_requerido if ana else "") or ""
+
+    plan_ai = _normalizar_plan_accion_nist_texto(
+        (ana.plan_accion_ai if ana else "") or ""
+    )
+    plan_editado = _normalizar_plan_accion_nist_texto(
+        (ana.plan_accion_editado if ana else "") or ""
+    )
+
+    plan_mostrar = plan_editado or plan_ai
+
+    if read_only:
+        toggle_btn_html = """
+        <button class="btn btn-outline-secondary rounded-pill px-4 fw-bold"
+                type="button"
+                disabled
+                title="El perfil Auditor no puede editar el análisis">
+          <i class="bi bi-pencil-square me-2"></i>
+          Editar
+        </button>
+        """
+    else:
+        toggle_btn_html = (
+            f'''
+            <a href="{url_for('madurez_nist.analisis_categoria', run_id=run.id, func=func_u, cat_code=cat_u)}"
+               class="btn nistana-btn-main rounded-pill px-4 fw-bold">
+              <i class="bi bi-eye me-2"></i>
+              Ver modo lectura
+            </a>
+            '''
+            if modo_edicion else
+            f'''
+            <a href="{url_for('madurez_nist.analisis_categoria', run_id=run.id, func=func_u, cat_code=cat_u, editar=1)}"
+               class="btn btn-primary rounded-pill px-4 fw-bold">
+              <i class="bi bi-pencil-square me-2"></i>
+              Editar
+            </a>
+            '''
+        )
+
+    if modo_edicion and not read_only:
+        panel_izquierdo = f"""
+        <div class="col-12 col-lg-6">
+          <div class="nistana-card p-4 h-100">
+            <div class="nistana-card-title">✏️ Edición manual del análisis</div>
+            <div class="text-muted small mb-3">
+              Ajusta los textos generados y guarda los cambios.
+            </div>
+
+            <form method="POST">
+              <div class="nistana-card-title">📌 Estado actual</div>
+              <textarea class="form-control nistana-textarea"
+                        name="estado_actual"
+                        rows="8"
+                        placeholder="Describe el estado actual...">{escape(estado_actual)}</textarea>
+
+              <div class="nistana-card-title mt-3">🎯 Estado requerido</div>
+              <textarea class="form-control nistana-textarea"
+                        name="estado_requerido"
+                        rows="7"
+                        placeholder="Describe el estado objetivo...">{escape(estado_requerido)}</textarea>
+
+              <div class="nistana-card-title mt-3">🛠 Plan de acción (editable)</div>
+              <textarea class="form-control nistana-textarea"
+                        name="plan_accion_editado"
+                        rows="12"
+                        placeholder="Puedes ajustar aquí el plan de acción...">{escape(plan_mostrar)}</textarea>
+
+              <div class="d-flex justify-content-center mt-3">
+                <button class="btn btn-primary rounded-pill px-5 fw-bold" type="submit">
+                  <i class="bi bi-save2 me-2"></i>Guardar cambios
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+        """
+
+        panel_derecho = f"""
+        <div class="col-12 col-lg-6">
+          <div class="nistana-card p-4 h-100">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+              <div>
+                <div class="nistana-card-title mb-0">🤖 Generación con IA</div>
+                <div class="text-muted small mt-1">
+                  La IA generará el estado actual, el estado requerido y el plan de acción
+                  con base en el porcentaje de cumplimiento y la categoría evaluada.
+                </div>
+              </div>
+            </div>
+
+            <div class="text-center mt-4">
+              <div class="nistana-ai-icon">
+                <i class="bi bi-cpu"></i>
+              </div>
+
+              <div class="nistana-ai-title mt-2">
+                Contenido asistido por IA
+              </div>
+
+              <div class="nistana-ai-text mt-2">
+                Presiona el botón para generar o regenerar automáticamente el análisis
+                de esta categoría.
+              </div>
+
+              <form method="POST"
+                    action="{url_for('madurez_nist.analisis_categoria_generar', run_id=run.id, func=func_u, cat_code=cat_u)}"
+                    class="m-0 mt-4">
+                <button class="btn nistana-btn-success rounded-pill px-4 fw-bold" type="submit">
+                  <i class="bi bi-magic me-2"></i>
+                  Generar análisis (IA)
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+        """
+
+    else:
+        panel_izquierdo = f"""
+        <div class="col-12 col-lg-6">
+          <div class="nistana-card p-4 h-100">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+              <div>
+                <div class="nistana-card-title mb-0">📄 Análisis de la categoría</div>
+                <div class="text-muted small mt-1">
+                  Vista lista para consulta ejecutiva.
+                </div>
+              </div>
+            </div>
+
+            <div class="nistana-read-block">
+              <div class="nistana-card-title">📌 Estado actual</div>
+              <div class="nistana-read-box">
+                {escape(estado_actual) if estado_actual else "<span class='text-muted'>Pendiente por generar con IA.</span>"}
+              </div>
+
+              <div class="nistana-card-title mt-3">🎯 Estado requerido</div>
+              <div class="nistana-read-box">
+                {escape(estado_requerido) if estado_requerido else "<span class='text-muted'>Pendiente por generar con IA.</span>"}
+              </div>
+
+              <div class="nistana-card-title mt-3">🛠 Plan de acción</div>
+              <div class="nistana-read-box">
+                {escape(plan_mostrar) if plan_mostrar else "<span class='text-muted'>Pendiente por generar con IA.</span>"}
+              </div>
+            </div>
+          </div>
+        </div>
+        """
+
+        if read_only:
+            panel_derecho = """
+            <div class="col-12 col-lg-6">
+              <div class="nistana-card p-4 h-100">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                  <div>
+                    <div class="nistana-card-title mb-0">🤖 Generación con IA</div>
+                    <div class="text-muted small mt-1">
+                      El perfil Auditor puede ver el análisis, pero no puede editarlo ni generarlo con IA.
+                    </div>
+                  </div>
+                </div>
+
+                <div class="nistana-ai-panel mt-3">
+                  <div class="nistana-ai-icon">
+                    <i class="bi bi-cpu"></i>
+                  </div>
+                  <div class="nistana-ai-title">Contenido asistido por IA</div>
+                  <div class="nistana-ai-text">
+                    La generación automática del análisis está bloqueada para el perfil Auditor.
+                  </div>
+
+                  <div class="mt-3">
+                    <button class="btn btn-outline-secondary rounded-pill px-4 fw-bold" type="button" disabled
+                            title="El perfil Auditor no puede generar análisis con IA">
+                      <i class="bi bi-magic me-2"></i>
+                      Generar análisis (IA)
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            """
+        else:
+            panel_derecho = f"""
+            <div class="col-12 col-lg-6">
+              <div class="nistana-card p-4 h-100">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                  <div>
+                    <div class="nistana-card-title mb-0">🤖 Generación con IA</div>
+                    <div class="text-muted small mt-1">
+                      Usa este botón para generar o regenerar el análisis de la categoría.
+                    </div>
+                  </div>
+                </div>
+
+                <div class="nistana-ai-panel mt-3">
+                  <div class="nistana-ai-icon">
+                    <i class="bi bi-cpu"></i>
+                  </div>
+                  <div class="nistana-ai-title">Contenido asistido por IA</div>
+                  <div class="nistana-ai-text">
+                    La IA generará el estado actual, el estado requerido y el plan de acción
+                    con base en el porcentaje de cumplimiento y la categoría evaluada.
+                  </div>
+
+                  <form method="POST"
+                        action="{url_for('madurez_nist.analisis_categoria_generar', run_id=run.id, func=func_u, cat_code=cat_u)}"
+                        class="m-0 mt-3">
+                    <button class="btn nistana-btn-success rounded-pill px-4 fw-bold" type="submit">
+                      <i class="bi bi-magic me-2"></i>
+                      Generar análisis (IA)
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+            """
+
+    content = f"""
+    <div class="nistana-shell">
+
+      <div class="nistana-header-card">
+        <div class="nistana-header-overlay">
+          <div class="nistana-header-text">
+            <h3 class="nistana-title m-0">Análisis por Categoría — NIST CSF 2.0</h3>
+            <div class="nistana-subtitle">
+              Consecutivo: <b>{escape(run.consecutivo or '')}</b>
+              · Función: <b>{escape(func_u)}</b>
+              · Categoría: <b>{escape(cat_u)}</b>
+              {" · Nombre: <b>" + escape(cat_nombre) + "</b>" if cat_nombre else ""}
+              · % de cumplimiento: <b>{pct:.2f}%</b>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="nistana-header-actions">
+        <div class="d-flex flex-wrap justify-content-center gap-2">
+          <a href="{url_for('madurez_nist.detalle', run_id=run.id)}"
+             class="btn nistana-btn-main rounded-pill px-4 fw-bold">
+            <i class="bi bi-arrow-left me-2"></i>
+            Volver al Detalle
+          </a>
+
+          {toggle_btn_html}
+        </div>
+      </div>
+
+      {"<div class='alert alert-info'>🔒 El perfil Auditor puede ver el análisis, pero no puede usar Editar ni Generar análisis (IA).</div>" if read_only else ""}
+
+      <div class="row g-3">
+        {panel_izquierdo}
+        {panel_derecho}
+      </div>
+
+    </div>
+
+    <style>
+      body{{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }}
+
+      .nistana-shell{{
+        width:96%;
+        max-width:1500px;
+        margin:26px auto 24px auto;
+      }}
+
+      .nistana-header-card{{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:14px;
+      }}
+
+      .nistana-header-card::before{{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+        pointer-events:none;
+      }}
+
+      .nistana-header-overlay{{
         width:100%;
         display:flex;
-        justify-content:space-between;
         align-items:center;
-        gap:14px;
-      }
-
-      .nistform-func-title{
-        font-size:1.02rem;
-        font-weight:950;
-        color:#0b4a8f;
-      }
-
-      .nistform-func-subtitle{
-        font-size:.78rem;
-        color:#607086;
-        font-weight:700;
-        margin-top:2px;
-      }
-
-      .nistform-acc-body{
-        background:#f8fbff;
-        padding:16px;
-      }
-
-      .nistform-cat-block{
-        background:rgba(255,255,255,.88);
-        border:1px solid rgba(15,23,42,.08);
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent !important;
+        padding:0 !important;
         border-radius:18px;
-        padding:8px 7px;
-        margin-bottom:14px;
-      }
+        position:relative;
+        z-index:1;
+      }}
 
-      .nistform-cat-title{
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:12px;
-        margin-bottom:14px;
-        color:#0b4a8f;
-        font-weight:950;
-      }
-
-      .nistform-cat-title small{
-        color:#607086;
-        font-weight:700;
-      }
-
-      .nistform-qcard{
+      .nistana-header-overlay::before{{
+        content:"🧠";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
         background:#ffffff;
-        border:1px solid #dbe6f4;
-        border-radius:16px;
-        padding:16px;
-        box-shadow:0 8px 18px rgba(15,23,42,.06);
-      }
-
-      .nistform-qhead{
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:10px;
-        margin-bottom:10px;
-      }
-
-      .nistform-qtext{
-        color:#0b1220;
-        font-weight:800;
-        line-height:1.35;
-        min-height:76px;
-      }
-
-      .nistform-radio-row{
-        display:grid;
-        grid-template-columns:repeat(4,1fr);
-        gap:6px;
-        margin-top:14px;
-      }
-
-      .nistform-radio-card{
+        color:#0b4a8f;
         display:flex;
         align-items:center;
         justify-content:center;
-        gap:7px;
-        border:1px solid #d7e0ec;
-        background:#ffffff;
-        color:#101827;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }}
+
+      .nistana-header-text{{
+        max-width:1100px;
+        width:100%;
+        display:block !important;
+        transform:none !important;
+      }}
+
+      .nistana-header-text::before{{
+        content:"SGSI · Análisis de Categoría NIST CSF 2.0";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
         border-radius:999px;
-        padding:8px 10px;
-        font-weight:900;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#ffffff;
+      }}
+
+      .nistana-title{{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        margin:0 !important;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+      }}
+
+      .nistana-subtitle{{
+        color:rgba(255,255,255,.95);
         font-size:.78rem;
-        cursor:pointer;
-        transition:all .18s ease;
-        min-height:40px;
-        user-select:none;
-      }
+        margin-top:4px;
+        line-height:1.25;
+      }}
 
-      .nistform-radio-card input{
-        accent-color:#0b4a8f;
-      }
+      .nistana-header-actions{{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }}
 
-      .nistform-radio-card:hover{
-        transform:translateY(-1px);
-        box-shadow:0 8px 16px rgba(15,23,42,.10);
-      }
+      .nistana-header-actions .btn,
+      .btn{{
+        border-radius:10px !important;
+        font-weight:900;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }}
 
-      .nistform-radio-card:has(input[value="NA"]:checked){
-        background:#e2e3e5;
-        border-color:#6c757d;
-        color:#41464b;
-      }
+      .nistana-btn-main,
+      .btn-outline-light{{
+        background:#ffffff;
+        color:#0f172a !important;
+        border:1px solid #cfd8e3 !important;
+      }}
 
-      .nistform-radio-card:has(input[value="SI"]:checked){
-        background:#d1e7dd;
-        border-color:#198754;
-        color:#0f5132;
-      }
+      .nistana-btn-main:hover,
+      .btn-outline-light:hover{{
+        background:#edf5ff;
+        color:#0b65d8 !important;
+      }}
 
-      .nistform-radio-card:has(input[value="PARCIAL"]:checked){
-        background:#fff3cd;
-        border-color:#ffc107;
-        color:#664d03;
-      }
+      .nistana-btn-success{{
+        background:linear-gradient(135deg,#198754 0%,#20a866 100%);
+        color:#ffffff !important;
+        border:none;
+        box-shadow:0 8px 18px rgba(25,135,84,.28);
+      }}
 
-      .nistform-radio-card:has(input[value="NO"]:checked){
-        background:#f8d7da;
-        border-color:#dc3545;
-        color:#842029;
-      }
+      .nistana-btn-success:hover{{
+        background:linear-gradient(135deg,#157347 0%,#1b9a5d 100%);
+        color:#ffffff !important;
+      }}
 
-      .form-label{
+      .nistana-card,
+      .card{{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px !important;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18) !important;
+        border:1px solid rgba(219,230,244,.9) !important;
+        overflow:hidden;
+      }}
+
+      .nistana-card.p-4{{
+        padding:1.5rem !important;
+      }}
+
+      .nistana-card-title,
+      .card h5,
+      .card h6{{
+        font-weight:950;
+        font-size:1rem;
+        color:#0b4a8f;
+        margin-bottom:10px;
+      }}
+
+      .nistana-textarea{{
+        border-radius:14px !important;
+        border:1px solid #d9e3f0 !important;
+        box-shadow:none !important;
+        resize:vertical;
+        background:#f8fafc;
+      }}
+
+      .nistana-textarea:focus{{
+        border-color:#3f86d6 !important;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
+        background:#ffffff;
+      }}
+
+      .nistana-read-box{{
+        min-height:110px;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
+        padding:14px 16px;
+        color:#243443;
+        white-space:pre-wrap;
+        word-break:break-word;
+        overflow-wrap:anywhere;
+      }}
+
+      .nistana-ai-icon{{
+        font-size:2.2rem;
+        color:#0b4a8f;
+        line-height:1;
+      }}
+
+      .nistana-ai-title{{
+        font-weight:950;
+        font-size:1.08rem;
+        color:#0b4a8f;
+      }}
+
+      .nistana-ai-text{{
+        color:#56697d;
+        font-size:.95rem;
+        line-height:1.5;
+        max-width:420px;
+        margin:0 auto;
+      }}
+
+      .form-label{{
         font-size:.72rem;
         font-weight:900;
         color:#0b4a8f;
@@ -6925,2756 +8660,80 @@ def soc2_nistform_css():
         border-radius:10px;
         display:inline-block;
         margin-bottom:6px;
-      }
+      }}
 
       .form-control,
-      .form-select{
+      .form-select{{
         border-radius:10px;
         border:1px solid #d9e3f0;
         min-height:40px;
         font-size:.86rem;
         background:#f8fafc;
         box-shadow:none !important;
-      }
+      }}
 
       .form-control:focus,
-      .form-select:focus{
+      .form-select:focus{{
         border-color:#3f86d6;
         box-shadow:0 0 0 .15rem rgba(63,134,214,.18) !important;
         background:#ffffff;
-      }
+      }}
 
-      .badge{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }
-
-      @media(max-width:991.98px){
-        .nistform-shell{
+      @media (max-width:991.98px){{
+        .nistana-shell{{
           width:98%;
           margin:8px auto 22px auto;
-        }
+        }}
 
-        .nistform-header-card{
+        .nistana-header-card{{
           min-height:88px;
-        }
+        }}
 
-        .nistform-title{
+        .nistana-title{{
           font-size:1.20rem;
-        }
+        }}
 
-        .nistform-subtitle{
+        .nistana-subtitle{{
           font-size:.68rem;
-        }
+        }}
 
-        .nistform-card{
-          padding:14px!important;
-        }
-      }
+        .nistana-read-box{{
+          min-height:90px;
+        }}
+      }}
 
-      @media(max-width:768px){
-        .nistform-header-overlay{
+      @media (max-width:768px){{
+        .nistana-header-overlay{{
           flex-direction:column;
           text-align:center;
           gap:10px;
-        }
+        }}
 
-        .nistform-header-overlay::before{
+        .nistana-header-overlay::before{{
           margin:0;
-        }
+        }}
 
-        .nistform-header-text::before{
+        .nistana-header-text::before{{
           margin-left:auto;
           margin-right:auto;
-        }
+        }}
 
-        .nistform-title,
-        .nistform-subtitle{
+        .nistana-title,
+        .nistana-subtitle{{
           text-align:center;
-        }
+        }}
 
-        .nistform-header-actions .btn{
+        .nistana-header-actions .btn{{
           width:100%;
-        }
-
-        .nistform-acc-inner,
-        .nistform-cat-title{
-          flex-direction:column;
-          align-items:flex-start;
-        }
-
-        .nistform-radio-row{
-          grid-template-columns:1fr;
-        }
-      }
+        }}
+      }}
     </style>
     """
 
-# ==========================================================================================================================================
-#                                                   Fin Módulo de Madurez SOC 2 — Diseño NIST
-# ==========================================================================================================================================
+    return render_template_string(BASE, title="Análisis NIST", content=content)
 
-# ==========================================================================================================================================
-#                                                   Módulo de Madurez ISO 22301 — Diseño NIST
-# ==========================================================================================================================================
 
-iso22301_madurez_bp = Blueprint("madurez_iso22301", __name__, url_prefix="/madurez_iso22301")
-
-# GRAC-RAM: colors se carga bajo demanda
-from reportlab.lib.enums import TA_CENTER
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.units import cm
-# GRAC-RAM: importación diferida: from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-Image = _GRACDeferredSymbol("reportlab.platypus", "Image")
-
-# ============================================================
-# BASE DE DATOS INDEPENDIENTE — ISO 22301
-# ============================================================
-ISO22301_DB_PATH = os.path.join(app.instance_path, "iso22301_madurez.db")
-os.makedirs(app.instance_path, exist_ok=True)
-
-app.config.setdefault("SQLALCHEMY_BINDS", {})
-app.config["SQLALCHEMY_BINDS"]["iso22301_madurez"] = "sqlite:///" + ISO22301_DB_PATH
-
-ISO22301_PERMISSION_NAME = "Nivel de Madurez ISO 22301"
-ISO22301_INSTRUMENTO_TEMPLATE_XLSX = os.path.join(BASE_DIR, "static", "templates", "Arkyntech_Matriz_Madurez_ISO_22301_ES.xlsx")
-
-ISO22301_STATUS_SCORE = {
-    "SI": 100,
-    "PARCIAL": 50,
-    "NO": 0,
-    "NA": 0,  # Valor visible 0; se excluye explícitamente del denominador.
-}
-
-ISO22301_BLOCK_ORDER = ["4", "5", "6", "7", "8", "9", "10"]
-
-ISO22301_BLOCK_TITLES = {
-    "4": "Contexto de la organización",
-    "5": "Liderazgo",
-    "6": "Planificación",
-    "7": "Apoyo",
-    "8": "Operación",
-    "9": "Evaluación del desempeño",
-    "10": "Mejora",
-}
-
-# Catálogo original de Arkyntech. Permite inicializar la base independiente
-# incluso cuando el Excel todavía no se ha copiado a static/templates.
-ISO22301_EMBEDDED_CATALOG = [{'item_id': 'BCP-001',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.1',
-  'domain_es': 'Contexto interno y externo',
-  'assessment_question_es': 'La organización identifica las condiciones internas que pueden afectar su capacidad para mantener productos y '
-                            'servicios prioritarios.',
-  'suggested_evidence_es': 'Análisis de contexto, mapa de procesos, diagnóstico organizacional, actas de revisión.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-002',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.1',
-  'domain_es': 'Contexto interno y externo',
-  'assessment_question_es': 'La organización identifica factores externos que pueden originar interrupciones o modificar sus necesidades '
-                            'de continuidad.',
-  'suggested_evidence_es': 'Análisis PESTEL, escenarios de amenaza, informes sectoriales y regulatorios.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-003',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.1',
-  'domain_es': 'Contexto interno y externo',
-  'assessment_question_es': 'Los temas de continuidad se relacionan explícitamente con la estrategia, los objetivos y el apetito de riesgo '
-                            'de la organización.',
-  'suggested_evidence_es': 'Plan estratégico, declaración de apetito de riesgo, mapa de objetivos.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-004',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.1',
-  'domain_es': 'Contexto interno y externo',
-  'assessment_question_es': 'Se revisan periódicamente los cambios del contexto y sus efectos sobre el sistema de continuidad.',
-  'suggested_evidence_es': 'Calendario de revisión, actas, registro de cambios y decisiones.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-005',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.1',
-  'domain_es': 'Cambio climático — Enmienda 2024',
-  'assessment_question_es': 'Se ha evaluado y documentado si el cambio climático es un asunto pertinente para la continuidad del negocio.',
-  'suggested_evidence_es': 'Evaluación de pertinencia climática, escenarios físicos y de transición, conclusión aprobada.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-006',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.2',
-  'domain_es': 'Partes interesadas',
-  'assessment_question_es': 'Se mantienen identificadas las partes interesadas relevantes para la continuidad del negocio.',
-  'suggested_evidence_es': 'Matriz de partes interesadas y responsables de relación.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-007',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.2',
-  'domain_es': 'Necesidades y expectativas',
-  'assessment_question_es': 'Se conocen y actualizan las necesidades de continuidad de clientes, autoridades, empleados, proveedores y '
-                            'socios críticos.',
-  'suggested_evidence_es': 'Matriz de requisitos, contratos, SLA, comunicaciones y encuestas.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-008',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.2.2',
-  'domain_es': 'Requisitos legales y regulatorios',
-  'assessment_question_es': 'Existe un inventario vigente de obligaciones legales, regulatorias y contractuales relacionadas con '
-                            'continuidad.',
-  'suggested_evidence_es': 'Matriz legal, circulares regulatorias, contratos, concepto jurídico.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-009',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.2.2',
-  'domain_es': 'Cumplimiento',
-  'assessment_question_es': 'Se asignan responsables y mecanismos para evaluar el cumplimiento de las obligaciones de continuidad.',
-  'suggested_evidence_es': 'Evaluaciones de cumplimiento, responsables, hallazgos y planes de cierre.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-010',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.2',
-  'domain_es': 'Cambio climático — Enmienda 2024',
-  'assessment_question_es': 'Se consideran requisitos o expectativas de partes interesadas relacionados con cambio climático cuando '
-                            'resultan pertinentes.',
-  'suggested_evidence_es': 'Matriz de interesados, compromisos ESG, contratos, exigencias de autoridades o clientes.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-011',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.3',
-  'domain_es': 'Alcance del SGCN',
-  'assessment_question_es': 'El alcance define límites organizacionales, ubicaciones, procesos, productos, servicios y dependencias '
-                            'incluidos.',
-  'suggested_evidence_es': 'Declaración de alcance aprobada y mapa de cobertura.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-012',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.3',
-  'domain_es': 'Alcance del SGCN',
-  'assessment_question_es': 'La definición del alcance utiliza el contexto, las obligaciones y las necesidades de las partes interesadas.',
-  'suggested_evidence_es': 'Trazabilidad del alcance con análisis de contexto y matriz de requisitos.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-013',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.3',
-  'domain_es': 'Alcance del SGCN',
-  'assessment_question_es': 'Las interfaces con procesos, sedes, terceros y servicios fuera del alcance están identificadas y gestionadas.',
-  'suggested_evidence_es': 'Mapa de interfaces, contratos, RACI y dependencias.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-014',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.3',
-  'domain_es': 'Alcance del SGCN',
-  'assessment_question_es': 'La declaración de alcance está documentada, aprobada, disponible y sujeta a control de cambios.',
-  'suggested_evidence_es': 'Documento vigente, aprobación, historial de versiones y publicación interna.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-015',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.4',
-  'domain_es': 'Sistema de gestión',
-  'assessment_question_es': 'Los procesos necesarios del sistema de continuidad y sus interacciones están definidos.',
-  'suggested_evidence_es': 'Mapa de procesos del SGCN, fichas de proceso y entradas/salidas.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-016',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.4',
-  'domain_es': 'Sistema de gestión',
-  'assessment_question_es': 'Se asignan criterios, métodos, responsables y recursos para operar y controlar el sistema de continuidad.',
-  'suggested_evidence_es': 'Procedimientos, indicadores, RACI, presupuesto y cronograma.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-017',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '4',
-  'clause': '4.4',
-  'domain_es': 'Sistema de gestión',
-  'assessment_question_es': 'El sistema se mantiene y mejora con base en resultados, cambios, incidentes y lecciones aprendidas.',
-  'suggested_evidence_es': 'Plan de mejora, revisiones, informes de incidentes y seguimiento.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-018',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '5',
-  'clause': '5.1',
-  'domain_es': 'Liderazgo y compromiso',
-  'assessment_question_es': 'La alta dirección asume responsabilidad por la eficacia del sistema de continuidad.',
-  'suggested_evidence_es': 'Actas de comité, decisiones, asignación de responsables y seguimiento ejecutivo.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-019',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '5',
-  'clause': '5.1',
-  'domain_es': 'Integración',
-  'assessment_question_es': 'Los requisitos de continuidad están integrados en procesos de negocio, proyectos, cambios y decisiones '
-                            'relevantes.',
-  'suggested_evidence_es': 'Metodologías corporativas, controles de proyecto y criterios de aprobación.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-020',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '5',
-  'clause': '5.1',
-  'domain_es': 'Recursos y apoyo',
-  'assessment_question_es': 'La alta dirección asegura recursos suficientes para establecer, operar, probar y mejorar la continuidad.',
-  'suggested_evidence_es': 'Presupuesto, capacidad de personal, herramientas, contratos y aprobaciones.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-021',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '5',
-  'clause': '5.1',
-  'domain_es': 'Comunicación directiva',
-  'assessment_question_es': 'Los líderes comunican la importancia de una continuidad eficaz y del cumplimiento de los compromisos '
-                            'definidos.',
-  'suggested_evidence_es': 'Comunicaciones, sesiones ejecutivas, campañas y registros de asistencia.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-022',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '5',
-  'clause': '5.1',
-  'domain_es': 'Resultados',
-  'assessment_question_es': 'La dirección promueve el logro de resultados, la colaboración entre áreas y la mejora continua.',
-  'suggested_evidence_es': 'Indicadores, compromisos de áreas, actas y reconocimientos o acciones correctivas.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-023',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '5',
-  'clause': '5.2',
-  'domain_es': 'Política de continuidad',
-  'assessment_question_es': 'Existe una política adecuada al propósito, contexto y dirección estratégica de la organización.',
-  'suggested_evidence_es': 'Política vigente, aprobación y relación con estrategia y alcance.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-024',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '5',
-  'clause': '5.2',
-  'domain_es': 'Política de continuidad',
-  'assessment_question_es': 'La política incluye compromisos de cumplimiento de requisitos y mejora continua.',
-  'suggested_evidence_es': 'Texto de la política y evidencias de aprobación.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-025',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '5',
-  'clause': '5.2',
-  'domain_es': 'Política de continuidad',
-  'assessment_question_es': 'La política proporciona un marco para definir y revisar objetivos de continuidad.',
-  'suggested_evidence_es': 'Trazabilidad entre política, objetivos, indicadores y planes.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-026',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '5',
-  'clause': '5.2.2',
-  'domain_es': 'Comunicación de la política',
-  'assessment_question_es': 'La política está disponible, se comunica dentro de la organización y se comparte externamente cuando '
-                            'corresponde.',
-  'suggested_evidence_es': 'Intranet, inducción, comunicaciones a terceros y evidencia de acceso.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-027',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '5',
-  'clause': '5.3',
-  'domain_es': 'Roles y autoridades',
-  'assessment_question_es': 'Se asignan y comunican responsabilidades y autoridades para los roles del sistema de continuidad.',
-  'suggested_evidence_es': 'RACI, perfiles de cargo, nombramientos y comunicaciones.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-028',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '5',
-  'clause': '5.3',
-  'domain_es': 'Gobierno del SGCN',
-  'assessment_question_es': 'Existe una instancia de gobierno con autoridad para decidir, escalar y supervisar el desempeño del sistema.',
-  'suggested_evidence_es': 'Términos de referencia del comité, calendario, actas y decisiones.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-029',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '5',
-  'clause': '5.3',
-  'domain_es': 'Reporte a la dirección',
-  'assessment_question_es': 'Está definida la responsabilidad de informar a la alta dirección sobre desempeño, brechas y oportunidades de '
-                            'mejora.',
-  'suggested_evidence_es': 'Informes ejecutivos, tablero, frecuencia y destinatarios.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-030',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '6',
-  'clause': '6.1',
-  'domain_es': 'Riesgos y oportunidades del SGCN',
-  'assessment_question_es': 'Se determinan riesgos que podrían impedir que el sistema logre los resultados previstos.',
-  'suggested_evidence_es': 'Registro de riesgos del SGCN, causas, consecuencias y controles.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-031',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '6',
-  'clause': '6.1',
-  'domain_es': 'Riesgos y oportunidades del SGCN',
-  'assessment_question_es': 'Se identifican oportunidades para fortalecer la resiliencia y mejorar el sistema.',
-  'suggested_evidence_es': 'Registro de oportunidades, iniciativas, responsables y beneficios esperados.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-032',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '6',
-  'clause': '6.1',
-  'domain_es': 'Tratamiento',
-  'assessment_question_es': 'Las acciones para tratar riesgos y oportunidades están integradas en procesos y planes de trabajo.',
-  'suggested_evidence_es': 'Planes de tratamiento, portafolio de iniciativas y seguimiento.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-033',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '6',
-  'clause': '6.1',
-  'domain_es': 'Evaluación de eficacia',
-  'assessment_question_es': 'Se evalúa si las acciones tomadas frente a riesgos y oportunidades fueron eficaces.',
-  'suggested_evidence_es': 'Indicadores, revisiones, resultados de pruebas y cierre de acciones.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-034',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '6',
-  'clause': '6.2',
-  'domain_es': 'Objetivos de continuidad',
-  'assessment_question_es': 'Se establecen objetivos coherentes con la política y pertinentes para las funciones y niveles aplicables.',
-  'suggested_evidence_es': 'Matriz de objetivos, aprobación y despliegue por áreas.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-035',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '6',
-  'clause': '6.2',
-  'domain_es': 'Objetivos de continuidad',
-  'assessment_question_es': 'Los objetivos son medibles cuando es posible, se monitorean y se actualizan según necesidad.',
-  'suggested_evidence_es': 'Indicadores, metas, periodicidad, resultados y revisiones.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-036',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '6',
-  'clause': '6.2',
-  'domain_es': 'Planificación de objetivos',
-  'assessment_question_es': 'Cada objetivo define actividades, recursos, responsable, plazo y método para evaluar resultados.',
-  'suggested_evidence_es': 'Ficha de objetivo, plan de trabajo, presupuesto y criterio de éxito.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-037',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '6',
-  'clause': '6.2',
-  'domain_es': 'Comunicación de objetivos',
-  'assessment_question_es': 'Los objetivos se comunican a las personas y partes relevantes para su cumplimiento.',
-  'suggested_evidence_es': 'Comunicaciones, tableros, reuniones y compromisos.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-038',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '6',
-  'clause': '6.3',
-  'domain_es': 'Cambios del SGCN',
-  'assessment_question_es': 'Los cambios del sistema se planifican considerando propósito, consecuencias, integridad, recursos y '
-                            'responsabilidades.',
-  'suggested_evidence_es': 'Procedimiento de cambios, análisis de impacto y aprobaciones.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-039',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '7',
-  'clause': '7.1',
-  'domain_es': 'Recursos',
-  'assessment_question_es': 'Se identifican y proveen recursos humanos, tecnológicos, físicos, financieros y de información para el SGCN.',
-  'suggested_evidence_es': 'Plan de recursos, presupuesto, inventarios y contratos.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-040',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '7',
-  'clause': '7.1',
-  'domain_es': 'Disponibilidad de recursos',
-  'assessment_question_es': 'Los recursos críticos de respuesta y recuperación están disponibles dentro de los tiempos requeridos.',
-  'suggested_evidence_es': 'Pruebas de disponibilidad, inventarios, acuerdos y tiempos de activación.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-041',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '7',
-  'clause': '7.2',
-  'domain_es': 'Competencia',
-  'assessment_question_es': 'Se han definido las competencias requeridas para roles que afectan el desempeño de continuidad.',
-  'suggested_evidence_es': 'Perfiles, matriz de competencias y roles de crisis.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-042',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '7',
-  'clause': '7.2',
-  'domain_es': 'Competencia',
-  'assessment_question_es': 'Las personas asignadas demuestran competencia mediante formación, experiencia o evaluación.',
-  'suggested_evidence_es': 'Certificados, experiencia, evaluaciones y observación en ejercicios.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-043',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '7',
-  'clause': '7.2',
-  'domain_es': 'Desarrollo de capacidades',
-  'assessment_question_es': 'Se ejecutan acciones para cerrar brechas de competencia y se evalúa su eficacia.',
-  'suggested_evidence_es': 'Plan de formación, resultados, evaluaciones y mejoras.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-044',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '7',
-  'clause': '7.3',
-  'domain_es': 'Conciencia',
-  'assessment_question_es': 'El personal conoce la política, su contribución a la continuidad y las consecuencias de no cumplir los '
-                            'procedimientos.',
-  'suggested_evidence_es': 'Inducciones, campañas, encuestas y pruebas de conocimiento.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-045',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '7',
-  'clause': '7.3',
-  'domain_es': 'Conciencia',
-  'assessment_question_es': 'Las personas conocen su papel antes, durante y después de una interrupción.',
-  'suggested_evidence_es': 'Tarjetas de rol, guías rápidas, simulacros y confirmaciones.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-046',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '7',
-  'clause': '7.4',
-  'domain_es': 'Comunicación',
-  'assessment_question_es': 'Existe un plan que define qué, cuándo, con quién, cómo y quién comunica asuntos de continuidad.',
-  'suggested_evidence_es': 'Plan de comunicación, matriz de contactos y vocerías.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-047',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '7',
-  'clause': '7.4',
-  'domain_es': 'Comunicación',
-  'assessment_question_es': 'Los canales de comunicación de crisis cuentan con alternativas y mecanismos de escalamiento.',
-  'suggested_evidence_es': 'Árbol de llamadas, canales alternos, pruebas y protocolos.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-048',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '7',
-  'clause': '7.4',
-  'domain_es': 'Comunicación',
-  'assessment_question_es': 'La comunicación con autoridades, medios, clientes, proveedores y otras partes relevantes está prevista.',
-  'suggested_evidence_es': 'Plantillas, directorio, criterios de notificación y voceros.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-049',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '7',
-  'clause': '7.5',
-  'domain_es': 'Información documentada',
-  'assessment_question_es': 'Se determinan los documentos y registros necesarios para operar y demostrar la eficacia del sistema.',
-  'suggested_evidence_es': 'Listado maestro, arquitectura documental y matriz de registros.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-050',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '7',
-  'clause': '7.5',
-  'domain_es': 'Control documental',
-  'assessment_question_es': 'Los documentos se identifican, revisan, aprueban, actualizan y distribuyen de forma controlada.',
-  'suggested_evidence_es': 'Procedimiento documental, versiones, aprobaciones y permisos.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-051',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '7',
-  'clause': '7.5',
-  'domain_es': 'Protección documental',
-  'assessment_question_es': 'La información de continuidad se protege, conserva, recupera y elimina de acuerdo con reglas definidas.',
-  'suggested_evidence_es': 'Controles de acceso, respaldos, retención y eliminación segura.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-052',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.1',
-  'domain_es': 'Planificación y control operacional',
-  'assessment_question_es': 'Se planifican y controlan los procesos necesarios para cumplir requisitos y ejecutar las acciones del SGCN.',
-  'suggested_evidence_es': 'Planes operativos, criterios de aceptación, controles y registros.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-053',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.1',
-  'domain_es': 'Cambios operacionales',
-  'assessment_question_es': 'Los cambios planificados se controlan y los cambios no previstos se revisan para reducir efectos adversos.',
-  'suggested_evidence_es': 'Registros de cambio, evaluación de impacto y acciones de mitigación.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-054',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.1',
-  'domain_es': 'Procesos tercerizados',
-  'assessment_question_es': 'Los procesos y servicios externos relevantes para continuidad están sujetos a controles definidos.',
-  'suggested_evidence_es': 'Contratos, SLA, evaluaciones de proveedor, planes y pruebas conjuntas.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-055',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.2.1',
-  'domain_es': 'BIA y evaluación de riesgos',
-  'assessment_question_es': 'Existe un proceso formal, vigente y consistente para el análisis de impacto y la evaluación de riesgos de '
-                            'interrupción.',
-  'suggested_evidence_es': 'Metodología aprobada, calendario, responsables y resultados.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-056',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.2.2',
-  'domain_es': 'Análisis de impacto al negocio',
-  'assessment_question_es': 'El BIA identifica actividades que soportan productos y servicios priorizados dentro del alcance.',
-  'suggested_evidence_es': 'Inventario de productos, servicios, procesos y actividades priorizadas.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-057',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.2.2',
-  'domain_es': 'Impactos',
-  'assessment_question_es': 'El BIA evalúa tipos de impacto y cómo aumentan con el tiempo después de una interrupción.',
-  'suggested_evidence_es': 'Escalas de impacto, curvas temporales, criterios financieros, legales, operativos y reputacionales.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-058',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.2.2',
-  'domain_es': 'Tiempos objetivo',
-  'assessment_question_es': 'Se establecen y justifican los tiempos máximos tolerables, objetivos de recuperación y puntos objetivo de '
-                            'recuperación cuando aplican.',
-  'suggested_evidence_es': 'MTPD/MAO, RTO, RPO, criterios, aprobaciones y trazabilidad.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-059',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.2.2',
-  'domain_es': 'Capacidad mínima',
-  'assessment_question_es': 'Se define la capacidad mínima aceptable y el momento en que debe recuperarse cada actividad priorizada.',
-  'suggested_evidence_es': 'Niveles mínimos de servicio, capacidad, volumen y cronograma de recuperación.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-060',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.2.2',
-  'domain_es': 'Recursos y dependencias',
-  'assessment_question_es': 'El BIA identifica personas, tecnología, datos, instalaciones, proveedores y otras dependencias necesarias.',
-  'suggested_evidence_es': 'Mapa de dependencias, recursos mínimos y puntos únicos de falla.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-061',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.2.2',
-  'domain_es': 'Interdependencias',
-  'assessment_question_es': 'Se analizan dependencias entre procesos y se define una secuencia viable de recuperación.',
-  'suggested_evidence_es': 'Mapa de interdependencias, cadena de recuperación y validación de áreas.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-062',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.2.2',
-  'domain_es': 'Aprobación y actualización del BIA',
-  'assessment_question_es': 'Los resultados del BIA son validados por dueños de negocio, aprobados y revisados ante cambios '
-                            'significativos.',
-  'suggested_evidence_es': 'Firmas, actas, versión vigente, disparadores y calendario de revisión.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-063',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.2.3',
-  'domain_es': 'Riesgos de interrupción',
-  'assessment_question_es': 'Se identifican amenazas, vulnerabilidades y escenarios que pueden interrumpir actividades priorizadas.',
-  'suggested_evidence_es': 'Registro de escenarios, talleres, inteligencia de amenazas y análisis de vulnerabilidad.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-064',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.2.3',
-  'domain_es': 'Análisis y evaluación',
-  'assessment_question_es': 'Los riesgos de interrupción se analizan y evalúan con criterios consistentes y aprobados.',
-  'suggested_evidence_es': 'Metodología, escalas, resultados, aceptación y priorización.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-065',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.2.3',
-  'domain_es': 'Tratamiento y riesgo residual',
-  'assessment_question_es': 'Se determinan controles, responsables, plazos y aceptación del riesgo residual.',
-  'suggested_evidence_es': 'Plan de tratamiento, controles, aprobaciones y seguimiento.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-066',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.3.1',
-  'domain_es': 'Estrategias y soluciones',
-  'assessment_question_es': 'Las estrategias de continuidad se basan en los resultados del BIA y de la evaluación de riesgos.',
-  'suggested_evidence_es': 'Trazabilidad BIA-riesgos-estrategias y criterios de decisión.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-067',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.3.2',
-  'domain_es': 'Opciones de estrategia',
-  'assessment_question_es': 'Se identifican opciones para antes, durante y después de una interrupción, incluyendo prevención, respuesta y '
-                            'recuperación.',
-  'suggested_evidence_es': 'Catálogo de opciones, escenarios, ventajas, limitaciones y costos.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-068',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.3.3',
-  'domain_es': 'Selección de soluciones',
-  'assessment_question_es': 'Las soluciones se seleccionan considerando tiempos objetivo, capacidad, riesgos, costos, beneficios y '
-                            'obligaciones.',
-  'suggested_evidence_es': 'Análisis multicriterio, caso de negocio y aprobación.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-069',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.3.3',
-  'domain_es': 'Adecuación de soluciones',
-  'assessment_question_es': 'Las soluciones seleccionadas son viables frente a escenarios severos pero plausibles.',
-  'suggested_evidence_es': 'Pruebas de capacidad, análisis de estrés y supuestos documentados.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-070',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.3.4',
-  'domain_es': 'Requisitos de recursos',
-  'assessment_question_es': 'Se determinan los recursos necesarios para implementar las soluciones de continuidad.',
-  'suggested_evidence_es': 'Requisitos de personal, instalaciones, TIC, datos, transporte, finanzas y proveedores.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-071',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.3.4',
-  'domain_es': 'Proveedores y cadena de suministro',
-  'assessment_question_es': 'Se establecen requisitos de continuidad para proveedores críticos y se verifica su capacidad.',
-  'suggested_evidence_es': 'Cláusulas, cuestionarios, certificaciones, planes y resultados de pruebas.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-072',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.3.5',
-  'domain_es': 'Implementación de soluciones',
-  'assessment_question_es': 'Las soluciones aprobadas se implementan, mantienen y controlan con responsables y recursos definidos.',
-  'suggested_evidence_es': 'Plan de implementación, entregables, responsables y evidencia operativa.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-073',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.3.5',
-  'domain_es': 'Capacidad técnica',
-  'assessment_question_es': 'La infraestructura y los mecanismos de recuperación cumplen los objetivos establecidos.',
-  'suggested_evidence_es': 'Pruebas técnicas, capacidad, replicación, respaldos y tiempos reales.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-074',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.4.1',
-  'domain_es': 'Planes y procedimientos',
-  'assessment_question_es': 'Los planes permiten gestionar una interrupción y continuar o recuperar actividades priorizadas.',
-  'suggested_evidence_es': 'Planes vigentes, procedimientos, listas de verificación y anexos.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-075',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.4.1',
-  'domain_es': 'Características de los planes',
-  'assessment_question_es': 'Los planes son específicos, flexibles, accesibles, comprensibles y utilizables bajo presión.',
-  'suggested_evidence_es': 'Revisión de calidad, copias alternas, accesibilidad y pruebas de uso.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-076',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.4.2',
-  'domain_es': 'Estructura de respuesta',
-  'assessment_question_es': 'Existe una estructura de respuesta con niveles de autoridad, roles, suplencias y criterios de escalamiento.',
-  'suggested_evidence_es': 'Organigrama de crisis, RACI, delegaciones y tarjetas de rol.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-077',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.4.2',
-  'domain_es': 'Activación y desactivación',
-  'assessment_question_es': 'Se definen criterios y responsables para activar, escalar, mantener y desactivar la respuesta.',
-  'suggested_evidence_es': 'Matriz de activación, umbrales, autoridad y registro de decisiones.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-078',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.4.2',
-  'domain_es': 'Gestión estratégica, táctica y operativa',
-  'assessment_question_es': 'La estructura coordina decisiones estratégicas, tácticas y operativas durante una interrupción.',
-  'suggested_evidence_es': 'Protocolos de coordinación, salas de crisis y cadencia de reuniones.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-079',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.4.3',
-  'domain_es': 'Alerta y comunicación',
-  'assessment_question_es': 'Se dispone de procedimientos para detectar, alertar, notificar y movilizar a los equipos relevantes.',
-  'suggested_evidence_es': 'Monitoreo, alarmas, árbol de llamadas, pruebas y registros.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-080',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.4.3',
-  'domain_es': 'Comunicación de crisis',
-  'assessment_question_es': 'Los mensajes se preparan, autorizan, emiten y registran con control de consistencia y oportunidad.',
-  'suggested_evidence_es': 'Plantillas, aprobaciones, registro de comunicaciones y monitoreo de medios.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-081',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.4.3',
-  'domain_es': 'Interoperabilidad',
-  'assessment_question_es': 'Los mecanismos de comunicación son compatibles con los de autoridades, respondedores y socios cuando aplica.',
-  'suggested_evidence_es': 'Protocolos conjuntos, directorios, pruebas y acuerdos.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-082',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.4.4',
-  'domain_es': 'Contenido del plan',
-  'assessment_question_es': 'Cada plan define propósito, alcance, objetivos, criterios de activación, roles, acciones y recursos.',
-  'suggested_evidence_es': 'Plan aprobado y lista de contenidos mínimos.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-083',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.4.4',
-  'domain_es': 'Procedimientos de continuidad',
-  'assessment_question_es': 'Los procedimientos detallan cómo operar a capacidad aceptable y cómo priorizar recursos durante la '
-                            'interrupción.',
-  'suggested_evidence_es': 'Procedimientos alternos, capacidad mínima y secuencia de actividades.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-084',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.4.4',
-  'domain_es': 'Dependencias y terceros',
-  'assessment_question_es': 'Los planes incorporan dependencias internas y externas, contactos y compromisos de terceros críticos.',
-  'suggested_evidence_es': 'Anexos de dependencias, contactos, SLA y acuerdos de apoyo.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-085',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.4.4',
-  'domain_es': 'Información vital',
-  'assessment_question_es': 'La información esencial para ejecutar los planes está disponible, protegida y actualizada.',
-  'suggested_evidence_es': 'Repositorios alternos, copias offline, control de acceso y versiones.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-086',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.4.5',
-  'domain_es': 'Recuperación y retorno',
-  'assessment_question_es': 'Se planifica la transición desde la respuesta hasta la recuperación y el retorno controlado a la operación '
-                            'normal.',
-  'suggested_evidence_es': 'Plan de retorno, criterios de estabilidad, validaciones y aceptación del negocio.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-087',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.4.5',
-  'domain_es': 'Restauración priorizada',
-  'assessment_question_es': 'La recuperación respeta los tiempos, la secuencia y la capacidad definidos por el BIA.',
-  'suggested_evidence_es': 'Cronograma de recuperación, resultados de pruebas y trazabilidad con RTO/RPO.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-088',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.5',
-  'domain_es': 'Programa de ejercicios',
-  'assessment_question_es': 'Existe un programa de ejercicios alineado con alcance, riesgos, capacidades y objetivos de continuidad.',
-  'suggested_evidence_es': 'Programa anual/plurianual, cobertura y aprobación.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-089',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.5',
-  'domain_es': 'Tipos y escenarios',
-  'assessment_question_es': 'Los ejercicios incluyen diferentes métodos y escenarios relevantes, progresivos y suficientemente exigentes.',
-  'suggested_evidence_es': 'Ejercicios de escritorio, simulaciones, pruebas técnicas e integrales.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-090',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.5',
-  'domain_es': 'Participación',
-  'assessment_question_es': 'Participan las áreas, directivos, sedes y terceros necesarios para validar la capacidad de extremo a extremo.',
-  'suggested_evidence_es': 'Listas de participantes, alcance, invitaciones y resultados.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-091',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.5',
-  'domain_es': 'Criterios y seguridad',
-  'assessment_question_es': 'Cada ejercicio define objetivos, criterios de éxito, controles de riesgo y reglas para evitar impactos no '
-                            'deseados.',
-  'suggested_evidence_es': 'Guion, plan de prueba, criterios, autorizaciones y plan de reversa.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-092',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.5',
-  'domain_es': 'Resultados y mejoras',
-  'assessment_question_es': 'Los ejercicios generan resultados documentados, lecciones, acciones, responsables y fechas de cierre.',
-  'suggested_evidence_es': 'Informe de ejercicio, evidencias, plan de acción y seguimiento.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-093',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.5',
-  'domain_es': 'Validación de capacidades',
-  'assessment_question_es': 'Los resultados demuestran si las soluciones y planes alcanzan los tiempos y capacidades requeridos.',
-  'suggested_evidence_es': 'Tiempos reales, volumen recuperado, desviaciones y aceptación del negocio.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-094',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.6',
-  'domain_es': 'Evaluación documental y de capacidades',
-  'assessment_question_es': 'Los planes, procedimientos y capacidades se revisan con una frecuencia definida y después de cambios o '
-                            'incidentes.',
-  'suggested_evidence_es': 'Calendario de revisión, disparadores, actas y versiones.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-095',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.6',
-  'domain_es': 'Conformidad y vigencia',
-  'assessment_question_es': 'La evaluación confirma que los elementos de continuidad siguen siendo adecuados, suficientes y eficaces.',
-  'suggested_evidence_es': 'Revisiones cruzadas, listas de verificación y aprobaciones.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-096',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '8',
-  'clause': '8.6',
-  'domain_es': 'Lecciones aprendidas',
-  'assessment_question_es': 'Los resultados de incidentes, ejercicios y evaluaciones se incorporan a planes, estrategias y formación.',
-  'suggested_evidence_es': 'Registro de lecciones, cambios implementados y validación posterior.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-097',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '9',
-  'clause': '9.1',
-  'domain_es': 'Seguimiento y medición',
-  'assessment_question_es': 'Se define qué medir, cómo medir, cuándo analizar y quién evalúa el desempeño del SGCN.',
-  'suggested_evidence_es': 'Ficha de indicadores, fuentes, responsables y periodicidad.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-098',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '9',
-  'clause': '9.1',
-  'domain_es': 'Indicadores',
-  'assessment_question_es': 'Los indicadores cubren preparación, capacidad, ejercicios, incidentes, acciones y cumplimiento de objetivos.',
-  'suggested_evidence_es': 'Tablero de indicadores, metas, tendencias y umbrales.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-099',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '9',
-  'clause': '9.1',
-  'domain_es': 'Análisis y evaluación',
-  'assessment_question_es': 'Los resultados se analizan para determinar eficacia, tendencias, desviaciones y necesidad de acciones.',
-  'suggested_evidence_es': 'Informes de desempeño, análisis de causa y decisiones.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-100',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '9',
-  'clause': '9.1',
-  'domain_es': 'Evidencia de resultados',
-  'assessment_question_es': 'Se conserva información documentada suficiente para demostrar los resultados del seguimiento y la evaluación.',
-  'suggested_evidence_es': 'Registros, reportes, trazabilidad de datos y retención.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-101',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '9',
-  'clause': '9.2.1',
-  'domain_es': 'Auditoría interna',
-  'assessment_question_es': 'Se realizan auditorías internas planificadas para evaluar conformidad y eficacia del sistema.',
-  'suggested_evidence_es': 'Programa, planes, listas de verificación, informes y evidencias.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-102',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '9',
-  'clause': '9.2.2',
-  'domain_es': 'Programa de auditoría',
-  'assessment_question_es': 'El programa considera importancia de procesos, cambios, riesgos y resultados de auditorías anteriores.',
-  'suggested_evidence_es': 'Criterios de priorización, cobertura, frecuencia y cronograma.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-103',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '9',
-  'clause': '9.2.2',
-  'domain_es': 'Independencia y competencia',
-  'assessment_question_es': 'Los auditores son competentes y mantienen objetividad e imparcialidad frente al trabajo auditado.',
-  'suggested_evidence_es': 'Competencias, asignaciones, declaración de independencia y revisión.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-104',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '9',
-  'clause': '9.2.2',
-  'domain_es': 'Resultados de auditoría',
-  'assessment_question_es': 'Los resultados se comunican a responsables pertinentes y se da seguimiento oportuno a las acciones.',
-  'suggested_evidence_es': 'Informe, distribución, plan de acción y verificación de cierre.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-105',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '9',
-  'clause': '9.3',
-  'domain_es': 'Revisión por la dirección',
-  'assessment_question_es': 'La alta dirección revisa el SGCN a intervalos planificados.',
-  'suggested_evidence_es': 'Calendario, convocatoria, actas y participantes.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-106',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '9',
-  'clause': '9.3.2',
-  'domain_es': 'Entradas de revisión',
-  'assessment_question_es': 'La revisión considera cambios, desempeño, auditorías, incidentes, ejercicios, riesgos, recursos y acciones '
-                            'previas.',
-  'suggested_evidence_es': 'Agenda, paquete de información y presentación ejecutiva.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-107',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '9',
-  'clause': '9.3.2',
-  'domain_es': 'Necesidades y oportunidades',
-  'assessment_question_es': 'La revisión analiza oportunidades de mejora y necesidades de cambio, recursos o actualización del sistema.',
-  'suggested_evidence_es': 'Análisis de brechas, propuestas, decisiones y priorización.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-108',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '9',
-  'clause': '9.3.3',
-  'domain_es': 'Salidas de revisión',
-  'assessment_question_es': 'Las decisiones y acciones de la revisión quedan documentadas con responsables y plazos.',
-  'suggested_evidence_es': 'Acta, decisiones, plan de acción y seguimiento.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-109',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '10',
-  'clause': '10.1',
-  'domain_es': 'No conformidad',
-  'assessment_question_es': 'Las no conformidades e incidentes originan acciones para controlar, corregir y atender sus consecuencias.',
-  'suggested_evidence_es': 'Registro de no conformidad, contención, corrección y evidencias.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-110',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '10',
-  'clause': '10.1',
-  'domain_es': 'Causa y recurrencia',
-  'assessment_question_es': 'Se analizan causas y se determina si pueden existir problemas similares en otros procesos o ubicaciones.',
-  'suggested_evidence_es': 'Análisis de causa raíz, revisión transversal y acciones sistémicas.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-111',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '10',
-  'clause': '10.1',
-  'domain_es': 'Acción correctiva',
-  'assessment_question_es': 'Las acciones correctivas son proporcionales al efecto de la no conformidad y se implementan oportunamente.',
-  'suggested_evidence_es': 'Plan de acción, priorización, responsables y plazos.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-112',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '10',
-  'clause': '10.1',
-  'domain_es': 'Eficacia y actualización',
-  'assessment_question_es': 'Se revisa la eficacia de las acciones y se actualizan riesgos, controles o el sistema cuando corresponde.',
-  'suggested_evidence_es': 'Verificación de eficacia, cambios, cierre y aprobación.',
-  'default_weight': 1,
-  'active': True},
- {'item_id': 'BCP-113',
-  'standard_code': 'ISO 22301',
-  'standard_version': '2019+Amd1:2024',
-  'chapter': '10',
-  'clause': '10.2',
-  'domain_es': 'Mejora continua',
-  'assessment_question_es': 'La organización mejora continuamente la adecuación, suficiencia y eficacia del sistema de continuidad.',
-  'suggested_evidence_es': 'Portafolio de mejoras, indicadores, lecciones y beneficios realizados.',
-  'default_weight': 1,
-  'active': True}]
-
-ISO22301_MADUREZ_LEVELS = [
-    {
-        "nivel": "Nivel 1: Inicial",
-        "descripcion": "No existe implementación formal o es mínima; las prácticas son ad hoc.",
-        "score": 1,
-        "rango_pct": "0% – 20%",
-        "logica": "Prácticas no formalizadas"
-    },
-    {
-        "nivel": "Nivel 2: Repetible",
-        "descripcion": "Existen prácticas parciales y repetibles, pero con documentación o control limitado.",
-        "score": 2,
-        "rango_pct": "21% – 40%",
-        "logica": "Prácticas parciales"
-    },
-    {
-        "nivel": "Nivel 3: Definido",
-        "descripcion": "El proceso está definido, documentado y comunicado para su ejecución consistente.",
-        "score": 3,
-        "rango_pct": "41% – 60%",
-        "logica": "Proceso documentado"
-    },
-    {
-        "nivel": "Nivel 4: Gestionado",
-        "descripcion": "El proceso se mide, gestiona, controla y tiene seguimiento periódico.",
-        "score": 4,
-        "rango_pct": "61% – 80%",
-        "logica": "Proceso medido y gestionado"
-    },
-    {
-        "nivel": "Nivel 5: Optimizado",
-        "descripcion": "El proceso es eficaz, sostenido y mejorado continuamente con evidencia trazable.",
-        "score": 5,
-        "rango_pct": "81% – 100%",
-        "logica": "Mejora continua"
-    },
-]
-
-
-# ============================================================
-# MODELOS DB — ISO 22301
-# ============================================================
-class Iso22301MadurezParametro(db.Model):
-    __bind_key__ = "iso22301_madurez"
-    __tablename__ = "iso22301_madurez_parametros"
-
-    id = db.Column(db.Integer, primary_key=True)
-    nivel = db.Column(db.String(80), nullable=False)
-    rango_desde = db.Column(db.Float, nullable=False)
-    rango_hasta = db.Column(db.Float, nullable=False)
-    color = db.Column(db.String(20), nullable=True)
-    descripcion = db.Column(db.Text, nullable=True)
-    orden = db.Column(db.Integer, default=0)
-
-
-class Iso22301MadurezPregunta(db.Model):
-    __bind_key__ = "iso22301_madurez"
-    __tablename__ = "iso22301_madurez_preguntas"
-
-    id = db.Column(db.Integer, primary_key=True)
-    bloque_codigo = db.Column(db.String(50), index=True, nullable=True)
-    bloque_nombre = db.Column(db.String(255), nullable=True)
-    seccion_codigo = db.Column(db.String(50), index=True, nullable=True)
-    seccion_nombre = db.Column(db.Text, nullable=True)
-    pregunta_codigo = db.Column(db.String(50), index=True, nullable=True)
-    pregunta = db.Column(db.Text, nullable=False)
-    evidencia_sugerida = db.Column(db.Text, nullable=True)
-    tipo = db.Column(db.String(5), nullable=False, default="q")  # h / q
-    orden = db.Column(db.Integer, default=0)
-    activo = db.Column(db.Boolean, default=True)
-
-
-class Iso22301MadurezRun(db.Model):
-    __bind_key__ = "iso22301_madurez"
-    __tablename__ = "iso22301_madurez_runs"
-
-    id = db.Column(db.Integer, primary_key=True)
-    consecutivo = db.Column(db.String(255), nullable=False, index=True)
-    company_name = db.Column(db.String(255), nullable=True)
-    user_id = db.Column(db.Integer, nullable=True)  # DB independiente: no FK cruzada
-    estado = db.Column(db.String(20), nullable=False, default="BORRADOR", index=True)
-    progreso_pct = db.Column(db.Integer, nullable=False, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-    resumen_json = db.Column(db.Text, nullable=False, default="{}")
-    pct_general = db.Column(db.Float, nullable=False, default=0.0)
-    radar_overall_b64 = db.Column(db.Text, nullable=True)
-
-    informe_ejecutivo_ai = db.Column(db.Text, nullable=True)
-    informe_ejecutivo_editado = db.Column(db.Text, nullable=True)
-    plan_trabajo_ai = db.Column(db.Text, nullable=True)
-    plan_trabajo_editado = db.Column(db.Text, nullable=True)
-
-
-class Iso22301MadurezRespuesta(db.Model):
-    __bind_key__ = "iso22301_madurez"
-    __tablename__ = "iso22301_madurez_respuestas"
-
-    id = db.Column(db.Integer, primary_key=True)
-    run_id = db.Column(db.Integer, db.ForeignKey("iso22301_madurez_runs.id", ondelete="CASCADE"), nullable=False, index=True)
-    pregunta_id = db.Column(db.Integer, db.ForeignKey("iso22301_madurez_preguntas.id", ondelete="CASCADE"), nullable=False, index=True)
-    estado = db.Column(db.String(20), nullable=False)  # SI / PARCIAL / NO / NA
-    comentario = db.Column(db.Text, nullable=True)
-
-
-class Iso22301MadurezCriterioAnalisis(db.Model):
-    __bind_key__ = "iso22301_madurez"
-    __tablename__ = "iso22301_madurez_criterio_analisis"
-
-    id = db.Column(db.Integer, primary_key=True)
-    run_id = db.Column(db.Integer, db.ForeignKey("iso22301_madurez_runs.id", ondelete="CASCADE"), nullable=False, index=True)
-    bloque_codigo = db.Column(db.String(50), nullable=False, index=True)
-    bloque_nombre = db.Column(db.String(255), nullable=True)
-    estado_actual = db.Column(db.Text, nullable=True)
-    estado_requerido = db.Column(db.Text, nullable=True)
-    plan_accion_ai = db.Column(db.Text, nullable=True)
-    plan_accion_editado = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-    __table_args__ = (
-        db.UniqueConstraint("run_id", "bloque_codigo", name="uq_iso22301_run_bloque"),
-    )
-
-
-# ============================================================
-# INICIALIZACIÓN DB INDEPENDIENTE
-# ============================================================
-def _iso22301_ensure_schema():
-    """Aplica migraciones idempotentes únicamente sobre la base ISO 22301."""
-    os.makedirs(app.instance_path, exist_ok=True)
-    conn = sqlite3.connect(ISO22301_DB_PATH)
-    try:
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(iso22301_madurez_preguntas)").fetchall()}
-        if cols and "evidencia_sugerida" not in cols:
-            conn.execute("ALTER TABLE iso22301_madurez_preguntas ADD COLUMN evidencia_sugerida TEXT")
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def init_iso22301_madurez_db():
-    try:
-        os.makedirs(app.instance_path, exist_ok=True)
-        app.config.setdefault("SQLALCHEMY_BINDS", {})
-        app.config["SQLALCHEMY_BINDS"]["iso22301_madurez"] = "sqlite:///" + ISO22301_DB_PATH
-        with app.app_context():
-            db.create_all(bind_key="iso22301_madurez")
-            _iso22301_ensure_schema()
-            seed_iso22301_parametros()
-            if Iso22301MadurezPregunta.query.filter_by(tipo="q").count() == 0:
-                iso22301_seed_catalog(ISO22301_EMBEDDED_CATALOG, replace=False)
-        print(f"✅ Base de datos ISO 22301 inicializada correctamente: {ISO22301_DB_PATH}")
-    except Exception as e:
-        print(f"❌ Error inicializando base de datos ISO 22301: {repr(e)}")
-        raise
-
-
-# ============================================================
-# HELPERS GENERALES
-# ============================================================
-def iso22301_block_title(code: str) -> str:
-    return ISO22301_BLOCK_TITLES.get((code or "").strip().upper(), code or "")
-
-
-def iso22301_safe_str(x):
-    if x is None:
-        return ""
-    try:
-        if pd.isna(x):
-            return ""
-    except Exception:
-        pass
-    return str(x).strip()
-
-
-def _iso22301_norm(s: str) -> str:
-    s = iso22301_safe_str(s)
-    s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
-    s = s.upper()
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
-
-
-def iso22301_normalizar_texto_excel(texto: str) -> str:
-    t = iso22301_safe_str(texto)
-    if not t:
-        return ""
-    t = t.replace("\ufeff", " ").replace("\xa0", " ")
-    t = t.replace("\r\n", "\n").replace("\r", "\n")
-    t = re.sub(r"[ \t]+", " ", t).strip()
-    return t
-
-
-def iso22301_detectar_bloque(texto: str):
-    n = _iso22301_norm(texto)
-    match = re.search(r"(?:CAPITULO|CAPÍTULO|CLAUSULA|CLÁUSULA)?\s*(10|[4-9])(?:\.0)?$", n)
-    if match:
-        code = match.group(1)
-        return code, ISO22301_BLOCK_TITLES.get(code, code)
-    return None, None
-
-
-def seed_iso22301_parametros():
-    if Iso22301MadurezParametro.query.first():
-        return
-    params = [
-        {"nivel": "Nivel 1: Inicial", "rango_desde": 0, "rango_hasta": 20.99, "color": "#dc3545", "descripcion": "No existe implementación formal o es mínima.", "orden": 1},
-        {"nivel": "Nivel 2: Repetible", "rango_desde": 21, "rango_hasta": 40.99, "color": "#fd7e14", "descripcion": "Existen prácticas parciales y repetibles.", "orden": 2},
-        {"nivel": "Nivel 3: Definido", "rango_desde": 41, "rango_hasta": 60.99, "color": "#ffc107", "descripcion": "El proceso está definido y documentado.", "orden": 3},
-        {"nivel": "Nivel 4: Gestionado", "rango_desde": 61, "rango_hasta": 80.99, "color": "#0d6efd", "descripcion": "El proceso se mide, gestiona y controla.", "orden": 4},
-        {"nivel": "Nivel 5: Optimizado", "rango_desde": 81, "rango_hasta": 100, "color": "#198754", "descripcion": "Proceso eficaz, sostenido y mejorado continuamente.", "orden": 5},
-    ]
-    for p in params:
-        db.session.add(Iso22301MadurezParametro(**p))
-    db.session.commit()
-
-
-def iso22301_resolver_nivel(pct: float):
-    try:
-        pct = float(pct or 0)
-    except Exception:
-        pct = 0.0
-    pct = max(0.0, min(100.0, pct))
-    rows = Iso22301MadurezParametro.query.order_by(Iso22301MadurezParametro.orden.asc()).all()
-    for r in rows:
-        if float(r.rango_desde) <= pct <= float(r.rango_hasta):
-            return {"nivel": r.nivel, "score": r.orden, "color": r.color or "#6c757d", "descripcion": r.descripcion or ""}
-    return {"nivel": "Nivel no definido", "score": 0, "color": "#6c757d", "descripcion": ""}
-
-
-def iso22301_resumen_instrumento():
-    total_q = Iso22301MadurezPregunta.query.filter_by(tipo="q").count()
-    total_h = Iso22301MadurezPregunta.query.filter_by(tipo="h").count()
-    por_bloque = (
-        db.session.query(Iso22301MadurezPregunta.bloque_codigo, func.count(Iso22301MadurezPregunta.id))
-        .filter(Iso22301MadurezPregunta.tipo == "q")
-        .group_by(Iso22301MadurezPregunta.bloque_codigo)
-        .all()
-    )
-    return {"total_preguntas": total_q, "total_headers": total_h, "por_bloque": {k: v for k, v in por_bloque}}
-
-
-def cargar_respuestas_iso22301(run_id):
-    out = {}
-    if not run_id:
-        return out
-    rows = Iso22301MadurezRespuesta.query.filter_by(run_id=run_id).all()
-    for r in rows:
-        out[r.pregunta_id] = {"estado": (r.estado or "").strip().upper(), "comentario": (r.comentario or "").strip()}
-    return out
-
-
-def calcular_progreso_iso22301(preguntas, form_data=None, respuestas_db=None):
-    total = len(preguntas)
-    respondidas = 0
-    for q in preguntas:
-        estado = ""
-        if form_data is not None:
-            estado = (form_data.get(f"st_{q.id}") or "").strip().upper()
-        elif respuestas_db is not None:
-            estado = (respuestas_db.get(q.id, {}).get("estado") or "").strip().upper()
-        if estado in ("SI", "PARCIAL", "NO", "NA"):
-            respondidas += 1
-    pct = int(round((respondidas / total) * 100)) if total > 0 else 0
-    return respondidas, total, pct
-
-
-def obtener_borrador_iso22301(user_id):
-    if not user_id:
-        return None
-    return (
-        Iso22301MadurezRun.query
-        .filter(Iso22301MadurezRun.user_id == user_id, Iso22301MadurezRun.estado == "BORRADOR")
-        .order_by(Iso22301MadurezRun.updated_at.desc(), Iso22301MadurezRun.id.desc())
-        .first()
-    )
-
-
-def _contar_respuestas_run_iso22301(run_id: int) -> int:
-    if not run_id:
-        return 0
-    return Iso22301MadurezRespuesta.query.filter_by(run_id=run_id).count()
-
-
-def _eliminar_runs_vacios_iso22301(user_id: int | None = None):
-    q = Iso22301MadurezRun.query
-    if user_id:
-        q = q.filter(Iso22301MadurezRun.user_id == user_id)
-    eliminados = 0
-    for run in q.all():
-        if Iso22301MadurezRespuesta.query.filter_by(run_id=run.id).count() == 0:
-            Iso22301MadurezCriterioAnalisis.query.filter_by(run_id=run.id).delete(synchronize_session=False)
-            db.session.delete(run)
-            eliminados += 1
-    if eliminados:
-        db.session.commit()
-    return eliminados
-
-
-def iso22301_pct_from_estados(estados: list[str]) -> float:
-    vals = []
-    for e in estados:
-        estado = (e or "").strip().upper()
-
-        # N/A tiene valor 0, pero no es una pregunta aplicable y por eso
-        # no suma ni aumenta el denominador del promedio.
-        if estado == "NA":
-            continue
-
-        v = ISO22301_STATUS_SCORE.get(estado)
-        if v is not None:
-            vals.append(v)
-
-    return round(sum(vals) / len(vals), 2) if vals else 0.0
-
-
-def _parse_rango_pct_iso22301(rango: str):
-    if not rango:
-        return None, None
-    s = rango.replace("%", "").strip().replace("–", "-")
-    parts = [p.strip() for p in s.split("-")]
-    if len(parts) != 2:
-        return None, None
-    try:
-        return float(parts[0]), float(parts[1])
-    except Exception:
-        return None, None
-
-
-def iso22301_nivel_visual_por_pct(pct: float):
-    return iso22301_resolver_nivel(pct)
-
-
-def _iso22301_group_questions():
-    preguntas = (
-        Iso22301MadurezPregunta.query
-        .filter_by(activo=True, tipo="q")
-        .order_by(Iso22301MadurezPregunta.bloque_codigo.asc(), Iso22301MadurezPregunta.orden.asc(), Iso22301MadurezPregunta.id.asc())
-        .all()
-    )
-    grouped = {}
-    for q in preguntas:
-        bloque = (q.bloque_codigo or "SIN_BLOQUE").strip().upper()
-        if bloque not in grouped:
-            grouped[bloque] = {
-                "titulo": q.bloque_nombre or iso22301_block_title(bloque) or bloque,
-                "items": []
-            }
-        grouped[bloque]["items"].append(q)
-    ordered = {}
-    for code in ISO22301_BLOCK_ORDER:
-        if code in grouped:
-            ordered[code] = grouped[code]
-    for code, val in grouped.items():
-        if code not in ordered:
-            ordered[code] = val
-    return ordered
-
-
-def _iso22301_build_resumen(run_id: int) -> dict:
-    q = (
-        db.session.query(Iso22301MadurezRespuesta, Iso22301MadurezPregunta)
-        .join(Iso22301MadurezPregunta, Iso22301MadurezPregunta.id == Iso22301MadurezRespuesta.pregunta_id)
-        .filter(Iso22301MadurezRespuesta.run_id == run_id)
-        .filter(Iso22301MadurezPregunta.tipo == "q")
-        .order_by(Iso22301MadurezPregunta.bloque_codigo.asc(), Iso22301MadurezPregunta.orden.asc())
-    )
-    por_bloque = {}
-    for r, p in q.all():
-        b = (p.bloque_codigo or "SIN_BLOQUE").strip().upper()
-        por_bloque.setdefault(b, {
-            "bloque": b,
-            "nombre": p.bloque_nombre or iso22301_block_title(b) or b,
-            "total": 0,
-            "validas": 0,
-            "SI": 0,
-            "PARCIAL": 0,
-            "NO": 0,
-            "NA": 0,
-            "items": [],
-        })
-        estado = (r.estado or "").strip().upper()
-        por_bloque[b]["total"] += 1
-        if estado in ("SI", "PARCIAL", "NO", "NA"):
-            por_bloque[b][estado] += 1
-        # Solo Sí, Parcial y No forman el denominador. N/A queda registrado
-        # en el detalle, pero no participa en el nivel de madurez.
-        if estado in ("SI", "PARCIAL", "NO"):
-            por_bloque[b]["validas"] += 1
-        por_bloque[b]["items"].append({
-            "pregunta_id": p.id,
-            "pregunta_codigo": p.pregunta_codigo,
-            "pregunta": p.pregunta,
-            "evidencia_sugerida": p.evidencia_sugerida or "",
-            "estado": estado,
-            "comentario": r.comentario or "",
-        })
-
-    resumen = {}
-    for b, d in por_bloque.items():
-        estados = [it["estado"] for it in d["items"]]
-        pct = iso22301_pct_from_estados(estados)
-        nivel = (
-            iso22301_resolver_nivel(pct)
-            if int(d.get("validas", 0) or 0) > 0
-            else {
-                "nivel": "No aplica",
-                "score": 0,
-                "color": "#6c757d",
-                "descripcion": "Todas las preguntas del capítulo fueron marcadas N/A.",
-            }
-        )
-        d["pct"] = pct
-        d["madurez"] = nivel["nivel"]
-        d["score"] = nivel.get("score", 0)
-        d["color"] = nivel["color"]
-        d["descripcion"] = nivel.get("descripcion", "")
-        d["brecha_pct"] = round(100.0 - pct, 2) if d["validas"] > 0 else 0.0
-        resumen[b] = d
-    return resumen
-
-
-def iso22301_pct_general_from_resumen(resumen: dict) -> float:
-    """Calcula el resultado global solo con preguntas distintas de N/A."""
-    estados = [
-        item.get("estado", "")
-        for bloque in (resumen or {}).values()
-        for item in (bloque.get("items", []) or [])
-    ]
-    return iso22301_pct_from_estados(estados)
-
-
-def iso22301_pct_por_criterio(resumen: dict, order: list[str] = None):
-    order = order or ISO22301_BLOCK_ORDER
-    labels, values = [], []
-    for b in order:
-        if b in (resumen or {}):
-            d = (resumen or {}).get(b, {}) or {}
-            if int(d.get("validas", 0) or 0) <= 0:
-                continue
-            labels.append(iso22301_block_title(b) or b)
-            values.append(float(d.get("pct", 0) or 0))
-    for b, d in (resumen or {}).items():
-        if b not in order:
-            if int(d.get("validas", 0) or 0) <= 0:
-                continue
-            labels.append(d.get("nombre") or b)
-            values.append(float(d.get("pct", 0) or 0))
-    return labels, values
-
-
-def iso22301_radar_b64(labels: list[str], values: list[float], title: str = "Radar ISO 22301"):
-    if not labels:
-        return ""
-    vals = [max(0.0, min(100.0, float(v))) for v in values]
-    N = len(labels)
-    angles = [n / float(N) * 2 * math.pi for n in range(N)]
-    angles += angles[:1]
-    plot_vals = vals + vals[:1]
-
-    fig = plt.figure(figsize=(3.55, 3.55), dpi=170)
-    ax = plt.subplot(111, polar=True)
-    ax.set_theta_offset(math.pi / 2)
-    ax.set_theta_direction(-1)
-    ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels, fontsize=7.3)
-    ax.tick_params(axis="x", pad=10)
-    ax.set_ylim(0, 100)
-    ax.set_yticks([20, 40, 60, 80, 100])
-    ax.set_yticklabels(["20", "40", "60", "80", "100"], fontsize=7)
-    ax.tick_params(axis="y", pad=4)
-    ax.plot(angles, plot_vals, linewidth=2.0)
-    ax.fill(angles, plot_vals, alpha=0.16)
-    ax.set_title(title, fontsize=9.5, pad=14)
-    fig.subplots_adjust(top=0.83, bottom=0.10, left=0.10, right=0.90)
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", transparent=True, bbox_inches="tight", pad_inches=0.22)
-    plt.close(fig)
-    return base64.b64encode(buf.getvalue()).decode("utf-8")
-
-
-def generar_iso22301_velocimetro_png_bytes(titulo, valor, nivel="", color="#6c757d"):
-    try:
-        valor = max(0, min(100, float(valor or 0)))
-        fig = plt.figure(figsize=(7.2, 4.2), dpi=220)
-        ax = plt.axes([0.04, 0.08, 0.92, 0.84])
-        ax.set_aspect("equal")
-        ax.axis("off")
-        ax.set_xlim(-1.18, 1.18)
-        ax.set_ylim(-0.28, 1.18)
-        fig.patch.set_facecolor("white")
-        ax.set_facecolor("white")
-        rangos = [(180, 144, "#d9534f"), (144, 108, "#f0ad4e"), (108, 72, "#f7d154"), (72, 36, "#5bc0de"), (36, 0, "#5cb85c")]
-        for theta1, theta2, c in rangos:
-            ax.add_patch(Wedge((0, 0), 1.00, theta2, theta1, width=0.18, facecolor=c, edgecolor="white", linewidth=2))
-        for pct in range(0, 101, 10):
-            ang = math.radians(180 - (pct / 100.0) * 180.0)
-            ax.plot([math.cos(ang) * 0.78, math.cos(ang) * 0.88], [math.sin(ang) * 0.78, math.sin(ang) * 0.88], linewidth=1.2, color="#4b5563")
-        for pct in [0, 25, 50, 75, 100]:
-            ang = math.radians(180 - (pct / 100.0) * 180.0)
-            ax.text(math.cos(ang) * 0.63, math.sin(ang) * 0.63, f"{pct}", ha="center", va="center", fontsize=10, fontweight="bold", color="#374151")
-        ang = math.radians(180 - (valor / 100.0) * 180.0)
-        ax.add_patch(FancyArrowPatch((0, 0), (math.cos(ang) * 0.72, math.sin(ang) * 0.72), arrowstyle="-|>", mutation_scale=18, linewidth=2.4, color="#0b1220", zorder=5))
-        ax.add_patch(Circle((0, 0), radius=0.065, facecolor="#0b1220", edgecolor="white", linewidth=1.0, zorder=6))
-        titulo_corto = (titulo or "").strip()
-        if len(titulo_corto) > 42:
-            titulo_corto = titulo_corto[:39] + "..."
-        ax.text(0, 1.06, titulo_corto, ha="center", va="center", fontsize=13, fontweight="bold", color="#0f3d68")
-        ax.text(0, 0.30, f"{valor:.1f}%", ha="center", va="center", fontsize=24, fontweight="bold", color=color)
-        if nivel:
-            ax.text(0, 0.12, str(nivel)[:30], ha="center", va="center", fontsize=11, fontweight="bold", color="#374151")
-        buf = io.BytesIO()
-        canvas = FigureCanvas(fig)
-        canvas.print_png(buf)
-        plt.close(fig)
-        buf.seek(0)
-        return buf.getvalue()
-    except Exception:
-        plt.close("all")
-        return None
-
-
-def generar_iso22301_velocimetro_base64(label: str, pct: float, nivel: str, color: str):
-    b = generar_iso22301_velocimetro_png_bytes(label, pct, nivel, color)
-    if not b:
-        return None
-    return base64.b64encode(b).decode("utf-8")
-
-
-def iso22301_normalizar_texto_rico_guardado(texto: str) -> str:
-    txt = (texto or "").strip()
-
-    if not txt:
-        return ""
-
-    txt = txt.replace("\r\n", "\n").replace("\r", "\n")
-    txt = html.unescape(txt)
-    txt = txt.replace("```json", "").replace("```", "").strip()
-
-    # Extrae JSON aunque venga como:
-    # { "informe_ejecutivo": "texto..." }
-    # { "plan_trabajo": "texto..." }
-    # { "texto": "texto..." }
-    obj = None
-
-    try:
-        obj = json.loads(txt)
-    except Exception:
-        try:
-            start = txt.find("{")
-            end = txt.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                obj = json.loads(txt[start:end + 1])
-        except Exception:
-            obj = None
-
-    if isinstance(obj, dict):
-        val = (
-            obj.get("informe_ejecutivo")
-            or obj.get("informe")
-            or obj.get("resumen_ejecutivo")
-            or obj.get("plan_trabajo")
-            or obj.get("plan_accion")
-            or obj.get("texto")
-            or ""
-        )
-
-        if isinstance(val, list):
-            val = _build_plan_accion_iso22301_texto(val)
-
-        if isinstance(val, dict):
-            val = json.dumps(val, ensure_ascii=False, indent=2)
-
-        if isinstance(val, str) and val.strip():
-            txt = val.strip()
-
-    txt = html.unescape(txt)
-
-    # Si aún quedaron llaves al inicio y contiene informe_ejecutivo,
-    # intenta extraer por regex como último recurso.
-    m = re.search(
-        r'"informe_ejecutivo"\s*:\s*"(?P<txt>.*)"\s*\}?\s*$',
-        txt,
-        flags=re.IGNORECASE | re.DOTALL
-    )
-
-    if m:
-        extraido = m.group("txt")
-
-        try:
-            # Solo interpreta secuencias JSON reales (\n, \u00f3, etc.)
-            extraido = json.loads(f'"{extraido}"')
-        except Exception:
-            pass
-
-        txt = extraido.strip()
-
-    txt = re.sub(r"<\s*br\s*/?\s*>", "\n", txt, flags=re.IGNORECASE)
-    txt = re.sub(r"<[^>]+>", "", txt)
-
-    patrones = [
-        r"^\s*\{\s*",
-        r"^\s*\"informe_ejecutivo\"\s*:\s*\"?",
-        r"^\s*\"resumen_ejecutivo\"\s*:\s*\"?",
-        r"^\s*\*{0,3}\s*INFORME\s+EJECUTIVO\s*(DE\s+MADUREZ\s+ISO\s*22301)?\s*\*{0,3}\s*[:\-–—]?\s*",
-        r"^\s*#{1,6}\s*INFORME\s+EJECUTIVO\s*(DE\s+MADUREZ\s+ISO\s*22301)?\s*[:\-–—]?\s*",
-        r"^\s*RESUMEN\s+EJECUTIVO\s*[:\-–—]?\s*",
-        r"^\s*PLAN\s+DE\s+TRABAJO\s*[:\-–—]?\s*",
-    ]
-
-    for p in patrones:
-        txt = re.sub(p, "", txt, flags=re.IGNORECASE).strip()
-
-    txt = re.sub(r'"\s*\}\s*$', "", txt).strip()
-    txt = txt.replace("\\n", "\n")
-    txt = txt.replace('\\"', '"')
-    txt = txt.replace("**", "").replace("__", "")
-
-    txt = re.sub(r"[ \t]+\n", "\n", txt)
-    txt = re.sub(r"\n[ \t]+", "\n", txt)
-    txt = re.sub(r"\n{3,}", "\n\n", txt)
-
-    return txt.strip()
-
-
-def _extraer_json_objeto_iso22301(raw: str) -> dict:
-    raw = (raw or "").strip().replace("```json", "").replace("```", "").strip()
-    if not raw:
-        return {}
-    try:
-        return json.loads(raw)
-    except Exception:
-        pass
-    try:
-        start = raw.find("{")
-        end = raw.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return json.loads(raw[start:end + 1])
-    except Exception:
-        pass
-    return {}
-
-
-def _iso22301_texto_informe_desde_valor(valor) -> str:
-    """Obtiene texto útil desde respuestas de IA con estructuras variables."""
-    if valor is None:
-        return ""
-
-    if isinstance(valor, str):
-        return iso22301_normalizar_texto_rico_guardado(valor)
-
-    if isinstance(valor, list):
-        partes = []
-        for item in valor:
-            texto_item = _iso22301_texto_informe_desde_valor(item)
-            if texto_item:
-                partes.append(texto_item)
-        return "\n\n".join(partes).strip()
-
-    if not isinstance(valor, dict):
-        return ""
-
-    aliases = (
-        "informe_ejecutivo",
-        "informe_ejecutivo_iso_22301",
-        "informe",
-        "resumen_ejecutivo",
-        "executive_summary",
-        "executive_report",
-        "report",
-        "summary",
-        "texto",
-        "contenido",
-        "content",
-        "respuesta",
-        "response",
-        "resultado",
-        "result",
-        "output",
-        "answer",
-    )
-
-    claves_normalizadas = {}
-    for clave in valor.keys():
-        clave_txt = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", str(clave))
-        clave_norm = re.sub(r"[^a-z0-9]+", "_", clave_txt.lower()).strip("_")
-        claves_normalizadas[clave_norm] = clave
-
-    # Primero busca los nombres de campo conocidos, incluidos formatos
-    # alternativos frecuentes de OpenRouter y Ollama.
-    for alias in aliases:
-        clave_real = claves_normalizadas.get(alias)
-        if clave_real is None:
-            continue
-        texto = _iso22301_texto_informe_desde_valor(valor.get(clave_real))
-        if texto:
-            return texto
-
-    # Si el proveedor anidó el contenido bajo otra clave, conserva el texto
-    # más completo en lugar de descartar toda la respuesta.
-    candidatos = []
-    for contenido in valor.values():
-        texto = _iso22301_texto_informe_desde_valor(contenido)
-        if texto:
-            candidatos.append(texto)
-
-    return max(candidatos, key=len) if candidatos else ""
-
-
-def _iso22301_extraer_informe_ai(raw) -> str:
-    """Acepta JSON, JSON anidado, bloques Markdown o texto plano de la IA."""
-    if raw is None:
-        return ""
-
-    if isinstance(raw, (dict, list)):
-        return _iso22301_texto_informe_desde_valor(raw)
-
-    raw_txt = str(raw).strip()
-    if not raw_txt:
-        return ""
-
-    limpio = raw_txt.replace("```json", "").replace("```", "").strip()
-    obj = None
-    try:
-        obj = json.loads(limpio)
-    except Exception:
-        try:
-            inicio = limpio.find("{")
-            fin = limpio.rfind("}")
-            if inicio != -1 and fin != -1 and fin > inicio:
-                obj = json.loads(limpio[inicio:fin + 1])
-        except Exception:
-            obj = None
-
-    # Si el JSON sí fue válido, una estructura vacía o sin contenido debe
-    # provocar el reintento; no debe guardarse como si fuera un informe.
-    if obj is not None:
-        return _iso22301_texto_informe_desde_valor(obj)
-
-    # Fallback para texto plano o JSON incompleto por límite de tokens.
-    texto = iso22301_normalizar_texto_rico_guardado(raw_txt)
-    if texto.strip() in ("", "{}", "[]"):
-        return ""
-    return texto.strip()
-
-
-def _build_plan_accion_iso22301_texto(plan_list) -> str:
-    if not isinstance(plan_list, list):
-        return ""
-    lines = []
-    for i, it in enumerate(plan_list, start=1):
-        accion = (it.get("accion") or it.get("actividad") or "").strip()
-        prioridad = (it.get("prioridad") or "").strip()
-        responsable = (it.get("responsable_sugerido") or "").strip()
-        plazo = (it.get("plazo") or "").strip()
-        evidencia = (it.get("evidencia_esperada") or it.get("entregable") or "").strip()
-        lines.append(
-            f"{i}. Acción: {accion or 'Sin definir'}\n"
-            f"   Prioridad: {prioridad or 'Sin definir'}\n"
-            f"   Responsable sugerido: {responsable or 'Sin definir'}\n"
-            f"   Plazo: {plazo or 'Sin definir'}\n"
-            f"   Evidencia esperada: {evidencia or 'Sin definir'}"
-        )
-    return "\n\n".join(lines).strip()
-
-
-def _normalizar_plan_accion_iso22301_texto(texto_raw: str) -> str:
-    txt = (texto_raw or "").strip().replace("```json", "").replace("```", "").strip()
-    if not txt:
-        return ""
-    obj = _extraer_json_objeto_iso22301(txt)
-    if isinstance(obj, dict):
-        for key in ("plan_accion", "plan_trabajo", "plan", "acciones"):
-            if isinstance(obj.get(key), list):
-                return _build_plan_accion_iso22301_texto(obj.get(key))
-    return iso22301_normalizar_texto_rico_guardado(txt)
-
-# ============================================================
-# ISO 22301 — PROMPT PLAN DE TRABAJO IA
-# ============================================================
-
-def _iso22301_prompt_plan_trabajo(run: "Iso22301MadurezRun", resumen: dict) -> str:
-    """
-    Prompt para generar plan de trabajo ISO 22301.
-    Lo usa plan_trabajo_generar().
-    """
-
-    lineas = []
-
-    for code in ISO22301_BLOCK_ORDER:
-        d = (resumen or {}).get(code)
-        if not d or int(d.get("validas", 0) or 0) <= 0:
-            continue
-
-        lineas.append(
-            f"- {d.get('nombre') or iso22301_block_title(code) or code}: "
-            f"{float(d.get('pct', 0) or 0):.2f}% | "
-            f"Nivel: {d.get('madurez') or ''} | "
-            f"Brecha: {float(d.get('brecha_pct', 0) or 0):.2f}% | "
-            f"NO: {d.get('NO', 0)} | "
-            f"Parcial: {d.get('PARCIAL', 0)}"
-        )
-
-    criterios_txt = "\n".join(lineas) if lineas else "Sin resultados consolidados."
-
-    return f"""
-Eres un consultor senior experto en ISO 22301 y preparación para auditoría.
-
-Genera un plan de trabajo priorizado para cerrar brechas ISO 22301.
-
-DATOS
-Consecutivo: {run.consecutivo}
-Cumplimiento general: {float(run.pct_general or 0):.2f}%
-
-RESULTADOS POR CRITERIO
-{criterios_txt}
-
-RESPONDE ÚNICAMENTE JSON VÁLIDO.
-No uses markdown.
-No agregues texto antes ni después del JSON.
-
-Formato exacto:
-{{
-  "plan_trabajo": [
-    {{
-      "accion": "texto",
-      "prioridad": "Alta|Media|Baja",
-      "responsable_sugerido": "texto",
-      "plazo": "texto",
-      "evidencia_esperada": "texto"
-    }}
-  ]
-}}
-
-REGLAS:
-- Genera entre 8 y 12 acciones.
-- Prioriza criterios con menor cumplimiento.
-- Las acciones deben ser auditables y verificables.
-- La evidencia esperada debe ser concreta.
-- No inventes herramientas específicas.
-""".strip()
-
-# ============================================================
-# IA — ISO 22301
-# ============================================================
-def _iso22301_ai_text(prompt: str, max_tokens: int = 900) -> str:
-    """
-    IA exclusiva para ISO 22301.
-    Corrige timeout de Ollama:
-    - Reduce num_predict
-    - Aumenta timeout
-    - No usa stream
-    - Mantiene OpenRouter si está configurado como proveedor
-    """
-
-    provider = (get_ai_provider() or "openrouter").strip().lower()
-
-    # =========================
-    # OLLAMA
-    # =========================
-    if provider == "ollama":
-        base_url = (get_ollama_base_url() or "http://localhost:11434").strip().rstrip("/")
-        model = (get_ollama_model() or "llama3.1").strip()
-
-        if not base_url:
-            raise RuntimeError("No hay OLLAMA_BASE_URL configurada.")
-        if not model:
-            raise RuntimeError("No hay OLLAMA_MODEL configurado.")
-
-        try:
-            resp = requests.post(
-                f"{base_url}/api/generate",
-                json={
-                    "model": model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.15,
-                        "num_predict": int(max_tokens or 700),
-                        "top_p": 0.9
-                    }
-                },
-                timeout=600
-            )
-
-            resp.raise_for_status()
-            data = resp.json() or {}
-            texto = (data.get("response") or "").strip()
-
-            if not texto:
-                raise RuntimeError("Ollama respondió sin contenido.")
-
-            return texto
-
-        except requests.exceptions.ReadTimeout:
-            raise RuntimeError(
-                "Ollama tardó demasiado en responder. "
-                "Se recomienda reducir el número de preguntas enviadas o usar OpenRouter para este análisis."
-            )
-
-        except requests.exceptions.ConnectionError:
-            raise RuntimeError(
-                "No fue posible conectar con Ollama. "
-                "Verifica que Ollama esté activo en http://localhost:11434."
-            )
-
-    # =========================
-    # OPENROUTER
-    # =========================
-    if "_ai_text" in globals():
-        return _ai_text(prompt, max_tokens=max_tokens)
-
-    raise RuntimeError("No se encontró helper global _ai_text para OpenRouter/Ollama.")
-
-
-def _iso22301_ai_prompt_criterio(
-    run: "Iso22301MadurezRun",
-    bloque_codigo: str,
-    bloque_nombre: str,
-    pct: float,
-    items: list[dict]
-):
-    """
-    Prompt ISO 22301 mejorado:
-    - Evita respuestas demasiado cortas.
-    - Mantiene límite para no generar timeout en Ollama.
-    - Obliga estado actual y requerido con análisis real.
-    """
-
-    bullets = []
-
-    applicable_items = [
-        it for it in (items or [])
-        if (it.get("estado") or "").strip().upper() != "NA"
-    ]
-
-    for it in applicable_items[:30]:
-        pregunta = (it.get("pregunta") or "")[:260].replace("\n", " ")
-        comentario = (it.get("comentario") or "")[:260].replace("\n", " ")
-        estado = (it.get("estado") or "").strip().upper()
-
-        linea = f"- [{estado}] {pregunta}"
-        if comentario:
-            linea += f" | Evidencia/Comentario: {comentario}"
-
-        bullets.append(linea)
-
-    joined = "\n".join(bullets) if bullets else "- Sin evidencias registradas."
-
-    return f"""
-Eres un consultor senior experto en ISO 22301, Trust Services Criteria, auditoría de controles, seguridad de la información y gobierno de riesgos.
-
-Debes generar un análisis ejecutivo, claro y accionable para el criterio evaluado.
-
-CONTEXTO DE LA EVALUACIÓN
-Consecutivo: {run.consecutivo}
-Criterio ISO 22301: {bloque_codigo} - {bloque_nombre}
-Cumplimiento actual: {pct:.2f}%
-
-EVIDENCIAS Y RESPUESTAS DEL CRITERIO
-{joined}
-
-INSTRUCCIONES OBLIGATORIAS
-Responde únicamente JSON válido.
-No uses markdown.
-No agregues texto antes ni después del JSON.
-
-Debes devolver exactamente estas llaves:
-{{
-  "estado_actual": "texto",
-  "estado_requerido": "texto",
-  "plan_accion": [
-    {{
-      "accion": "texto",
-      "prioridad": "Alta|Media|Baja",
-      "responsable_sugerido": "texto",
-      "plazo": "texto",
-      "evidencia_esperada": "texto"
-    }}
-  ]
-}}
-
-REGLAS PARA estado_actual:
-- No respondas solo con el porcentaje.
-- Redacta entre 2 y 4 párrafos.
-- Explica qué tan maduro está el criterio actualmente.
-- Menciona fortalezas visibles según respuestas SI.
-- Menciona brechas según respuestas NO y PARCIAL.
-- Usa los comentarios/evidencias cuando existan.
-- Si hay pocas evidencias, dilo claramente.
-- No inventes herramientas ni controles que no estén soportados por las respuestas.
-
-REGLAS PARA estado_requerido:
-- No respondas solo con "100% de cumplimiento".
-- Redacta entre 2 y 4 párrafos.
-- Describe el estado objetivo esperado para ISO 22301.
-- Explica qué controles, evidencias, formalización, monitoreo y mejora deberían existir.
-- Relaciona el estado requerido con auditoría, trazabilidad, evidencia y operación sostenida.
-- No inventes marcas ni herramientas específicas.
-
-REGLAS PARA plan_accion:
-- Genera entre 5 y 8 acciones.
-- Prioriza primero respuestas NO y PARCIAL.
-- Cada acción debe ser concreta, auditable y verificable.
-- La evidencia esperada debe ser un entregable real: política, procedimiento, matriz, registro, acta, reporte, evidencia de monitoreo, prueba de control, etc.
-- Usa prioridades Alta, Media o Baja.
-
-TONO
-Profesional, ejecutivo y consultivo.
-Enfocado en madurez ISO 22301 y preparación para auditoría.
-""".strip()
-
-
-# ============================================================
-# CARGA DEL CATÁLOGO E IMPORTACIÓN DEL INSTRUMENTO ISO 22301
-# ============================================================
-def _iso22301_bool(value, default=True):
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    txt = _iso22301_norm(value)
-    return txt not in ("0", "FALSE", "FALSO", "NO", "INACTIVO")
-
-
-def _iso22301_catalog_from_excel(xlsx_path):
-    df = pd.read_excel(xlsx_path, sheet_name="Catálogo Arkyntech", header=0)
-    normalized = {_iso22301_norm(c): c for c in df.columns}
-    required = {
-        "ITEM_ID", "CHAPTER", "CLAUSE", "DOMAIN_ES",
-        "ASSESSMENT_QUESTION_ES", "SUGGESTED_EVIDENCE_ES"
-    }
-    missing = sorted(required - set(normalized))
-    if missing:
-        raise ValueError("Faltan columnas en 'Catálogo Arkyntech': " + ", ".join(missing))
-
-    rows = []
-    for _, row in df.iterrows():
-        item_id = iso22301_safe_str(row.get(normalized["ITEM_ID"]))
-        question = iso22301_normalizar_texto_excel(row.get(normalized["ASSESSMENT_QUESTION_ES"]))
-        if not item_id or not question:
-            continue
-        rows.append({
-            "item_id": item_id,
-            "standard_code": iso22301_safe_str(row.get(normalized.get("STANDARD_CODE"))) or "ISO 22301",
-            "standard_version": iso22301_safe_str(row.get(normalized.get("STANDARD_VERSION"))) or "2019+Amd1:2024",
-            "chapter": iso22301_safe_str(row.get(normalized["CHAPTER"])).replace(".0", ""),
-            "clause": iso22301_safe_str(row.get(normalized["CLAUSE"])),
-            "domain_es": iso22301_safe_str(row.get(normalized["DOMAIN_ES"])),
-            "assessment_question_es": question,
-            "suggested_evidence_es": iso22301_normalizar_texto_excel(row.get(normalized["SUGGESTED_EVIDENCE_ES"])),
-            "default_weight": 1,
-            "active": _iso22301_bool(row.get(normalized.get("ACTIVE")), True),
-        })
-    return rows
-
-
-def iso22301_seed_catalog(catalog_rows, replace=False):
-    if replace:
-        Iso22301MadurezCriterioAnalisis.query.delete(synchronize_session=False)
-        Iso22301MadurezRespuesta.query.delete(synchronize_session=False)
-        Iso22301MadurezRun.query.delete(synchronize_session=False)
-        Iso22301MadurezPregunta.query.delete(synchronize_session=False)
-        db.session.flush()
-    elif Iso22301MadurezPregunta.query.filter_by(tipo="q").first():
-        return {"headers": 0, "questions": 0, "ignored": 0}
-
-    headers_created = set()
-    creadas_q = 0
-    creadas_h = 0
-    ignoradas = 0
-    orden = 1
-
-    for item in catalog_rows or []:
-        chapter = str(item.get("chapter") or "").strip().replace(".0", "")
-        clause = str(item.get("clause") or "").strip()
-        domain = str(item.get("domain_es") or "").strip()
-        item_id = str(item.get("item_id") or "").strip()
-        question = iso22301_normalizar_texto_excel(item.get("assessment_question_es"))
-        evidence = iso22301_normalizar_texto_excel(item.get("suggested_evidence_es"))
-        if chapter not in ISO22301_BLOCK_TITLES or not item_id or not question:
-            ignoradas += 1
-            continue
-
-        if chapter not in headers_created:
-            title = ISO22301_BLOCK_TITLES[chapter]
-            db.session.add(Iso22301MadurezPregunta(
-                bloque_codigo=chapter,
-                bloque_nombre=title,
-                seccion_codigo=chapter,
-                seccion_nombre=title,
-                pregunta_codigo=f"CAP-{chapter}",
-                pregunta=title,
-                evidencia_sugerida=None,
-                tipo="h",
-                orden=orden,
-                activo=True,
-            ))
-            orden += 1
-            creadas_h += 1
-            headers_created.add(chapter)
-
-        db.session.add(Iso22301MadurezPregunta(
-            bloque_codigo=chapter,
-            bloque_nombre=ISO22301_BLOCK_TITLES[chapter],
-            seccion_codigo=clause,
-            seccion_nombre=domain,
-            pregunta_codigo=item_id,
-            pregunta=question,
-            evidencia_sugerida=evidence,
-            tipo="q",
-            orden=orden,
-            activo=_iso22301_bool(item.get("active"), True),
-        ))
-        orden += 1
-        creadas_q += 1
-
-    db.session.commit()
-    return {"headers": creadas_h, "questions": creadas_q, "ignored": ignoradas}
-
-
-@iso22301_madurez_bp.route("/admin/importar_instrumento", methods=["POST"])
-@login_required
-def importar_instrumento_iso22301():
-    user = User.query.get(session.get("user_id"))
-    if user.role == "auditor":
-        flash("El rol Auditor no puede importar instrumentos.", "danger")
-        return redirect(url_for("madurez_iso22301.parametros"))
-    if user.role != "admin" and not verificar_permiso(user, ISO22301_PERMISSION_NAME):
-        flash("No tiene permiso para importar el instrumento ISO 22301.", "danger")
-        return redirect(url_for("menu"))
-
-    force = (request.args.get("force") == "1") or (request.form.get("force") == "1")
-    try:
-        if Iso22301MadurezPregunta.query.filter_by(tipo="q").first() and not force:
-            flash("El instrumento ISO 22301 ya está cargado en la base de datos.", "warning")
-            return redirect(url_for("madurez_iso22301.parametros"))
-
-        alternativas = [
-            ISO22301_INSTRUMENTO_TEMPLATE_XLSX,
-            os.path.join(BASE_DIR, "static", "templates", "Arkyntech_Matriz_Madurez_ISO_22301_ES(1).xlsx"),
-            os.path.join(BASE_DIR, "static", "templates", "ISO 22301.xlsx"),
-        ]
-        xlsx_path = next((p for p in alternativas if os.path.exists(p)), None)
-        catalog_rows = _iso22301_catalog_from_excel(xlsx_path) if xlsx_path else ISO22301_EMBEDDED_CATALOG
-        stats = iso22301_seed_catalog(catalog_rows, replace=force)
-        source_name = os.path.basename(xlsx_path) if xlsx_path else "catálogo integrado en Arkyntech"
-        flash(
-            f"✅ Instrumento ISO 22301 importado desde {source_name}. "
-            f"Capítulos: {stats['headers']} | Preguntas: {stats['questions']} | Ignoradas: {stats['ignored']}",
-            "success",
-        )
-        return redirect(url_for("madurez_iso22301.parametros"))
-    except Exception as e:
-        db.session.rollback()
-        traceback.print_exc()
-        flash(f"❌ Error importando instrumento ISO 22301: {e}", "danger")
-        return redirect(url_for("madurez_iso22301.parametros"))
-
-
-# ============================================================
-# CONSOLIDAR ANÁLISIS
-# ============================================================
-def run_analysis_from_iso22301_run(iso22301_run_id: int):
-    run = Iso22301MadurezRun.query.get_or_404(iso22301_run_id)
-    resumen = _iso22301_build_resumen(run.id)
-    # Cálculo general ponderado por pregunta aplicable. N/A se conserva
-    # en el historial, pero no suma ni forma parte del denominador.
-    pct_general = iso22301_pct_general_from_resumen(resumen)
-    labels, values = iso22301_pct_por_criterio(resumen, ISO22301_BLOCK_ORDER)
-    run.resumen_json = json.dumps(resumen, ensure_ascii=False)
-    run.pct_general = pct_general
-    run.radar_overall_b64 = iso22301_radar_b64(labels, values, title="Radar por Capítulo - ISO 22301")
-    run.company_name = run.consecutivo
-    run.updated_at = datetime.utcnow()
-    db.session.commit()
-    return run.id
-
-# ============================================================
-# PERMISOS ISO 22301 — ADMIN / USUARIO CON PERMISO / AUDITOR
-# ============================================================
-
-def iso22301_user_can_access(user):
-    """
-    Puede VER el módulo:
-    - admin
-    - auditor
-    - usuario con permiso Nivel de madurez ISO 22301
-    """
-    return bool(
-        user and (
-            user.role in ("admin", "auditor")
-            or verificar_permiso(user, ISO22301_PERMISSION_NAME)
-        )
-    )
-
-
-def iso22301_user_can_execute(user):
-    """
-    Puede EJECUTAR / MODIFICAR:
-    - admin
-    - usuario con permiso Nivel de madurez ISO 22301
-
-    Auditor NO puede:
-    - editar
-    - eliminar
-    - generar IA
-    - exportar PDF
-    - importar instrumento
-    - guardar / analizar
-    """
-    return bool(
-        user
-        and user.role != "auditor"
-        and (
-            user.role == "admin"
-            or verificar_permiso(user, ISO22301_PERMISSION_NAME)
-        )
-    )
-
-
-def iso22301_check_access_or_redirect(user, msg="No tiene permiso para acceder al módulo ISO 22301."):
-    if not iso22301_user_can_access(user):
-        flash(msg, "danger")
-        return redirect(url_for("menu"))
-    return None
-
-
-def iso22301_check_execute_or_redirect(user, msg="No tiene permiso para ejecutar esta acción en ISO 22301."):
-    if not iso22301_user_can_execute(user):
-        flash(msg, "danger")
-        return redirect(url_for("madurez_iso22301.inicio_iso22301"))
-    return None
-
-
-# Alias para compatibilidad con bloques anteriores
-def iso22301_deny_access(msg="No tiene permiso para acceder al módulo ISO 22301."):
-    flash(msg, "danger")
-    return redirect(url_for("menu"))
-
-
-def iso22301_deny_execute(msg="No tiene permiso para ejecutar esta acción en ISO 22301."):
-    flash(msg, "danger")
-    return redirect(url_for("madurez_iso22301.inicio_iso22301"))
-
-
-# ============================================================
-# PANTALLA PRINCIPAL — MISMO DISEÑO NIST
-# ============================================================
-
-@iso22301_madurez_bp.route("/", methods=["GET"], endpoint="inicio_iso22301")
-@login_required
-def inicio_iso22301():
-    user = User.query.get(session.get("user_id"))
-
-    if not iso22301_user_can_access(user):
-        return iso22301_deny_access("No tiene permiso para acceder al módulo de nivel de madurez ISO 22301.")
-
-    read_only = user.role == "auditor"
-
-    ingreso_btn = """
-      <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled title="El rol Auditor no puede ingresar información">
-        <i class="bi bi-pencil-square me-2"></i>Ingresar la información
-      </button>
-    """ if read_only else f"""
-      <a href="{url_for('madurez_iso22301.ingreso')}" class="btn nistmad-btn-primary rounded-pill px-4 fw-bold">
-        <i class="bi bi-pencil-square me-2"></i>Ingresar la información
-      </a>
-    """
-
-    parametros_btn = """
-      <button class="btn btn-outline-secondary rounded-pill px-3" disabled title="El rol Auditor no puede modificar parámetros">
-        <i class="bi bi-gear me-2"></i>Parámetros
-      </button>
-    """ if read_only else f"""
-      <a href="{url_for('madurez_iso22301.parametros')}" class="btn btn-outline-secondary rounded-pill px-3">
-        <i class="bi bi-gear me-2"></i>Parámetros
-      </a>
-    """
-
-    total = Iso22301MadurezPregunta.query.filter_by(tipo="q").count()
-    badge = '<span class="badge bg-success ms-2">Instrumento cargado</span>' if total else '<span class="badge bg-danger ms-2">Instrumento NO cargado</span>'
-    hint = "Puedes ingresar la información, analizar la evaluación o consultar el historial." if total else "Primero entra a Parámetros e importa el instrumento ISO 22301."
-
-    content = f"""
-<div class="nistmad-shell">
-
-  <div class="nistmad-header-card">
-    <div class="nistmad-header-overlay">
-      <div class="nistmad-header-text">
-        <h3 class="nistmad-title m-0">Nivel de Madurez — ISO 22301</h3>
-        <div class="nistmad-subtitle">
-          Evaluación por capítulos 4 a 10: Contexto, Liderazgo, Planificación, Apoyo,
-          Operación, Evaluación del desempeño y Mejora.
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="nistmad-header-actions">
-    {ingreso_btn}
-    <a href="{url_for('madurez_iso22301.historial')}" class="btn nistmad-btn-soft rounded-pill px-4 historial-pill">
-      <span class="d-inline-flex align-items-center gap-2">
-        <span class="hist-dot"></span>
-        <i class="bi bi-clock-history"></i>
-        <span class="fw-semibold">Historial de Revisiones</span>
-      </span>
-    </a>
-  </div>
-
-  <div class="row g-3 mt-2">
-    <div class="col-12 col-lg-8">
-      <div class="nistmad-card p-4 h-100">
-        <div class="nistmad-section-title">Estado del instrumento</div>
-        <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
-          <div>
-            <div class="fw-bold">Estado del instrumento {badge}</div>
-            <div class="text-muted small mt-1">Preguntas cargadas: <b>{total}</b></div>
-            <div class="mt-2 small">{hint}</div>
-          </div>
-          <div class="text-end">
-            <div class="text-muted small">Acceso rápido</div>
-            <div class="d-flex gap-2 flex-wrap justify-content-end mt-2">
-              {parametros_btn}
-            </div>
-          </div>
-        </div>
-        <div class="alert alert-info mt-3 mb-0 small">
-          <b>Sugerencia:</b> Usa <b>Parámetros</b> para ver la definición de niveles 1–5
-          y gestionar la importación del instrumento ISO 22301.
-        </div>
-      </div>
-    </div>
-
-    <div class="col-12 col-lg-4">
-      <div class="nistmad-card p-4 h-100">
-        <div class="nistmad-section-title">¿Qué puedes hacer aquí?</div>
-        <ul class="small mb-0 text-black ps-3">
-          <li><b>Ingresar la información:</b> diligenciar respuestas con evidencia.</li>
-          <li><b>Historial:</b> revisar evaluaciones previas y resultados.</li>
-          <li><b>Parámetros:</b> gestionar niveles e instrumento, excepto auditor.</li>
-        </ul>
-      </div>
-    </div>
-  </div>
-</div>
-{iso22301_nist_css('nistmad', '🛡️')}
-"""
-    return render_template_string(BASE, title="Madurez ISO 22301", content=content)
-
-# ============================================================
-# PARÁMETROS — USUARIO CON PERMISO PUEDE MODIFICAR / AUDITOR NO
-# ============================================================
-
-@iso22301_madurez_bp.route("/parametros", methods=["GET", "POST"])
-@login_required
-def parametros():
-    user = User.query.get(session.get("user_id"))
-
-    if not iso22301_user_can_execute(user):
-        return iso22301_deny_execute("No tiene permiso para administrar parámetros ISO 22301.")
-
-    seed_iso22301_parametros()
-
-    if request.method == "POST":
-        try:
-            for r in Iso22301MadurezParametro.query.all():
-                r.nivel = (request.form.get(f"nivel_{r.id}") or r.nivel).strip()
-                r.rango_desde = float(request.form.get(f"desde_{r.id}") or r.rango_desde)
-                r.rango_hasta = float(request.form.get(f"hasta_{r.id}") or r.rango_hasta)
-                r.color = (request.form.get(f"color_{r.id}") or r.color).strip()
-                r.descripcion = (request.form.get(f"descripcion_{r.id}") or "").strip()
-            db.session.commit()
-            flash("✅ Parámetros ISO 22301 guardados correctamente.", "success")
-        except Exception as e:
-            db.session.rollback()
-            flash(f"Error guardando parámetros ISO 22301: {e}", "danger")
-        return redirect(url_for("madurez_iso22301.parametros"))
-
-    rows = []
-    for r in Iso22301MadurezParametro.query.order_by(Iso22301MadurezParametro.orden.asc()).all():
-        rows.append(f"""
-        <tr>
-          <td><input class="form-control" name="nivel_{r.id}" value="{escape(r.nivel or '')}"></td>
-          <td class="text-center"><input class="form-control text-center" name="desde_{r.id}" value="{r.rango_desde}"></td>
-          <td class="text-center"><input class="form-control text-center" name="hasta_{r.id}" value="{r.rango_hasta}"></td>
-          <td class="text-center"><input type="color" class="form-control form-control-color mx-auto" name="color_{r.id}" value="{escape(r.color or '#6c757d')}"></td>
-          <td><textarea class="form-control" name="descripcion_{r.id}" rows="2">{escape(r.descripcion or '')}</textarea></td>
-        </tr>
-        """)
-
-    resumen = iso22301_resumen_instrumento()
-
-    content = f"""
-<div class="nistpar-shell">
-  <div class="nistpar-header-card">
-    <div class="nistpar-header-overlay">
-      <div class="nistpar-header-text">
-        <h3 class="nistpar-title m-0">Parámetros de Madurez — ISO 22301</h3>
-        <div class="nistpar-subtitle">Configuración de niveles, rangos de madurez e importación del instrumento.</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="nistpar-header-actions">
-    <a href="{url_for('madurez_iso22301.inicio_iso22301')}" class="btn nistpar-btn-main rounded-pill px-4 fw-bold">
-      <i class="bi bi-arrow-left me-2"></i>Volver
-    </a>
-    <form method="POST" action="{url_for('madurez_iso22301.importar_instrumento_iso22301')}" class="m-0">
-      <button class="btn btn-success rounded-pill px-4 fw-bold">
-        <i class="bi bi-upload me-2"></i>Importar instrumento
-      </button>
-    </form>
-    <form method="POST" action="{url_for('madurez_iso22301.importar_instrumento_iso22301')}?force=1" class="m-0" onsubmit="return confirm('¿Borrar e importar de nuevo el instrumento ISO 22301?')">
-      <button class="btn btn-danger rounded-pill px-4 fw-bold">
-        <i class="bi bi-arrow-repeat me-2"></i>Reimportar
-      </button>
-    </form>
-  </div>
-
-  <div class="nistpar-card p-4 mb-3">
-    <div class="nistpar-section-title">Resumen instrumento</div>
-    <div class="small text-black">
-      Preguntas: <b>{resumen['total_preguntas']}</b> · Cabeceras: <b>{resumen['total_headers']}</b> · Por capítulo: <b>{escape(str(resumen['por_bloque']))}</b>
-    </div>
-  </div>
-
-  <form method="POST" class="nistpar-card p-4">
-    <div class="nistpar-section-title">Niveles de madurez</div>
-    <div class="table-responsive">
-      <table class="table table-hover align-middle nistpar-table">
-        <thead class="nistpar-table-head">
-          <tr>
-            <th style="width:28%;">Nivel de Madurez</th>
-            <th class="text-center" style="width:110px;">Desde %</th>
-            <th class="text-center" style="width:110px;">Hasta %</th>
-            <th class="text-center" style="width:90px;">Color</th>
-            <th>Descripción del Nivel</th>
-          </tr>
-        </thead>
-        <tbody>{''.join(rows)}</tbody>
-      </table>
-    </div>
-    <div class="text-end mt-3">
-      <button class="btn btn-primary rounded-pill px-4 fw-bold">
-        <i class="bi bi-save me-2"></i>Guardar parámetros
-      </button>
-    </div>
-  </form>
-</div>
-{iso22301_nist_css('nistpar', '⚙️')}
-"""
-    return render_template_string(BASE, title="Parámetros ISO 22301", content=content)
-
-
-# ============================================================
-# INGRESO DE INFORMACIÓN ISO 22301 — SIN LOADER GLOBAL EN VALIDACIÓN
-# ============================================================
+# =========================================================
+# GENERAR ANÁLISIS IA POR CATEGORÍA
+# =========================================================
 

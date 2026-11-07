@@ -1,3 +1,7326 @@
+@app.route('/inventario_software/edit/<int:id>', methods=['GET', 'POST'])
+@login_required
+def inventario_software_edit(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor' or (
+        user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información")
+    ):
+        flash("No tiene permiso para editar registros de activos de software.", "danger")
+        return redirect(url_for('inventario_software'))
+
+    item = InventarioSoftware.query.get_or_404(id)
+    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
+
+    evidencias = InventarioSoftwareEvidencia.query.filter_by(
+        registro_id=item.id
+    ).order_by(InventarioSoftwareEvidencia.id.desc()).all()
+
+    conf_opts = ValoracionConfidencialidad.query.order_by(ValoracionConfidencialidad.nivel_num.asc()).all()
+    inte_opts = ValoracionIntegridad.query.order_by(ValoracionIntegridad.nivel_num.asc()).all()
+    disp_opts = ValoracionDisponibilidad.query.order_by(ValoracionDisponibilidad.nivel_num.asc()).all()
+
+    current_area = AreaEmpresa.query.filter_by(area=(item.area or '')).first()
+    current_area_id = current_area.id if current_area else 0
+
+    if request.method == 'POST':
+        selected_area_id = request.form.get('area_id', type=int)
+        selected_area = AreaEmpresa.query.get(selected_area_id) if selected_area_id else None
+
+        item.area = selected_area.area if selected_area else ''
+        item.division = (request.form.get('division') or '').strip()
+        item.proceso = (request.form.get('proceso') or '').strip()
+        item.nombre_activo = (request.form.get('nombre_activo') or '').strip()
+        item.administrador = (request.form.get('administrador') or '').strip()
+        item.dueno_tecnico = (request.form.get('dueno_tecnico') or '').strip()
+        item.propietario = (request.form.get('propietario') or '').strip()
+        item.medio = (request.form.get('medio') or '').strip()
+        item.ubicacion_tipo = (request.form.get('ubicacion') or '').strip()
+        item.ubicacion_nombre = (request.form.get('ubicacion_nombre') or '').strip()
+        item.descripcion = (request.form.get('descripcion') or '').strip()
+        item.accesos_autorizados = (request.form.get('accesos_autorizados') or '').strip()
+        item.info_personal = request.form.get('info_personal') or 'No'
+        item.info_regulada = request.form.get('info_regulada') or 'No'
+        item.info_sensible_compania = request.form.get('info_sensible_compania') or 'No'
+        item.info_sensible_clientes = request.form.get('info_sensible_clientes') or 'No'
+        item.observaciones = (request.form.get('observaciones') or '').strip()
+
+        try:
+            item.c_nivel = int(request.form.get('conf_num') or 0)
+            item.i_nivel = int(request.form.get('int_num') or 0)
+            item.d_nivel = int(request.form.get('disp_num') or 0)
+        except ValueError:
+            item.c_nivel = item.i_nivel = item.d_nivel = 0
+
+        if not (
+            item.area and item.division and item.proceso and item.nombre_activo and
+            item.administrador and item.dueno_tecnico and item.ubicacion_nombre and item.accesos_autorizados
+        ):
+            flash(
+                "Campos obligatorios: Área, División, Proceso, Nombre, Administrador, Dueño Técnico, Nombre de la ubicación y Acceso Autorizado.",
+                "danger"
+            )
+            return redirect(url_for('inventario_software_edit', id=item.id))
+
+        for n in (item.c_nivel, item.i_nivel, item.d_nivel):
+            if n < 1 or n > 5:
+                flash("Los niveles C/I/D deben estar entre 1 y 5.", "danger")
+                return redirect(url_for('inventario_software_edit', id=item.id))
+
+        item.valor_activo = round((item.c_nivel + item.i_nivel + item.d_nivel) / 3)
+
+        conf_row = ValoracionConfidencialidad.query.filter_by(nivel_num=item.c_nivel).first()
+        item.etiqueta_conf_num = item.c_nivel
+        item.etiqueta_conf_texto = conf_row.clasificacion if conf_row else f"Nivel {item.c_nivel}"
+
+        crit_row = ValoracionCriticidadActivo.query.filter_by(nivel_num=item.valor_activo).first()
+        item.criticidad_num = item.valor_activo
+        item.criticidad_texto = crit_row.nivel_texto if crit_row else f"Nivel {item.valor_activo}"
+
+        db.session.add(item)
+        guardar_evidencias_inventario_software(item)
+        db.session.commit()
+
+        flash("Cambios guardados.", "success")
+        return redirect(url_for('inventario_software_edit', id=item.id))
+
+    html = """
+    <div class="invsoftedit-shell">
+
+      <div class="invsoftedit-header-card">
+        <div class="invsoftedit-header-overlay">
+          <div class="invsoftedit-header-text">
+            <h3 class="invsoftedit-title m-0">Editar — Inventario de Software</h3>
+            <div class="invsoftedit-subtitle">
+              Actualización de activos de software del Sistema de Gestión de Seguridad de la Información
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="invsoftedit-header-actions">
+        <a href="{{ url_for('inventario_software') }}"
+           class="btn rounded-pill px-4 fw-bold invsoftedit-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+
+        <a href="{{ url_for('inventario_software_detalle', id=item.id) }}"
+           class="btn btn-info rounded-pill px-4 fw-bold text-white">
+          Ver detalle
+        </a>
+      </div>
+
+      <div class="invsoftedit-card">
+        <div class="invsoftedit-card-body">
+
+          <form id="formEditarInventarioSoftware" method="post" enctype="multipart/form-data">
+
+            <div class="row g-3">
+
+              <div class="col-md-4">
+                <label class="form-label">Área</label>
+                <select name="area_id" id="softArea" class="form-select" required>
+                  <option value="">-- Seleccione --</option>
+                  {% for a in areas %}
+                    <option value="{{ a.id }}" {% if current_area_id == a.id %}selected{% endif %}>
+                      {{ a.area }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">División</label>
+                <select name="division" id="softDivision" class="form-select" required>
+                  <option value="">-- Seleccione --</option>
+                  {% if item.division %}
+                    <option value="{{ item.division }}" selected>{{ item.division }}</option>
+                  {% endif %}
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Proceso</label>
+                <input type="text" name="proceso" class="form-control" required value="{{ item.proceso or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Nombre del Activo</label>
+                <input type="text" name="nombre_activo" class="form-control" required value="{{ item.nombre_activo or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Administrador (Owner)</label>
+                <input type="text" name="administrador" class="form-control" required value="{{ item.administrador or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Dueño Técnico</label>
+                <input type="text" name="dueno_tecnico" class="form-control" required value="{{ item.dueno_tecnico or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Propietario</label>
+                <input type="text" name="propietario" class="form-control" value="{{ item.propietario or '' }}">
+              </div>
+
+              <div class="col-md-9">
+                <label class="form-label">Descripción</label>
+                <textarea name="descripcion" class="form-control" rows="2">{{ item.descripcion or '' }}</textarea>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Medio</label>
+                <select name="medio" class="form-select">
+                  {% for opt in ['Aplicación Web','Aplicación de Escritorio','Aplicación de Servidor','Servicios con un Tercero'] %}
+                    <option value="{{ opt }}" {% if item.medio == opt %}selected{% endif %}>{{ opt }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Ubicación</label>
+                <select name="ubicacion" class="form-select">
+                  {% for opt in ['Área','Servidor','Dominio/URL'] %}
+                    <option value="{{ opt }}" {% if item.ubicacion_tipo == opt %}selected{% endif %}>{{ opt }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Nombre de la ubicación</label>
+                <input type="text" name="ubicacion_nombre" class="form-control" required value="{{ item.ubicacion_nombre or '' }}">
+              </div>
+
+              <div class="col-md-12">
+                <label class="form-label">Acceso Autorizado (Áreas o Divisiones)</label>
+                <input type="text"
+                       name="accesos_autorizados"
+                       class="form-control"
+                       value="{{ item.accesos_autorizados or '' }}"
+                       placeholder="p.ej.: Operaciones; Ventas; División Andina"
+                       required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Confidencialidad (1..5)</label>
+                <select name="conf_num" class="form-select" required>
+                  {% for o in conf_opts %}
+                    <option value="{{ o.nivel_num }}" {% if item.c_nivel == o.nivel_num %}selected{% endif %}>
+                      {{ o.nivel_num }} — {{ o.clasificacion }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Integridad (1..5)</label>
+                <select name="int_num" class="form-select" required>
+                  {% for o in inte_opts %}
+                    <option value="{{ o.nivel_num }}" {% if item.i_nivel == o.nivel_num %}selected{% endif %}>
+                      {{ o.nivel_num }} — {{ o.nivel }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Disponibilidad (1..5)</label>
+                <select name="disp_num" class="form-select" required>
+                  {% for o in disp_opts %}
+                    <option value="{{ o.nivel_num }}" {% if item.d_nivel == o.nivel_num %}selected{% endif %}>
+                      {{ o.nivel_num }} — {{ o.nivel }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">¿Info Personal?</label>
+                <select name="info_personal" class="form-select">
+                  <option value="Sí" {% if item.info_personal == 'Sí' %}selected{% endif %}>Sí</option>
+                  <option value="No" {% if item.info_personal == 'No' %}selected{% endif %}>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">¿Regulada?</label>
+                <select name="info_regulada" class="form-select">
+                  <option value="Sí" {% if item.info_regulada == 'Sí' %}selected{% endif %}>Sí</option>
+                  <option value="No" {% if item.info_regulada == 'No' %}selected{% endif %}>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">¿Sens. Compañía?</label>
+                <select name="info_sensible_compania" class="form-select">
+                  <option value="Sí" {% if item.info_sensible_compania == 'Sí' %}selected{% endif %}>Sí</option>
+                  <option value="No" {% if item.info_sensible_compania == 'No' %}selected{% endif %}>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">¿Sens. Clientes?</label>
+                <select name="info_sensible_clientes" class="form-select">
+                  <option value="Sí" {% if item.info_sensible_clientes == 'Sí' %}selected{% endif %}>Sí</option>
+                  <option value="No" {% if item.info_sensible_clientes == 'No' %}selected{% endif %}>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Observaciones</label>
+                <input type="text" name="observaciones" class="form-control" value="{{ item.observaciones or '' }}">
+              </div>
+
+              <div class="col-md-12">
+                <div class="invsoftedit-evidence-upload">
+                  <label class="form-label mb-1">Agregar nuevas evidencias PDF</label>
+                  <input type="file" name="evidencias" class="form-control" accept="application/pdf,.pdf" multiple>
+                  <div class="invsoftedit-evidence-help">
+                    Los nuevos PDF se sumarán a las evidencias existentes del activo.
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            <div class="invsoftedit-bottom-actions">
+              <button class="btn btn-success rounded-pill px-4 fw-bold"
+                      type="submit"
+                      form="formEditarInventarioSoftware">
+                Guardar cambios
+              </button>
+
+              <a href="{{ url_for('inventario_software') }}"
+                 class="btn rounded-pill px-4 fw-bold invsoftedit-cancel-btn">
+                Cancelar
+              </a>
+            </div>
+
+          </form>
+
+          <div class="invsoftedit-evidence-section">
+            <div class="invsoftedit-section-title">📎 Evidencias actuales</div>
+
+            {% if evidencias %}
+              <div class="invsoftedit-evidence-grid">
+
+                {% for ev in evidencias %}
+                  <div class="invsoftedit-evidence-card">
+
+                    <div class="invsoftedit-evidence-icon">📄</div>
+
+                    <div class="invsoftedit-evidence-content">
+                      <div class="invsoftedit-evidence-name">
+                        {{ ev.original_name or ev.filename }}
+                      </div>
+
+                      <div class="invsoftedit-evidence-meta">
+                        {{ ev.uploaded_at.strftime('%Y-%m-%d %H:%M') if ev.uploaded_at else '—' }}
+                        ·
+                        {{ ev.uploaded_by or 'Sistema' }}
+                      </div>
+                    </div>
+
+                    <div class="invsoftedit-evidence-actions">
+
+                      <a href="/inventario_software/evidencia/{{ ev.id }}/pdf"
+                         class="btn btn-sm btn-primary rounded-pill fw-bold">
+                        Ver evidencia
+                      </a>
+
+                      <form method="post"
+                            action="/inventario_software/evidencia/{{ ev.id }}/delete"
+                            class="d-inline"
+                            onsubmit="return confirm('¿Eliminar esta evidencia?');">
+                        <button type="submit"
+                                class="btn btn-sm btn-danger rounded-pill fw-bold">
+                          Eliminar
+                        </button>
+                      </form>
+
+                    </div>
+
+                  </div>
+                {% endfor %}
+
+              </div>
+            {% else %}
+              <div class="invsoftedit-no-evidence">
+                No hay evidencias PDF cargadas para este activo.
+              </div>
+            {% endif %}
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .invsoftedit-shell{
+        width:96%;
+        max-width:1500px;
+        margin:10px auto 24px auto;
+      }
+
+      .invsoftedit-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .invsoftedit-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .invsoftedit-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent;
+        padding:0;
+        position:relative;
+        z-index:1;
+      }
+
+      .invsoftedit-header-overlay::before{
+        content:"✏️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .invsoftedit-header-text{
+        max-width:1100px;
+        width:100%;
+      }
+
+      .invsoftedit-header-text::before{
+        content:"SGSI · Edición Inventario de Software";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#fff;
+      }
+
+      .invsoftedit-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .invsoftedit-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .invsoftedit-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .invsoftedit-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invsoftedit-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invsoftedit-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .invsoftedit-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .invsoftedit-card-body{
+        padding:18px;
+      }
+
+      .invsoftedit-card .form-label{
+        font-weight:800;
+        color:#25324a;
+        margin-bottom:4px;
+        font-size:.78rem;
+      }
+
+      .invsoftedit-card .form-control,
+      .invsoftedit-card .form-select{
+        border-radius:9px;
+        border:1px solid #d9e3f0;
+        min-height:32px;
+        font-size:.80rem;
+        background:#f8fafc;
+      }
+
+      .invsoftedit-card textarea.form-control{
+        min-height:70px;
+      }
+
+      .invsoftedit-card .form-control:focus,
+      .invsoftedit-card .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 0.15rem rgba(63,134,214,.18);
+      }
+
+      .invsoftedit-evidence-upload{
+        background:#f8fbff;
+        border:1px dashed #9ec5fe;
+        border-radius:14px;
+        padding:12px;
+      }
+
+      .invsoftedit-evidence-help{
+        color:#475569;
+        font-size:.74rem;
+        margin-top:5px;
+      }
+
+      .invsoftedit-evidence-section{
+        margin-top:18px;
+        background:#f8fbff;
+        border:1px solid #dbeafe;
+        border-radius:16px;
+        padding:8px 7px;
+      }
+
+      .invsoftedit-section-title{
+        color:#0f172a;
+        font-size:.92rem;
+        font-weight:950;
+        margin-bottom:10px;
+      }
+
+      .invsoftedit-evidence-grid{
+        display:grid;
+        grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+        gap:12px;
+      }
+
+      .invsoftedit-evidence-card{
+        background:#ffffff;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        padding:8px 7px;
+        display:flex;
+        align-items:center;
+        gap:12px;
+        box-shadow:0 8px 16px rgba(15,23,42,.08);
+      }
+
+      .invsoftedit-evidence-icon{
+        width:46px;
+        height:46px;
+        min-width:46px;
+        border-radius:14px;
+        background:linear-gradient(135deg,#e0f2fe,#dbeafe);
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.4rem;
+      }
+
+      .invsoftedit-evidence-content{
+        flex:1;
+        min-width:0;
+      }
+
+      .invsoftedit-evidence-name{
+        color:#0f172a;
+        font-size:.82rem;
+        font-weight:950;
+        word-break:break-word;
+      }
+
+      .invsoftedit-evidence-meta{
+        color:#475569;
+        font-size:.72rem;
+        margin-top:3px;
+      }
+
+      .invsoftedit-evidence-actions{
+        display:flex;
+        gap:6px;
+        flex-wrap:wrap;
+        justify-content:flex-end;
+      }
+
+      .invsoftedit-evidence-actions .btn{
+        font-size:.70rem;
+        font-weight:900;
+        padding:5px 11px;
+      }
+
+      .invsoftedit-no-evidence{
+        background:#fff;
+        border:1px dashed #9ec5fe;
+        border-radius:14px;
+        padding:8px 7px;
+        color:#475569;
+        font-size:.82rem;
+        font-weight:700;
+      }
+
+      .invsoftedit-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        margin-top:18px;
+        flex-wrap:wrap;
+      }
+
+      .invsoftedit-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invsoftedit-cancel-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invsoftedit-cancel-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      @media (max-width:992px){
+        .invsoftedit-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .invsoftedit-header-card{
+          min-height:88px;
+        }
+
+        .invsoftedit-title{
+          font-size:1.20rem;
+        }
+
+        .invsoftedit-card-body{
+          padding:8px 7px;
+        }
+      }
+
+      @media (max-width:768px){
+        .invsoftedit-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .invsoftedit-header-overlay::before{
+          margin:0;
+        }
+
+        .invsoftedit-header-actions .btn,
+        .invsoftedit-bottom-actions .btn{
+          width:100%;
+        }
+
+        .invsoftedit-evidence-card{
+          flex-direction:column;
+          align-items:flex-start;
+        }
+
+        .invsoftedit-evidence-actions{
+          width:100%;
+          justify-content:flex-start;
+        }
+      }
+    </style>
+
+    <script>
+      function cargarDivisionesSoftwareEdit() {
+        const areaSel = document.getElementById('softArea');
+        const divSel  = document.getElementById('softDivision');
+        const divisionActual = "{{ item.division|e }}";
+
+        if (!areaSel || !divSel) return;
+
+        const areaId = areaSel.value;
+        divSel.innerHTML = '<option value="">-- Seleccione --</option>';
+
+        if (!areaId) return;
+
+        fetch(`/areas/${areaId}/divisiones_json`)
+          .then(r => r.json())
+          .then(data => {
+            if (!data.divisiones || data.divisiones.length === 0) {
+              divSel.innerHTML = '<option value="">(Sin divisiones para esta área)</option>';
+              return;
+            }
+
+            divSel.innerHTML = '<option value="">-- Seleccione --</option>';
+
+            data.divisiones.forEach(d => {
+              const opt = document.createElement('option');
+              opt.value = d.nombre;
+              opt.textContent = d.nombre;
+
+              if (d.nombre === divisionActual) {
+                opt.selected = true;
+              }
+
+              divSel.appendChild(opt);
+            });
+          })
+          .catch(err => {
+            console.error('Error cargando divisiones (software):', err);
+            divSel.innerHTML = '<option value="">Error cargando divisiones</option>';
+          });
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+        const areaSel = document.getElementById('softArea');
+
+        if (areaSel) {
+          areaSel.addEventListener('change', cargarDivisionesSoftwareEdit);
+
+          if (areaSel.value) {
+            cargarDivisionesSoftwareEdit();
+          }
+        }
+      });
+    </script>
+    """
+
+    inner = render_template_string(
+        html,
+        item=item,
+        areas=areas,
+        evidencias=evidencias,
+        current_area_id=current_area_id,
+        conf_opts=conf_opts,
+        inte_opts=inte_opts,
+        disp_opts=disp_opts
+    )
+
+    return render_template_string(BASE, content=Markup(inner))
+
+# =========================
+# MATRIZ — Inventario de Software
+# =========================
+@app.route('/inventario_software', methods=['GET'])
+@login_required
+def inventario_software():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        read_only = True
+    else:
+        if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
+            flash("No tiene permiso para ver los activos de información.", "danger")
+            return redirect(url_for('menu'))
+        read_only = False
+
+    items = InventarioSoftware.query.order_by(InventarioSoftware.id.desc()).all()
+
+    matriz_items = []
+
+    for item in items:
+        conf_row = ValoracionConfidencialidad.query.filter_by(
+            nivel_num=item.c_nivel
+        ).first() if item.c_nivel is not None else None
+
+        inte_row = ValoracionIntegridad.query.filter_by(
+            nivel_num=item.i_nivel
+        ).first() if item.i_nivel is not None else None
+
+        disp_row = ValoracionDisponibilidad.query.filter_by(
+            nivel_num=item.d_nivel
+        ).first() if item.d_nivel is not None else None
+
+        valor_row = ValoracionCriticidadActivo.query.filter_by(
+            nivel_num=item.valor_activo
+        ).first() if item.valor_activo is not None else None
+
+        conf_texto = (
+            conf_row.clasificacion
+            if conf_row and getattr(conf_row, 'clasificacion', None)
+            else (item.etiqueta_conf_texto or (f"Nivel {item.c_nivel}" if item.c_nivel is not None else "—"))
+        )
+
+        inte_texto = (
+            inte_row.nivel
+            if inte_row and getattr(inte_row, 'nivel', None)
+            else (f"Nivel {item.i_nivel}" if item.i_nivel is not None else "—")
+        )
+
+        disp_texto = (
+            disp_row.nivel
+            if disp_row and getattr(disp_row, 'nivel', None)
+            else (f"Nivel {item.d_nivel}" if item.d_nivel is not None else "—")
+        )
+
+        valor_texto = (
+            valor_row.nivel_texto
+            if valor_row and getattr(valor_row, 'nivel_texto', None)
+            else (f"Nivel {item.valor_activo}" if item.valor_activo is not None else "—")
+        )
+
+        matriz_items.append({
+            "item": item,
+            "conf_texto": conf_texto,
+            "inte_texto": inte_texto,
+            "disp_texto": disp_texto,
+            "valor_texto": valor_texto,
+            "criticidad_texto": item.criticidad_texto or (f"Nivel {item.criticidad_num}" if item.criticidad_num is not None else "—"),
+            "etiquetado_texto": item.etiqueta_conf_texto or (f"Nivel {item.etiqueta_conf_num}" if item.etiqueta_conf_num is not None else "—"),
+        })
+
+    html = """
+    <div class="invsoftmat-shell">
+
+      <div class="invsoftmat-header-card">
+        <div class="invsoftmat-header-overlay">
+          <div class="invsoftmat-header-text">
+            <h3 class="invsoftmat-title m-0">Inventario de Software — Matriz</h3>
+            <div class="invsoftmat-subtitle">
+              Visualización resumida de activos de software del Sistema de Gestión de Seguridad de la Información
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="invsoftmat-header-actions">
+        {% if not read_only %}
+          <a href="{{ url_for('inventario_software_new') }}"
+             class="btn btn-primary rounded-pill px-4 fw-bold">
+            ➕ Agregar Activo
+          </a>
+        {% else %}
+          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
+            ➕ Agregar Activo
+          </button>
+        {% endif %}
+      </div>
+
+      <style>
+        .badge-n1 { background:#2ecc71; color:#fff; }
+        .badge-n2 { background:#f1c40f; color:#111; }
+        .badge-n3 { background:#e67e22; color:#fff; }
+        .badge-n4 { background:#e74c3c; color:#fff; }
+        .badge-n5 { background:#8e44ad; color:#fff; }
+      </style>
+
+      <div class="invsoftmat-card">
+        <div class="invsoftmat-topbar">
+          <div>
+            <h5 class="invsoftmat-top-title mb-1">Resumen de activos de software</h5>
+            <div class="invsoftmat-top-note">
+              La matriz muestra los niveles de valoración en texto. Para consultar toda la información utilice el botón <strong>Ver detalle</strong>.
+            </div>
+          </div>
+
+          <div class="invsoftmat-counter-badge">
+            Total registros: {{ matriz_items|length }}
+          </div>
+        </div>
+
+        <div class="invsoftmat-card-body">
+          <div class="invsoftmat-table-wrap">
+            <div class="table-responsive">
+              <table class="table table-bordered table-hover align-middle invsoftmat-table mb-0">
+
+                <colgroup>
+                  <col style="width: 11%;">
+                  <col style="width: 11%;">
+                  <col style="width: 11%;">
+                  <col style="width: 15%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 12%;">
+                  <col style="width: 14%;">
+                </colgroup>
+
+                <thead>
+                  <tr>
+                    <th>Área</th>
+                    <th>División</th>
+                    <th>Proceso</th>
+                    <th>Nombre del Activo</th>
+                    <th>Confidencialidad</th>
+                    <th>Integridad</th>
+                    <th>Disponibilidad</th>
+                    <th>Valor</th>
+                    <th>Criticidad</th>
+                    <th>Etiquetado</th>
+                    <th class="invsoftmat-col-acciones">Acciones</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {% for row in matriz_items %}
+                    {% set item = row.item %}
+                    <tr>
+                      <td>{{ item.area or '—' }}</td>
+                      <td>{{ item.division or '—' }}</td>
+                      <td>{{ item.proceso or '—' }}</td>
+
+                      <td class="invsoftmat-cell-main">
+                        <div class="invsoftmat-main-text">{{ item.nombre_activo or '—' }}</div>
+                      </td>
+
+                      <td class="text-center">
+                        <span class="badge badge-n{{ item.c_nivel or 1 }} invsoftmat-badge-text">
+                          {{ row.conf_texto }}
+                        </span>
+                      </td>
+
+                      <td class="text-center">
+                        <span class="badge badge-n{{ item.i_nivel or 1 }} invsoftmat-badge-text">
+                          {{ row.inte_texto }}
+                        </span>
+                      </td>
+
+                      <td class="text-center">
+                        <span class="badge badge-n{{ item.d_nivel or 1 }} invsoftmat-badge-text">
+                          {{ row.disp_texto }}
+                        </span>
+                      </td>
+
+                      <td class="text-center">
+                        <span class="badge badge-n{{ item.valor_activo or 1 }} invsoftmat-badge-text">
+                          {{ row.valor_texto }}
+                        </span>
+                      </td>
+
+                      <td class="text-center">
+                        <span class="badge badge-n{{ item.criticidad_num or 1 }} invsoftmat-badge-text">
+                          {{ row.criticidad_texto }}
+                        </span>
+                      </td>
+
+                      <td class="text-center">
+                        <span class="badge badge-n{{ item.etiqueta_conf_num or 1 }} invsoftmat-badge-text">
+                          {{ row.etiquetado_texto }}
+                        </span>
+                      </td>
+
+                      <td class="text-center invsoftmat-col-acciones">
+                        <div class="invsoftmat-actions-wrap">
+
+                          <a href="{{ url_for('inventario_software_detalle', id=item.id) }}"
+                             class="btn btn-info btn-sm rounded-pill invsoftmat-btn-action text-white fw-bold">
+                            Ver detalle
+                          </a>
+
+                          {% if not read_only %}
+                            <a href="{{ url_for('inventario_software_edit', id=item.id) }}"
+                               class="btn btn-warning btn-sm rounded-pill invsoftmat-btn-action fw-bold">
+                              Editar
+                            </a>
+
+                            <a href="{{ url_for('inventario_software_delete', id=item.id) }}"
+                               class="btn btn-danger btn-sm rounded-pill invsoftmat-btn-action fw-bold"
+                               onclick="return confirm('¿Eliminar este activo de software?');">
+                              Eliminar
+                            </a>
+                          {% else %}
+                            <span class="badge bg-secondary">Solo lectura</span>
+                          {% endif %}
+
+                        </div>
+                      </td>
+                    </tr>
+                  {% endfor %}
+
+                  {% if matriz_items|length == 0 %}
+                    <tr>
+                      <td colspan="11" class="text-center text-muted py-5">
+                        Sin registros
+                      </td>
+                    </tr>
+                  {% endif %}
+                </tbody>
+
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .invsoftmat-shell{
+        width:96%;
+        max-width:1750px;
+        margin:10px auto 24px auto;
+      }
+
+      .invsoftmat-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .invsoftmat-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .invsoftmat-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent;
+        padding:0;
+        position:relative;
+        z-index:1;
+      }
+
+      .invsoftmat-header-overlay::before{
+        content:"💻";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .invsoftmat-header-text{
+        max-width:1100px;
+        width:100%;
+      }
+
+      .invsoftmat-header-text::before{
+        content:"SGSI · Matriz Inventario de Software";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#fff;
+      }
+
+      .invsoftmat-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .invsoftmat-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .invsoftmat-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .invsoftmat-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invsoftmat-card{
+        background:rgba(255,255,255,.96) !important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .invsoftmat-topbar{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:12px;
+        padding:14px 16px 0 16px;
+        flex-wrap:wrap;
+      }
+
+      .invsoftmat-top-title{
+        color:#0f172a;
+        font-weight:950;
+        font-size:.92rem;
+      }
+
+      .invsoftmat-top-note{
+        color:#475569;
+        font-size:.78rem;
+      }
+
+      .invsoftmat-counter-badge{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        color:#fff;
+        font-weight:900;
+        border-radius:999px;
+        padding:7px 14px;
+        font-size:.78rem;
+        box-shadow:0 8px 16px rgba(15,23,42,.16);
+      }
+
+      .invsoftmat-card-body{
+        padding:12px 16px 16px 16px;
+      }
+
+      .invsoftmat-table-wrap{
+        max-height:70vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#fff;
+      }
+
+      .invsoftmat-table{
+        min-width:1650px;
+        table-layout:fixed;
+        margin-bottom:0;
+      }
+
+      .invsoftmat-table thead th{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#fff;
+        font-weight:900;
+        text-align:center;
+        vertical-align:middle;
+      }
+
+      .invsoftmat-table th,
+      .invsoftmat-table td{
+        vertical-align:top;
+        font-size:.68rem;
+        padding:9px 8px;
+        white-space:normal;
+        word-break:break-word;
+        overflow-wrap:anywhere;
+      }
+
+      .invsoftmat-table td{
+        border-bottom:1px solid #e5edf7;
+      }
+
+      .invsoftmat-table tbody tr:nth-child(even){
+        background:#f8fbff;
+      }
+
+      .invsoftmat-table tbody tr:hover{
+        background:#eef6ff;
+      }
+
+      .invsoftmat-cell-main .invsoftmat-main-text{
+        font-weight:900;
+        color:#0f172a;
+      }
+
+      .invsoftmat-badge-text{
+        font-size:.68rem !important;
+        line-height:1.15;
+        padding:5px 8px;
+        border-radius:999px;
+        font-weight:900;
+        white-space:normal;
+        max-width:130px;
+        display:inline-block;
+      }
+
+      .invsoftmat-col-acciones{
+        width:160px !important;
+        min-width:160px !important;
+      }
+
+      .invsoftmat-actions-wrap{
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+        align-items:center;
+        justify-content:center;
+      }
+
+      .invsoftmat-btn-action,
+      .invsoftmat-actions-wrap .badge{
+        font-size:.64rem !important;
+        line-height:1.1;
+        padding:4px 10px !important;
+        min-width:108px;
+        max-width:108px;
+        text-align:center;
+        white-space:nowrap;
+        border-radius:999px !important;
+        font-weight:900;
+      }
+
+      @media (max-width:992px){
+        .invsoftmat-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .invsoftmat-header-card{
+          min-height:88px;
+        }
+
+        .invsoftmat-title{
+          font-size:1.20rem;
+        }
+
+        .invsoftmat-card-body{
+          padding:12px;
+        }
+
+        .invsoftmat-topbar{
+          padding:12px 14px 0 14px;
+        }
+      }
+
+      @media (max-width:768px){
+        .invsoftmat-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .invsoftmat-header-overlay::before{
+          margin:0;
+        }
+
+        .invsoftmat-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+
+    inner = render_template_string(
+        html,
+        matriz_items=matriz_items,
+        read_only=read_only
+    )
+
+    return render_template_string(BASE, content=Markup(inner))
+
+# =========================
+# DETALLE — Inventario de Software
+# =========================
+@app.route('/inventario_software/detalle/<int:id>', methods=['GET'])
+@login_required
+def inventario_software_detalle(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role != 'auditor':
+        if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
+            flash("No tiene permiso para ver el detalle de activos de software.", "danger")
+            return redirect(url_for('inventario_software'))
+
+    item = InventarioSoftware.query.get_or_404(id)
+
+    evidencias = InventarioSoftwareEvidencia.query.filter_by(
+        registro_id=item.id
+    ).order_by(InventarioSoftwareEvidencia.id.desc()).all()
+
+    conf_row = ValoracionConfidencialidad.query.filter_by(nivel_num=item.c_nivel).first() if item.c_nivel is not None else None
+    inte_row = ValoracionIntegridad.query.filter_by(nivel_num=item.i_nivel).first() if item.i_nivel is not None else None
+    disp_row = ValoracionDisponibilidad.query.filter_by(nivel_num=item.d_nivel).first() if item.d_nivel is not None else None
+    valor_row = ValoracionCriticidadActivo.query.filter_by(nivel_num=item.valor_activo).first() if item.valor_activo is not None else None
+
+    conf_texto = conf_row.clasificacion if conf_row and getattr(conf_row, 'clasificacion', None) else (item.etiqueta_conf_texto or (f"Nivel {item.c_nivel}" if item.c_nivel is not None else "—"))
+    inte_texto = inte_row.nivel if inte_row and getattr(inte_row, 'nivel', None) else (f"Nivel {item.i_nivel}" if item.i_nivel is not None else "—")
+    disp_texto = disp_row.nivel if disp_row and getattr(disp_row, 'nivel', None) else (f"Nivel {item.d_nivel}" if item.d_nivel is not None else "—")
+    valor_texto = valor_row.nivel_texto if valor_row and getattr(valor_row, 'nivel_texto', None) else (f"Nivel {item.valor_activo}" if item.valor_activo is not None else "—")
+
+    criticidad_texto = item.criticidad_texto or (f"Nivel {item.criticidad_num}" if item.criticidad_num is not None else "—")
+    etiquetado_texto = item.etiqueta_conf_texto or (
+        conf_row.clasificacion if conf_row and getattr(conf_row, 'clasificacion', None)
+        else (f"Nivel {item.etiqueta_conf_num}" if item.etiqueta_conf_num is not None else "—")
+    )
+
+    def badge_class(n):
+        if n == 1:
+            return "badge-n1"
+        if n == 2:
+            return "badge-n2"
+        if n == 3:
+            return "badge-n3"
+        if n == 4:
+            return "badge-n4"
+        return "badge-n5"
+
+    conf_badge = badge_class(item.c_nivel or 1)
+    inte_badge = badge_class(item.i_nivel or 1)
+    disp_badge = badge_class(item.d_nivel or 1)
+    valor_badge = badge_class(item.valor_activo or 1)
+    criticidad_badge = badge_class(item.criticidad_num or 1)
+    etiquetado_badge = badge_class(item.etiqueta_conf_num or 1)
+
+    html = """
+    <div class="invsoftdet-shell">
+
+      <div class="invsoftdet-header-card">
+        <div class="invsoftdet-header-overlay">
+          <div class="invsoftdet-header-text">
+            <h3 class="invsoftdet-title m-0">Detalle — Inventario de Software</h3>
+            <div class="invsoftdet-subtitle">
+              Consulta completa del activo de software registrado en el Sistema de Gestión de Seguridad de la Información
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="invsoftdet-header-actions">
+        <a href="{{ url_for('inventario_software') }}"
+           class="btn rounded-pill px-4 fw-bold invsoftdet-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+
+        {% if user.role != 'auditor' %}
+          <a href="{{ url_for('inventario_software_edit', id=item.id) }}"
+             class="btn btn-warning rounded-pill px-4 fw-bold">
+            Editar
+          </a>
+        {% endif %}
+      </div>
+
+      <style>
+        .badge-n1 { background:#2ecc71; color:#fff; }
+        .badge-n2 { background:#f1c40f; color:#111; }
+        .badge-n3 { background:#e67e22; color:#fff; }
+        .badge-n4 { background:#e74c3c; color:#fff; }
+        .badge-n5 { background:#8e44ad; color:#fff; }
+      </style>
+
+      <div class="invsoftdet-card">
+        <div class="invsoftdet-card-body">
+
+          <div class="row g-3">
+
+            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">Área</div><div class="invsoftdet-value">{{ item.area or '—' }}</div></div></div>
+            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">División</div><div class="invsoftdet-value">{{ item.division or '—' }}</div></div></div>
+            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">Proceso</div><div class="invsoftdet-value">{{ item.proceso or '—' }}</div></div></div>
+
+            <div class="col-md-6"><div class="invsoftdet-field"><div class="invsoftdet-label">Nombre del Activo</div><div class="invsoftdet-value">{{ item.nombre_activo or '—' }}</div></div></div>
+            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">Owner/Admin</div><div class="invsoftdet-value">{{ item.administrador or '—' }}</div></div></div>
+            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">Dueño Técnico</div><div class="invsoftdet-value">{{ item.dueno_tecnico or '—' }}</div></div></div>
+
+            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">Propietario</div><div class="invsoftdet-value">{{ item.propietario or '—' }}</div></div></div>
+            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">Medio</div><div class="invsoftdet-value">{{ item.medio or '—' }}</div></div></div>
+            <div class="col-md-4"><div class="invsoftdet-field"><div class="invsoftdet-label">Ubicación</div><div class="invsoftdet-value">{{ item.ubicacion_tipo or '—' }} — {{ item.ubicacion_nombre or '—' }}</div></div></div>
+
+            <div class="col-md-12"><div class="invsoftdet-field"><div class="invsoftdet-label">Descripción</div><div class="invsoftdet-value">{{ item.descripcion or '—' }}</div></div></div>
+            <div class="col-md-12"><div class="invsoftdet-field"><div class="invsoftdet-label">Accesos Autorizados</div><div class="invsoftdet-value">{{ item.accesos_autorizados or '—' }}</div></div></div>
+
+            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Confidencialidad</div><span class="badge {{ conf_badge }} invsoftdet-badge">{{ conf_texto }}</span></div></div>
+            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Integridad</div><span class="badge {{ inte_badge }} invsoftdet-badge">{{ inte_texto }}</span></div></div>
+            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Disponibilidad</div><span class="badge {{ disp_badge }} invsoftdet-badge">{{ disp_texto }}</span></div></div>
+            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Valor del Activo</div><span class="badge {{ valor_badge }} invsoftdet-badge">{{ valor_texto }}</span></div></div>
+            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Criticidad</div><span class="badge {{ criticidad_badge }} invsoftdet-badge">{{ criticidad_texto }}</span></div></div>
+            <div class="col-md-2"><div class="invsoftdet-field text-center"><div class="invsoftdet-label">Etiquetado</div><span class="badge {{ etiquetado_badge }} invsoftdet-badge">{{ etiquetado_texto }}</span></div></div>
+
+            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">¿Info Personal?</div><div class="invsoftdet-value">{{ item.info_personal or '—' }}</div></div></div>
+            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">¿Regulada?</div><div class="invsoftdet-value">{{ item.info_regulada or '—' }}</div></div></div>
+            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">¿Sens. Compañía?</div><div class="invsoftdet-value">{{ item.info_sensible_compania or '—' }}</div></div></div>
+            <div class="col-md-3"><div class="invsoftdet-field"><div class="invsoftdet-label">¿Sens. Clientes?</div><div class="invsoftdet-value">{{ item.info_sensible_clientes or '—' }}</div></div></div>
+
+            <div class="col-md-12"><div class="invsoftdet-field"><div class="invsoftdet-label">Observaciones</div><div class="invsoftdet-value">{{ item.observaciones or '—' }}</div></div></div>
+
+          </div>
+
+          <div class="invsoftdet-evidence-section">
+            <div class="invsoftdet-section-title">📎 Evidencias PDF</div>
+
+            {% if evidencias %}
+              <div class="invsoftdet-evidence-grid">
+
+                {% for ev in evidencias %}
+                  <div class="invsoftdet-evidence-card">
+
+                    <div class="invsoftdet-evidence-icon">📄</div>
+
+                    <div class="invsoftdet-evidence-content">
+                      <div class="invsoftdet-evidence-name">
+                        {{ ev.original_name or ev.filename }}
+                      </div>
+
+                      <div class="invsoftdet-evidence-meta">
+                        {{ ev.uploaded_at.strftime('%Y-%m-%d %H:%M') if ev.uploaded_at else '—' }}
+                        ·
+                        {{ ev.uploaded_by or 'Sistema' }}
+                      </div>
+                    </div>
+
+                    <div class="invsoftdet-evidence-actions">
+
+                      <a href="/inventario_software/evidencia/{{ ev.id }}/pdf"
+                         class="btn btn-sm btn-primary rounded-pill fw-bold">
+                        Ver evidencia
+                      </a>
+
+                      {% if user.role != 'auditor' %}
+                        <form method="post"
+                              action="/inventario_software/evidencia/{{ ev.id }}/delete"
+                              class="d-inline"
+                              onsubmit="return confirm('¿Eliminar esta evidencia?');">
+                          <button type="submit"
+                                  class="btn btn-sm btn-danger rounded-pill fw-bold">
+                            Eliminar
+                          </button>
+                        </form>
+                      {% endif %}
+
+                    </div>
+
+                  </div>
+                {% endfor %}
+
+              </div>
+            {% else %}
+              <div class="invsoftdet-no-evidence">
+                No hay evidencias PDF cargadas para este activo.
+              </div>
+            {% endif %}
+          </div>
+
+          <div class="invsoftdet-bottom-actions">
+            <a href="{{ url_for('inventario_software') }}"
+               class="btn rounded-pill px-4 fw-bold invsoftdet-cancel-btn">
+              Cerrar
+            </a>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .invsoftdet-shell{
+        width:96%;
+        max-width:1400px;
+        margin:10px auto 24px auto;
+      }
+
+      .invsoftdet-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .invsoftdet-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 90% 10%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .invsoftdet-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        position:relative;
+        z-index:1;
+      }
+
+      .invsoftdet-header-overlay::before{
+        content:"💻";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.4rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .invsoftdet-header-text{
+        max-width:1100px;
+        width:100%;
+      }
+
+      .invsoftdet-header-text::before{
+        content:"SGSI · Inventario de Software";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#fff;
+      }
+
+      .invsoftdet-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .invsoftdet-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .invsoftdet-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .invsoftdet-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invsoftdet-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invsoftdet-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .invsoftdet-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+      }
+
+      .invsoftdet-card-body{
+        padding:20px;
+      }
+
+      .invsoftdet-field{
+        background:linear-gradient(180deg,#f8fafc,#ffffff);
+        border:1px solid #e2e8f0;
+        border-radius:14px;
+        padding:8px 7px;
+        height:100%;
+        box-shadow:0 4px 10px rgba(0,0,0,.05);
+      }
+
+      .invsoftdet-label{
+        font-size:.72rem;
+        font-weight:900;
+        color:#2563eb;
+        text-transform:uppercase;
+        letter-spacing:.4px;
+        margin-bottom:6px;
+      }
+
+      .invsoftdet-value{
+        color:#0f172a;
+        font-size:.90rem;
+        white-space:pre-wrap;
+        word-break:break-word;
+        line-height:1.35;
+      }
+
+      .invsoftdet-badge{
+        font-size:.72rem;
+        padding:6px 10px;
+        border-radius:999px;
+        display:inline-block;
+        font-weight:800;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }
+
+      .invsoftdet-evidence-section{
+        margin-top:18px;
+        background:#f8fbff;
+        border:1px solid #dbeafe;
+        border-radius:16px;
+        padding:8px 7px;
+      }
+
+      .invsoftdet-section-title{
+        color:#0f172a;
+        font-size:.92rem;
+        font-weight:950;
+        margin-bottom:10px;
+      }
+
+      .invsoftdet-evidence-grid{
+        display:grid;
+        grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+        gap:12px;
+      }
+
+      .invsoftdet-evidence-card{
+        background:#ffffff;
+        border:1px solid #dbe6f4;
+        border-radius:16px;
+        padding:8px 7px;
+        display:flex;
+        align-items:center;
+        gap:12px;
+        box-shadow:0 8px 16px rgba(15,23,42,.08);
+      }
+
+      .invsoftdet-evidence-icon{
+        width:46px;
+        height:46px;
+        min-width:46px;
+        border-radius:14px;
+        background:linear-gradient(135deg,#e0f2fe,#dbeafe);
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.4rem;
+      }
+
+      .invsoftdet-evidence-content{
+        flex:1;
+        min-width:0;
+      }
+
+      .invsoftdet-evidence-name{
+        color:#0f172a;
+        font-size:.82rem;
+        font-weight:950;
+        word-break:break-word;
+      }
+
+      .invsoftdet-evidence-meta{
+        color:#475569;
+        font-size:.72rem;
+        margin-top:3px;
+      }
+
+      .invsoftdet-evidence-actions{
+        display:flex;
+        gap:6px;
+        flex-wrap:wrap;
+        justify-content:flex-end;
+      }
+
+      .invsoftdet-evidence-actions .btn{
+        font-size:.70rem;
+        font-weight:900;
+        padding:5px 11px;
+      }
+
+      .invsoftdet-no-evidence{
+        background:#fff;
+        border:1px dashed #9ec5fe;
+        border-radius:14px;
+        padding:8px 7px;
+        color:#475569;
+        font-size:.82rem;
+        font-weight:700;
+      }
+
+      .invsoftdet-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:12px;
+        margin-top:24px;
+        flex-wrap:wrap;
+      }
+
+      .invsoftdet-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+      }
+
+      .invsoftdet-cancel-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+        box-shadow:0 6px 12px rgba(0,0,0,.10);
+      }
+
+      .invsoftdet-cancel-btn:hover{
+        background:#f1f5f9;
+      }
+
+      @media (max-width:992px){
+        .invsoftdet-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .invsoftdet-title{
+          font-size:1.20rem;
+        }
+
+        .invsoftdet-card-body{
+          padding:8px 7px;
+        }
+
+        .invsoftdet-badge{
+          width:100%;
+          text-align:center;
+        }
+      }
+
+      @media (max-width:768px){
+        .invsoftdet-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .invsoftdet-header-overlay::before{
+          margin:0;
+        }
+
+        .invsoftdet-header-actions .btn{
+          width:100%;
+        }
+
+        .invsoftdet-evidence-card{
+          flex-direction:column;
+          align-items:flex-start;
+        }
+
+        .invsoftdet-evidence-actions{
+          width:100%;
+          justify-content:flex-start;
+        }
+      }
+    </style>
+    """
+
+    inner = render_template_string(
+        html,
+        item=item,
+        user=user,
+        evidencias=evidencias,
+        conf_texto=conf_texto,
+        inte_texto=inte_texto,
+        disp_texto=disp_texto,
+        valor_texto=valor_texto,
+        criticidad_texto=criticidad_texto,
+        etiquetado_texto=etiquetado_texto,
+        conf_badge=conf_badge,
+        inte_badge=inte_badge,
+        disp_badge=disp_badge,
+        valor_badge=valor_badge,
+        criticidad_badge=criticidad_badge,
+        etiquetado_badge=etiquetado_badge
+    )
+
+    return render_template_string(BASE, content=Markup(inner))
+
+# =========================
+# VISTA — Evidencia Inventario de Software
+# =========================
+@app.route('/inventario_software/evidencia/<int:evidencia_id>/pdf')
+@login_required
+def inventario_software_evidencia_pdf(evidencia_id):
+
+    user = User.query.get(session.get('user_id'))
+
+    if user.role != 'auditor':
+
+        if user.role != 'admin' and not verificar_permiso(
+            user,
+            "Gestión de Activos de Información"
+        ):
+
+            flash(
+                "No tiene permiso para ver evidencias de activos de software.",
+                "danger"
+            )
+
+            return redirect(url_for('inventario_software'))
+
+    ev = InventarioSoftwareEvidencia.query.get_or_404(evidencia_id)
+
+    item = InventarioSoftware.query.get_or_404(
+        ev.registro_id
+    )
+
+    upload_dir = app.config.get(
+        'UPLOAD_INVENTARIO_SOFTWARE_DIR'
+    )
+
+    if not upload_dir:
+        abort(404)
+
+    file_path = os.path.join(
+        upload_dir,
+        ev.filename
+    )
+
+    if not os.path.exists(file_path):
+
+        flash(
+            "No se encontró el archivo de evidencia.",
+            "danger"
+        )
+
+        return redirect(
+            url_for(
+                'inventario_software_detalle',
+                id=ev.registro_id
+            )
+        )
+
+    inner_html = """
+
+    <div class="container my-3">
+
+      <!-- =========================
+           BOTONES SUPERIORES
+      ========================== -->
+      <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+
+        <a href="{{ url_for('inventario_software_detalle', id=item.id) }}"
+           class="btn btn-secondary rounded-pill px-4 py-2 fw-bold">
+
+          ⬅ Volver al Detalle
+
+        </a>
+
+        <div class="small text-muted text-truncate">
+          Archivo: {{ ev.original_name or ev.filename }}
+        </div>
+
+      </div>
+
+      <!-- =========================
+           CARD VISOR PDF
+      ========================== -->
+      <div class="card shadow-sm evidencia-card">
+
+        <div class="card-header evidencia-header">
+
+          <div>
+
+            <small>
+              Activo:
+              {{ item.nombre_activo or '—' }}
+            </small>
+
+          </div>
+
+        </div>
+
+        <div class="card-body p-2">
+
+          <div class="pdf-container">
+
+            <iframe
+              id="pdfFrame"
+              src="{{ url_for('inventario_software_evidencia_pdf_raw', evidencia_id=ev.id) }}#zoom=page-width"
+              title="Visor PDF">
+            </iframe>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <style>
+
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .evidencia-card{
+        background:rgba(255,255,255,.90)!important;
+        backdrop-filter:blur(4px);
+        border-radius:14px;
+        overflow:hidden;
+        border:none;
+      }
+
+      .evidencia-header{
+        background:linear-gradient(
+          135deg,
+          #062b55,
+          #0b4a8f,
+          #1d5fae
+        );
+
+        color:#fff !important;
+        border:none;
+      }
+
+      .pdf-container{
+        height:min(82vh,1000px);
+        min-height:600px;
+        width:100%;
+      }
+
+      .pdf-container iframe{
+        width:100%;
+        height:100%;
+        border:1px solid #dee2e6;
+        border-radius:8px;
+        background:#fff;
+      }
+
+      @media (max-width:768px){
+
+        .pdf-container{
+          min-height:500px;
+        }
+
+      }
+
+    </style>
+
+    """
+
+    return render_template_string(
+        BASE,
+        content=Markup(
+            render_template_string(
+                inner_html,
+                ev=ev,
+                item=item
+            )
+        )
+    )
+
+
+# =========================
+# PDF RAW — Evidencia Inventario de Software
+# =========================
+@app.route('/inventario_software/evidencia/<int:evidencia_id>/pdf/raw')
+@login_required
+def inventario_software_evidencia_pdf_raw(evidencia_id):
+
+    user = User.query.get(session.get('user_id'))
+
+    if user.role != 'auditor':
+
+        if user.role != 'admin' and not verificar_permiso(
+            user,
+            "Gestión de Activos de Información"
+        ):
+
+            flash(
+                "No tiene permiso para ver evidencias de activos de software.",
+                "danger"
+            )
+
+            return redirect(url_for('inventario_software'))
+
+    ev = InventarioSoftwareEvidencia.query.get_or_404(
+        evidencia_id
+    )
+
+    upload_dir = app.config.get(
+        'UPLOAD_INVENTARIO_SOFTWARE_DIR'
+    )
+
+    if not upload_dir:
+        abort(404)
+
+    file_path = os.path.join(
+        upload_dir,
+        ev.filename
+    )
+
+    if not os.path.exists(file_path):
+
+        flash(
+            "No se encontró el archivo de evidencia.",
+            "danger"
+        )
+
+        return redirect(
+            url_for(
+                'inventario_software_detalle',
+                id=ev.registro_id
+            )
+        )
+
+    return send_from_directory(
+        upload_dir,
+        ev.filename,
+        mimetype='application/pdf',
+        as_attachment=False,
+        download_name=ev.original_name or ev.filename
+    )
+
+@app.route('/inventario_software/evidencia/<int:evidencia_id>/delete', methods=['POST'])
+@login_required
+def inventario_software_evidencia_delete(evidencia_id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede eliminar evidencias.", "danger")
+        return redirect(url_for('inventario_software'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
+        flash("No tiene permiso para eliminar evidencias.", "danger")
+        return redirect(url_for('inventario_software'))
+
+    ev = InventarioSoftwareEvidencia.query.get_or_404(evidencia_id)
+    registro_id = ev.registro_id
+
+    upload_dir = app.config.get('UPLOAD_INVENTARIO_SOFTWARE_DIR')
+    file_path = os.path.join(upload_dir, ev.filename) if upload_dir else None
+
+    try:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception:
+        pass
+
+    db.session.delete(ev)
+    db.session.commit()
+
+    flash("Evidencia eliminada correctamente.", "success")
+    return redirect(url_for('inventario_software_detalle', id=registro_id))
+
+# =========================
+# ELIMINAR — Inventario de Software
+# =========================
+@app.route('/inventario_software/delete/<int:id>')
+@login_required
+def inventario_software_delete(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor' or (
+        user.role != 'admin'
+        and not verificar_permiso(user, "Gestión de Activos de Información")
+    ):
+        flash("No tiene permiso para eliminar activos.", "danger")
+        return redirect(url_for('inventario_software_menu'))
+
+    it = InventarioSoftware.query.get_or_404(id)
+
+    upload_dir = app.config.get('UPLOAD_INVENTARIO_SOFTWARE_DIR')
+    if upload_dir:
+        try:
+            for ev in list(it.evidencias or []):
+                if ev.filename:
+                    file_path = os.path.join(upload_dir, ev.filename)
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+        except Exception as e:
+            print("Error eliminando evidencias del activo de software:", repr(e))
+
+    db.session.delete(it)
+    db.session.commit()
+    flash("Eliminado correctamente.", "success")
+    return redirect(url_for('inventario_software'))
+
+# ===================================
+# ENTRADA DIRECTA — Inventario Físico
+# ===================================
+
+# ============================================================
+#                 INTEGRACIÓN GLPI → INVENTARIO FÍSICO GRAC
+# ============================================================
+
+# =========================
+# MODELO — Configuración GLPI Inventario Físico
+# =========================
+class GLPIInventarioFisicoConfig(db.Model):
+    __tablename__ = "glpi_inventario_fisico_config"
+
+    id = db.Column(db.Integer, primary_key=True)
+    nombre = db.Column(db.String(120), nullable=False, default="GLPI Principal")
+    base_url = db.Column(db.String(500), nullable=False)  # Ej: http://192.168.0.10:8080/apirest.php
+    app_token = db.Column(db.Text, nullable=True)
+    user_token = db.Column(db.Text, nullable=True)
+
+    # Valores por defecto para completar campos SGSI que GLPI normalmente no trae
+    # IMPORTANTE: sin ForeignKey porque en tu app la tabla real de AreaEmpresa no se llama necesariamente "area_empresa".
+    # Se guarda el ID del área y se consulta contra AreaEmpresa manualmente.
+    area_id_default = db.Column(db.Integer, nullable=True)
+    division_default = db.Column(db.String(250), nullable=True)
+    ciudad_default = db.Column(db.String(120), nullable=True)
+    pais_default = db.Column(db.String(120), nullable=True, default="Colombia")
+
+    c_nivel_default = db.Column(db.Integer, nullable=False, default=3)
+    i_nivel_default = db.Column(db.Integer, nullable=False, default=3)
+    d_nivel_default = db.Column(db.Integer, nullable=False, default=3)
+
+    activo = db.Column(db.Boolean, nullable=False, default=True)
+    verificar_ssl = db.Column(db.Boolean, nullable=False, default=False)
+    timeout = db.Column(db.Integer, nullable=False, default=30)
+
+    ultima_prueba = db.Column(db.DateTime, nullable=True)
+    ultimo_sync = db.Column(db.DateTime, nullable=True)
+    ultimo_estado = db.Column(db.String(40), nullable=True)
+    ultimo_mensaje = db.Column(db.Text, nullable=True)
+
+
+
+def ensure_glpi_inventario_fisico_tables():
+    """
+    Crea solo la tabla independiente de configuración GLPI si no existe.
+    No modifica la tabla actual InventarioFisico.
+    Evita ejecutar db.create_all() global para no disparar errores de otros modelos.
+    """
+    try:
+        with app.app_context():
+            GLPIInventarioFisicoConfig.__table__.create(bind=db.engine, checkfirst=True)
+    except Exception as e:
+        print("Error creando tabla GLPI Inventario Físico:", repr(e))
+
+
+try:
+    ensure_glpi_inventario_fisico_tables()
+except Exception:
+    pass
+
+
+# =========================
+# HELPERS — Seguridad token
+# =========================
+def _glpi_invfis_encrypt(value):
+    if not value:
+        return ""
+    try:
+        if "_fernet_from_app" in globals():
+            f = _fernet_from_app()
+            return f.encrypt(value.encode("utf-8")).decode("utf-8")
+    except Exception:
+        pass
+    return value
+
+
+def _glpi_invfis_decrypt(value):
+    if not value:
+        return ""
+    try:
+        if "_fernet_from_app" in globals():
+            f = _fernet_from_app()
+            return f.decrypt(value.encode("utf-8")).decode("utf-8")
+    except Exception:
+        pass
+    return value
+
+
+def _glpi_normalize_base_url(base_url):
+    base_url = (base_url or "").strip().rstrip("/")
+    if not base_url:
+        return ""
+    if not base_url.endswith("/apirest.php"):
+        base_url = base_url + "/apirest.php"
+    return base_url
+
+
+def _glpi_invfis_config_activa():
+    return (
+        GLPIInventarioFisicoConfig.query
+        .filter_by(activo=True)
+        .order_by(GLPIInventarioFisicoConfig.id.desc())
+        .first()
+    )
+
+
+def _glpi_invfis_headers(cfg, session_token=None):
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    app_token = _glpi_invfis_decrypt(cfg.app_token)
+    if app_token:
+        headers["App-Token"] = app_token
+
+    if session_token:
+        headers["Session-Token"] = session_token
+
+    return headers
+
+
+def _glpi_invfis_init_session(cfg):
+    """
+    Inicia sesión en GLPI usando user_token + app_token.
+    """
+    base_url = _glpi_normalize_base_url(cfg.base_url)
+    user_token = _glpi_invfis_decrypt(cfg.user_token)
+
+    if not base_url or not user_token:
+        raise Exception("Debe configurar la URL base de GLPI y el User Token.")
+
+    headers = _glpi_invfis_headers(cfg)
+    headers["Authorization"] = "user_token " + user_token
+
+    url = base_url + "/initSession"
+    res = requests.get(
+        url,
+        headers=headers,
+        timeout=cfg.timeout or 30,
+        verify=bool(cfg.verificar_ssl),
+    )
+
+    if res.status_code not in (200, 201):
+        raise Exception(f"GLPI initSession falló: HTTP {res.status_code} - {res.text[:500]}")
+
+    data = res.json()
+    token = data.get("session_token")
+    if not token:
+        raise Exception("GLPI no devolvió session_token.")
+
+    return token
+
+
+def _glpi_invfis_kill_session(cfg, session_token):
+    try:
+        base_url = _glpi_normalize_base_url(cfg.base_url)
+        if not base_url or not session_token:
+            return
+
+        requests.get(
+            base_url + "/killSession",
+            headers=_glpi_invfis_headers(cfg, session_token),
+            timeout=10,
+            verify=bool(cfg.verificar_ssl),
+        )
+    except Exception:
+        pass
+
+
+def _glpi_get_value(obj, *keys, default=""):
+    """
+    Lee campos de GLPI soportando nombres comunes y valores nulos.
+    """
+    for k in keys:
+        if isinstance(obj, dict) and k in obj and obj.get(k) not in (None, ""):
+            return str(obj.get(k)).strip()
+    return default
+
+
+def _glpi_pick_dropdown_name(obj, key):
+    """
+    GLPI con expand_dropdowns puede devolver texto o dict.
+    """
+    val = obj.get(key) if isinstance(obj, dict) else None
+    if isinstance(val, dict):
+        return str(val.get("name") or val.get("completename") or "").strip()
+    if val not in (None, ""):
+        return str(val).strip()
+    return ""
+
+
+def _glpi_invfis_fetch_computers(cfg, session_token, range_start=0, range_end=999):
+    """
+    Consulta computadores de GLPI.
+    """
+    base_url = _glpi_normalize_base_url(cfg.base_url)
+
+    params = {
+        "expand_dropdowns": "true",
+        "range": f"{range_start}-{range_end}",
+    }
+
+    res = requests.get(
+        base_url + "/Computer",
+        headers=_glpi_invfis_headers(cfg, session_token),
+        params=params,
+        timeout=cfg.timeout or 30,
+        verify=bool(cfg.verificar_ssl),
+    )
+
+    if res.status_code not in (200, 206):
+        raise Exception(f"Consulta de computadores GLPI falló: HTTP {res.status_code} - {res.text[:500]}")
+
+    data = res.json()
+    if isinstance(data, dict) and "data" in data:
+        return data.get("data") or []
+    if isinstance(data, list):
+        return data
+    return []
+
+
+def _glpi_invfis_fetch_computer_detail(cfg, session_token, computer_id):
+    """
+    Consulta el detalle de un computador GLPI para traer campos que muchas veces
+    no vienen completos en la consulta masiva /Computer.
+    """
+    computer_id = _glpi_clean_text(computer_id)
+    if not computer_id:
+        return {}
+
+    base_url = _glpi_normalize_base_url(cfg.base_url)
+    params = {
+        "expand_dropdowns": "true",
+        "with_devices": "true",
+        "get_hateoas": "false",
+    }
+
+    res = requests.get(
+        base_url + f"/Computer/{computer_id}",
+        headers=_glpi_invfis_headers(cfg, session_token),
+        params=params,
+        timeout=cfg.timeout or 30,
+        verify=bool(cfg.verificar_ssl),
+    )
+
+    if res.status_code not in (200, 206):
+        return {}
+
+    data = res.json()
+    return data if isinstance(data, dict) else {}
+
+
+_GLPI_INVFIS_ITEM_CACHE = {}
+
+
+def _glpi_invfis_api_get(cfg, session_token, path, params=None):
+    """
+    GET genérico contra API REST GLPI.
+    Devuelve dict/list o {} si no responde correctamente.
+    """
+    try:
+        base_url = _glpi_normalize_base_url(cfg.base_url)
+        res = requests.get(
+            base_url + path,
+            headers=_glpi_invfis_headers(cfg, session_token),
+            params=params or {"expand_dropdowns": "true", "get_hateoas": "false"},
+            timeout=cfg.timeout or 30,
+            verify=bool(cfg.verificar_ssl),
+        )
+        if res.status_code not in (200, 206):
+            return {}
+        data = res.json()
+        return data
+    except Exception:
+        return {}
+
+
+def _glpi_invfis_first_dict(data):
+    """
+    Devuelve el primer diccionario útil desde una respuesta GLPI que puede venir
+    como dict, list o {"data": [...]}.
+    """
+    if isinstance(data, dict):
+        if isinstance(data.get("data"), list) and data.get("data"):
+            for row in data.get("data"):
+                if isinstance(row, dict):
+                    return row
+        return data
+
+    if isinstance(data, list):
+        for row in data:
+            if isinstance(row, dict):
+                return row
+
+    return {}
+
+
+def _glpi_invfis_fetch_operating_system_relation(cfg, session_token, computer_id):
+    """
+    GLPI 10 suele guardar la pestaña 'Operating systems' como relación
+    Item_OperatingSystem, no siempre dentro del objeto Computer.
+
+    Esta función consulta varias rutas compatibles y devuelve el primer registro
+    de sistema operativo asociado al computador.
+
+    Campos esperados en Item_OperatingSystem:
+      - operatingsystems_id
+      - operatingsystemversions_id
+      - operatingsystemarchitectures_id
+      - operatingsystemkernels_id
+      - operatingsystemkernelversions_id
+      - operatingsystemeditions_id
+      - operatingsystemservicepacks_id
+    """
+    computer_id = _glpi_clean_text(computer_id)
+    if not computer_id:
+        return {}
+
+    candidates = [
+        f"/Computer/{computer_id}/Item_OperatingSystem",
+        f"/Computer/{computer_id}/OperatingSystem",
+        f"/Computer/{computer_id}/OperatingSystemVersion",
+    ]
+
+    for path in candidates:
+        data = _glpi_invfis_api_get(
+            cfg,
+            session_token,
+            path,
+            params={"expand_dropdowns": "true", "get_hateoas": "false"}
+        )
+        row = _glpi_invfis_first_dict(data)
+        if row:
+            return row
+
+    # Último intento: búsqueda directa sobre Item_OperatingSystem.
+    # Algunas instalaciones no habilitan el endpoint padre/hijo, pero sí el itemtype directo.
+    try:
+        data = _glpi_invfis_api_get(
+            cfg,
+            session_token,
+            "/Item_OperatingSystem",
+            params={
+                "expand_dropdowns": "true",
+                "get_hateoas": "false",
+                "criteria[0][field]": "items_id",
+                "criteria[0][searchtype]": "equals",
+                "criteria[0][value]": computer_id,
+                "criteria[1][link]": "AND",
+                "criteria[1][field]": "itemtype",
+                "criteria[1][searchtype]": "equals",
+                "criteria[1][value]": "Computer",
+            }
+        )
+        row = _glpi_invfis_first_dict(data)
+        if row:
+            return row
+    except Exception:
+        pass
+
+    return {}
+
+
+def _glpi_invfis_merge_os_relation_into_computer(computer, os_relation):
+    """
+    Mezcla el registro Item_OperatingSystem en el dict Computer sin perder campos
+    del equipo. Además crea llaves alias para que el mapeo GRAC lea exactamente:
+      procesador      <- arquitectura
+      tipo_sistema    <- nombre del SO
+      version_so      <- kernel
+      edicion_so      <- edición
+    """
+    merged = dict(computer or {})
+
+    if not isinstance(os_relation, dict) or not os_relation:
+        return merged
+
+    for k, v in os_relation.items():
+        if v not in (None, "", "None", "null"):
+            merged[k] = v
+
+    return merged
+
+
+def _glpi_invfis_extract_id(value):
+    """
+    Extrae el ID real de un campo GLPI, aun cuando venga expandido como dict.
+    """
+    if value in (None, "", "None", "null"):
+        return ""
+
+    if isinstance(value, dict):
+        for k in ("id", "items_id", "value"):
+            if value.get(k) not in (None, "", "None", "null"):
+                return str(value.get(k)).strip()
+        return ""
+
+    # Si ya viene como número/string numérico
+    value = str(value).strip()
+    return value if value.isdigit() else ""
+
+
+def _glpi_invfis_extract_name(value):
+    """
+    Extrae nombre/completename si el campo GLPI ya vino expandido.
+    """
+    if value in (None, "", "None", "null"):
+        return ""
+
+    if isinstance(value, dict):
+        for k in ("name", "completename", "value"):
+            if value.get(k) not in (None, "", "None", "null"):
+                txt = str(value.get(k)).strip()
+                # Evita devolver un ID numérico como nombre
+                if txt and not txt.isdigit():
+                    return txt
+        return ""
+
+    txt = str(value).strip()
+    return "" if txt.isdigit() else txt
+
+
+def _glpi_invfis_resolve_item_name(cfg, session_token, itemtype, item_id):
+    """
+    Resuelve un ID de dropdown GLPI consultando su endpoint.
+    Ejemplos:
+      /OperatingSystem/1
+      /OperatingSystemArchitecture/1
+      /OperatingSystemKernel/1
+      /OperatingSystemKernelVersion/1
+      /OperatingSystemEdition/1
+    """
+    item_id = _glpi_clean_text(item_id)
+    if not itemtype or not item_id:
+        return ""
+
+    cache_key = (itemtype, item_id)
+    if cache_key in _GLPI_INVFIS_ITEM_CACHE:
+        return _GLPI_INVFIS_ITEM_CACHE[cache_key]
+
+    data = _glpi_invfis_api_get(cfg, session_token, f"/{itemtype}/{item_id}")
+    if isinstance(data, dict):
+        for k in ("name", "completename", "value"):
+            val = _glpi_clean_text(data.get(k))
+            if val:
+                _GLPI_INVFIS_ITEM_CACHE[cache_key] = val
+                return val
+
+    _GLPI_INVFIS_ITEM_CACHE[cache_key] = ""
+    return ""
+
+
+def _glpi_invfis_resolve_dropdown(cfg, session_token, computer, field_name, itemtypes):
+    """
+    Resuelve un campo dropdown de GLPI:
+      1) Si ya vino expandido con name/completename, usa ese texto.
+      2) Si vino como ID, consulta el endpoint del itemtype correspondiente.
+      3) Si no existe, devuelve vacío.
+    """
+    if not isinstance(computer, dict):
+        return ""
+
+    raw = computer.get(field_name)
+    expanded_name = _glpi_invfis_extract_name(raw)
+    if expanded_name:
+        return expanded_name
+
+    item_id = _glpi_invfis_extract_id(raw)
+    if not item_id:
+        item_id = _glpi_any_value(computer, field_name)
+
+    item_id = _glpi_clean_text(item_id)
+    if not item_id or not item_id.isdigit():
+        return ""
+
+    for itemtype in itemtypes:
+        name = _glpi_invfis_resolve_item_name(cfg, session_token, itemtype, item_id)
+        if name:
+            return name
+
+    return ""
+
+
+def _glpi_invfis_resolve_operating_system_data(cfg, session_token, computer):
+    """
+    Relaciones definitivas solicitadas GLPI → GRAC:
+
+      - Procesador en GRAC      = Arquitecturas en GLPI
+      - Tipo de sistema en GRAC = Nombre en Operating system GLPI
+      - Versión SO en GRAC      = Kernel en Operating system GLPI
+      - Edición del SO en GRAC  = Edición en Operating system GLPI
+
+    Se consulta primero el campo expandido. Si GLPI solo entrega IDs,
+    se resuelven contra los endpoints nativos de GLPI.
+    """
+
+    # Tipo de sistema GRAC = Nombre en Operating system GLPI
+    tipo_sistema = (
+        _glpi_invfis_resolve_dropdown(
+            cfg,
+            session_token,
+            computer,
+            "operatingsystems_id",
+            ("OperatingSystem",)
+        )
+        or _glpi_any_value(
+            computer,
+            "operating_system",
+            "operatingsystem",
+            "operating_system_name",
+            "os_name",
+            "os",
+            "sistema_operativo",
+            "tipo_sistema",
+            "name_operatingsystem"
+        )
+    )
+
+    # Edición del SO GRAC = Edición en Operating system GLPI
+    edicion_so = (
+        _glpi_invfis_resolve_dropdown(
+            cfg,
+            session_token,
+            computer,
+            "operatingsystemeditions_id",
+            ("OperatingSystemEdition", "OperatingSystemServicePack")
+        )
+        or _glpi_any_value(
+            computer,
+            "operating_system_edition",
+            "operatingsystemedition",
+            "os_edition",
+            "edition",
+            "edicion",
+            "edicion_so"
+        )
+    )
+
+    # Versión SO GRAC = Kernel en Operating system GLPI
+    # En GLPI puede existir como kernel o kernel version, según versión/agente.
+    version_so_kernel = (
+        _glpi_invfis_resolve_dropdown(
+            cfg,
+            session_token,
+            computer,
+            "operatingsystemkernels_id",
+            ("OperatingSystemKernel",)
+        )
+        or _glpi_invfis_resolve_dropdown(
+            cfg,
+            session_token,
+            computer,
+            "operatingsystemkernelversions_id",
+            ("OperatingSystemKernelVersion", "OperatingSystemKernel")
+        )
+        or _glpi_any_value(
+            computer,
+            "operating_system_kernel",
+            "operatingsystemkernel",
+            "operating_system_kernel_version",
+            "kernel",
+            "kernel_version",
+            "os_kernel",
+            "version_kernel",
+            "version_so"
+        )
+    )
+
+    # Procesador GRAC = Arquitecturas en GLPI
+    arquitectura = (
+        _glpi_invfis_resolve_dropdown(
+            cfg,
+            session_token,
+            computer,
+            "operatingsystemarchitectures_id",
+            ("OperatingSystemArchitecture", "Architecture")
+        )
+        or _glpi_invfis_resolve_dropdown(
+            cfg,
+            session_token,
+            computer,
+            "architectures_id",
+            ("Architecture", "OperatingSystemArchitecture")
+        )
+        or _glpi_any_value(
+            computer,
+            "operating_system_architecture",
+            "operatingsystemarchitecture",
+            "architecture",
+            "architectures",
+            "arquitectura",
+            "arquitecturas",
+            "os_architecture"
+        )
+    )
+
+    return tipo_sistema, edicion_so, version_so_kernel, arquitectura
+
+
+
+def _glpi_clean_text(value):
+    """
+    Normaliza valores traídos desde GLPI.
+    Si GLPI no trae valor, devuelve cadena vacía.
+    """
+    if value in (None, "", "None", "null"):
+        return ""
+    return str(value).strip()
+
+
+def _glpi_any_value(obj, *keys):
+    """
+    Busca el primer valor real en el diccionario GLPI.
+    No inventa valores por defecto.
+    """
+    if not isinstance(obj, dict):
+        return ""
+
+    for key in keys:
+        val = obj.get(key)
+        if isinstance(val, dict):
+            val = val.get("name") or val.get("completename") or val.get("value")
+        elif isinstance(val, list):
+            val = ", ".join([_glpi_clean_text(x.get("name") if isinstance(x, dict) else x) for x in val if x])
+        val = _glpi_clean_text(val)
+        if val:
+            return val
+
+    return ""
+
+
+def _glpi_invfis_os_data(cfg, session_token, computer):
+    """
+    Wrapper compatible para las relaciones GLPI → GRAC.
+    Usa resolución robusta por endpoint cuando GLPI trae IDs.
+    """
+    return _glpi_invfis_resolve_operating_system_data(cfg, session_token, computer)
+
+
+
+def _glpi_invfis_hw_data(computer):
+    """
+    RAM se toma solo si viene desde GLPI.
+
+    Procesador NO se toma de CPU física porque el requerimiento indica:
+      procesador en GRAC = Arquitecturas en GLPI.
+    Ese valor se asigna desde _glpi_invfis_os_data().
+    """
+    ram = _glpi_any_value(
+        computer,
+        "memory",
+        "ram",
+        "ram_instalada",
+        "memories",
+        "computermemories"
+    )
+
+    return ram
+
+
+
+def _glpi_invfis_fetch_group_relation(cfg, session_token, computer_id):
+    """
+    Busca el Grupo a cargo del computador en GLPI.
+
+    En GLPI, el campo visual 'Grupo a cargo' puede venir:
+      - directamente en Computer como groups_id_tech / groups_id
+      - o como relación Group_Item asociada al Computer.
+
+    Devuelve el primer registro útil.
+    """
+    computer_id = _glpi_clean_text(computer_id)
+    if not computer_id:
+        return {}
+
+    candidates = [
+        f"/Computer/{computer_id}/Group_Item",
+        f"/Computer/{computer_id}/Group",
+    ]
+
+    for path in candidates:
+        data = _glpi_invfis_api_get(
+            cfg,
+            session_token,
+            path,
+            params={"expand_dropdowns": "true", "get_hateoas": "false"}
+        )
+        row = _glpi_invfis_first_dict(data)
+        if row:
+            return row
+
+    # Intento directo sobre Group_Item.
+    try:
+        data = _glpi_invfis_api_get(
+            cfg,
+            session_token,
+            "/Group_Item",
+            params={
+                "expand_dropdowns": "true",
+                "get_hateoas": "false",
+                "criteria[0][field]": "items_id",
+                "criteria[0][searchtype]": "equals",
+                "criteria[0][value]": computer_id,
+                "criteria[1][link]": "AND",
+                "criteria[1][field]": "itemtype",
+                "criteria[1][searchtype]": "equals",
+                "criteria[1][value]": "Computer",
+            }
+        )
+        row = _glpi_invfis_first_dict(data)
+        if row:
+            return row
+    except Exception:
+        pass
+
+    return {}
+
+
+def _glpi_invfis_merge_group_relation_into_computer(computer, group_relation):
+    """
+    Mezcla la relación Group_Item al dict Computer y crea aliases.
+    """
+    merged = dict(computer or {})
+
+    if not isinstance(group_relation, dict) or not group_relation:
+        return merged
+
+    for k, v in group_relation.items():
+        if v not in (None, "", "None", "null"):
+            merged[k] = v
+
+    # Normaliza aliases comunes hacia groups_id_tech.
+    for key in ("groups_id", "groups_id_tech", "group_id", "group", "name", "completename"):
+        val = group_relation.get(key)
+        if val not in (None, "", "None", "null") and not merged.get("groups_id_tech"):
+            merged["groups_id_tech"] = val
+            break
+
+    return merged
+
+
+
+def _glpi_invfis_resolver_nombre_grupo_glpi(cfg=None, session_token=None, computer=None):
+    raw_group = ""
+
+    if isinstance(computer, dict):
+        raw_group = (
+            computer.get("groups_id_tech")
+            or computer.get("groups_id")
+            or computer.get("group_id")
+            or ""
+        )
+
+    group_id = str(raw_group).strip()
+
+    mapa_grupos = {
+        "1": "Seguridad",
+        "3": "Ventas",
+    }
+
+    return mapa_grupos.get(group_id, ""), group_id
+
+
+def _glpi_invfis_crear_area_segura(nombre_area):
+    nombre_area = _glpi_clean_text(nombre_area)
+    if not nombre_area:
+        return None
+
+    try:
+        with db.session.no_autoflush:
+            area = AreaEmpresa.query.filter(AreaEmpresa.area.ilike(nombre_area)).first()
+            if area:
+                return area.id
+    except Exception:
+        db.session.rollback()
+
+    try:
+        from sqlalchemy import text
+
+        tabla = AreaEmpresa.__table__.name
+
+        columnas_db = db.session.execute(
+            text(f"PRAGMA table_info({tabla})")
+        ).fetchall()
+
+        valores = {}
+
+        for col in columnas_db:
+            col_name = col[1]
+            not_null = col[3]
+            pk = col[5]
+
+            if pk:
+                continue
+
+            if col_name == "area":
+                valores[col_name] = nombre_area
+            elif not_null:
+                if "responsable" in col_name.lower():
+                    valores[col_name] = "Importado desde GLPI"
+                elif "cargo" in col_name.lower():
+                    valores[col_name] = "Automático GLPI"
+                else:
+                    valores[col_name] = ""
+            else:
+                valores[col_name] = None
+
+        columnas = ", ".join(valores.keys())
+        placeholders = ", ".join([f":{k}" for k in valores.keys()])
+
+        db.session.execute(
+            text(f"INSERT INTO {tabla} ({columnas}) VALUES ({placeholders})"),
+            valores
+        )
+        db.session.flush()
+
+        area = AreaEmpresa.query.filter(AreaEmpresa.area.ilike(nombre_area)).first()
+        return area.id if area else None
+
+    except Exception as e:
+        print("ERROR REAL CREANDO AREA GLPI:", repr(e))
+        db.session.rollback()
+        return None
+
+
+def _glpi_invfis_resolver_area_obligatoria(cfg=None, session_token=None, computer=None):
+    grupo_texto, group_id = _glpi_invfis_resolver_nombre_grupo_glpi(
+        cfg,
+        session_token,
+        computer
+    )
+
+    if not grupo_texto:
+        return None
+
+    return _glpi_invfis_crear_area_segura(grupo_texto)
+
+
+def _glpi_invfis_numero_neutro(value=None):
+    """
+    Devuelve 0 cuando GLPI no trae clasificación.
+    Se usa para cumplir columnas numéricas NOT NULL sin inventar niveles 1-5.
+    """
+    try:
+        if value in (None, "", "None", "null"):
+            return 0
+        return int(value)
+    except Exception:
+        return 0
+
+
+def _glpi_invfis_map_computer_to_data(cfg, computer, session_token=None):
+    """
+    Mapeo GLPI Computer → InventarioFisico.
+
+    Reglas aplicadas:
+    - No se inventan datos funcionales cuando GLPI no los trae.
+    - Asignado a = campo name de GLPI.
+    - Todo campo SO se interpreta como Sistema Operativo.
+    - Sistema Operativo de GLPI se guarda en GRAC como tipo_sistema.
+    - area_id se resuelve técnicamente porque la tabla inventario_fisico lo exige NOT NULL.
+    """
+
+    glpi_id = _glpi_any_value(computer, "id")
+    nombre_glpi = _glpi_any_value(computer, "name", "nombre")
+    serial = _glpi_any_value(computer, "serial", "serial_number", "otherserial")
+    uuid = _glpi_any_value(computer, "uuid", "id_producto")
+
+    marca = (
+        _glpi_pick_dropdown_name(computer, "manufacturers_id")
+        or _glpi_any_value(computer, "manufacturer", "marca")
+    )
+
+    modelo = (
+        _glpi_pick_dropdown_name(computer, "computermodels_id")
+        or _glpi_any_value(computer, "model", "modelo")
+    )
+
+    tipo_equipo = (
+        _glpi_pick_dropdown_name(computer, "computertypes_id")
+        or _glpi_any_value(computer, "type", "tipo", "clase_activo")
+    )
+
+    ubicacion = (
+        _glpi_pick_dropdown_name(computer, "locations_id")
+        or _glpi_any_value(computer, "location", "ubicacion", "ciudad")
+    )
+
+    sistema_operativo, edicion_so, version_so, arquitectura_glpi = _glpi_invfis_os_data(cfg, session_token, computer)
+    ram = _glpi_invfis_hw_data(computer)
+
+    comentario = _glpi_any_value(computer, "comment", "comments")
+
+    # Clase del activo solo con datos que vienen de GLPI.
+    clase_activo = ""
+    if tipo_equipo and modelo:
+        clase_activo = f"{tipo_equipo} / {modelo}"
+    elif tipo_equipo:
+        clase_activo = tipo_equipo
+    elif modelo:
+        clase_activo = modelo
+
+    # IMPORTANTE:
+    # area_id es obligatorio por estructura de la tabla inventario_fisico.
+    # Si GLPI no trae un área que coincida con AreaEmpresa, se toma la primera área existente
+    # únicamente para permitir el guardado. No se completan otros valores por defecto.
+    area_id_obligatoria = _glpi_invfis_resolver_area_obligatoria(
+        cfg,
+        session_token,
+        computer
+    )
+
+    data = {
+        "area_id": area_id_obligatoria,
+        "division": _glpi_any_value(computer, "division", "business_unit", "departamento"),
+
+        # Regla solicitada: Asignado a = campo name de GLPI
+        "asignado_a": nombre_glpi,
+
+        "cargo": _glpi_any_value(computer, "cargo", "position", "title"),
+        "ciudad": ubicacion,
+        "clase_activo": clase_activo,
+        "marca": marca,
+
+        # Solo si GLPI lo trae.
+        "mouse": _glpi_any_value(computer, "mouse"),
+        "teclado": _glpi_any_value(computer, "keyboard", "teclado"),
+        "base_portatil": _glpi_any_value(computer, "base_portatil", "dock", "docking_station"),
+        "monitor": _glpi_any_value(computer, "monitor", "monitors"),
+
+        "numero_serial": serial,
+        "nombre_dispositivo": nombre_glpi,
+        # Relación solicitada: Procesador GRAC = Arquitecturas en GLPI
+        "procesador": arquitectura_glpi,
+        "ram_instalada": ram,
+
+        # Identificadores GLPI
+        "id_dispositivo": glpi_id,
+        "id_producto": uuid,
+
+        # SO = Sistema Operativo
+        "tipo_sistema": sistema_operativo,
+        "edicion_so": edicion_so,
+        "version_so": version_so,
+
+        "pais": _glpi_any_value(computer, "country", "pais"),
+        "fecha_compra": None,
+        "fecha_asignacion": None,
+
+        # Clasificación SGSI: GLPI no la trae.
+        # Se guarda 0 para cumplir columnas numéricas NOT NULL si existen, sin mostrar niveles inventados.
+        "c_nivel": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "c_nivel", "confidencialidad")),
+        "i_nivel": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "i_nivel", "integridad")),
+        "d_nivel": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "d_nivel", "disponibilidad")),
+        "valor_activo": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "valor_activo")),
+        "criticidad_num": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "criticidad_num")),
+        "criticidad_texto": _glpi_any_value(computer, "criticidad_texto"),
+        "etiqueta_conf_num": _glpi_invfis_numero_neutro(_glpi_any_value(computer, "etiqueta_conf_num")),
+        "etiqueta_conf_texto": _glpi_any_value(computer, "etiqueta_conf_texto"),
+
+        # Información regulatoria: solo se diligencia si GLPI lo trae.
+        "info_personal": _glpi_any_value(computer, "info_personal"),
+        "info_regulada": _glpi_any_value(computer, "info_regulada"),
+        "info_sensible": _glpi_any_value(computer, "info_sensible"),
+        "info_sensible_clientes": _glpi_any_value(computer, "info_sensible_clientes"),
+
+        "observaciones": comentario,
+    }
+
+    return data
+
+
+def _glpi_invfis_find_existing(data):
+    """
+    Evita duplicados.
+    Prioridad:
+    1) número serial
+    2) id_dispositivo GLPI
+    3) nombre de dispositivo
+
+    Usa no_autoflush para que una búsqueda no dispare flush prematuro.
+    """
+    serial = (data.get("numero_serial") or "").strip()
+    glpi_id = (data.get("id_dispositivo") or "").strip()
+    nombre = (data.get("nombre_dispositivo") or "").strip()
+
+    with db.session.no_autoflush:
+        if serial:
+            item = InventarioFisico.query.filter_by(numero_serial=serial).first()
+            if item:
+                return item
+
+        if glpi_id:
+            item = InventarioFisico.query.filter_by(id_dispositivo=glpi_id).first()
+            if item:
+                return item
+
+        if nombre:
+            item = InventarioFisico.query.filter_by(nombre_dispositivo=nombre).first()
+            if item:
+                return item
+
+    return None
+
+
+def _glpi_invfis_upsert(data):
+    """
+    Crea o actualiza un activo físico desde datos GLPI.
+    Ejecuta flush controlado para detectar errores por registro y no dejar
+    la sesión en estado inválido para el siguiente equipo.
+    """
+    item = _glpi_invfis_find_existing(data)
+    created = False
+
+    if not item:
+        item = InventarioFisico()
+        db.session.add(item)
+        created = True
+
+    for k, v in data.items():
+        if hasattr(item, k):
+            setattr(item, k, v)
+
+    db.session.flush()
+    return item, created
+
+
+def glpi_invfis_sincronizar():
+    """
+    Ejecuta sincronización GLPI → InventarioFisico.
+    No importa registros sin identificador mínimo de GLPI.
+    Hace commit por registro para evitar que un error dañe toda la transacción.
+    """
+    cfg = _glpi_invfis_config_activa()
+    if not cfg:
+        raise Exception("No existe una configuración GLPI activa.")
+
+    session_token = None
+    creados = 0
+    actualizados = 0
+    omitidos = 0
+    errores = []
+
+    try:
+        session_token = _glpi_invfis_init_session(cfg)
+        computers = _glpi_invfis_fetch_computers(cfg, session_token)
+
+        for comp in computers:
+            try:
+                comp_detalle = comp
+
+                # Consulta detalle por equipo y, muy importante, la relación
+                # Item_OperatingSystem que alimenta la pestaña "Operating systems" de GLPI.
+                # Sin esta relación, muchos GLPI devuelven en blanco:
+                # Arquitecturas, Nombre del SO, Kernel y Edición.
+                glpi_comp_id = _glpi_any_value(comp, "id")
+                if glpi_comp_id:
+                    detalle = _glpi_invfis_fetch_computer_detail(cfg, session_token, glpi_comp_id)
+                    if detalle:
+                        comp_detalle = {**comp, **detalle}
+
+                    os_relation = _glpi_invfis_fetch_operating_system_relation(cfg, session_token, glpi_comp_id)
+                    if os_relation:
+                        comp_detalle = _glpi_invfis_merge_os_relation_into_computer(comp_detalle, os_relation)
+
+                    group_relation = _glpi_invfis_fetch_group_relation(cfg, session_token, glpi_comp_id)
+                    if group_relation:
+                        comp_detalle = _glpi_invfis_merge_group_relation_into_computer(comp_detalle, group_relation)
+
+                data = _glpi_invfis_map_computer_to_data(cfg, comp_detalle, session_token)
+
+                # FORZAR ÁREA DESDE GRUPO GLPI ANTES DE OMITIR
+                if not data.get("area_id"):
+                    grupo_glpi = (
+                        _glpi_any_value(comp_detalle, "groups_id_tech", "groups_id", "group_id")
+                        or ""
+                    ).strip()
+
+                    mapa_grupos = {
+                        "1": "Seguridad",
+                        "3": "Ventas",
+                    }
+
+                    nombre_area = mapa_grupos.get(grupo_glpi)
+
+                    if nombre_area:
+                        area = AreaEmpresa.query.filter(AreaEmpresa.area.ilike(nombre_area)).first()
+
+                        if not area:
+                            area = AreaEmpresa(
+                                area=nombre_area,
+                                responsable_nombre="GLPI",
+                                responsable_cargo="GLPI"
+                            )
+                            db.session.add(area)
+                            db.session.flush()
+
+                        data["area_id"] = area.id
+
+                if not data.get("area_id"):
+                    grupo_debug = (
+                        _glpi_any_value(comp_detalle, "groups_id_tech", "groups_id", "group_id", "name", "completename")
+                        or _glpi_any_value(comp_detalle, "grupo_a_cargo", "technical_group", "group_tech")
+                        or "NO DETECTADO"
+                    )
+
+                    omitidos += 1
+                    errores.append(
+                        f"Equipo GLPI {comp.get('id', 'N/D')} omitido: FALLÓ crear Área desde Grupo GLPI. "
+                        f"Valor detectado GLPI: {grupo_debug}"
+                    )
+                    db.session.rollback()
+                    continue
+
+                _, created = _glpi_invfis_upsert(data)
+                db.session.commit()
+
+                if created:
+                    creados += 1
+                else:
+                    actualizados += 1
+
+            except Exception as e:
+                db.session.rollback()
+                omitidos += 1
+                errores.append(f"Equipo GLPI {comp.get('id', 'N/D')}: {str(e)}")
+
+        try:
+            cfg = _glpi_invfis_config_activa()
+            cfg.ultimo_sync = datetime.utcnow()
+            cfg.ultimo_estado = "OK" if not errores else "OK_CON_OMITIDOS"
+            cfg.ultimo_mensaje = f"Creados: {creados}, Actualizados: {actualizados}, Omitidos: {omitidos}"
+            if errores:
+                cfg.ultimo_mensaje += " | " + " || ".join(errores[:5])
+            db.session.add(cfg)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+        return {
+            "creados": creados,
+            "actualizados": actualizados,
+            "omitidos": omitidos,
+            "errores": errores[:20],
+        }
+
+    except Exception as e:
+        db.session.rollback()
+        try:
+            cfg = _glpi_invfis_config_activa()
+            if cfg:
+                cfg.ultimo_sync = datetime.utcnow()
+                cfg.ultimo_estado = "ERROR"
+                cfg.ultimo_mensaje = str(e)
+                db.session.add(cfg)
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+        raise
+
+    finally:
+        if session_token:
+            _glpi_invfis_kill_session(cfg, session_token)
+
+# =========================
+# RUTA — Configurar conexión GLPI
+# =========================
+@app.route('/inventario_fisico/glpi/config', methods=['GET', 'POST'])
+@login_required
+def inventario_fisico_glpi_config():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor' or (
+        user.role != 'admin'
+        and not verificar_permiso(user, "Gestión de Activos de Información")
+    ):
+        flash("No tiene permiso para configurar GLPI.", "danger")
+        return redirect(url_for('inventario_fisico'))
+
+    cfg = _glpi_invfis_config_activa()
+    if not cfg:
+        cfg = GLPIInventarioFisicoConfig(
+            nombre="GLPI Principal",
+            base_url="",
+            activo=True,
+            verificar_ssl=False,
+            timeout=30,
+
+            # Estos campos se conservan por compatibilidad con la tabla,
+            # pero la sincronización ya no los usa para inventar datos.
+            area_id_default=None,
+            division_default="",
+            ciudad_default="",
+            pais_default="",
+            c_nivel_default=0,
+            i_nivel_default=0,
+            d_nivel_default=0,
+        )
+        db.session.add(cfg)
+        db.session.commit()
+
+    if request.method == 'POST':
+        accion = request.form.get("accion") or "guardar"
+
+        cfg.nombre = (request.form.get("nombre") or "GLPI Principal").strip()
+        cfg.base_url = _glpi_normalize_base_url(request.form.get("base_url"))
+
+        app_token = (request.form.get("app_token") or "").strip()
+        user_token = (request.form.get("user_token") or "").strip()
+
+        if app_token:
+            cfg.app_token = _glpi_invfis_encrypt(app_token)
+        if user_token:
+            cfg.user_token = _glpi_invfis_encrypt(user_token)
+
+        # No se diligencian valores por defecto que no vengan de GLPI.
+        cfg.area_id_default = None
+        cfg.division_default = ""
+        cfg.ciudad_default = ""
+        cfg.pais_default = ""
+        cfg.c_nivel_default = 0
+        cfg.i_nivel_default = 0
+        cfg.d_nivel_default = 0
+
+        cfg.verificar_ssl = True if request.form.get("verificar_ssl") == "1" else False
+        cfg.timeout = request.form.get("timeout", type=int) or 30
+        cfg.activo = True
+
+        db.session.add(cfg)
+        db.session.commit()
+
+        if accion == "probar":
+            session_token = None
+            try:
+                session_token = _glpi_invfis_init_session(cfg)
+                cfg.ultima_prueba = datetime.utcnow()
+                cfg.ultimo_estado = "OK"
+                cfg.ultimo_mensaje = "Conexión exitosa con GLPI."
+                db.session.add(cfg)
+                db.session.commit()
+                flash("Conexión exitosa con GLPI.", "success")
+            except Exception as e:
+                cfg.ultima_prueba = datetime.utcnow()
+                cfg.ultimo_estado = "ERROR"
+                cfg.ultimo_mensaje = str(e)
+                db.session.add(cfg)
+                db.session.commit()
+                flash(f"Error probando conexión GLPI: {str(e)}", "danger")
+            finally:
+                if session_token:
+                    _glpi_invfis_kill_session(cfg, session_token)
+        else:
+            flash("Configuración GLPI guardada correctamente.", "success")
+
+        return redirect(url_for('inventario_fisico_glpi_config'))
+
+    html = """
+    <div class="glpiinv-shell">
+
+      <div class="glpiinv-header-card">
+        <div class="glpiinv-header-overlay">
+          <div class="glpiinv-header-text">
+            <h3 class="glpiinv-title m-0">Configurar conexión GLPI</h3>
+            <div class="glpiinv-subtitle">
+              Parámetros de integración para importar exclusivamente datos existentes en GLPI al Inventario Físico GRAC
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="glpiinv-header-actions">
+        <a href="{{ url_for('inventario_fisico') }}"
+           class="btn rounded-pill px-4 fw-bold glpiinv-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+      </div>
+
+      <div class="glpiinv-card">
+        <div class="glpiinv-card-body">
+
+          {% with msgs = get_flashed_messages(with_categories=true) %}
+            {% if msgs %}
+              {% for cat, msg in msgs %}
+                <div class="alert alert-{{ 'warning' if cat=='message' else cat }} alert-dismissible fade show" role="alert">
+                  {{ msg }}
+                  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+              {% endfor %}
+            {% endif %}
+          {% endwith %}
+
+          <form method="post">
+            <div class="row g-3">
+
+              <div class="col-md-4">
+                <label class="form-label">Nombre de la conexión</label>
+                <input type="text" name="nombre" class="form-control" value="{{ cfg.nombre or '' }}">
+              </div>
+
+              <div class="col-md-8">
+                <label class="form-label">URL API REST GLPI</label>
+                <input type="text"
+                       name="base_url"
+                       class="form-control"
+                       required
+                       placeholder="http://192.168.0.10:8080/apirest.php"
+                       value="{{ cfg.base_url or '' }}">
+                <small class="text-muted">Puede ser con o sin /apirest.php. El sistema lo normaliza.</small>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">App Token</label>
+                <input type="password" name="app_token" class="form-control" placeholder="Dejar vacío para conservar el actual">
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">User Token</label>
+                <input type="password" name="user_token" class="form-control" placeholder="Dejar vacío para conservar el actual">
+              </div>
+
+              <div class="col-md-2">
+                <label class="form-label">Timeout</label>
+                <input type="number" name="timeout" class="form-control" min="5" max="300" value="{{ cfg.timeout or 30 }}">
+              </div>
+
+              <div class="col-md-12">
+                <div class="form-check mt-2">
+                  <input class="form-check-input" type="checkbox" name="verificar_ssl" value="1" id="verificar_ssl"
+                         {% if cfg.verificar_ssl %}checked{% endif %}>
+                  <label class="form-check-label fw-bold" for="verificar_ssl">
+                    Verificar certificado SSL
+                  </label>
+                </div>
+              </div>
+
+            </div>
+
+            <div class="glpiinv-status-box mt-4">
+              <div><b>Última prueba:</b> {{ cfg.ultima_prueba or '—' }}</div>
+              <div><b>Última sincronización:</b> {{ cfg.ultimo_sync or '—' }}</div>
+              <div><b>Estado:</b> {{ cfg.ultimo_estado or '—' }}</div>
+              <div><b>Mensaje:</b> {{ cfg.ultimo_mensaje or '—' }}</div>
+            </div>
+
+            <div class="glpiinv-note mt-3">
+              <b>Nota:</b> la importación no diligencia valores por defecto de GRAC. Solo se guardan datos que existan en GLPI.
+              El campo <b>Asignado a</b> se toma del campo <b>name</b> de GLPI. <b>Procesador</b> se toma de <b>Arquitecturas</b>. <b>Tipo de sistema</b> se toma del <b>Nombre del Operating system</b>, <b>Versión SO</b> del <b>Kernel</b> y <b>Edición del SO</b> de <b>Edición</b>.
+            </div>
+
+            <div class="glpiinv-bottom-actions">
+              <button class="btn btn-success rounded-pill px-4 fw-bold" name="accion" value="guardar" type="submit">
+                💾 Guardar configuración
+              </button>
+              <button class="btn btn-primary rounded-pill px-4 fw-bold" name="accion" value="probar" type="submit">
+                🔌 Probar conexión
+              </button>
+            </div>
+
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .glpiinv-shell{
+        width:96%;
+        max-width:1500px;
+        margin:10px auto 24px auto;
+      }
+
+      .glpiinv-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        color:#fff;
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .glpiinv-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .glpiinv-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        position:relative;
+        z-index:1;
+      }
+
+      .glpiinv-header-overlay::before{
+        content:"🔌";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#fff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .glpiinv-header-text::before{
+        content:"SGSI · GLPI Inventario Físico";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+      }
+
+      .glpiinv-title{
+        color:#fff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        margin:0 !important;
+      }
+
+      .glpiinv-subtitle{
+        color:rgba(248,252,255,.96);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .glpiinv-header-actions,
+      .glpiinv-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 12px;
+      }
+
+      .glpiinv-header-actions .btn,
+      .glpiinv-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .glpiinv-back-btn{
+        background:#fff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .glpiinv-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .glpiinv-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        overflow:hidden;
+        border:1px solid rgba(219,230,244,.9);
+      }
+
+      .glpiinv-card-body{
+        padding:16px 18px;
+      }
+
+      .glpiinv-card .form-label{
+        font-weight:800;
+        color:#25324a;
+        font-size:.78rem;
+      }
+
+      .glpiinv-card .form-control,
+      .glpiinv-card .form-select{
+        border-radius:9px;
+        border:1px solid #d9e3f0;
+        min-height:32px;
+        font-size:.80rem;
+        background:#f8fafc;
+      }
+
+      .glpiinv-status-box,
+      .glpiinv-note{
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        padding:12px 14px;
+        background:#f8fbff;
+        font-size:.82rem;
+        color:#24324a;
+      }
+    </style>
+    """
+
+    inner = render_template_string(html, cfg=cfg)
+    return render_template_string(BASE, content=Markup(inner))
+
+
+# =========================
+# RUTA — Sincronizar GLPI → Inventario Físico
+# =========================
+@app.route('/inventario_fisico/glpi/sync', methods=['POST'])
+@login_required
+def inventario_fisico_glpi_sync():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor' or (
+        user.role != 'admin'
+        and not verificar_permiso(user, "Gestión de Activos de Información")
+    ):
+        flash("No tiene permiso para sincronizar GLPI.", "danger")
+        return redirect(url_for('inventario_fisico'))
+
+    try:
+        resumen = glpi_invfis_sincronizar()
+
+        msg = (
+            f"Sincronización GLPI finalizada. "
+            f"Creados: {resumen['creados']}, "
+            f"Actualizados: {resumen['actualizados']}, "
+            f"Omitidos: {resumen['omitidos']}."
+        )
+
+        errores = resumen.get("errores") or []
+        if errores:
+            msg += " Detalle: " + " | ".join(errores[:10])
+
+        flash(msg, "success" if resumen["omitidos"] == 0 else "warning")
+
+    except Exception as e:
+        print("ERROR GLPI Inventario Físico:", traceback.format_exc())
+        flash(f"Error sincronizando con GLPI: {str(e)}", "danger")
+
+    return redirect(url_for('inventario_fisico'))
+
+
+@app.route('/inventario_fisico_menu', methods=['GET'])
+@login_required
+def inventario_fisico_menu():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role not in ('admin', 'auditor') and not verificar_permiso(
+        user, "Gestión de Activos de Información"
+    ):
+        flash("No tiene permiso para acceder al módulo de inventarios físico.", "danger")
+        return redirect(url_for('activos_menu'))
+
+    return redirect(url_for('inventario_fisico'))
+
+# =========================
+# AGREGAR — Inventario Físico
+# =========================
+@app.route('/inventario_fisico/new', methods=['GET', 'POST'])
+@login_required
+def inventario_fisico_new():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede agregar registros.", "danger")
+        return redirect(url_for('inventario_fisico'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
+        flash("No tiene permiso para agregar registros de activos.", "danger")
+        return redirect(url_for('inventario_fisico'))
+    
+    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
+    paises = sorted([c.name for c in pycountry.countries])
+
+    conf_opts = ValoracionConfidencialidad.query.order_by(ValoracionConfidencialidad.nivel_num.asc()).all()
+    inte_opts = ValoracionIntegridad.query.order_by(ValoracionIntegridad.nivel_num.asc()).all()
+    disp_opts = ValoracionDisponibilidad.query.order_by(ValoracionDisponibilidad.nivel_num.asc()).all()
+
+    if request.method == 'POST':
+        area_id = request.form.get('area_id', type=int)
+        division = (request.form.get('division') or '').strip()
+
+        asignado_a = (request.form.get('asignado_a') or '').strip()
+        cargo      = (request.form.get('cargo') or '').strip()
+        ciudad     = (request.form.get('ciudad') or '').strip()
+
+        clase_activo = (request.form.get('clase_activo') or '').strip()
+        marca        = (request.form.get('marca') or '').strip()
+
+        mouse         = request.form.get('mouse') or 'No'
+        teclado       = request.form.get('teclado') or 'No'
+        base_portatil = request.form.get('base_portatil') or 'No'
+        monitor       = request.form.get('monitor') or 'No'
+
+        numero_serial      = (request.form.get('numero_serial') or '').strip()
+        nombre_dispositivo = (request.form.get('nombre_dispositivo') or '').strip()
+        procesador         = (request.form.get('procesador') or '').strip()
+        ram_instalada      = (request.form.get('ram_instalada') or '').strip()
+        id_dispositivo     = (request.form.get('id_dispositivo') or '').strip()
+        id_producto        = (request.form.get('id_producto') or '').strip()
+        tipo_sistema       = (request.form.get('tipo_sistema') or '').strip()
+        edicion_so         = (request.form.get('edicion_so') or '').strip()
+        version_so         = (request.form.get('version_so') or '').strip()
+        pais               = (request.form.get('pais') or '').strip()
+
+        from datetime import datetime
+        fecha_compra_str     = (request.form.get('fecha_compra') or '').strip()
+        fecha_asignacion_str = (request.form.get('fecha_asignacion') or '').strip()
+
+        fecha_compra = None
+        fecha_asignacion = None
+        try:
+            fecha_compra = datetime.strptime(fecha_compra_str, '%Y-%m-%d').date() if fecha_compra_str else None
+            fecha_asignacion = datetime.strptime(fecha_asignacion_str, '%Y-%m-%d').date() if fecha_asignacion_str else None
+        except ValueError:
+            flash("Formato de fecha inválido.", "danger")
+            return redirect(url_for('inventario_fisico_new'))
+
+        try:
+            c_nivel = int(request.form.get('c_nivel') or 0)
+            i_nivel = int(request.form.get('i_nivel') or 0)
+            d_nivel = int(request.form.get('d_nivel') or 0)
+        except ValueError:
+            c_nivel = i_nivel = d_nivel = 0
+
+        info_personal          = request.form.get('info_personal') or 'No'
+        info_regulada          = request.form.get('info_regulada') or 'No'
+        info_sensible          = request.form.get('info_sensible') or 'No'
+        info_sensible_clientes = request.form.get('info_sensible_clientes') or 'No'
+
+        observaciones = (request.form.get('observaciones') or '').strip()
+
+        if not (area_id and division and clase_activo and nombre_dispositivo):
+            flash("Campos obligatorios: Área, División, Clase de activo y Nombre del dispositivo.", "danger")
+            return redirect(url_for('inventario_fisico_new'))
+
+        for n in (c_nivel, i_nivel, d_nivel):
+            if n < 1 or n > 5:
+                flash("Los niveles C/I/D deben estar entre 1 y 5.", "danger")
+                return redirect(url_for('inventario_fisico_new'))
+
+        valor_activo = round((c_nivel + i_nivel + d_nivel) / 3)
+
+        conf_row = ValoracionConfidencialidad.query.filter_by(nivel_num=c_nivel).first()
+        etiqueta_conf_num = c_nivel
+        etiqueta_conf_texto = conf_row.clasificacion if conf_row else f"Nivel {c_nivel}"
+
+        crit_row = ValoracionCriticidadActivo.query.filter_by(nivel_num=valor_activo).first()
+        criticidad_num = valor_activo
+        criticidad_texto = crit_row.nivel_texto if crit_row else f"Nivel {valor_activo}"
+
+        it = InventarioFisico(
+            area_id=area_id,
+            division=division,
+            asignado_a=asignado_a,
+            cargo=cargo,
+            ciudad=ciudad,
+            clase_activo=clase_activo,
+            marca=marca,
+            mouse=mouse,
+            teclado=teclado,
+            base_portatil=base_portatil,
+            monitor=monitor,
+            numero_serial=numero_serial,
+            nombre_dispositivo=nombre_dispositivo,
+            procesador=procesador,
+            ram_instalada=ram_instalada,
+            id_dispositivo=id_dispositivo,
+            id_producto=id_producto,
+            tipo_sistema=tipo_sistema,
+            edicion_so=edicion_so,
+            version_so=version_so,
+            pais=pais,
+            fecha_compra=fecha_compra,
+            fecha_asignacion=fecha_asignacion,
+            c_nivel=c_nivel,
+            i_nivel=i_nivel,
+            d_nivel=d_nivel,
+            valor_activo=valor_activo,
+            criticidad_num=criticidad_num,
+            criticidad_texto=criticidad_texto,
+            etiqueta_conf_num=etiqueta_conf_num,
+            etiqueta_conf_texto=etiqueta_conf_texto,
+            info_personal=info_personal,
+            info_regulada=info_regulada,
+            info_sensible=info_sensible,
+            info_sensible_clientes=info_sensible_clientes,
+            observaciones=observaciones
+        )
+        db.session.add(it)
+        db.session.commit()
+        flash("Activo físico creado.", "success")
+        return redirect(url_for('inventario_fisico'))
+
+    html = """
+    <div class="invfis-shell">
+
+      <div class="invfis-header-card">
+        <div class="invfis-header-overlay">
+          <div class="invfis-header-text">
+            <h3 class="invfis-title m-0">Agregar — Inventario Físico</h3>
+            <div class="invfis-subtitle">
+              Registro y clasificación de activos físicos del Sistema de Gestión de Seguridad de la Información
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="invfis-header-actions">
+        <a href="{{ url_for('inventario_fisico') }}"
+           class="btn rounded-pill px-4 fw-bold invfis-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+      </div>
+
+      <div class="invfis-card">
+        <div class="invfis-card-body">
+          <form method="post">
+            <div class="row g-3">
+
+              <div class="col-md-3">
+                <label class="form-label">Área</label>
+                <select name="area_id" id="fisArea" class="form-select" required>
+                  <option value="">-- Seleccione --</option>
+                  {% for a in areas %}
+                    <option value="{{ a.id }}">{{ a.area }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">División</label>
+                <select name="division" id="fisDivision" class="form-select" required>
+                  <option value="">-- Seleccione --</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Asignado a</label>
+                <input type="text" name="asignado_a" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Cargo</label>
+                <input type="text" name="cargo" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">País</label>
+                <select name="pais" class="form-select">
+                  <option value="">-- Seleccione --</option>
+                  {% for p in paises %}
+                    <option value="{{ p }}">{{ p }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Ciudad</label>
+                <input type="text" name="ciudad" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Clase de activo</label>
+                <select name="clase_activo" class="form-select" required>
+                  {% for opt in ['Laptop','Servidor','Equipo de comunicación','Desktop'] %}
+                    <option value="{{ opt }}">{{ opt }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Marca</label>
+                <input type="text" name="marca" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Mouse</label>
+                <select name="mouse" class="form-select">
+                  <option>Sí</option>
+                  <option>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Teclado</label>
+                <select name="teclado" class="form-select">
+                  <option>Sí</option>
+                  <option>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Base Portátil</label>
+                <select name="base_portatil" class="form-select">
+                  <option>Sí</option>
+                  <option>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Monitor</label>
+                <select name="monitor" class="form-select">
+                  <option>Sí</option>
+                  <option>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Número de serial</label>
+                <input type="text" name="numero_serial" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Nombre del dispositivo</label>
+                <input type="text" name="nombre_dispositivo" class="form-control" required>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Procesador</label>
+                <input type="text" name="procesador" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">RAM instalada</label>
+                <input type="text" name="ram_instalada" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Id. del dispositivo</label>
+                <input type="text" name="id_dispositivo" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Id. del producto</label>
+                <input type="text" name="id_producto" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Tipo de sistema operativo</label>
+                <input type="text" name="tipo_sistema" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Edición del SO</label>
+                <input type="text" name="edicion_so" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Versión</label>
+                <input type="text" name="version_so" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Fecha de compra</label>
+                <input type="date" name="fecha_compra" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Fecha de asignación del equipo</label>
+                <input type="date" name="fecha_asignacion" class="form-control">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Clasificación Confidencialidad</label>
+                <select name="c_nivel" class="form-select">
+                  {% for o in conf_opts %}
+                    <option value="{{ o.nivel_num }}">{{ o.nivel_num }} — {{ o.clasificacion }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Clasificación Integridad</label>
+                <select name="i_nivel" class="form-select">
+                  {% for o in inte_opts %}
+                    <option value="{{ o.nivel_num }}">{{ o.nivel_num }} — {{ o.nivel }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Clasificación Disponibilidad</label>
+                <select name="d_nivel" class="form-select">
+                  {% for o in disp_opts %}
+                    <option value="{{ o.nivel_num }}">{{ o.nivel_num }} — {{ o.nivel }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">¿Es Información Personal?</label>
+                <select name="info_personal" class="form-select">
+                  <option>Sí</option>
+                  <option>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">¿Es información regulada por una legislación?</label>
+                <select name="info_regulada" class="form-select">
+                  <option>Sí</option>
+                  <option>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">¿Es información sensible de la Compañía?</label>
+                <select name="info_sensible" class="form-select">
+                  <option>Sí</option>
+                  <option>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">¿Es información sensible de Clientes?</label>
+                <select name="info_sensible_clientes" class="form-select">
+                  <option>Sí</option>
+                  <option>No</option>
+                </select>
+              </div>
+
+              <div class="col-12">
+                <label class="form-label">Observaciones</label>
+                <textarea name="observaciones" class="form-control" rows="2"></textarea>
+              </div>
+
+            </div>
+
+            <div class="invfis-bottom-actions">
+              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
+                Guardar
+              </button>
+              <a href="{{ url_for('inventario_fisico') }}"
+                 class="btn rounded-pill px-4 fw-bold invfis-cancel-btn">
+                Cancelar
+              </a>
+            </div>
+
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .invfis-shell{
+        width:96%;
+        max-width:1550px;
+        margin:10px auto 24px auto;
+      }
+
+      .invfis-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .invfis-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .invfis-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent;
+        padding:0;
+        position:relative;
+        z-index:1;
+      }
+
+      .invfis-header-overlay::before{
+        content:"🏢";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .invfis-header-text{
+        max-width:1100px;
+        width:100%;
+      }
+
+      .invfis-header-text::before{
+        content:"SGSI · Inventario Físico";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#fff;
+      }
+
+      .invfis-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .invfis-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .invfis-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .invfis-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invfis-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invfis-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .invfis-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .invfis-card-body{
+        padding:18px;
+      }
+
+      .invfis-card .form-label{
+        font-weight:800;
+        color:#25324a;
+        margin-bottom:4px;
+        font-size:.78rem;
+      }
+
+      .invfis-card .form-control,
+      .invfis-card .form-select{
+        border-radius:9px;
+        border:1px solid #d9e3f0;
+        min-height:32px;
+        font-size:.80rem;
+        background:#f8fafc;
+      }
+
+      .invfis-card textarea.form-control{
+        min-height:70px;
+        resize:vertical;
+      }
+
+      .invfis-card .form-control:focus,
+      .invfis-card .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
+        background:#fff;
+      }
+
+      .invfis-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        margin-top:18px;
+        flex-wrap:wrap;
+      }
+
+      .invfis-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invfis-cancel-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invfis-cancel-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      @media (max-width:992px){
+        .invfis-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .invfis-header-card{
+          min-height:88px;
+        }
+
+        .invfis-title{
+          font-size:1.20rem;
+        }
+
+        .invfis-card-body{
+          padding:8px 7px;
+        }
+      }
+
+      @media (max-width:768px){
+        .invfis-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .invfis-header-overlay::before{
+          margin:0;
+        }
+
+        .invfis-header-actions .btn,
+        .invfis-bottom-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+    inner = render_template_string(
+        html,
+        areas=areas,
+        paises=paises,
+        conf_opts=conf_opts,
+        inte_opts=inte_opts,
+        disp_opts=disp_opts
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+# =========================
+# EDICIÓN — Inventario Físico
+# =========================
+@app.route('/inventario_fisico/edit/<int:id>', methods=['GET', 'POST'])
+@login_required
+def inventario_fisico_edit(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor' or (
+        user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información")
+    ):
+        flash("No tiene permiso para editar registros de activos físicos.", "danger")
+        return redirect(url_for('inventario_fisico'))
+    
+    item = InventarioFisico.query.get_or_404(id)
+
+    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
+    paises = sorted([c.name for c in pycountry.countries])
+    divisiones = DivisionEmpresa.query.order_by(
+        DivisionEmpresa.area_id.asc(),
+        DivisionEmpresa.nombre_division.asc()
+    ).all()
+
+    div_map = {}
+    for d in divisiones:
+        div_map.setdefault(d.area_id, []).append(d.nombre_division)
+
+    conf_opts = ValoracionConfidencialidad.query.order_by(ValoracionConfidencialidad.nivel_num.asc()).all()
+    inte_opts = ValoracionIntegridad.query.order_by(ValoracionIntegridad.nivel_num.asc()).all()
+    disp_opts = ValoracionDisponibilidad.query.order_by(ValoracionDisponibilidad.nivel_num.asc()).all()
+
+    if request.method == 'POST':
+        item.area_id = request.form.get('area_id', type=int)
+        item.division = (request.form.get('division') or '').strip()
+
+        item.asignado_a = (request.form.get('asignado_a') or '').strip()
+        item.cargo      = (request.form.get('cargo') or '').strip()
+        item.ciudad     = (request.form.get('ciudad') or '').strip()
+
+        item.clase_activo = (request.form.get('clase_activo') or '').strip()
+        item.marca        = (request.form.get('marca') or '').strip()
+
+        item.mouse         = request.form.get('mouse') or 'No'
+        item.teclado       = request.form.get('teclado') or 'No'
+        item.base_portatil = request.form.get('base_portatil') or 'No'
+        item.monitor       = request.form.get('monitor') or 'No'
+
+        item.numero_serial      = (request.form.get('numero_serial') or '').strip()
+        item.nombre_dispositivo = (request.form.get('nombre_dispositivo') or '').strip()
+        item.procesador         = (request.form.get('procesador') or '').strip()
+        item.ram_instalada      = (request.form.get('ram_instalada') or '').strip()
+        item.id_dispositivo     = (request.form.get('id_dispositivo') or '').strip()
+        item.id_producto        = (request.form.get('id_producto') or '').strip()
+        item.tipo_sistema       = (request.form.get('tipo_sistema') or '').strip()
+        item.edicion_so         = (request.form.get('edicion_so') or '').strip()
+        item.version_so         = (request.form.get('version_so') or '').strip()
+        item.pais               = (request.form.get('pais') or '').strip()
+
+        from datetime import datetime
+        fecha_compra_str     = (request.form.get('fecha_compra') or '').strip()
+        fecha_asignacion_str = (request.form.get('fecha_asignacion') or '').strip()
+
+        try:
+            item.fecha_compra = datetime.strptime(fecha_compra_str, '%Y-%m-%d').date() if fecha_compra_str else None
+            item.fecha_asignacion = datetime.strptime(fecha_asignacion_str, '%Y-%m-%d').date() if fecha_asignacion_str else None
+        except ValueError:
+            flash("Formato de fecha inválido.", "danger")
+            return redirect(url_for('inventario_fisico_edit', id=item.id))
+
+        try:
+            item.c_nivel = int(request.form.get('c_nivel') or 0)
+            item.i_nivel = int(request.form.get('i_nivel') or 0)
+            item.d_nivel = int(request.form.get('d_nivel') or 0)
+        except ValueError:
+            item.c_nivel = item.i_nivel = item.d_nivel = 0
+
+        item.info_personal          = request.form.get('info_personal') or 'No'
+        item.info_regulada          = request.form.get('info_regulada') or 'No'
+        item.info_sensible          = request.form.get('info_sensible') or 'No'
+        item.info_sensible_clientes = request.form.get('info_sensible_clientes') or 'No'
+        item.observaciones          = (request.form.get('observaciones') or '').strip()
+
+        if not (item.area_id and item.division and item.clase_activo and item.nombre_dispositivo):
+            flash("Campos obligatorios: Área, División, Clase de activo y Nombre del dispositivo.", "danger")
+            return redirect(url_for('inventario_fisico_edit', id=item.id))
+
+        for n in (item.c_nivel, item.i_nivel, item.d_nivel):
+            if n < 1 or n > 5:
+                flash("Los niveles C/I/D deben estar entre 1 y 5.", "danger")
+                return redirect(url_for('inventario_fisico_edit', id=item.id))
+
+        item.valor_activo = round((item.c_nivel + item.i_nivel + item.d_nivel) / 3)
+
+        conf_row = ValoracionConfidencialidad.query.filter_by(nivel_num=item.c_nivel).first()
+        item.etiqueta_conf_num = item.c_nivel
+        item.etiqueta_conf_texto = conf_row.clasificacion if conf_row else f"Nivel {item.c_nivel}"
+
+        crit_row = ValoracionCriticidadActivo.query.filter_by(nivel_num=item.valor_activo).first()
+        item.criticidad_num = item.valor_activo
+        item.criticidad_texto = crit_row.nivel_texto if crit_row else f"Nivel {item.valor_activo}"
+
+        db.session.add(item)
+        db.session.commit()
+        flash("Cambios guardados.", "success")
+        return redirect(url_for('inventario_fisico'))
+
+    html = """
+    <div class="invfisedit-shell">
+
+      <div class="invfisedit-header-card">
+        <div class="invfisedit-header-overlay">
+          <div class="invfisedit-header-text">
+            <h3 class="invfisedit-title m-0">Editar — Inventario Físico</h3>
+            <div class="invfisedit-subtitle">
+              Actualización de activos físicos del Sistema de Gestión de Seguridad de la Información
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="invfisedit-header-actions">
+        <a href="{{ url_for('inventario_fisico') }}"
+           class="btn rounded-pill px-4 fw-bold invfisedit-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+
+      </div>
+
+      <div class="invfisedit-card">
+        <div class="invfisedit-card-body">
+          <form method="post">
+            <div class="row g-3">
+
+              <div class="col-md-3">
+                <label class="form-label">Área</label>
+                <select name="area_id" id="fisAreaEdit" class="form-select" required>
+                  <option value="">-- Seleccione --</option>
+                  {% for a in areas %}
+                    <option value="{{ a.id }}" {% if item.area_id == a.id %}selected{% endif %}>
+                      {{ a.area }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">División</label>
+                <select name="division" id="fisDivisionEdit" class="form-select" required>
+                  <option value="">-- Seleccione --</option>
+                  {% if item.division %}
+                    <option value="{{ item.division }}" selected>{{ item.division }}</option>
+                  {% endif %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Asignado a</label>
+                <input type="text" name="asignado_a" class="form-control" value="{{ item.asignado_a or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Cargo</label>
+                <input type="text" name="cargo" class="form-control" value="{{ item.cargo or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">País</label>
+                <select name="pais" class="form-select">
+                  <option value="">-- Seleccione --</option>
+                  {% for p in paises %}
+                    <option value="{{ p }}" {% if item.pais == p %}selected{% endif %}>{{ p }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Ciudad</label>
+                <input type="text" name="ciudad" class="form-control" value="{{ item.ciudad or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Clase de activo</label>
+                <select name="clase_activo" class="form-select" required>
+                  {% for opt in ['Laptop','Servidor','Equipo de comunicación','Desktop'] %}
+                    <option value="{{ opt }}" {% if item.clase_activo == opt %}selected{% endif %}>{{ opt }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Marca</label>
+                <input type="text" name="marca" class="form-control" value="{{ item.marca or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Mouse</label>
+                <select name="mouse" class="form-select">
+                  <option value="Sí" {% if item.mouse == 'Sí' %}selected{% endif %}>Sí</option>
+                  <option value="No" {% if item.mouse == 'No' %}selected{% endif %}>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Teclado</label>
+                <select name="teclado" class="form-select">
+                  <option value="Sí" {% if item.teclado == 'Sí' %}selected{% endif %}>Sí</option>
+                  <option value="No" {% if item.teclado == 'No' %}selected{% endif %}>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Base Portátil</label>
+                <select name="base_portatil" class="form-select">
+                  <option value="Sí" {% if item.base_portatil == 'Sí' %}selected{% endif %}>Sí</option>
+                  <option value="No" {% if item.base_portatil == 'No' %}selected{% endif %}>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Monitor</label>
+                <select name="monitor" class="form-select">
+                  <option value="Sí" {% if item.monitor == 'Sí' %}selected{% endif %}>Sí</option>
+                  <option value="No" {% if item.monitor == 'No' %}selected{% endif %}>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Número de serial</label>
+                <input type="text" name="numero_serial" class="form-control" value="{{ item.numero_serial or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Nombre del dispositivo</label>
+                <input type="text" name="nombre_dispositivo" class="form-control" value="{{ item.nombre_dispositivo or '' }}" required>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Procesador</label>
+                <input type="text" name="procesador" class="form-control" value="{{ item.procesador or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">RAM instalada</label>
+                <input type="text" name="ram_instalada" class="form-control" value="{{ item.ram_instalada or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Id. del dispositivo</label>
+                <input type="text" name="id_dispositivo" class="form-control" value="{{ item.id_dispositivo or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Id. del producto</label>
+                <input type="text" name="id_producto" class="form-control" value="{{ item.id_producto or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Tipo de sistema operativo</label>
+                <input type="text" name="tipo_sistema" class="form-control" value="{{ item.tipo_sistema or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Edición del SO</label>
+                <input type="text" name="edicion_so" class="form-control" value="{{ item.edicion_so or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Versión</label>
+                <input type="text" name="version_so" class="form-control" value="{{ item.version_so or '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Fecha de compra</label>
+                <input type="date" name="fecha_compra" class="form-control"
+                       value="{{ item.fecha_compra.strftime('%Y-%m-%d') if item.fecha_compra else '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Fecha de asignación del equipo</label>
+                <input type="date" name="fecha_asignacion" class="form-control"
+                       value="{{ item.fecha_asignacion.strftime('%Y-%m-%d') if item.fecha_asignacion else '' }}">
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Clasificación Confidencialidad</label>
+                <select name="c_nivel" class="form-select">
+                  {% for o in conf_opts %}
+                    <option value="{{ o.nivel_num }}" {% if item.c_nivel == o.nivel_num %}selected{% endif %}>{{ o.nivel_num }} — {{ o.clasificacion }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Clasificación Integridad</label>
+                <select name="i_nivel" class="form-select">
+                  {% for o in inte_opts %}
+                    <option value="{{ o.nivel_num }}" {% if item.i_nivel == o.nivel_num %}selected{% endif %}>{{ o.nivel_num }} — {{ o.nivel }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Clasificación Disponibilidad</label>
+                <select name="d_nivel" class="form-select">
+                  {% for o in disp_opts %}
+                    <option value="{{ o.nivel_num }}" {% if item.d_nivel == o.nivel_num %}selected{% endif %}>{{ o.nivel_num }} — {{ o.nivel }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">¿Es Información Personal?</label>
+                <select name="info_personal" class="form-select">
+                  <option value="Sí" {% if item.info_personal == 'Sí' %}selected{% endif %}>Sí</option>
+                  <option value="No" {% if item.info_personal == 'No' %}selected{% endif %}>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">¿Es información regulada por una legislación?</label>
+                <select name="info_regulada" class="form-select">
+                  <option value="Sí" {% if item.info_regulada == 'Sí' %}selected{% endif %}>Sí</option>
+                  <option value="No" {% if item.info_regulada == 'No' %}selected{% endif %}>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">¿Es información sensible de la Compañía?</label>
+                <select name="info_sensible" class="form-select">
+                  <option value="Sí" {% if item.info_sensible == 'Sí' %}selected{% endif %}>Sí</option>
+                  <option value="No" {% if item.info_sensible == 'No' %}selected{% endif %}>No</option>
+                </select>
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">¿Es información sensible de Clientes?</label>
+                <select name="info_sensible_clientes" class="form-select">
+                  <option value="Sí" {% if item.info_sensible_clientes == 'Sí' %}selected{% endif %}>Sí</option>
+                  <option value="No" {% if item.info_sensible_clientes == 'No' %}selected{% endif %}>No</option>
+                </select>
+              </div>
+
+              <div class="col-12">
+                <label class="form-label">Observaciones</label>
+                <textarea name="observaciones" class="form-control" rows="2">{{ item.observaciones or '' }}</textarea>
+              </div>
+
+            </div>
+
+            <div class="invfisedit-bottom-actions">
+              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
+                Guardar cambios
+              </button>
+              <a href="{{ url_for('inventario_fisico') }}"
+                 class="btn rounded-pill px-4 fw-bold invfisedit-cancel-btn">
+                Cancelar
+              </a>
+            </div>
+
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      /* =========================
+         CONTENEDOR
+         ========================= */
+      .invfisedit-shell{
+        width:96%;
+        max-width:1450px;
+        margin:10px auto 24px auto;
+      }
+
+      /* =========================
+         HEADER SGSI PRO
+         ========================= */
+      .invfisedit-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .invfisedit-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .invfisedit-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        position:relative;
+        z-index:1;
+      }
+
+      .invfisedit-header-overlay::before{
+        content:"🏢";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .invfisedit-header-text{
+        max-width:1100px;
+        width:100%;
+      }
+
+      .invfisedit-header-text::before{
+        content:"SGSI · Inventario Físico";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#fff;
+      }
+
+      .invfisedit-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .invfisedit-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      /* =========================
+         BOTONES SUPERIORES
+         ========================= */
+      .invfisedit-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .invfisedit-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invfisedit-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invfisedit-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      /* =========================
+         CARD
+         ========================= */
+      .invfisedit-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .invfisedit-card-body{
+        padding:18px;
+      }
+
+      /* =========================
+         FORMULARIOS (COMPACTOS PRO)
+         ========================= */
+      .invfisedit-card .form-label{
+        font-weight:800;
+        color:#25324a;
+        margin-bottom:4px;
+        font-size:.78rem;
+      }
+
+      .invfisedit-card .form-control,
+      .invfisedit-card .form-select{
+        border-radius:9px;
+        border:1px solid #d9e3f0;
+        min-height:32px;
+        font-size:.80rem;
+        background:#f8fafc;
+      }
+
+      .invfisedit-card textarea.form-control{
+        min-height:70px;
+        resize:vertical;
+      }
+
+      .invfisedit-card .form-control:focus,
+      .invfisedit-card .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
+        background:#fff;
+      }
+
+      /* =========================
+         BOTONES INFERIORES
+         ========================= */
+      .invfisedit-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        margin-top:18px;
+        flex-wrap:wrap;
+      }
+
+      .invfisedit-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invfisedit-cancel-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invfisedit-cancel-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      /* =========================
+         RESPONSIVE
+         ========================= */
+      @media (max-width:992px){
+        .invfisedit-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .invfisedit-title{
+          font-size:1.20rem;
+        }
+
+        .invfisedit-card-body{
+          padding:8px 7px;
+        }
+      }
+
+      @media (max-width:768px){
+        .invfisedit-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .invfisedit-header-overlay::before{
+          margin:0;
+        }
+
+        .invfisedit-header-actions .btn,
+        .invfisedit-bottom-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+    inner = render_template_string(
+        html,
+        item=item,
+        areas=areas,
+        div_map=div_map,
+        paises=paises,
+        conf_opts=conf_opts,
+        inte_opts=inte_opts,
+        disp_opts=disp_opts
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+# =========================
+# MATRIZ — Inventario Físico
+# =========================
+@app.route('/inventario_fisico', methods=['GET'])
+@login_required
+def inventario_fisico():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        read_only = True
+    else:
+        if user.role != 'admin' and not verificar_permiso_activos(user, "Inventario Físico"):
+            flash("No tiene permiso para ver los activos físicos.", "danger")
+            return redirect(url_for('menu'))
+        read_only = False
+
+    items = (
+        InventarioFisico.query
+        .options(selectinload(InventarioFisico.area))
+        .order_by(InventarioFisico.id.desc())
+        .all()
+    )
+
+    cfg_glpi = _glpi_invfis_config_activa()
+
+    matriz_items = []
+
+    for item in items:
+        conf_row = ValoracionConfidencialidad.query.filter_by(nivel_num=item.c_nivel).first() if item.c_nivel is not None else None
+        inte_row = ValoracionIntegridad.query.filter_by(nivel_num=item.i_nivel).first() if item.i_nivel is not None else None
+        disp_row = ValoracionDisponibilidad.query.filter_by(nivel_num=item.d_nivel).first() if item.d_nivel is not None else None
+        valor_row = ValoracionCriticidadActivo.query.filter_by(nivel_num=item.valor_activo).first() if item.valor_activo is not None else None
+
+        conf_texto = conf_row.clasificacion if conf_row and getattr(conf_row, 'clasificacion', None) else (item.etiqueta_conf_texto or (f"Nivel {item.c_nivel}" if item.c_nivel is not None else "—"))
+        inte_texto = inte_row.nivel if inte_row and getattr(inte_row, 'nivel', None) else (f"Nivel {item.i_nivel}" if item.i_nivel is not None else "—")
+        disp_texto = disp_row.nivel if disp_row and getattr(disp_row, 'nivel', None) else (f"Nivel {item.d_nivel}" if item.d_nivel is not None else "—")
+        valor_texto = valor_row.nivel_texto if valor_row and getattr(valor_row, 'nivel_texto', None) else (f"Nivel {item.valor_activo}" if item.valor_activo is not None else "—")
+        criticidad_texto = item.criticidad_texto or (f"Nivel {item.criticidad_num}" if item.criticidad_num is not None else "—")
+        etiquetado_texto = item.etiqueta_conf_texto or (
+            conf_row.clasificacion if conf_row and getattr(conf_row, 'clasificacion', None)
+            else (f"Nivel {item.etiqueta_conf_num}" if item.etiqueta_conf_num is not None else "—")
+        )
+
+        matriz_items.append({
+            "item": item,
+            "conf_texto": conf_texto,
+            "inte_texto": inte_texto,
+            "disp_texto": disp_texto,
+            "valor_texto": valor_texto,
+            "criticidad_texto": criticidad_texto,
+            "etiquetado_texto": etiquetado_texto,
+        })
+
+    html = """
+    <div class="invfismat-shell">
+
+      <div class="invfismat-header-card">
+        <div class="invfismat-header-overlay">
+          <div class="invfismat-header-text">
+            <h3 class="invfismat-title m-0">Inventario Físico — Matriz</h3>
+            <div class="invfismat-subtitle">
+              Visualización resumida de activos físicos del Sistema de Gestión de Seguridad de la Información
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="invfismat-header-actions">
+        {% if not read_only %}
+          <a href="{{ url_for('inventario_fisico_new') }}"
+             class="btn btn-primary rounded-pill px-4 fw-bold">
+            ➕ Agregar Activo
+          </a>
+
+          <a href="{{ url_for('inventario_fisico_glpi_config') }}"
+             class="btn rounded-pill px-4 fw-bold invfismat-btn-config-glpi">
+            ⚙️ Configurar GLPI
+          </a>
+
+          <form method="post"
+                action="{{ url_for('inventario_fisico_glpi_sync') }}"
+                class="d-inline"
+                onsubmit="return confirm('¿Desea sincronizar los equipos de GLPI con la matriz de inventario físico?');">
+            <button type="submit"
+                    class="btn rounded-pill px-4 fw-bold invfismat-btn-glpi">
+              🔌 Sincronizar GLPI
+            </button>
+          </form>
+        {% else %}
+          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
+            ➕ Agregar Activo
+          </button>
+          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
+            🔌 Sincronizar GLPI
+          </button>
+        {% endif %}
+      </div>
+
+      {% if cfg_glpi %}
+        <div class="invfismat-glpi-status">
+          <b>GLPI:</b> {{ cfg_glpi.base_url or 'Sin URL' }}
+          <span class="mx-2">|</span>
+          <b>Último sync:</b> {{ cfg_glpi.ultimo_sync or '—' }}
+          <span class="mx-2">|</span>
+          <b>Estado:</b> {{ cfg_glpi.ultimo_estado or '—' }}
+          {% if cfg_glpi.ultimo_mensaje %}
+            <span class="mx-2">|</span>
+            {{ cfg_glpi.ultimo_mensaje }}
+          {% endif %}
+        </div>
+      {% else %}
+        <div class="invfismat-glpi-status">
+          <b>GLPI:</b> no configurado. Use el botón <b>Configurar GLPI</b>.
+        </div>
+      {% endif %}
+
+      <style>
+        .badge-n1 { background:#2ecc71; color:#fff; }
+        .badge-n2 { background:#f1c40f; color:#111; }
+        .badge-n3 { background:#e67e22; color:#fff; }
+        .badge-n4 { background:#e74c3c; color:#fff; }
+        .badge-n5 { background:#8e44ad; color:#fff; }
+      </style>
+
+      <div class="invfismat-card">
+        <div class="invfismat-topbar">
+          <div>
+            <h5 class="invfismat-top-title mb-1">Resumen de activos físicos</h5>
+            <div class="invfismat-top-note">
+              La matriz muestra los niveles de valoración en texto. Para consultar toda la información utilice el botón <strong>Ver detalle</strong>.
+            </div>
+          </div>
+
+          <div class="invfismat-counter-badge">
+            Total registros: {{ matriz_items|length }}
+          </div>
+        </div>
+
+        <div class="invfismat-card-body">
+          <div class="invfismat-table-wrap">
+            <div class="table-responsive">
+              <table class="table table-bordered table-hover align-middle invfismat-table mb-0">
+
+                <colgroup>
+                  <col style="width: 10%;">
+                  <col style="width: 10%;">
+                  <col style="width: 13%;">
+                  <col style="width: 9%;">
+                  <col style="width: 9%;">
+                  <col style="width: 11%;">
+                  <col style="width: 11%;">
+                  <col style="width: 11%;">
+                  <col style="width: 11%;">
+                  <col style="width: 11%;">
+                  <col style="width: 12%;">
+                  <col style="width: 14%;">
+                </colgroup>
+
+                <thead>
+                  <tr>
+                    <th>Área</th>
+                    <th>División</th>
+                    <th>Nombre del dispositivo</th>
+                    <th>Clase</th>
+                    <th>Marca</th>
+                    <th>Confidencialidad</th>
+                    <th>Integridad</th>
+                    <th>Disponibilidad</th>
+                    <th>Valor</th>
+                    <th>Criticidad</th>
+                    <th>Etiquetado</th>
+                    <th class="invfismat-col-acciones">Acciones</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {% for row in matriz_items %}
+                    {% set item = row.item %}
+                    <tr>
+                      <td>{{ item.area.area if item.area else '—' }}</td>
+                      <td>{{ item.division or '—' }}</td>
+
+                      <td class="invfismat-cell-main">
+                        <div class="invfismat-main-text">{{ item.nombre_dispositivo or '—' }}</div>
+                      </td>
+
+                      <td>{{ item.clase_activo or '—' }}</td>
+                      <td>{{ item.marca or '—' }}</td>
+
+                      <td class="text-center">
+                        <span class="badge badge-n{{ item.c_nivel or 1 }} invfismat-badge-text">
+                          {{ row.conf_texto }}
+                        </span>
+                      </td>
+
+                      <td class="text-center">
+                        <span class="badge badge-n{{ item.i_nivel or 1 }} invfismat-badge-text">
+                          {{ row.inte_texto }}
+                        </span>
+                      </td>
+
+                      <td class="text-center">
+                        <span class="badge badge-n{{ item.d_nivel or 1 }} invfismat-badge-text">
+                          {{ row.disp_texto }}
+                        </span>
+                      </td>
+
+                      <td class="text-center">
+                        <span class="badge badge-n{{ item.valor_activo or 1 }} invfismat-badge-text">
+                          {{ row.valor_texto }}
+                        </span>
+                      </td>
+
+                      <td class="text-center">
+                        <span class="badge badge-n{{ item.criticidad_num or 1 }} invfismat-badge-text">
+                          {{ row.criticidad_texto }}
+                        </span>
+                      </td>
+
+                      <td class="text-center">
+                        <span class="badge badge-n{{ item.etiqueta_conf_num or 1 }} invfismat-badge-text">
+                          {{ row.etiquetado_texto }}
+                        </span>
+                      </td>
+
+                      <td class="text-center invfismat-col-acciones">
+                        <div class="invfismat-actions-wrap">
+
+                          <a href="{{ url_for('inventario_fisico_detalle', id=item.id) }}"
+                             class="btn btn-info btn-sm rounded-pill invfismat-btn-action text-white fw-bold">
+                            Ver detalle
+                          </a>
+
+                          {% if not read_only %}
+                            <a href="{{ url_for('inventario_fisico_edit', id=item.id) }}"
+                               class="btn btn-warning btn-sm rounded-pill invfismat-btn-action fw-bold">
+                              Editar
+                            </a>
+
+                            <a href="{{ url_for('inventario_fisico_delete', id=item.id) }}"
+                               class="btn btn-danger btn-sm rounded-pill invfismat-btn-action fw-bold"
+                               onclick="return confirm('¿Eliminar este activo físico?');">
+                              Eliminar
+                            </a>
+                          {% else %}
+                            <span class="badge bg-secondary">Solo lectura</span>
+                          {% endif %}
+
+                        </div>
+                      </td>
+                    </tr>
+                  {% endfor %}
+
+                  {% if matriz_items|length == 0 %}
+                    <tr>
+                      <td colspan="12" class="text-center text-muted py-5">
+                        Sin registros
+                      </td>
+                    </tr>
+                  {% endif %}
+                </tbody>
+
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .invfismat-shell{
+        width:96%;
+        max-width:1850px;
+        margin:10px auto 24px auto;
+      }
+
+      .invfismat-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .invfismat-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .invfismat-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent;
+        padding:0;
+        position:relative;
+        z-index:1;
+      }
+
+      .invfismat-header-overlay::before{
+        content:"🏢";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .invfismat-header-text{
+        max-width:1100px;
+        width:100%;
+      }
+
+      .invfismat-header-text::before{
+        content:"SGSI · Matriz Inventario Físico";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#fff;
+      }
+
+      .invfismat-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .invfismat-subtitle{
+        color:rgba(248,252,255,.96);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .invfismat-header-actions{
+        display:flex;
+        justify-content:center;
+        align-items:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 12px;
+      }
+
+      .invfismat-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.14);
+      }
+
+      .invfismat-btn-config-glpi{
+        background:#475569;
+        color:#fff;
+        border:1px solid #475569;
+      }
+
+      .invfismat-btn-config-glpi:hover{
+        background:#475569;
+        color:#fff;
+        border-color:#475569;
+      }
+
+      .invfismat-btn-glpi{
+        background:#0b65d8;
+        color:#fff;
+        border:1px solid #0b65d8;
+      }
+
+      .invfismat-btn-glpi:hover{
+        background:#084fa8;
+        color:#fff;
+        border-color:#084fa8;
+      }
+
+      .invfismat-glpi-status{
+        width:100%;
+        max-width:1850px;
+        margin:0 auto 12px auto;
+        background:rgba(255,255,255,.92);
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        padding:10px 14px;
+        box-shadow:0 8px 18px rgba(15,23,42,.12);
+        font-size:.80rem;
+        color:#25324a;
+        text-align:center;
+      }
+
+      .invfismat-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        overflow:hidden;
+        border:1px solid rgba(219,230,244,.9);
+      }
+
+      .invfismat-topbar{
+        padding:14px 18px;
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:14px;
+        background:linear-gradient(180deg,#ffffff 0%,#f5f9ff 100%);
+        border-bottom:1px solid #e2e8f0;
+      }
+
+      .invfismat-top-title{
+        font-weight:950;
+        color:#1e293b;
+        font-size:1rem;
+      }
+
+      .invfismat-top-note{
+        font-size:.78rem;
+        color:#475569;
+      }
+
+      .invfismat-counter-badge{
+        background:#0b4a8f;
+        color:#fff;
+        border-radius:999px;
+        padding:8px 14px;
+        font-weight:900;
+        font-size:.78rem;
+        white-space:nowrap;
+        box-shadow:0 8px 16px rgba(20,89,166,.22);
+      }
+
+      .invfismat-card-body{
+        padding:16px 18px;
+      }
+
+      .invfismat-table-wrap{
+        max-height:72vh;
+        overflow:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#fff;
+      }
+
+      .invfismat-table{
+        min-width:1450px;
+        table-layout:fixed;
+      }
+
+      .invfismat-table th,
+      .invfismat-table td{
+        font-size:.68rem;
+        padding:8px 7px;
+        vertical-align:middle;
+        word-break:break-word;
+      }
+
+      .invfismat-table thead th{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#fff !important;
+        font-weight:900;
+        text-align:center;
+      }
+
+      .invfismat-table tbody tr:nth-child(even){
+        background:#f8fbff;
+      }
+
+      .invfismat-table tbody tr:hover{
+        background:#eef6ff;
+      }
+
+      .invfismat-main-text{
+        font-weight:900;
+        color:#1e293b;
+      }
+
+      .invfismat-badge-text{
+        border-radius:999px;
+        padding:.42rem .58rem;
+        font-size:.68rem;
+        font-weight:900;
+        white-space:normal;
+        line-height:1.15;
+        display:inline-block;
+        min-width:80px;
+      }
+
+      .invfismat-col-acciones{
+        min-width:170px;
+      }
+
+      .invfismat-actions-wrap{
+        display:flex;
+        justify-content:center;
+        align-items:center;
+        gap:6px;
+        flex-wrap:wrap;
+      }
+
+      .invfismat-btn-action{
+        font-size:.64rem !important;
+        padding:5px 10px !important;
+        box-shadow:0 4px 10px rgba(0,0,0,.10);
+      }
+
+      @media (max-width:992px){
+        .invfismat-shell{
+          width:98%;
+        }
+
+        .invfismat-topbar{
+          flex-direction:column;
+          align-items:flex-start;
+        }
+      }
+
+      @media (max-width:768px){
+        .invfismat-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .invfismat-header-overlay::before{
+          margin:0;
+        }
+
+        .invfismat-header-actions .btn,
+        .invfismat-header-actions form{
+          width:100%;
+        }
+
+        .invfismat-header-actions form button{
+          width:100%;
+        }
+      }
+    </style>
+    """
+
+    inner = render_template_string(
+        html,
+        matriz_items=matriz_items,
+        read_only=read_only,
+        cfg_glpi=cfg_glpi,
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+# =========================
+# DETALLE — Inventario Físico
+# =========================
+@app.route('/inventario_fisico/detalle/<int:id>', methods=['GET'])
+@login_required
+def inventario_fisico_detalle(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role != 'auditor':
+        if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
+            flash("No tiene permiso para ver el detalle de activos físicos.", "danger")
+            return redirect(url_for('inventario_fisico'))
+
+    item = (
+        InventarioFisico.query
+        .options(selectinload(InventarioFisico.area))
+        .get_or_404(id)
+    )
+
+    conf_row = ValoracionConfidencialidad.query.filter_by(
+        nivel_num=item.c_nivel
+    ).first() if item.c_nivel is not None else None
+
+    inte_row = ValoracionIntegridad.query.filter_by(
+        nivel_num=item.i_nivel
+    ).first() if item.i_nivel is not None else None
+
+    disp_row = ValoracionDisponibilidad.query.filter_by(
+        nivel_num=item.d_nivel
+    ).first() if item.d_nivel is not None else None
+
+    valor_row = ValoracionCriticidadActivo.query.filter_by(
+        nivel_num=item.valor_activo
+    ).first() if item.valor_activo is not None else None
+
+    conf_texto = (
+        conf_row.clasificacion
+        if conf_row and getattr(conf_row, 'clasificacion', None)
+        else (item.etiqueta_conf_texto or (f"Nivel {item.c_nivel}" if item.c_nivel is not None else "—"))
+    )
+
+    inte_texto = (
+        inte_row.nivel
+        if inte_row and getattr(inte_row, 'nivel', None)
+        else (f"Nivel {item.i_nivel}" if item.i_nivel is not None else "—")
+    )
+
+    disp_texto = (
+        disp_row.nivel
+        if disp_row and getattr(disp_row, 'nivel', None)
+        else (f"Nivel {item.d_nivel}" if item.d_nivel is not None else "—")
+    )
+
+    valor_texto = (
+        valor_row.nivel_texto
+        if valor_row and getattr(valor_row, 'nivel_texto', None)
+        else (f"Nivel {item.valor_activo}" if item.valor_activo is not None else "—")
+    )
+
+    criticidad_texto = item.criticidad_texto or (
+        f"Nivel {item.criticidad_num}" if item.criticidad_num is not None else "—"
+    )
+
+    etiquetado_texto = item.etiqueta_conf_texto or (
+        conf_row.clasificacion if conf_row and getattr(conf_row, 'clasificacion', None)
+        else (f"Nivel {item.etiqueta_conf_num}" if item.etiqueta_conf_num is not None else "—")
+    )
+
+    def badge_class(n):
+        if n == 1:
+            return "badge-n1"
+        if n == 2:
+            return "badge-n2"
+        if n == 3:
+            return "badge-n3"
+        if n == 4:
+            return "badge-n4"
+        return "badge-n5"
+
+    conf_badge = badge_class(item.c_nivel or 1)
+    inte_badge = badge_class(item.i_nivel or 1)
+    disp_badge = badge_class(item.d_nivel or 1)
+    valor_badge = badge_class(item.valor_activo or 1)
+    criticidad_badge = badge_class(item.criticidad_num or 1)
+    etiquetado_badge = badge_class(item.etiqueta_conf_num or 1)
+
+    html = """
+    <div class="invfisdet-shell">
+
+      <div class="invfisdet-header-card">
+        <div class="invfisdet-header-overlay">
+          <div class="invfisdet-header-text">
+            <h3 class="invfisdet-title m-0">Detalle — Inventario Físico</h3>
+            <div class="invfisdet-subtitle">
+              Consulta completa del activo físico registrado en el Sistema de Gestión de Seguridad de la Información
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="invfisdet-header-actions">
+        <a href="{{ url_for('inventario_fisico') }}"
+           class="btn rounded-pill px-4 fw-bold invfisdet-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+
+        {% if user.role != 'auditor' %}
+          <a href="{{ url_for('inventario_fisico_edit', id=item.id) }}"
+             class="btn btn-warning rounded-pill px-4 fw-bold">
+            Editar
+          </a>
+        {% endif %}
+      </div>
+
+      <style>
+        .badge-n1 { background:#2ecc71; color:#fff; }
+        .badge-n2 { background:#f1c40f; color:#111; }
+        .badge-n3 { background:#e67e22; color:#fff; }
+        .badge-n4 { background:#e74c3c; color:#fff; }
+        .badge-n5 { background:#8e44ad; color:#fff; }
+      </style>
+
+      <div class="invfisdet-card">
+        <div class="invfisdet-card-body">
+
+          <div class="row g-3">
+            <div class="col-md-4">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Área</div>
+                <div class="invfisdet-value">{{ item.area.area if item.area else '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-4">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">División</div>
+                <div class="invfisdet-value">{{ item.division or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-4">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Clase de activo</div>
+                <div class="invfisdet-value">{{ item.clase_activo or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-4">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Asignado a</div>
+                <div class="invfisdet-value">{{ item.asignado_a or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-4">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Cargo</div>
+                <div class="invfisdet-value">{{ item.cargo or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-4">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Ciudad</div>
+                <div class="invfisdet-value">{{ item.ciudad or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-4">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Marca</div>
+                <div class="invfisdet-value">{{ item.marca or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-4">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Número de serial</div>
+                <div class="invfisdet-value">{{ item.numero_serial or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-4">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Nombre del dispositivo</div>
+                <div class="invfisdet-value">{{ item.nombre_dispositivo or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Procesador</div>
+                <div class="invfisdet-value">{{ item.procesador or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">RAM instalada</div>
+                <div class="invfisdet-value">{{ item.ram_instalada or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">ID del dispositivo</div>
+                <div class="invfisdet-value">{{ item.id_dispositivo or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">ID del producto</div>
+                <div class="invfisdet-value">{{ item.id_producto or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-4">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Tipo de sistema</div>
+                <div class="invfisdet-value">{{ item.tipo_sistema or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-4">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Edición SO</div>
+                <div class="invfisdet-value">{{ item.edicion_so or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-4">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Versión SO</div>
+                <div class="invfisdet-value">{{ item.version_so or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">País</div>
+                <div class="invfisdet-value">{{ item.pais or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Fecha de compra</div>
+                <div class="invfisdet-value">{{ item.fecha_compra or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Fecha de asignación</div>
+                <div class="invfisdet-value">{{ item.fecha_asignacion or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Monitor</div>
+                <div class="invfisdet-value">{{ item.monitor or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Mouse</div>
+                <div class="invfisdet-value">{{ item.mouse or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Teclado</div>
+                <div class="invfisdet-value">{{ item.teclado or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Base portátil</div>
+                <div class="invfisdet-value">{{ item.base_portatil or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-2">
+              <div class="invfisdet-field text-center">
+                <div class="invfisdet-label">Confidencialidad</div>
+                <span class="badge {{ conf_badge }} invfisdet-badge">{{ conf_texto }}</span>
+              </div>
+            </div>
+
+            <div class="col-md-2">
+              <div class="invfisdet-field text-center">
+                <div class="invfisdet-label">Integridad</div>
+                <span class="badge {{ inte_badge }} invfisdet-badge">{{ inte_texto }}</span>
+              </div>
+            </div>
+
+            <div class="col-md-2">
+              <div class="invfisdet-field text-center">
+                <div class="invfisdet-label">Disponibilidad</div>
+                <span class="badge {{ disp_badge }} invfisdet-badge">{{ disp_texto }}</span>
+              </div>
+            </div>
+
+            <div class="col-md-2">
+              <div class="invfisdet-field text-center">
+                <div class="invfisdet-label">Valor del Activo</div>
+                <span class="badge {{ valor_badge }} invfisdet-badge">{{ valor_texto }}</span>
+              </div>
+            </div>
+
+            <div class="col-md-2">
+              <div class="invfisdet-field text-center">
+                <div class="invfisdet-label">Criticidad</div>
+                <span class="badge {{ criticidad_badge }} invfisdet-badge">{{ criticidad_texto }}</span>
+              </div>
+            </div>
+
+            <div class="col-md-2">
+              <div class="invfisdet-field text-center">
+                <div class="invfisdet-label">Etiquetado</div>
+                <span class="badge {{ etiquetado_badge }} invfisdet-badge">{{ etiquetado_texto }}</span>
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">¿Es información personal?</div>
+                <div class="invfisdet-value">{{ item.info_personal or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">¿Es información regulada?</div>
+                <div class="invfisdet-value">{{ item.info_regulada or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">¿Info sensible compañía?</div>
+                <div class="invfisdet-value">{{ item.info_sensible or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-3">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">¿Info sensible clientes?</div>
+                <div class="invfisdet-value">{{ item.info_sensible_clientes or '—' }}</div>
+              </div>
+            </div>
+
+            <div class="col-md-12">
+              <div class="invfisdet-field">
+                <div class="invfisdet-label">Observaciones</div>
+                <div class="invfisdet-value">{{ item.observaciones or '—' }}</div>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="invfisdet-bottom-actions">
+            <a href="{{ url_for('inventario_fisico') }}"
+               class="btn rounded-pill px-4 fw-bold invfisdet-cancel-btn">
+              Cerrar
+            </a>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .invfisdet-shell{
+        width:96%;
+        max-width:1400px;
+        margin:10px auto 24px auto;
+      }
+
+      .invfisdet-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .invfisdet-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 90% 10%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .invfisdet-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        position:relative;
+        z-index:1;
+      }
+
+      .invfisdet-header-overlay::before{
+        content:"🏢";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .invfisdet-header-text{
+        max-width:1100px;
+        width:100%;
+      }
+
+      .invfisdet-header-text::before{
+        content:"SGSI · Inventario Físico";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#fff;
+      }
+
+      .invfisdet-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .invfisdet-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .invfisdet-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .invfisdet-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invfisdet-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invfisdet-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .invfisdet-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .invfisdet-card-body{
+        padding:20px;
+      }
+
+      .invfisdet-field{
+        background:linear-gradient(180deg,#f8fafc,#ffffff);
+        border:1px solid #e2e8f0;
+        border-radius:14px;
+        padding:8px 7px;
+        height:100%;
+        box-shadow:0 4px 10px rgba(0,0,0,.05);
+      }
+
+      .invfisdet-label{
+        font-size:.72rem;
+        font-weight:900;
+        color:#2563eb;
+        text-transform:uppercase;
+        letter-spacing:.4px;
+        margin-bottom:6px;
+      }
+
+      .invfisdet-value{
+        color:#0f172a;
+        font-size:.90rem;
+        white-space:pre-wrap;
+        word-break:break-word;
+        line-height:1.35;
+      }
+
+      .invfisdet-badge{
+        font-size:.72rem;
+        padding:6px 10px;
+        border-radius:999px;
+        display:inline-block;
+        font-weight:800;
+        box-shadow:0 4px 10px rgba(0,0,0,.08);
+      }
+
+      .invfisdet-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:12px;
+        margin-top:24px;
+        flex-wrap:wrap;
+      }
+
+      .invfisdet-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+      }
+
+      .invfisdet-cancel-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+        box-shadow:0 6px 12px rgba(0,0,0,.10);
+      }
+
+      .invfisdet-cancel-btn:hover{
+        background:#f1f5f9;
+      }
+
+      @media (max-width:992px){
+        .invfisdet-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .invfisdet-title{
+          font-size:1.20rem;
+        }
+
+        .invfisdet-card-body{
+          padding:8px 7px;
+        }
+
+        .invfisdet-badge{
+          width:100%;
+          text-align:center;
+        }
+      }
+
+      @media (max-width:768px){
+        .invfisdet-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .invfisdet-header-overlay::before{
+          margin:0;
+        }
+
+        .invfisdet-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+    inner = render_template_string(
+        html,
+        item=item,
+        user=user,
+        conf_texto=conf_texto,
+        inte_texto=inte_texto,
+        disp_texto=disp_texto,
+        valor_texto=valor_texto,
+        criticidad_texto=criticidad_texto,
+        etiquetado_texto=etiquetado_texto,
+        conf_badge=conf_badge,
+        inte_badge=inte_badge,
+        disp_badge=disp_badge,
+        valor_badge=valor_badge,
+        criticidad_badge=criticidad_badge,
+        etiquetado_badge=etiquetado_badge
+    )
+    return render_template_string(BASE, content=Markup(inner))
+
+# =========================
+# ELIMINAR — Inventario Físico
+# =========================
+@app.route('/inventario_fisico/delete/<int:id>')
+@login_required
+def inventario_fisico_delete(id):
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor' or (
+        user.role != 'admin'
+        and not verificar_permiso(user, "Gestión de Activos de Información")
+    ):
+        flash("No tiene permiso para eliminar activos.", "danger")
+        return redirect(url_for('inventario_fisico_menu'))
+
+    it = InventarioFisico.query.get_or_404(id)
+    db.session.delete(it)
+    db.session.commit()
+    flash("Eliminado.", "success")
+    return redirect(url_for('inventario_fisico'))
+
+# ====================================
+# Inventario de Datos Personales
+# ====================================
+
+class InventarioDatosPersonales(db.Model):
+    __tablename__ = "inventario_datos_personales"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    responsable_datos = db.Column(db.String(255), nullable=False)
+
+    area_id = db.Column(db.Integer, nullable=True)
+    division_id = db.Column(db.Integer, nullable=True)
+
+    naturaleza_datos = db.Column(db.Text, nullable=False)
+    ubicacion_sistema_datos = db.Column(db.String(255), nullable=False)
+    titular_datos = db.Column(db.String(200), nullable=False)
+    sitio_web_asociado = db.Column(db.Text)
+
+    fuente_datos = db.Column(db.String(255), nullable=False)
+    administrador_sistema = db.Column(db.String(255), nullable=False)
+    alcance_datos = db.Column(db.Text)
+    formato_informacion = db.Column(db.String(150))
+    proposito_uso_datos = db.Column(db.Text, nullable=False)
+
+    pais_almacenamiento = db.Column(db.String(120), nullable=False)
+    pais_acceso = db.Column(db.String(120), nullable=False)
+
+    transferencia_fuera_compania = db.Column(db.String(2), default="No")
+    politica_retencion = db.Column(db.String(255))
+    politica_privacidad = db.Column(db.Text)
+    solicita_consentimiento = db.Column(db.String(2), default="No")
+
+    notas = db.Column(db.Text)
+    recomendacion = db.Column(db.Text)
+    seguridad_quien_tiene_acceso = db.Column(db.String(255), nullable=False)
+    consentimiento_titular_disponible = db.Column(db.String(2), default="No")
+
+    dato_nombre = db.Column(db.String(2), default="No")
+    dato_telefono = db.Column(db.String(2), default="No")
+    dato_direccion = db.Column(db.String(2), default="No")
+    dato_numero_identificacion = db.Column(db.String(2), default="No")
+    dato_fecha_nacimiento = db.Column(db.String(2), default="No")
+    dato_licencia_conduccion = db.Column(db.String(2), default="No")
+    dato_pasaporte_visa = db.Column(db.String(2), default="No")
+    dato_sensible = db.Column(db.String(2), default="No")
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<InventarioDatosPersonales {self.id} - {self.responsable_datos}>"
+
+# =========================
+# ENTRADA DIRECTA — Inventario de Datos Personales
+# =========================
+@app.route('/inventario_datos_personales_menu')
+@login_required
+def inventario_datos_personales_menu():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role not in ('admin', 'auditor') and not verificar_permiso(user, "Gestión de Activos de Información"):
+        flash("No tiene permiso para acceder al módulo de inventario de datos personales.", "danger")
+        return redirect(url_for('activos_menu'))
+
+    return redirect(url_for('inventario_datos_personales'))
+
+
+# =========================
+# Agregar — Inventario de Datos Personales
+# =========================
+@app.route('/inventario_datos_personales/new', methods=['GET', 'POST'])
+@login_required
+def inventario_datos_personales_new():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role == 'auditor':
+        flash("El rol Auditor no puede agregar registros.", "danger")
+        return redirect(url_for('inventario_datos_personales'))
+
+    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Activos de Información"):
+        flash("No tiene permiso para agregar registros de datos personales.", "danger")
+        return redirect(url_for('inventario_datos_personales'))
+
+    paises = sorted([c.name for c in pycountry.countries])
+    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
+
+    if request.method == 'POST':
+        area_id = request.form.get('area_id', type=int)
+        division_id = request.form.get('division_id', type=int)
+
+        naturaleza_datos = (request.form.get('naturaleza_datos') or "").strip()
+        ubicacion_sistema_datos = (request.form.get('ubicacion_sistema_datos') or "").strip()
+        titular_datos = (request.form.get('titular_datos') or "").strip()
+        sitio_web_asociado = (request.form.get('sitio_web_asociado') or "").strip()
+
+        fuente_datos = (request.form.get('fuente_datos') or "").strip()
+        administrador_sistema = (request.form.get('administrador_sistema') or "").strip()
+        alcance_datos = (request.form.get('alcance_datos') or "").strip()
+        formato_informacion = (request.form.get('formato_informacion') or "").strip()
+        proposito_uso_datos = (request.form.get('proposito_uso_datos') or "").strip()
+
+        pais_almacenamiento = (request.form.get('pais_almacenamiento') or "").strip()
+        pais_acceso = (request.form.get('pais_acceso') or "").strip()
+        transferencia_fuera_compania = request.form.get('transferencia_fuera_compania') or "No"
+        politica_retencion = (request.form.get('politica_retencion') or "").strip()
+        politica_privacidad = (request.form.get('politica_privacidad') or "").strip()
+        solicita_consentimiento = request.form.get('solicita_consentimiento') or "No"
+
+        notas = (request.form.get('notas') or "").strip()
+        recomendacion = (request.form.get('recomendacion') or "").strip()
+        seguridad_quien_tiene_acceso = (request.form.get('seguridad_quien_tiene_acceso') or "").strip()
+        consentimiento_titular_disponible = request.form.get('consentimiento_titular_disponible') or "No"
+
+        dato_nombre = request.form.get('dato_nombre') or "No"
+        dato_telefono = request.form.get('dato_telefono') or "No"
+        dato_direccion = request.form.get('dato_direccion') or "No"
+        dato_numero_identificacion = request.form.get('dato_numero_identificacion') or "No"
+        dato_fecha_nacimiento = request.form.get('dato_fecha_nacimiento') or "No"
+        dato_licencia_conduccion = request.form.get('dato_licencia_conduccion') or "No"
+        dato_pasaporte_visa = request.form.get('dato_pasaporte_visa') or "No"
+        dato_sensible = request.form.get('dato_sensible') or "No"
+
+        area = AreaEmpresa.query.get(area_id) if area_id else None
+        division = DivisionEmpresa.query.get(division_id) if division_id else None
+
+        responsable_datos = ""
+        if area:
+            responsable_datos = area.area
+        if division:
+            responsable_datos = f"{responsable_datos} / {division.nombre_division}"
+
+        if not (
+            area_id and naturaleza_datos and ubicacion_sistema_datos and
+            titular_datos and fuente_datos and administrador_sistema and
+            proposito_uso_datos and pais_almacenamiento and pais_acceso and
+            seguridad_quien_tiene_acceso
+        ):
+            flash("Complete los campos obligatorios del inventario de datos personales.", "danger")
+            return redirect(url_for('inventario_datos_personales_new'))
+
+        item = InventarioDatosPersonales(
+            responsable_datos=responsable_datos,
+            area_id=area_id,
+            division_id=division_id,
+            naturaleza_datos=naturaleza_datos,
+            ubicacion_sistema_datos=ubicacion_sistema_datos,
+            titular_datos=titular_datos,
+            sitio_web_asociado=sitio_web_asociado,
+            fuente_datos=fuente_datos,
+            administrador_sistema=administrador_sistema,
+            alcance_datos=alcance_datos,
+            formato_informacion=formato_informacion,
+            proposito_uso_datos=proposito_uso_datos,
+            pais_almacenamiento=pais_almacenamiento,
+            pais_acceso=pais_acceso,
+            transferencia_fuera_compania=transferencia_fuera_compania,
+            politica_retencion=politica_retencion,
+            politica_privacidad=politica_privacidad,
+            solicita_consentimiento=solicita_consentimiento,
+            notas=notas,
+            recomendacion=recomendacion,
+            seguridad_quien_tiene_acceso=seguridad_quien_tiene_acceso,
+            consentimiento_titular_disponible=consentimiento_titular_disponible,
+            dato_nombre=dato_nombre,
+            dato_telefono=dato_telefono,
+            dato_direccion=dato_direccion,
+            dato_numero_identificacion=dato_numero_identificacion,
+            dato_fecha_nacimiento=dato_fecha_nacimiento,
+            dato_licencia_conduccion=dato_licencia_conduccion,
+            dato_pasaporte_visa=dato_pasaporte_visa,
+            dato_sensible=dato_sensible
+        )
+        db.session.add(item)
+        db.session.commit()
+
+        flash("Registro de inventario de datos personales creado.", "success")
+        return redirect(url_for('inventario_datos_personales'))
+
+    html = """
+    <div class="invdp-shell">
+
+      <div class="invdp-header-card">
+        <div class="invdp-header-overlay">
+          <div class="invdp-header-text">
+            <h3 class="invdp-title m-0">Registro — Inventario de Datos Personales</h3>
+            <div class="invdp-subtitle">
+              Registro de sistemas, tratamientos, acceso, transferencia y elementos de datos personales
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="invdp-header-actions">
+        <a href="{{ url_for('inventario_datos_personales') }}"
+           class="btn rounded-pill px-4 fw-bold invdp-back-btn">
+          ⬅ Volver a la Matriz
+        </a>
+
+        
+      </div>
+
+      <div class="invdp-card">
+        <div class="invdp-card-body">
+          <form method="post">
+            <div class="row g-3">
+
+              <div class="col-md-8">
+                <label class="form-label">Responsable de los datos</label>
+
+                <div class="row g-2">
+                  <div class="col-md-6">
+                    <select name="area_id" id="area_id" class="form-select" required>
+                      <option value="">-- Seleccione Área --</option>
+                      {% for a in areas %}
+                        <option value="{{ a.id }}">{{ a.area }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+
+                  <div class="col-md-6">
+                    <select name="division_id" id="division_id" class="form-select">
+                      <option value="">Todas las divisiones</option>
+                    </select>
+                  </div>
+                </div>
+
+                <small class="text-muted">Seleccione el área y, si aplica, la división responsable de los datos.</small>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Titular de los datos</label>
+                <input type="text" name="titular_datos" class="form-control" required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Ubicación del sistema de datos</label>
+                <input type="text" name="ubicacion_sistema_datos" class="form-control" placeholder="Ej. SAP, CRM, ERP" required>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Naturaleza de los datos</label>
+                <textarea name="naturaleza_datos" class="form-control" rows="2" required></textarea>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Sitio web asociado</label>
+                <textarea name="sitio_web_asociado" class="form-control" rows="2"></textarea>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Fuente de los datos</label>
+                <input type="text" name="fuente_datos" class="form-control" required>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Administrador del sistema</label>
+                <input type="text" name="administrador_sistema" class="form-control" required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Formato de la información</label>
+                <select name="formato_informacion" class="form-select">
+                  <option value="">-- Seleccione --</option>
+                  <option value="Digital">Digital</option>
+                  <option value="Físico">Físico</option>
+                  <option value="Mixto">Mixto</option>
+                </select>
+              </div>
+
+              <div class="col-md-8">
+                <label class="form-label">Alcance de los datos</label>
+                <textarea name="alcance_datos" class="form-control" rows="2"></textarea>
+              </div>
+
+              <div class="col-md-12">
+                <label class="form-label">Propósito y uso de los datos</label>
+                <textarea name="proposito_uso_datos" class="form-control" rows="2" required></textarea>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">¿Dónde se almacenan los datos?</label>
+                <select name="pais_almacenamiento" class="form-select" required>
+                  <option value="">-- Seleccione país --</option>
+                  {% for p in paises %}
+                    <option value="{{ p }}">{{ p }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">¿Dónde se accede a los datos?</label>
+                <select name="pais_acceso" class="form-select" required>
+                  <option value="">-- Seleccione país --</option>
+                  {% for p in paises %}
+                    <option value="{{ p }}">{{ p }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Transferencia de datos fuera de la compañía</label>
+                <select name="transferencia_fuera_compania" class="form-select">
+                  <option value="No">No</option>
+                  <option value="Sí">Sí</option>
+                </select>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Política de retención</label>
+                <input type="text" name="politica_retencion" class="form-control" placeholder="Ubicación de la política y años de retención">
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">¿Política de privacidad?</label>
+                <textarea name="politica_privacidad" class="form-control" rows="2"></textarea>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">¿Se solicita consentimiento?</label>
+                <select name="solicita_consentimiento" class="form-select">
+                  <option value="No">No</option>
+                  <option value="Sí">Sí</option>
+                </select>
+              </div>
+
+              <div class="col-md-8">
+                <label class="form-label">Seguridad — ¿Quién tiene acceso?</label>
+                <input type="text" name="seguridad_quien_tiene_acceso" class="form-control" required>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">¿Existe consentimiento disponible del titular?</label>
+                <select name="consentimiento_titular_disponible" class="form-select">
+                  <option value="No">No</option>
+                  <option value="Sí">Sí</option>
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Notas</label>
+                <textarea name="notas" class="form-control" rows="2"></textarea>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Recomendación</label>
+                <textarea name="recomendacion" class="form-control" rows="2"></textarea>
+              </div>
+
+              <div class="col-12 mt-4">
+                <div class="invdp-section-title">Elementos de datos</div>
+              </div>
+
+              {% set yn_fields = [
+                ('dato_nombre', 'Nombre'),
+                ('dato_telefono', 'Teléfono'),
+                ('dato_direccion', 'Dirección'),
+                ('dato_numero_identificacion', 'Número del Documento de Identificación'),
+                ('dato_fecha_nacimiento', 'Fecha de nacimiento'),
+                ('dato_licencia_conduccion', 'Número de licencia de conducción'),
+                ('dato_pasaporte_visa', 'Información de pasaporte / visa'),
+                ('dato_sensible', 'Datos sensibles')
+              ] %}
+
+              {% for field, label in yn_fields %}
+              <div class="col-md-3">
+                <label class="form-label">{{ label }}</label>
+                <select name="{{ field }}" class="form-select">
+                  <option value="No">No</option>
+                  <option value="Sí">Sí</option>
+                </select>
+              </div>
+              {% endfor %}
+
+            </div>
+
+            <div class="invdp-bottom-actions">
+              <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold">
+                Guardar registro
+              </button>
+
+              <a href="{{ url_for('inventario_datos_personales') }}"
+                 class="btn rounded-pill px-4 fw-bold invdp-cancel-btn">
+                Cancelar
+              </a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const areaSel = document.getElementById('area_id');
+      const divSel = document.getElementById('division_id');
+
+      if (!areaSel || !divSel) return;
+
+      areaSel.addEventListener('change', async function () {
+        const areaId = this.value;
+        divSel.innerHTML = '<option value="">Todas las divisiones</option>';
+
+        if (!areaId) return;
+
+        try {
+          const resp = await fetch(`/areas/${areaId}/divisiones_json`);
+          const data = await resp.json();
+
+          (data.divisiones || []).forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d.id;
+            opt.textContent = d.nombre;
+            divSel.appendChild(opt);
+          });
+        } catch (e) {
+          console.error('Error cargando divisiones:', e);
+        }
+      });
+    });
+    </script>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .invdp-shell{
+        width:96%;
+        max-width:1400px;
+        margin:10px auto 24px auto;
+      }
+
+      .invdp-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .invdp-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .invdp-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent;
+        padding:0;
+        position:relative;
+        z-index:1;
+      }
+
+      .invdp-header-overlay::before{
+        content:"🗂️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .invdp-header-text{
+        max-width:1100px;
+        width:100%;
+      }
+
+      .invdp-header-text::before{
+        content:"SGSI · Inventario de Datos Personales";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#fff;
+      }
+
+      .invdp-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .invdp-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .invdp-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .invdp-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invdp-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invdp-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .invdp-card{
+        background:rgba(255,255,255,.96)!important;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .invdp-card-body{
+        padding:18px;
+      }
+
+      .invdp-card .form-label{
+        font-weight:800;
+        color:#25324a;
+        margin-bottom:4px;
+        font-size:.78rem;
+      }
+
+      .invdp-card .form-control,
+      .invdp-card .form-select{
+        border-radius:9px;
+        border:1px solid #d9e3f0;
+        min-height:32px;
+        font-size:.80rem;
+        background:#f8fafc;
+      }
+
+      .invdp-card textarea.form-control{
+        min-height:70px;
+        resize:vertical;
+      }
+
+      .invdp-card .form-control:focus,
+      .invdp-card .form-select:focus{
+        border-color:#3f86d6;
+        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
+        background:#fff;
+      }
+
+      .invdp-section-title{
+        font-weight:950;
+        font-size:.78rem;
+        color:#0b4a8f;
+        padding:9px 12px;
+        border-radius:12px;
+        background:#eef5ff;
+        border:1px solid #d9eaff;
+        margin:10px 0 10px;
+      }
+
+      .invdp-bottom-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        margin-top:18px;
+        flex-wrap:wrap;
+      }
+
+      .invdp-bottom-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invdp-cancel-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invdp-cancel-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      @media (max-width:992px){
+        .invdp-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .invdp-header-card{
+          min-height:88px;
+        }
+
+        .invdp-title{
+          font-size:1.20rem;
+        }
+
+        .invdp-card-body{
+          padding:8px 7px;
+        }
+      }
+
+      @media (max-width:768px){
+        .invdp-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .invdp-header-overlay::before{
+          margin:0;
+        }
+
+        .invdp-header-actions .btn,
+        .invdp-bottom-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """
+
+    return render_template_string(
+        BASE,
+        content=Markup(render_template_string(html, paises=paises, areas=areas))
+    )
+
+
+# =========================
+# Matriz — Inventario de Datos Personales
+# =========================
+@app.route('/inventario_datos_personales', methods=['GET'])
+@login_required
+def inventario_datos_personales():
+    user = User.query.get(session.get('user_id'))
+
+    if user.role not in ('admin', 'auditor') and not verificar_permiso_activos(user, "Inventario de Datos Personales"):
+        flash("No tiene permiso para ver la matriz de datos personales.", "danger")
+        return redirect(url_for('menu'))
+
+    read_only = (user.role == 'auditor')
+
+    items = InventarioDatosPersonales.query.order_by(InventarioDatosPersonales.id.desc()).all()
+
+    html = render_template_string("""
+    <div class="invdpm-shell">
+
+      <div class="invdpm-header-card">
+        <div class="invdpm-header-overlay">
+          <div class="invdpm-header-text">
+            <h3 class="invdpm-title m-0">Matriz — Inventario de Datos Personales</h3>
+            <div class="invdpm-subtitle">
+              Visualización resumida de registros del inventario de datos personales
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="invdpm-header-actions">
+
+        {% if not read_only %}
+          <a href="{{ url_for('inventario_datos_personales_new') }}"
+             class="btn btn-primary rounded-pill px-4 fw-bold">
+            ➕ Agregar Registro
+          </a>
+        {% else %}
+          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
+            ➕ Agregar Registro
+          </button>
+        {% endif %}
+      </div>
+
+      <div class="invdpm-card">
+        <div class="invdpm-topbar">
+          <div>
+            <h5 class="invdpm-top-title mb-1">Resumen de activos de información</h5>
+            <div class="invdpm-top-note">
+              La matriz muestra únicamente los campos esenciales. Para consultar toda la información utilice el botón <strong>Ver detalle</strong>.
+            </div>
+          </div>
+
+          <div class="invdpm-counter-badge">
+            Total registros: {{ items|length }}
+          </div>
+        </div>
+
+        <div class="invdpm-card-body">
+          <div class="invdpm-table-wrap">
+            <div class="table-responsive">
+              <table class="table align-middle mb-0 invdpm-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Responsable</th>
+                    <th>Naturaleza de los datos</th>
+                    <th>Titular</th>
+                    <th>Sistema</th>
+                    <th>Almacenamiento</th>
+                    <th>Acceso</th>
+                    <th class="text-center invdpm-col-acciones">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for it in items %}
+                  <tr>
+                    <td>{{ it.id }}</td>
+                    <td>{{ it.responsable_datos }}</td>
+                    <td>{{ it.naturaleza_datos }}</td>
+                    <td>{{ it.titular_datos }}</td>
+                    <td>{{ it.ubicacion_sistema_datos }}</td>
+                    <td>{{ it.pais_almacenamiento }}</td>
+                    <td>{{ it.pais_acceso }}</td>
+                    <td class="text-center invdpm-col-acciones">
+                      <div class="invdpm-actions-wrap">
+                        <a href="{{ url_for('inventario_datos_personales_detalle', id=it.id) }}"
+                           class="btn btn-info btn-sm text-white rounded-pill invdpm-btn-action">
+                          Ver detalle
+                        </a>
+
+                        {% if not read_only %}
+                          <a href="{{ url_for('inventario_datos_personales_edit', id=it.id) }}"
+                             class="btn btn-primary btn-sm rounded-pill invdpm-btn-action">
+                            Editar
+                          </a>
+
+                          <a href="{{ url_for('inventario_datos_personales_delete', id=it.id) }}"
+                             class="btn btn-danger btn-sm rounded-pill invdpm-btn-action"
+                             onclick="return confirm('¿Eliminar este registro de inventario de datos personales?');">
+                            Eliminar
+                          </a>
+                        {% else %}
+                          <span class="badge bg-secondary">Solo lectura</span>
+                        {% endif %}
+                      </div>
+                    </td>
+                  </tr>
+                  {% else %}
+                  <tr>
+                    <td colspan="8" class="text-center py-4 text-muted">
+                      No hay registros creados.
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      body{
+        background-image:url('/static/img/ccsgsi.jpg');
+        background-size:cover;
+        background-position:center;
+        background-attachment:fixed;
+        background-repeat:no-repeat;
+      }
+
+      .invdpm-shell{
+        width:96%;
+        max-width:1500px;
+        margin:10px auto 24px auto;
+      }
+
+      .invdpm-header-card{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        border-radius:18px;
+        padding:16px 24px;
+        min-height:94px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 12px 24px rgba(15,23,42,.25);
+        position:relative;
+        overflow:hidden;
+        margin-bottom:10px;
+      }
+
+      .invdpm-header-card::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
+          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
+      }
+
+      .invdpm-header-overlay{
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:flex-start;
+        text-align:left;
+        background:transparent;
+        padding:0;
+        position:relative;
+        z-index:1;
+      }
+
+      .invdpm-header-overlay::before{
+        content:"🗂️";
+        width:54px;
+        height:54px;
+        min-width:54px;
+        border-radius:14px;
+        background:#ffffff;
+        color:#0b4a8f;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:1.45rem;
+        box-shadow:0 8px 18px rgba(0,0,0,.25);
+        margin-right:14px;
+      }
+
+      .invdpm-header-text{
+        max-width:1100px;
+        width:100%;
+      }
+
+      .invdpm-header-text::before{
+        content:"SGSI · Matriz de Datos Personales";
+        display:inline-block;
+        background:rgba(255,255,255,.18);
+        border-radius:999px;
+        padding:3px 10px;
+        font-size:.65rem;
+        font-weight:800;
+        margin-bottom:4px;
+        color:#fff;
+      }
+
+      .invdpm-title{
+        color:#ffffff !important;
+        font-weight:950;
+        font-size:1.32rem;
+        line-height:1.1;
+        text-shadow:0 3px 10px rgba(0,0,0,.35);
+        margin:0 !important;
+      }
+
+      .invdpm-subtitle{
+        color:rgba(255,255,255,.95);
+        font-size:.78rem;
+        margin-top:4px;
+      }
+
+      .invdpm-header-actions{
+        display:flex;
+        justify-content:center;
+        gap:10px;
+        flex-wrap:wrap;
+        margin:10px 0 14px;
+      }
+
+      .invdpm-header-actions .btn{
+        border-radius:10px !important;
+        min-height:32px;
+        padding:8px 22px !important;
+        font-size:.82rem;
+        font-weight:900;
+        box-shadow:0 8px 16px rgba(15,23,42,.15);
+      }
+
+      .invdpm-back-btn{
+        background:#ffffff;
+        color:#0f172a;
+        border:1px solid #cfd8e3;
+      }
+
+      .invdpm-back-btn:hover{
+        background:#edf5ff;
+        color:#0b65d8;
+        border-color:#9ec5fe;
+      }
+
+      .invdpm-card{
+        background:rgba(255,255,255,.96);
+        border:none;
+        border-radius:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 12px 24px rgba(15,23,42,.18);
+        border:1px solid rgba(219,230,244,.9);
+        overflow:hidden;
+      }
+
+      .invdpm-topbar{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:12px;
+        padding:14px 16px 0 16px;
+        flex-wrap:wrap;
+      }
+
+      .invdpm-top-title{
+        color:#0f172a;
+        font-weight:950;
+        font-size:.92rem;
+      }
+
+      .invdpm-top-note{
+        color:#475569;
+        font-size:.78rem;
+      }
+
+      .invdpm-counter-badge{
+        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
+        color:#fff;
+        font-weight:900;
+        border-radius:999px;
+        padding:7px 14px;
+        font-size:.78rem;
+        box-shadow:0 8px 16px rgba(15,23,42,.16);
+      }
+
+      .invdpm-card-body{
+        padding:12px 16px 16px 16px;
+      }
+
+      .invdpm-table-wrap{
+        max-height:70vh;
+        overflow-y:auto;
+        overflow-x:auto;
+        border:1px solid #dbe6f4;
+        border-radius:14px;
+        background:#fff;
+      }
+
+      .invdpm-table{
+        min-width:1300px;
+        table-layout:fixed;
+        margin-bottom:0;
+      }
+
+      .invdpm-table thead th{
+        position:sticky;
+        top:0;
+        z-index:10;
+        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
+        color:#ffffff;
+        font-weight:900;
+        text-align:center;
+        vertical-align:middle;
+        white-space:nowrap;
+      }
+
+      .invdpm-table td,
+      .invdpm-table th{
+        vertical-align:middle;
+        font-size:.78rem;
+        padding:9px 8px;
+        white-space:normal;
+        word-break:break-word;
+        overflow-wrap:anywhere;
+      }
+
+      .invdpm-table td{
+        border-bottom:1px solid #e5edf7;
+      }
+
+      .invdpm-table tbody tr:nth-child(even){
+        background:#f8fbff;
+      }
+
+      .invdpm-table tbody tr:hover{
+        background:#eef6ff;
+      }
+
+      .invdpm-col-acciones{
+        min-width:180px;
+        width:180px;
+      }
+
+      .invdpm-actions-wrap{
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+        align-items:center;
+        justify-content:center;
+      }
+
+      .invdpm-btn-action{
+        min-width:105px;
+        max-width:120px;
+        font-size:.64rem !important;
+        padding:4px 12px !important;
+        line-height:1.2;
+        text-align:center;
+        white-space:nowrap;
+        border-radius:999px !important;
+        font-weight:900;
+      }
+
+      @media (max-width:992px){
+        .invdpm-shell{
+          width:98%;
+          margin:8px auto 22px auto;
+        }
+
+        .invdpm-header-card{
+          min-height:88px;
+        }
+
+        .invdpm-title{
+          font-size:1.20rem;
+        }
+
+        .invdpm-card-body{
+          padding:12px;
+        }
+
+        .invdpm-topbar{
+          padding:12px 14px 0 14px;
+        }
+      }
+
+      @media (max-width:768px){
+        .invdpm-header-overlay{
+          flex-direction:column;
+          text-align:center;
+          gap:10px;
+        }
+
+        .invdpm-header-overlay::before{
+          margin:0;
+        }
+
+        .invdpm-header-actions .btn{
+          width:100%;
+        }
+      }
+    </style>
+    """, items=items, read_only=read_only)
+
+    return render_template_string(BASE, content=Markup(html))
+
+# =========================
+# Detalle — Inventario de Datos Personales
+# =========================
 @app.route('/inventario_datos_personales/detalle/<int:id>', methods=['GET'])
 @login_required
 def inventario_datos_personales_detalle(id):
@@ -1130,8681 +8453,4 @@ def activos_valoracion():
     """)
 
     return render_template_string(BASE, content=Markup(html))
-
-def render_tabla_valoracion(titulo, items, post_url, edit_item=None, delete_url=None, volver_url=None):
-    html = """
-    <div class="container mt-4">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h3 class="m-0">{{ titulo }}</h3>
-        <div class="d-flex gap-2">
-          <a href="{{ volver_url }}" class="btn btn-secondary rounded-pill px-4 py-2">⬅ Volver</a>
-          <a href="{{ url_for('activos_menu') }}" class="btn btn-outline-secondary rounded-pill px-4 py-2">🏠 Volver al Menú Activos</a>
-        </div>
-      </div>
-
-      <!-- Formulario crear/editar -->
-      <div class="card shadow-sm mb-3">
-        <div class="card-body">
-          <form method="post" action="{{ post_url }}">
-            {% if edit_item %}
-              <input type="hidden" name="id" value="{{ edit_item.id }}">
-            {% endif %}
-
-            <div class="row g-3">
-              <div class="col-md-4">
-                <label class="form-label">Nivel</label>
-                <input type="text" name="nivel" class="form-control" required
-                       value="{{ edit_item.nivel if edit_item else '' }}" placeholder="Alto / Medio / Bajo">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">Impacto (1..5)</label>
-                <input type="number" name="impacto" class="form-control" min="1" max="5" required
-                       value="{{ edit_item.impacto if edit_item else '' }}">
-              </div>
-              <div class="col-md-3">
-                <label class="form-label">Clasificación</label>
-                <input type="text" name="clasificacion" class="form-control" required
-                       value="{{ edit_item.clasificacion if edit_item else '' }}" placeholder="Restringido / Interno / Público">
-              </div>
-              <div class="col-md-3">
-                <label class="form-label d-block">Estado</label>
-                <select name="activo" class="form-select">
-                  <option value="1" {% if edit_item and edit_item.activo %}selected{% endif %}>Activo</option>
-                  <option value="0" {% if edit_item and not edit_item.activo %}selected{% endif %}>Inactivo</option>
-                </select>
-              </div>
-              <div class="col-12">
-                <label class="form-label">Descripción</label>
-                <textarea name="descripcion" class="form-control" rows="2" required>{{ edit_item.descripcion if edit_item else '' }}</textarea>
-              </div>
-            </div>
-
-            <div class="mt-3 d-flex justify-content-center gap-2">
-              <button type="submit" class="btn btn-success rounded-pill px-4">
-                {% if edit_item %}Guardar cambios{% else %}Agregar{% endif %}
-              </button>
-              {% if edit_item %}
-                <a href="{{ request.path }}" class="btn btn-outline-secondary rounded-pill px-4">Cancelar</a>
-              {% endif %}
-            </div>
-          </form>
-        </div>
-      </div>
-
-      <!-- Tabla -->
-      <div class="table-responsive">
-        <table class="table table-bordered table-sm align-middle">
-          <thead class="table-secondary">
-            <tr class="text-center">
-              <th style="width:12%">Nivel</th>
-              <th style="width:10%">Impacto</th>
-              <th style="width:18%">Clasificación</th>
-              <th>Descripción</th>
-              <th style="width:16%">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for it in items %}
-            <tr>
-              <td><b>{{ it.nivel }}</b> {% if not it.activo %}<span class="badge bg-secondary ms-1">Inactivo</span>{% endif %}</td>
-              <td class="text-center">{{ it.impacto }}</td>
-              <td>{{ it.clasificacion }}</td>
-              <td class="small">{{ it.descripcion }}</td>
-              <td class="text-center">
-                <a href="{{ request.path }}?edit={{ it.id }}" class="btn btn-warning btn-sm rounded-pill px-3">Editar</a>
-                <a href="{{ delete_url }}?id={{ it.id }}" class="btn btn-danger btn-sm rounded-pill px-3"
-                   onclick="return confirm('¿Eliminar este registro?');">Eliminar</a>
-              </td>
-            </tr>
-            {% endfor %}
-            {% if items|length == 0 %}
-              <tr><td colspan="5" class="text-center text-muted">Sin registros</td></tr>
-            {% endif %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    """
-    return Markup(render_template_string(
-        html,
-        titulo=titulo,
-        items=items,
-        post_url=post_url,
-        edit_item=edit_item,
-        delete_url=delete_url,
-        volver_url=volver_url,
-        request=request
-    ))
-    
-
-
-# =========================
-# Valor Confidencialidad
-# =========================
-
-@app.route('/valor_confidencialidad', methods=['GET', 'POST'])
-@login_required
-def valor_confidencialidad():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        read_only = True
-    else:
-        if user.role != 'admin' and not verificar_permiso(user, "Registro de Proveedores"):
-            flash("No tiene permiso para ver los registros de proveedores.", "danger")
-            return redirect(url_for('proveedores_menu'))
-        read_only = False
-
-    # 3) Definir si es solo lectura (auditor)
-    solo_lectura = (user.role == 'auditor')
-
-    # (Si no usas 'areas' aquí, incluso podrías eliminar esta línea)
-    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
-
-    # 🚫 Si es auditor, ignoramos cualquier POST (no puede crear/editar)
-    if request.method == 'POST' and solo_lectura:
-        flash("El rol Auditor no puede modificar la tabla de valoración de confidencialidad.", "danger")
-        return redirect(url_for('valor_confidencialidad'))
-
-    # Crear / Editar: solo si NO es solo lectura
-    if request.method == 'POST' and not solo_lectura:
-        rid = request.form.get('id')
-        nivel_txt = (request.form.get('nivel_confidencialidad') or "").strip()
-        descripcion = (request.form.get('descripcion') or "").strip()
-        impacto = (request.form.get('impacto') or "").strip()
-        clasificacion = (request.form.get('clasificacion') or "").strip()
-        try:
-            nivel_num = int(request.form.get('nivel_num') or 0)
-        except ValueError:
-            nivel_num = 0
-
-        # Validación
-        if not (nivel_txt and descripcion and impacto and clasificacion):
-            flash("Todos los campos son obligatorios.", "danger")
-            return redirect(url_for('valor_confidencialidad'))
-        if nivel_num < 1 or nivel_num > 5:
-            flash("El nivel numérico debe estar entre 1 y 5.", "danger")
-            return redirect(url_for('valor_confidencialidad'))
-
-        # Crear / editar
-        if rid:
-            it = ValoracionConfidencialidad.query.get(int(rid))
-            if not it:
-                flash("Registro no encontrado.", "danger")
-                return redirect(url_for('valor_confidencialidad'))
-        else:
-            it = ValoracionConfidencialidad()
-
-        it.nivel_confidencialidad = nivel_txt
-        it.descripcion = descripcion
-        it.impacto = impacto
-        it.clasificacion = clasificacion
-        it.nivel_num = nivel_num
-
-        db.session.add(it)
-        db.session.commit()
-        flash("Guardado correctamente.", "success")
-        return redirect(url_for('valor_confidencialidad'))
-
-    # GET
-    edit_id = request.args.get('edit', type=int)
-    edit_item = ValoracionConfidencialidad.query.get(edit_id) if edit_id else None
-    items = ValoracionConfidencialidad.query.order_by(ValoracionConfidencialidad.nivel_num.asc(), ValoracionConfidencialidad.id.desc()).all()
-
-    html = """
-    <div class="valconf-shell">
-
-      <!-- CABECERA -->
-      <div class="valconf-header-card">
-        <div class="valconf-header-overlay">
-          <div class="valconf-header-text">
-            <h3 class="valconf-title m-0">Tabla de Valoración — Confidencialidad</h3>
-            <div class="valconf-subtitle">
-              Configuración de niveles, clasificación e impacto para la valoración de confidencialidad de activos
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOTÓN VOLVER -->
-      <div class="valconf-header-actions">
-      </div>
-
-      <!-- FORMULARIO -->
-      {% if not solo_lectura %}
-      <div class="valconf-card mb-3">
-        <div class="valconf-card-body">
-          <form method="post" action="{{ url_for('valor_confidencialidad') }}">
-            {% if edit_item %}
-              <input type="hidden" name="id" value="{{ edit_item.id }}">
-            {% endif %}
-
-            <div class="row g-3">
-
-              <div class="col-md-3">
-                <label class="form-label">Nivel de Confidencialidad (texto)</label>
-                <input type="text"
-                       name="nivel_confidencialidad"
-                       class="form-control"
-                       required
-                       placeholder="Alto / Medio / Bajo / etc."
-                       value="{{ edit_item.nivel_confidencialidad if edit_item else '' }}">
-              </div>
-
-              <div class="col-md-2">
-                <label class="form-label">Nivel (numérico 1–5)</label>
-                <input type="number"
-                       name="nivel_num"
-                       class="form-control"
-                       min="1"
-                       max="5"
-                       required
-                       value="{{ edit_item.nivel_num if edit_item else '' }}"
-                       placeholder="1 a 5">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Clasificación (texto)</label>
-                <input type="text"
-                       name="clasificacion"
-                       class="form-control"
-                       required
-                       placeholder="Restringido / Interno / Público / etc."
-                       value="{{ edit_item.clasificacion if edit_item else '' }}">
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Impacto</label>
-                <textarea name="impacto"
-                          class="form-control"
-                          rows="2"
-                          required
-                          placeholder="Descripción del impacto, ejemplos, alcance...">{{ edit_item.impacto if edit_item else '' }}</textarea>
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Descripción</label>
-                <textarea name="descripcion"
-                          class="form-control"
-                          rows="2"
-                          required
-                          placeholder="Definición del nivel, ejemplos, alcance...">{{ edit_item.descripcion if edit_item else '' }}</textarea>
-              </div>
-
-            </div>
-
-            <div class="valconf-bottom-actions">
-              <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold">
-                {% if edit_item %}Guardar cambios{% else %}Agregar{% endif %}
-              </button>
-
-              {% if edit_item %}
-                <a href="{{ url_for('valor_confidencialidad') }}"
-                   class="btn rounded-pill px-4 fw-bold valconf-cancel-btn">
-                  Cancelar
-                </a>
-              {% endif %}
-            </div>
-          </form>
-        </div>
-      </div>
-      {% endif %}
-
-      <!-- TABLA -->
-      <style>
-        .badge-n1 { background:#2ecc71; }
-        .badge-n2 { background:#f1c40f; color:#111; }
-        .badge-n3 { background:#ff6f61; }
-        .badge-n4 { background:#8e2c2c; }
-        .badge-n5 { background:#8e44ad; }
-      </style>
-
-      <div class="valconf-card">
-        <div class="valconf-card-body">
-
-          <div class="valconf-table-wrap">
-            <div class="table-responsive">
-              <table class="table table-bordered table-sm align-middle valconf-table mb-0">
-                <thead class="table-secondary">
-                  <tr class="text-center">
-                    <th style="width:16%">Nivel (texto)</th>
-                    <th style="width:8%">Nivel<br>numérico</th>
-                    <th>Descripción</th>
-                    <th style="width:18%">Impacto</th>
-                    <th style="width:20%">Clasificación (color por nivel)</th>
-                    <th style="width:16%">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for it in items %}
-                    {% set cls = 'badge-n' ~ (it.nivel_num if it.nivel_num in [1,2,3,4,5] else 3) %}
-                    <tr>
-                      <td><b>{{ it.nivel_confidencialidad }}</b></td>
-                      <td class="text-center">{{ it.nivel_num }}</td>
-                      <td class="small">{{ it.descripcion }}</td>
-                      <td>{{ it.impacto }}</td>
-                      <td class="text-center">
-                        <span class="badge {{ cls }} rounded-pill px-3 py-2">
-                          {{ it.clasificacion }}
-                        </span>
-                      </td>
-                      <td class="text-center">
-                        {% if not solo_lectura %}
-                          <a href="{{ url_for('valor_confidencialidad', edit=it.id) }}"
-                             class="btn btn-warning btn-sm rounded-pill px-3">
-                            Editar
-                          </a>
-                          <a href="{{ url_for('valor_confidencialidad_delete', id=it.id) }}"
-                             class="btn btn-danger btn-sm rounded-pill px-3"
-                             onclick="return confirm('¿Eliminar este registro?');">
-                            Eliminar
-                          </a>
-                        {% else %}
-                          <span class="text-muted small">Solo lectura</span>
-                        {% endif %}
-                      </td>
-                    </tr>
-                  {% endfor %}
-
-                  {% if items|length == 0 %}
-                    <tr>
-                      <td colspan="6" class="text-center text-muted py-4">Sin registros</td>
-                    </tr>
-                  {% endif %}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .valconf-shell{
-        width:96%;
-        max-width:1600px;
-        margin:10px auto 24px auto;
-      }
-
-      .valconf-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .valconf-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .valconf-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent;
-        padding:0;
-        position:relative;
-        z-index:1;
-      }
-
-      .valconf-header-overlay::before{
-        content:"🔐";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .valconf-header-text{
-        max-width:1100px;
-        width:100%;
-        transform:none;
-      }
-
-      .valconf-header-text::before{
-        content:"SGSI · Tablas de Valoración";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .valconf-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .valconf-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .valconf-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin:10px 0 14px;
-        flex-wrap:wrap;
-      }
-
-      .valconf-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .valconf-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .valconf-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .valconf-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .valconf-card-body{
-        padding:18px;
-      }
-
-      .valconf-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .valconf-card .form-control,
-      .valconf-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .valconf-card textarea.form-control{
-        min-height:70px;
-        resize:vertical;
-      }
-
-      .valconf-card .form-control:focus,
-      .valconf-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#fff;
-      }
-
-      .valconf-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:18px;
-        flex-wrap:wrap;
-      }
-
-      .valconf-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .valconf-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .valconf-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .valconf-table-wrap{
-        max-height:70vh;
-        overflow-y:auto;
-        overflow-x:auto;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:#fff;
-      }
-
-      .valconf-table{
-        width:100%;
-        min-width:1100px;
-        table-layout:auto;
-        margin-bottom:0;
-      }
-
-      .valconf-table th,
-      .valconf-table td{
-        white-space:normal;
-        word-break:break-word;
-        vertical-align:top;
-        font-size:.78rem;
-        padding:9px 8px;
-      }
-
-      .valconf-table td{
-        border-bottom:1px solid #e5edf7;
-      }
-
-      .valconf-table thead th{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#ffffff !important;
-        font-weight:900;
-        text-align:center;
-        vertical-align:middle;
-      }
-
-      .valconf-table tbody tr:nth-child(even){
-        background:#f8fbff;
-      }
-
-      .valconf-table tbody tr:hover{
-        background:#eef6ff;
-      }
-
-      .badge{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }
-
-      .btn.rounded-pill{
-        border-radius:999px !important;
-      }
-
-      .valconf-card .btn{
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-        font-weight:900;
-        font-size:.78rem;
-      }
-
-      @media (max-width:992px){
-        .valconf-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .valconf-header-card{
-          min-height:88px;
-        }
-
-        .valconf-title{
-          font-size:1.20rem;
-        }
-
-        .valconf-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .valconf-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .valconf-header-overlay::before{
-          margin:0;
-        }
-
-        .valconf-header-actions .btn,
-        .valconf-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(
-        html,
-        edit_item=edit_item,
-        items=items,
-        solo_lectura=solo_lectura
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-@app.route('/valor_confidencialidad/delete')
-@login_required
-def valor_confidencialidad_delete():
-    user = User.query.filter_by(username=session['username']).first()
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede eliminar registros de la tabla de confidencialidad.", "danger")
-        return redirect(url_for('valor_confidencialidad'))
-    
-    rid = request.args.get('id', type=int)
-    it = ValoracionConfidencialidad.query.get(rid)
-    if it:
-        db.session.delete(it)
-        db.session.commit()
-        flash("Eliminado correctamente.", "success")
-    else:
-        flash("Registro no encontrado.", "danger")
-    return redirect(url_for('valor_confidencialidad'))
-
-# =========================
-# Valor Integridad
-# =========================
-
-@app.route('/valor_integridad', methods=['GET', 'POST'])
-@login_required
-def valor_integridad():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        read_only = True
-    else:
-        if user.role != 'admin' and not verificar_permiso(user, "Registro de Proveedores"):
-            flash("No tiene permiso para ver los registros de proveedores.", "danger")
-            return redirect(url_for('proveedores_menu'))
-        read_only = False
-
-    # 3) Definir si es solo lectura (auditor)
-    solo_lectura = (user.role == 'auditor')
-
-    # 4) Si es auditor e intenta hacer POST, se bloquea
-    if request.method == 'POST' and solo_lectura:
-        flash("El rol Auditor no puede modificar la tabla de valoración de integridad.", "danger")
-        return redirect(url_for('valor_integridad'))
-
-    # 5) Crear / Editar: solo si NO es solo lectura
-    if request.method == 'POST' and not solo_lectura:
-        rid = request.form.get('id')
-        nivel_txt = (request.form.get('nivel') or "").strip()
-        descripcion = (request.form.get('descripcion') or "").strip()
-        impacto = (request.form.get('impacto') or "").strip()
-        clasificacion = (request.form.get('clasificacion') or "").strip()
-        try:
-            nivel_num = int(request.form.get('nivel_num') or 0)
-        except ValueError:
-            nivel_num = 0
-
-        if not (nivel_txt and descripcion and impacto and clasificacion):
-            flash("Todos los campos son obligatorios.", "danger")
-            return redirect(url_for('valor_integridad'))
-        if nivel_num < 1 or nivel_num > 5:
-            flash("El nivel numérico debe estar entre 1 y 5.", "danger")
-            return redirect(url_for('valor_integridad'))
-
-        if rid:
-            it = ValoracionIntegridad.query.get(int(rid))
-            if not it:
-                flash("Registro no encontrado.", "danger")
-                return redirect(url_for('valor_integridad'))
-        else:
-            it = ValoracionIntegridad()
-
-        it.nivel = nivel_txt
-        it.descripcion = descripcion
-        it.impacto = impacto
-        it.clasificacion = clasificacion
-        it.nivel_num = nivel_num
-
-        db.session.add(it)
-        db.session.commit()
-        flash("Guardado correctamente.", "success")
-        return redirect(url_for('valor_integridad'))
-
-    # GET
-    edit_id = request.args.get('edit', type=int)
-    edit_item = ValoracionIntegridad.query.get(edit_id) if edit_id else None
-    items = ValoracionIntegridad.query.order_by(ValoracionIntegridad.nivel_num.asc(), ValoracionIntegridad.id.desc()).all()
-
-    html = """
-    <div class="valint-shell">
-
-      <!-- CABECERA -->
-      <div class="valint-header-card">
-        <div class="valint-header-overlay">
-          <div class="valint-header-text">
-            <h3 class="valint-title m-0">Tabla de Valoración — Integridad</h3>
-            <div class="valint-subtitle">
-              Configuración de niveles, clasificación e impacto para la valoración de integridad de activos
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOTÓN VOLVER -->
-      <div class="valint-header-actions">
-      </div>
-
-      <!-- FORMULARIO -->
-      {% if not solo_lectura %}
-      <div class="valint-card mb-3">
-        <div class="valint-card-body">
-
-          <form method="post" action="{{ url_for('valor_integridad') }}">
-            {% if edit_item %}
-              <input type="hidden" name="id" value="{{ edit_item.id }}">
-            {% endif %}
-
-            <div class="row g-3">
-
-              <div class="col-md-3">
-                <label class="form-label">Nivel (texto)</label>
-                <input type="text"
-                       name="nivel"
-                       class="form-control"
-                       required
-                       placeholder="Alto / Medio / Bajo / etc."
-                       value="{{ edit_item.nivel if edit_item else '' }}">
-              </div>
-
-              <div class="col-md-2">
-                <label class="form-label">Nivel (numérico 1–5)</label>
-                <input type="number"
-                       name="nivel_num"
-                       class="form-control"
-                       min="1"
-                       max="5"
-                       required
-                       value="{{ edit_item.nivel_num if edit_item else '' }}"
-                       placeholder="1 a 5">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Clasificación (texto)</label>
-                <input type="text"
-                       name="clasificacion"
-                       class="form-control"
-                       required
-                       placeholder="Crítico / Importante / Normal / etc."
-                       value="{{ edit_item.clasificacion if edit_item else '' }}">
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Impacto</label>
-                <textarea name="impacto"
-                          class="form-control"
-                          rows="2"
-                          required
-                          placeholder="Descripción del impacto, ejemplos, alcance...">{{ edit_item.impacto if edit_item else '' }}</textarea>
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Descripción</label>
-                <textarea name="descripcion"
-                          class="form-control"
-                          rows="2"
-                          required
-                          placeholder="Definición del nivel, ejemplos, alcance...">{{ edit_item.descripcion if edit_item else '' }}</textarea>
-              </div>
-
-            </div>
-
-            <div class="valint-bottom-actions">
-
-              <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold">
-                {% if edit_item %}Guardar cambios{% else %}Agregar{% endif %}
-              </button>
-
-              {% if edit_item %}
-                <a href="{{ url_for('valor_integridad') }}"
-                   class="btn rounded-pill px-4 fw-bold valint-cancel-btn">
-                  Cancelar
-                </a>
-              {% endif %}
-
-            </div>
-
-          </form>
-
-        </div>
-      </div>
-      {% endif %}
-
-      <!-- TABLA -->
-      <style>
-        .badge-n1 { background:#2ecc71; }
-        .badge-n2 { background:#f1c40f; color:#111; }
-        .badge-n3 { background:#e74c3c; }
-        .badge-n4 { background:#8e2c2c; }
-        .badge-n5 { background:#8e44ad; }
-      </style>
-
-      <div class="valint-card">
-        <div class="valint-card-body">
-
-          <div class="valint-table-wrap">
-            <div class="table-responsive">
-
-              <table class="table table-bordered table-sm align-middle valint-table mb-0">
-
-                <thead class="table-secondary">
-                  <tr class="text-center">
-                    <th style="width:16%">Nivel (texto)</th>
-                    <th style="width:8%">Nivel<br>numérico</th>
-                    <th>Descripción</th>
-                    <th style="width:18%">Impacto</th>
-                    <th style="width:20%">Clasificación (color por nivel)</th>
-                    <th style="width:16%">Acciones</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-
-                {% for it in items %}
-                  {% set cls = 'badge-n' ~ (it.nivel_num if it.nivel_num in [1,2,3,4,5] else 3) %}
-
-                  <tr>
-
-                    <td><b>{{ it.nivel }}</b></td>
-
-                    <td class="text-center">
-                      {{ it.nivel_num }}
-                    </td>
-
-                    <td class="small">
-                      {{ it.descripcion }}
-                    </td>
-
-                    <td>
-                      {{ it.impacto }}
-                    </td>
-
-                    <td class="text-center">
-                      <span class="badge {{ cls }} rounded-pill px-3 py-2">
-                        {{ it.clasificacion }}
-                      </span>
-                    </td>
-
-                    <td class="text-center">
-
-                      {% if not solo_lectura %}
-
-                        <a href="{{ url_for('valor_integridad', edit=it.id) }}"
-                           class="btn btn-warning btn-sm rounded-pill px-3">
-                          Editar
-                        </a>
-
-                        <a href="{{ url_for('valor_integridad_delete', id=it.id) }}"
-                           class="btn btn-danger btn-sm rounded-pill px-3"
-                           onclick="return confirm('¿Eliminar este registro?');">
-                          Eliminar
-                        </a>
-
-                      {% else %}
-
-                        <span class="text-muted small">Solo lectura</span>
-
-                      {% endif %}
-
-                    </td>
-
-                  </tr>
-
-                {% endfor %}
-
-                {% if items|length == 0 %}
-                  <tr>
-                    <td colspan="6" class="text-center text-muted py-4">
-                      Sin registros
-                    </td>
-                  </tr>
-                {% endif %}
-
-                </tbody>
-
-              </table>
-
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-    /* =========================
-       FONDO SGSI
-    ========================= */
-    body{
-      background-image:url('/static/img/ccsgsi.jpg');
-      background-size:cover;
-      background-position:center;
-      background-attachment:fixed;
-      background-repeat:no-repeat;
-    }
-
-    /* =========================
-       CONTENEDOR
-    ========================= */
-    .valint-shell{
-      width:96%;
-      max-width:1600px;
-      margin:10px auto 24px auto;
-    }
-
-    /* =========================
-       HEADER SGSI PRO
-    ========================= */
-    .valint-header-card{
-      background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-      border-radius:18px;
-      padding:16px 24px;
-      min-height:95px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      box-shadow:0 12px 24px rgba(15,23,42,.25);
-      position:relative;
-      overflow:hidden;
-      margin-bottom:10px;
-    }
-
-    .valint-header-card::before{
-      content:"";
-      position:absolute;
-      inset:0;
-      background:
-        radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-        repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-    }
-
-    /* ICONO */
-    .valint-header-overlay{
-      width:100%;
-      display:flex;
-      align-items:center;
-      justify-content:flex-start;
-      text-align:left;
-      position:relative;
-      z-index:1;
-    }
-
-    .valint-header-overlay::before{
-      content:"🧩";
-      width:54px;
-      height:54px;
-      border-radius:14px;
-      background:#ffffff;
-      color:#0b4a8f;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      font-size:1.4rem;
-      box-shadow:0 8px 18px rgba(0,0,0,.25);
-      margin-right:14px;
-    }
-
-    /* TEXTO */
-    .valint-header-text{
-      max-width:1100px;
-      width:100%;
-    }
-
-    .valint-header-text::before{
-      content:"SGSI · Valoración Interna";
-      display:inline-block;
-      background:rgba(255,255,255,.18);
-      border-radius:999px;
-      padding:3px 10px;
-      font-size:.65rem;
-      font-weight:800;
-      margin-bottom:4px;
-      color:#fff;
-    }
-
-    .valint-title{
-      color:#ffffff !important;
-      font-weight:950;
-      font-size:1.32rem;
-      line-height:1.1;
-      text-shadow:0 3px 10px rgba(0,0,0,.35);
-      margin:0 !important;
-    }
-
-    .valint-subtitle{
-      color:rgba(255,255,255,.95);
-      font-size:.78rem;
-      margin-top:4px;
-    }
-
-    /* =========================
-       BOTONES SUPERIORES
-    ========================= */
-    .valint-header-actions{
-      display:flex;
-      justify-content:center;
-      gap:10px;
-      margin:10px 0 14px;
-      flex-wrap:wrap;
-    }
-
-    .valint-header-actions .btn{
-      border-radius:10px !important;
-      min-height:32px;
-      padding:8px 22px !important;
-      font-size:.82rem;
-      font-weight:900;
-      box-shadow:0 8px 16px rgba(15,23,42,.15);
-    }
-
-    .valint-back-btn{
-      background:#ffffff;
-      color:#0f172a;
-      border:1px solid #cfd8e3;
-    }
-
-    .valint-back-btn:hover{
-      background:#edf5ff;
-      color:#0b65d8;
-      border-color:#9ec5fe;
-    }
-
-    /* =========================
-       CARD PRINCIPAL
-    ========================= */
-    .valint-card{
-      background:rgba(255,255,255,.96)!important;
-      border-radius:18px;
-      backdrop-filter:blur(8px);
-      box-shadow:0 12px 24px rgba(15,23,42,.18);
-      border:1px solid rgba(219,230,244,.9);
-      overflow:hidden;
-    }
-
-    .valint-card-body{
-      padding:18px;
-    }
-
-    /* =========================
-       FORMULARIOS
-    ========================= */
-    .valint-card .form-label{
-      font-weight:800;
-      color:#25324a;
-      font-size:.78rem;
-    }
-
-    .valint-card .form-control,
-    .valint-card .form-select{
-      border-radius:9px;
-      border:1px solid #d9e3f0;
-      min-height:32px;
-      font-size:.80rem;
-      background:#f8fafc;
-    }
-
-    .valint-card textarea{
-      min-height:70px;
-    }
-
-    .valint-card .form-control:focus,
-    .valint-card .form-select:focus{
-      border-color:#3f86d6;
-      box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-      background:#fff;
-    }
-
-    /* =========================
-       BOTONES INFERIORES
-    ========================= */
-    .valint-bottom-actions{
-      display:flex;
-      justify-content:center;
-      gap:10px;
-      margin-top:18px;
-      flex-wrap:wrap;
-    }
-
-    .valint-bottom-actions .btn{
-      border-radius:10px !important;
-      min-height:32px;
-      padding:8px 22px !important;
-      font-size:.82rem;
-      font-weight:900;
-      box-shadow:0 8px 16px rgba(15,23,42,.15);
-    }
-
-    .valint-cancel-btn{
-      background:#ffffff;
-      color:#0f172a;
-      border:1px solid #cfd8e3;
-    }
-
-    .valint-cancel-btn:hover{
-      background:#edf5ff;
-      color:#0b65d8;
-    }
-
-    /* =========================
-       TABLA PRO
-    ========================= */
-    .valint-table-wrap{
-      max-height:70vh;
-      overflow:auto;
-      border:1px solid #dbe6f4;
-      border-radius:14px;
-      background:#fff;
-    }
-
-    .valint-table{
-      width:100%;
-      min-width:1100px;
-    }
-
-    .valint-table th,
-    .valint-table td{
-      font-size:.78rem;
-      padding:9px;
-      word-break:break-word;
-    }
-
-    .valint-table thead th{
-      position:sticky;
-      top:0;
-      z-index:10;
-      background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-      color:#fff !important;
-      font-weight:900;
-      text-align:center;
-    }
-
-    .valint-table tbody tr:nth-child(even){
-      background:#f8fbff;
-    }
-
-    .valint-table tbody tr:hover{
-      background:#eef6ff;
-    }
-
-    /* =========================
-       RESPONSIVE
-    ========================= */
-    @media (max-width:768px){
-      .valint-header-overlay{
-        flex-direction:column;
-        text-align:center;
-        gap:10px;
-      }
-
-      .valint-header-overlay::before{
-        margin:0;
-      }
-
-      .valint-header-actions .btn,
-      .valint-bottom-actions .btn{
-        width:100%;
-      }
-    }
-    </style>
-    """
-    inner = render_template_string(
-        html,
-        edit_item=edit_item,
-        items=items,
-        solo_lectura=solo_lectura
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-@app.route('/valor_integridad/delete')
-@login_required
-def valor_integridad_delete():
-    user = User.query.filter_by(username=session['username']).first()
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede eliminar registros de la tabla de integridad.", "danger")
-        return redirect(url_for('valor_integridad'))
-    
-    rid = request.args.get('id', type=int)
-    it = ValoracionIntegridad.query.get(rid)
-    if it:
-        db.session.delete(it)
-        db.session.commit()
-        flash("Eliminado correctamente.", "success")
-    else:
-        flash("Registro no encontrado.", "danger")
-    return redirect(url_for('valor_integridad'))
-
-# =========================
-# Valor Disponibilidad
-# =========================
-
-@app.route('/valor_disponibilidad', methods=['GET', 'POST'])
-@login_required
-def valor_disponibilidad():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        read_only = True
-    else:
-        if user.role != 'admin' and not verificar_permiso(user, "Registro de Proveedores"):
-            flash("No tiene permiso para ver los registros de proveedores.", "danger")
-            return redirect(url_for('proveedores_menu'))
-        read_only = False
-
-    # 3) Definir si es solo lectura (auditor)
-    solo_lectura = (user.role == 'auditor')
-
-    # 4) Si es auditor e intenta hacer POST, bloquear
-    if request.method == 'POST' and solo_lectura:
-        flash("El rol Auditor no puede modificar la tabla de valoración de disponibilidad.", "danger")
-        return redirect(url_for('valor_disponibilidad'))
-
-    # 5) Crear / Editar: solo si NO es solo lectura
-    if request.method == 'POST' and not solo_lectura:
-        rid = request.form.get('id')
-        nivel_txt = (request.form.get('nivel') or "").strip()
-        descripcion = (request.form.get('descripcion') or "").strip()
-        impacto = (request.form.get('impacto') or "").strip()
-        clasificacion = (request.form.get('clasificacion') or "").strip()
-        try:
-            nivel_num = int(request.form.get('nivel_num') or 0)
-        except ValueError:
-            nivel_num = 0
-
-        if not (nivel_txt and descripcion and impacto and clasificacion):
-            flash("Todos los campos son obligatorios.", "danger")
-            return redirect(url_for('valor_disponibilidad'))
-        if nivel_num < 1 or nivel_num > 5:
-            flash("El nivel numérico debe estar entre 1 y 5.", "danger")
-            return redirect(url_for('valor_disponibilidad'))
-
-        if rid:
-            it = ValoracionDisponibilidad.query.get(int(rid))
-            if not it:
-                flash("Registro no encontrado.", "danger")
-                return redirect(url_for('valor_disponibilidad'))
-        else:
-            it = ValoracionDisponibilidad()
-
-        it.nivel = nivel_txt
-        it.descripcion = descripcion
-        it.impacto = impacto
-        it.clasificacion = clasificacion
-        it.nivel_num = nivel_num
-
-        db.session.add(it)
-        db.session.commit()
-        flash("Guardado correctamente.", "success")
-        return redirect(url_for('valor_disponibilidad'))
-
-    # GET
-    edit_id = request.args.get('edit', type=int)
-    edit_item = ValoracionDisponibilidad.query.get(edit_id) if edit_id else None
-    items = ValoracionDisponibilidad.query.order_by(
-        ValoracionDisponibilidad.nivel_num.asc(),
-        ValoracionDisponibilidad.id.desc()
-    ).all()
-
-    html = """
-    <div class="valdisp-shell">
-
-      <!-- CABECERA -->
-      <div class="valdisp-header-card">
-        <div class="valdisp-header-overlay">
-          <div class="valdisp-header-text">
-            <h3 class="valdisp-title m-0">Tabla de Valoración — Disponibilidad</h3>
-            <div class="valdisp-subtitle">
-              Configuración de niveles, clasificación e impacto para la valoración de disponibilidad de activos
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOTÓN VOLVER -->
-      <div class="valdisp-header-actions">
-    
-      </div>
-
-      <!-- FORMULARIO -->
-      {% if not solo_lectura %}
-      <div class="valdisp-card mb-3">
-        <div class="valdisp-card-body">
-
-          <form method="post" action="{{ url_for('valor_disponibilidad') }}">
-            {% if edit_item %}
-              <input type="hidden" name="id" value="{{ edit_item.id }}">
-            {% endif %}
-
-            <div class="row g-3">
-
-              <div class="col-md-3">
-                <label class="form-label">Nivel (texto)</label>
-                <input type="text"
-                       name="nivel"
-                       class="form-control"
-                       required
-                       placeholder="Alta / Media / Baja / etc."
-                       value="{{ edit_item.nivel if edit_item else '' }}">
-              </div>
-
-              <div class="col-md-2">
-                <label class="form-label">Nivel (numérico 1–5)</label>
-                <input type="number"
-                       name="nivel_num"
-                       class="form-control"
-                       min="1"
-                       max="5"
-                       required
-                       value="{{ edit_item.nivel_num if edit_item else '' }}"
-                       placeholder="1 a 5">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Clasificación (texto)</label>
-                <input type="text"
-                       name="clasificacion"
-                       class="form-control"
-                       required
-                       placeholder="Crítico / Importante / Normal / etc."
-                       value="{{ edit_item.clasificacion if edit_item else '' }}">
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Impacto</label>
-                <textarea name="impacto"
-                          class="form-control"
-                          rows="2"
-                          required
-                          placeholder="Descripción del impacto, ejemplos, alcance...">{{ edit_item.impacto if edit_item else '' }}</textarea>
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Descripción</label>
-                <textarea name="descripcion"
-                          class="form-control"
-                          rows="2"
-                          required
-                          placeholder="Definición del nivel, ejemplos, alcance...">{{ edit_item.descripcion if edit_item else '' }}</textarea>
-              </div>
-
-            </div>
-
-            <div class="valdisp-bottom-actions">
-
-              <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold">
-                {% if edit_item %}Guardar cambios{% else %}Agregar{% endif %}
-              </button>
-
-              {% if edit_item %}
-                <a href="{{ url_for('valor_disponibilidad') }}"
-                   class="btn rounded-pill px-4 fw-bold valdisp-cancel-btn">
-                  Cancelar
-                </a>
-              {% endif %}
-
-            </div>
-
-          </form>
-
-        </div>
-      </div>
-      {% endif %}
-
-      <!-- TABLA -->
-      <style>
-        .badge-n1 { background:#2ecc71; }
-        .badge-n2 { background:#f1c40f; color:#111; }
-        .badge-n3 { background:#e74c3c; }
-        .badge-n4 { background:#8e2c2c; }
-        .badge-n5 { background:#8e44ad; }
-      </style>
-
-      <div class="valdisp-card">
-        <div class="valdisp-card-body">
-
-          <div class="valdisp-table-wrap">
-            <div class="table-responsive">
-
-              <table class="table table-bordered table-sm align-middle valdisp-table mb-0">
-
-                <thead class="table-secondary">
-                  <tr class="text-center">
-                    <th style="width:16%">Nivel (texto)</th>
-                    <th style="width:8%">Nivel<br>numérico</th>
-                    <th>Descripción</th>
-                    <th style="width:18%">Impacto</th>
-                    <th style="width:20%">Clasificación (color por nivel)</th>
-                    <th style="width:16%">Acciones</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-
-                {% for it in items %}
-                  {% set cls = 'badge-n' ~ (it.nivel_num if it.nivel_num in [1,2,3,4,5] else 3) %}
-
-                  <tr>
-
-                    <td><b>{{ it.nivel }}</b></td>
-
-                    <td class="text-center">
-                      {{ it.nivel_num }}
-                    </td>
-
-                    <td class="small">
-                      {{ it.descripcion }}
-                    </td>
-
-                    <td>
-                      {{ it.impacto }}
-                    </td>
-
-                    <td class="text-center">
-                      <span class="badge {{ cls }} rounded-pill px-3 py-2">
-                        {{ it.clasificacion }}
-                      </span>
-                    </td>
-
-                    <td class="text-center">
-
-                      {% if not solo_lectura %}
-
-                        <a href="{{ url_for('valor_disponibilidad', edit=it.id) }}"
-                           class="btn btn-warning btn-sm rounded-pill px-3">
-                          Editar
-                        </a>
-
-                        <a href="{{ url_for('valor_disponibilidad_delete', id=it.id) }}"
-                           class="btn btn-danger btn-sm rounded-pill px-3"
-                           onclick="return confirm('¿Eliminar este registro?');">
-                          Eliminar
-                        </a>
-
-                      {% else %}
-
-                        <span class="text-muted small">Solo lectura</span>
-
-                      {% endif %}
-
-                    </td>
-
-                  </tr>
-
-                {% endfor %}
-
-                {% if items|length == 0 %}
-                  <tr>
-                    <td colspan="6" class="text-center text-muted py-4">
-                      Sin registros
-                    </td>
-                  </tr>
-                {% endif %}
-
-                </tbody>
-
-              </table>
-
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .valdisp-shell{
-        width:96%;
-        max-width:1600px;
-        margin:10px auto 24px auto;
-      }
-
-      .valdisp-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:95px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .valdisp-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .valdisp-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-      }
-
-      .valdisp-header-overlay::before{
-        content:"🕒";
-        width:54px;
-        height:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .valdisp-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .valdisp-header-text::before{
-        content:"SGSI · Valoración de Disponibilidad";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .valdisp-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .valdisp-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .valdisp-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin:10px 0 14px;
-        flex-wrap:wrap;
-      }
-
-      .valdisp-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .valdisp-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .valdisp-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .valdisp-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .valdisp-card-body{
-        padding:18px;
-      }
-
-      .valdisp-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        font-size:.78rem;
-      }
-
-      .valdisp-card .form-control,
-      .valdisp-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .valdisp-card textarea{
-        min-height:70px;
-      }
-
-      .valdisp-card .form-control:focus,
-      .valdisp-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#fff;
-      }
-
-      .valdisp-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:18px;
-        flex-wrap:wrap;
-      }
-
-      .valdisp-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .valdisp-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .valdisp-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-      }
-
-      .valdisp-table-wrap{
-        max-height:70vh;
-        overflow:auto;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:#fff;
-      }
-
-      .valdisp-table{
-        width:100%;
-        min-width:1100px;
-      }
-
-      .valdisp-table th,
-      .valdisp-table td{
-        font-size:.78rem;
-        padding:9px;
-        word-break:break-word;
-      }
-
-      .valdisp-table thead th{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#fff !important;
-        font-weight:900;
-        text-align:center;
-      }
-
-      .valdisp-table tbody tr:nth-child(even){
-        background:#f8fbff;
-      }
-
-      .valdisp-table tbody tr:hover{
-        background:#eef6ff;
-      }
-
-      .badge{
-        border-radius:999px;
-        font-size:.72rem;
-        padding:.38rem .65rem;
-        font-weight:900;
-      }
-
-      .btn.rounded-pill{
-        border-radius:999px !important;
-      }
-
-      .valdisp-card .btn{
-        box-shadow:0 4px 10px rgba(0,0,0,.08);
-        font-weight:900;
-      }
-
-      @media (max-width:992px){
-        .valdisp-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .valdisp-header-card{
-          min-height:88px;
-        }
-
-        .valdisp-title{
-          font-size:1.20rem;
-        }
-
-        .valdisp-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .valdisp-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .valdisp-header-overlay::before{
-          margin:0;
-        }
-
-        .valdisp-header-actions .btn,
-        .valdisp-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(
-        html,
-        edit_item=edit_item,
-        items=items,
-        solo_lectura=solo_lectura
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-@app.route('/valor_disponibilidad/delete')
-@login_required
-def valor_disponibilidad_delete():
-    user = User.query.filter_by(username=session['username']).first()
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede eliminar registros de la tabla de disponibilidad.", "danger")
-        return redirect(url_for('valor_disponibilidad'))
-    
-    rid = request.args.get('id', type=int)
-    it = ValoracionDisponibilidad.query.get(rid)
-    if it:
-        db.session.delete(it)
-        db.session.commit()
-        flash("Eliminado correctamente.", "success")
-    else:
-        flash("Registro no encontrado.", "danger")
-    return redirect(url_for('valor_disponibilidad'))
-
-# =========================
-# Valor Criticidad del Activo
-# =========================
-
-@app.route('/valor_criticidad_activo', methods=['GET', 'POST'])
-@login_required
-def valor_criticidad_activo():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        read_only = True
-    else:
-        if user.role != 'admin' and not verificar_permiso(user, "Registro de Proveedores"):
-            flash("No tiene permiso para ver los registros de proveedores.", "danger")
-            return redirect(url_for('proveedores_menu'))
-        read_only = False
-
-    # 3) Definir si es solo lectura (auditor)
-    solo_lectura = (user.role == 'auditor')
-
-    # 5) Crear / Editar: solo si NO es solo lectura
-    if request.method == 'POST' and not solo_lectura:
-        rid = request.form.get('id')
-        nivel_texto = (request.form.get('nivel_texto') or "").strip()
-        try:
-            nivel_num = int(request.form.get('nivel_num') or 0)
-        except ValueError:
-            nivel_num = 0
-
-        if not nivel_texto:
-            flash("El campo 'Nivel de Criticidad' (texto) es obligatorio.", "danger")
-            return redirect(url_for('valor_criticidad_activo'))
-        if nivel_num < 1 or nivel_num > 5:
-            flash("El 'Nivel de criticidad' numérico debe estar entre 1 y 5.", "danger")
-            return redirect(url_for('valor_criticidad_activo'))
-
-        if rid:
-            it = ValoracionCriticidadActivo.query.get(int(rid))
-            if not it:
-                flash("Registro no encontrado.", "danger")
-                return redirect(url_for('valor_criticidad_activo'))
-        else:
-            it = ValoracionCriticidadActivo()
-
-        it.nivel_texto = nivel_texto
-        it.nivel_num = nivel_num
-
-        db.session.add(it)
-        db.session.commit()
-        flash("Guardado correctamente.", "success")
-        return redirect(url_for('valor_criticidad_activo'))
-
-    # GET: listar y soportar edición
-    edit_id = request.args.get('edit', type=int)
-    edit_item = ValoracionCriticidadActivo.query.get(edit_id) if edit_id else None
-    items = ValoracionCriticidadActivo.query.order_by(
-        ValoracionCriticidadActivo.nivel_num.asc(),
-        ValoracionCriticidadActivo.id.desc()
-    ).all()
-
-    html = """
-    <div class="valcrit-shell">
-
-      <!-- CABECERA -->
-      <div class="valcrit-header-card">
-        <div class="valcrit-header-overlay">
-          <div class="valcrit-header-text">
-            <h3 class="valcrit-title m-0">Niveles de Criticidad del Activo</h3>
-            <div class="valcrit-subtitle">
-              Configuración de niveles de criticidad para la valoración de activos del Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOTÓN VOLVER -->
-      <div class="valcrit-header-actions">
-        
-      </div>
-
-      <!-- FORMULARIO -->
-      {% if not solo_lectura %}
-      <div class="valcrit-card mb-3">
-        <div class="valcrit-card-body">
-          <form method="post" action="{{ url_for('valor_criticidad_activo') }}">
-            {% if edit_item %}
-              <input type="hidden" name="id" value="{{ edit_item.id }}">
-            {% endif %}
-
-            <div class="row g-3">
-
-              <div class="col-md-3">
-                <label class="form-label">Nivel de criticidad (numérico 1–5)</label>
-                <input type="number"
-                       name="nivel_num"
-                       class="form-control"
-                       min="1"
-                       max="5"
-                       required
-                       value="{{ edit_item.nivel_num if edit_item else '' }}"
-                       placeholder="1 a 5">
-              </div>
-
-              <div class="col-md-9">
-                <label class="form-label">Nivel de Criticidad (texto)</label>
-                <input type="text"
-                       name="nivel_texto"
-                       class="form-control"
-                       required
-                       placeholder="Bajo / Medio / Alto / Crítico / etc."
-                       value="{{ edit_item.nivel_texto if edit_item else '' }}">
-              </div>
-
-            </div>
-
-            <div class="valcrit-bottom-actions">
-              <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold">
-                {% if edit_item %}Guardar cambios{% else %}Agregar{% endif %}
-              </button>
-
-              {% if edit_item %}
-                <a href="{{ url_for('valor_criticidad_activo') }}"
-                   class="btn rounded-pill px-4 fw-bold valcrit-cancel-btn">
-                  Cancelar
-                </a>
-              {% endif %}
-            </div>
-
-          </form>
-        </div>
-      </div>
-      {% endif %}
-
-      <!-- TABLA -->
-      <div class="valcrit-card">
-        <div class="valcrit-card-body">
-
-          <div class="valcrit-table-wrap">
-            <div class="table-responsive">
-              <table class="table table-bordered table-sm align-middle valcrit-table mb-0">
-                <thead class="table-secondary">
-                  <tr class="text-center">
-                    <th style="width:14%">Nivel (numérico)</th>
-                    <th>Nivel de Criticidad (texto)</th>
-                    <th style="width:18%">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for it in items %}
-                    <tr>
-                      <td class="text-center"><b>{{ it.nivel_num }}</b></td>
-                      <td>{{ it.nivel_texto }}</td>
-                      <td class="text-center">
-                        {% if not solo_lectura %}
-                          <a href="{{ url_for('valor_criticidad_activo', edit=it.id) }}"
-                             class="btn btn-warning btn-sm rounded-pill px-3">
-                            Editar
-                          </a>
-                          <a href="{{ url_for('valor_criticidad_activo_delete', id=it.id) }}"
-                             class="btn btn-danger btn-sm rounded-pill px-3"
-                             onclick="return confirm('¿Eliminar este registro?');">
-                            Eliminar
-                          </a>
-                        {% else %}
-                          <span class="text-muted small">Solo lectura</span>
-                        {% endif %}
-                      </td>
-                    </tr>
-                  {% endfor %}
-
-                  {% if items|length == 0 %}
-                    <tr>
-                      <td colspan="3" class="text-center text-muted py-4">
-                        Sin registros
-                      </td>
-                    </tr>
-                  {% endif %}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .valcrit-shell{
-        width:96%;
-        max-width:1600px;
-        margin:10px auto 24px auto;
-      }
-
-      /* =========================
-         HEADER SGSI MODERNO
-      ========================= */
-      .valcrit-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:95px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .valcrit-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .valcrit-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-      }
-
-      .valcrit-header-overlay::before{
-        content:"⚙️";
-        width:54px;
-        height:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .valcrit-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .valcrit-header-text::before{
-        content:"SGSI · Valoración de Criticidad";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .valcrit-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .valcrit-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      /* =========================
-         BOTONES
-      ========================= */
-      .valcrit-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin:10px 0 14px;
-        flex-wrap:wrap;
-      }
-
-      .valcrit-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .valcrit-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .valcrit-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-      }
-
-      /* =========================
-         CARD
-      ========================= */
-      .valcrit-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .valcrit-card-body{
-        padding:18px;
-      }
-
-      /* =========================
-         FORMULARIOS
-      ========================= */
-      .valcrit-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        font-size:.78rem;
-      }
-
-      .valcrit-card .form-control,
-      .valcrit-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .valcrit-card textarea{
-        min-height:70px;
-      }
-
-      .valcrit-card .form-control:focus,
-      .valcrit-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#fff;
-      }
-
-      /* =========================
-         TABLA
-      ========================= */
-      .valcrit-table-wrap{
-        max-height:70vh;
-        overflow:auto;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:#fff;
-      }
-
-      .valcrit-table{
-        width:100%;
-        min-width:900px;
-      }
-
-      .valcrit-table th,
-      .valcrit-table td{
-        font-size:.78rem;
-        padding:9px;
-        word-break:break-word;
-      }
-
-      .valcrit-table thead th{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#fff !important;
-        font-weight:900;
-        text-align:center;
-      }
-
-      .valcrit-table tbody tr:nth-child(even){
-        background:#f8fbff;
-      }
-
-      .valcrit-table tbody tr:hover{
-        background:#eef6ff;
-      }
-
-      /* =========================
-         BOTONES INFERIORES
-      ========================= */
-      .valcrit-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:18px;
-        flex-wrap:wrap;
-      }
-
-      .valcrit-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-      }
-
-      .valcrit-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .valcrit-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-      }
-
-      /* =========================
-         RESPONSIVE
-      ========================= */
-      @media (max-width:992px){
-        .valcrit-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .valcrit-title{
-          font-size:1.20rem;
-        }
-
-        .valcrit-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .valcrit-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .valcrit-header-overlay::before{
-          margin:0;
-        }
-
-        .valcrit-header-actions .btn,
-        .valcrit-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(
-        html,
-        edit_item=edit_item,
-        items=items,
-        solo_lectura=solo_lectura
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-@app.route('/valor_criticidad_activo/delete')
-@login_required
-def valor_criticidad_activo_delete():
-    user = User.query.filter_by(username=session['username']).first()
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede eliminar niveles de criticidad del activo.", "danger")
-        return redirect(url_for('valor_criticidad_activo'))
-    
-    rid = request.args.get('id', type=int)
-    it = ValoracionCriticidadActivo.query.get(rid)
-    if it:
-        db.session.delete(it)
-        db.session.commit()
-        flash("Eliminado correctamente.", "success")
-    else:
-        flash("Registro no encontrado.", "danger")
-    return redirect(url_for('valor_criticidad_activo'))
-
-
-
-# ============================================================================================================================================
-#                                                               Fin del Módulo Gestión de Activos
-# ============================================================================================================================================
-
-# ==========================================================================================================================================
-#                                                       Módulo de Gestión de Accesos
-# ==========================================================================================================================================
-
-# ==========================
-# ENTRADA DIRECTA — Gestión de Accesos
-# ==========================
-@app.route('/accesos_menu')
-@login_required
-def accesos_menu():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Gestión de Accesos"):
-        flash("No tiene permiso para acceder al módulo de Gestión de Accesos.", "danger")
-        return redirect(url_for('menu'))
-
-    return redirect(url_for('accesos_matriz'))
-
-
-# =================================
-# Estados de los usuarios
-# =================================
-@app.route('/accesos_estados', methods=['GET', 'POST'])
-@login_required
-def accesos_estados():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede acceder al submódulo de estados de usuarios.", "danger")
-        return redirect(url_for('accesos_matriz'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Accesos"):
-        flash("No tiene permiso para gestionar estados de usuarios.", "danger")
-        return redirect(url_for('accesos_matriz'))
-
-    solo_lectura = False
-
-    if request.method == 'POST' and not solo_lectura:
-        accion = request.form.get('accion')
-
-        if accion == 'crear':
-            nombre = (request.form.get('nombre') or '').strip()
-            if not nombre:
-                flash("El nombre del estado es obligatorio.", "danger")
-            else:
-                if not EstadoUsuarioAcceso.query.filter_by(nombre=nombre).first():
-                    db.session.add(EstadoUsuarioAcceso(nombre=nombre))
-                    db.session.commit()
-                    flash("Estado creado correctamente.", "success")
-                else:
-                    flash("Ese estado ya existe.", "warning")
-
-        elif accion == 'eliminar':
-            rid = request.form.get('id', type=int)
-            est = EstadoUsuarioAcceso.query.get(rid)
-            if est:
-                en_uso = GestionAcceso.query.filter_by(estado_id=est.id).count()
-                if en_uso > 0:
-                    flash("No se puede eliminar el estado porque está en uso.", "danger")
-                else:
-                    db.session.delete(est)
-                    db.session.commit()
-                    flash("Estado eliminado.", "success")
-
-        return redirect(url_for('accesos_estados'))
-
-    estados = EstadoUsuarioAcceso.query.order_by(EstadoUsuarioAcceso.nombre.asc()).all()
-
-    html = """
-    <div class="accestado-shell">
-
-      <div class="accestado-header-card">
-        <div class="accestado-header-overlay">
-          <div class="accestado-header-text">
-            <h3 class="accestado-title m-0">Estados de los Usuarios</h3>
-            <div class="accestado-subtitle">
-              Configuración de estados para la gestión de accesos de usuarios del Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="accestado-header-actions">
-        <a href="{{ url_for('accesos_matriz') }}"
-           class="btn rounded-pill px-4 fw-bold accestado-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-
-      </div>
-
-      <div class="accestado-card mb-3">
-        <div class="accestado-card-body">
-          <form method="post" class="row g-3 align-items-end">
-
-            <div class="col-md-6">
-              <label class="form-label">Nombre del estado</label>
-              <input name="nombre" class="form-control" {% if solo_lectura %}disabled{% endif %}>
-            </div>
-
-            <div class="col-md-6">
-              {% if not solo_lectura %}
-                <button class="btn btn-success rounded-pill px-4 fw-bold"
-                        name="accion"
-                        value="crear"
-                        type="submit">
-                  Agregar
-                </button>
-              {% else %}
-                <span class="text-warning small">Solo lectura.</span>
-              {% endif %}
-            </div>
-
-          </form>
-        </div>
-      </div>
-
-      <div class="accestado-card">
-        <div class="accestado-card-body">
-          <div class="accestado-table-wrap">
-            <div class="table-responsive">
-              <table class="table table-sm table-bordered align-middle mb-0 accestado-table">
-                <thead class="table-secondary">
-                  <tr>
-                    <th>Estado</th>
-                    <th style="width:20%">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for e in estados %}
-                    <tr>
-                      <td>{{ e.nombre }}</td>
-                      <td>
-                        {% if not solo_lectura %}
-                          <form method="post"
-                                style="display:inline;"
-                                onsubmit="return confirm('¿Eliminar este estado?');">
-                            <input type="hidden" name="id" value="{{ e.id }}">
-                            <button class="btn btn-danger btn-sm rounded-pill px-3"
-                                    name="accion"
-                                    value="eliminar"
-                                    type="submit">
-                              Eliminar
-                            </button>
-                          </form>
-                        {% else %}
-                          <span class="text-muted small">Solo lectura</span>
-                        {% endif %}
-                      </td>
-                    </tr>
-                  {% endfor %}
-
-                  {% if estados|length == 0 %}
-                    <tr>
-                      <td colspan="2" class="text-center text-muted py-4">
-                        Sin estados configurados
-                      </td>
-                    </tr>
-                  {% endif %}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .accestado-shell{
-        width:96%;
-        max-width:1350px;
-        margin:10px auto 24px auto;
-      }
-
-      /* =========================
-         HEADER SGSI UNIFICADO
-      ========================= */
-      .accestado-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .accestado-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .accestado-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-      }
-
-      .accestado-header-overlay::before{
-        content:"👤";
-        width:54px;
-        height:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .accestado-header-text{
-        width:100%;
-      }
-
-      .accestado-header-text::before{
-        content:"SGSI · Estado de Accesos";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .accestado-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .accestado-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      /* =========================
-         BOTONES SUPERIORES
-      ========================= */
-      .accestado-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .accestado-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .accestado-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .accestado-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      /* =========================
-         CARD PRINCIPAL
-      ========================= */
-      .accestado-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .accestado-card-body{
-        padding:18px;
-      }
-
-      /* =========================
-         FORMULARIOS
-      ========================= */
-      .accestado-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        font-size:.78rem;
-      }
-
-      .accestado-card .form-control{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .accestado-card .form-control:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#fff;
-      }
-
-      /* =========================
-         TABLA PRO SGSI
-      ========================= */
-      .accestado-table-wrap{
-        max-height:70vh;
-        overflow-y:auto;
-        overflow-x:auto;
-        border:1px solid rgba(0,0,0,.08);
-        border-radius:14px;
-        background:#ffffff;
-      }
-
-      .accestado-table{
-        width:100%;
-        min-width:750px;
-      }
-
-      .accestado-table th,
-      .accestado-table td{
-        white-space:normal;
-        word-break:break-word;
-        vertical-align:middle;
-        font-size:.82rem;
-        padding:10px;
-      }
-
-      .accestado-table thead th{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:#dbeafe !important;
-        color:#0f172a;
-        font-weight:900;
-        text-align:center;
-      }
-
-      .accestado-table tbody tr:hover{
-        background:rgba(59,130,246,.06);
-      }
-
-      /* =========================
-         RESPONSIVE
-      ========================= */
-      @media (max-width:992px){
-        .accestado-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .accestado-header-card{
-          min-height:88px;
-        }
-
-        .accestado-title{
-          font-size:1.20rem;
-        }
-
-        .accestado-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .accestado-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .accestado-header-overlay::before{
-          margin:0;
-        }
-
-        .accestado-header-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-
-    inner = render_template_string(html, estados=estados, solo_lectura=solo_lectura)
-    return render_template_string(BASE, content=Markup(inner))
-
-
-# ==========================
-# Agregar acceso
-# ==========================
-@app.route('/accesos/new', methods=['GET','POST'])
-@login_required
-def accesos_new():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede agregar accesos.", "danger")
-        return redirect(url_for('accesos_matriz'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Accesos"):
-        flash("No tiene permiso para agregar accesos.", "danger")
-        return redirect(url_for('accesos_matriz'))
-
-    areas   = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
-    estados = EstadoUsuarioAcceso.query.order_by(EstadoUsuarioAcceso.nombre.asc()).all()
-    niveles = ["Alto", "Medio", "Bajo"]
-
-    if request.method == 'POST':
-        it = GestionAcceso(
-            id_acceso        = (request.form.get('id_acceso') or '').strip(),
-            rol_usuario      = (request.form.get('rol_usuario') or '').strip(),
-            usuario          = (request.form.get('usuario') or '').strip(),
-            area_id          = request.form.get('area_id', type=int),
-            aplicacion       = (request.form.get('aplicacion') or '').strip(),
-            tipo_acceso      = (request.form.get('tipo_acceso') or '').strip(),
-            rol_tecnico_app  = (request.form.get('rol_tecnico_app') or '').strip(),
-            nivel_privilegio = (request.form.get('nivel_privilegio') or '').strip(),
-            justificacion    = (request.form.get('justificacion') or '').strip(),
-            aprobado_por     = (request.form.get('aprobado_por') or '').strip(),
-            gestionado_por   = (request.form.get('gestionado_por') or '').strip(),
-            fecha_alta       = request.form.get('fecha_alta') or '',
-            fecha_baja       = request.form.get('fecha_baja') or '',
-            estado_id        = request.form.get('estado_id', type=int),
-            evidencia        = (request.form.get('evidencia') or '').strip(),
-        )
-
-        db.session.add(it)
-
-        files = request.files.getlist('evidencias')
-        for f in files:
-            if not f or not f.filename:
-                continue
-            if not is_allowed_pdf(f.filename):
-                flash(f"Archivo no permitido (solo PDF): {f.filename}", "danger")
-                continue
-
-            store_name = unique_store_name(f.filename)
-            path = os.path.join(app.config['UPLOAD_GESTION_ACCESOS_DIR'], store_name)
-            f.save(path)
-
-            ev = GestionAccesoEvidencia(
-                registro=it,
-                filename=store_name,
-                original_name=secure_filename(f.filename),
-                mime='application/pdf',
-                size=os.path.getsize(path)
-            )
-            db.session.add(ev)
-
-        db.session.commit()
-        flash("Acceso registrado correctamente.", "success")
-        return redirect(url_for('accesos_matriz'))
-
-    html = """
-    <div class="accesoadd-shell">
-
-      <div class="accesoadd-header-card">
-        <div class="accesoadd-header-overlay">
-          <div class="accesoadd-header-text">
-            <h3 class="accesoadd-title m-0">Agregar Acceso</h3>
-            <div class="accesoadd-subtitle">
-              Registro y gestión de accesos de usuarios, privilegios, aprobaciones y evidencias del Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="accesoadd-header-actions">
-        <a href="{{ url_for('accesos_matriz') }}"
-           class="btn rounded-pill px-4 fw-bold accesoadd-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-
-
-      </div>
-
-      <div class="accesoadd-card">
-        <div class="accesoadd-card-body">
-          <form method="post" enctype="multipart/form-data">
-            <div class="row g-3">
-
-              <div class="col-md-3">
-                <label class="form-label">ID</label>
-                <input class="form-control" name="id_acceso" required>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Rol del Usuario</label>
-                <input class="form-control" name="rol_usuario">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Usuario</label>
-                <input class="form-control" name="usuario">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Área</label>
-                <select name="area_id" class="form-select">
-                  <option value="">-- Seleccione --</option>
-                  {% for a in areas %}
-                    <option value="{{ a.id }}">{{ a.area }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Aplicación / Sistema</label>
-                <input class="form-control" name="aplicacion">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Tipo de Acceso</label>
-                <input class="form-control" name="tipo_acceso">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Rol Técnico en App</label>
-                <input class="form-control" name="rol_tecnico_app">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Nivel de Privilegio</label>
-                <select name="nivel_privilegio" class="form-select">
-                  <option value="">-- Seleccione --</option>
-                  {% for n in niveles %}
-                    <option>{{ n }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-8">
-                <label class="form-label">Justificación del Acceso</label>
-                <textarea class="form-control" name="justificacion" rows="2"></textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Aprobado por</label>
-                <input class="form-control" name="aprobado_por">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Gestionado por</label>
-                <input class="form-control" name="gestionado_por">
-              </div>
-
-              <div class="col-md-2">
-                <label class="form-label">Fecha de Alta</label>
-                <input type="date" class="form-control" name="fecha_alta">
-              </div>
-
-              <div class="col-md-2">
-                <label class="form-label">Fecha de Baja</label>
-                <input type="date" class="form-control" name="fecha_baja">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Estado</label>
-                <select name="estado_id" class="form-select">
-                  <option value="">-- Seleccione --</option>
-                  {% for e in estados %}
-                    <option value="{{ e.id }}">{{ e.nombre }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-8">
-                <label class="form-label">Evidencia (texto)</label>
-                <textarea class="form-control" name="evidencia" rows="2"></textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Evidencias PDF</label>
-                <input type="file" name="evidencias" class="form-control" accept=".pdf" multiple>
-                <small class="text-muted">Puede adjuntar uno o varios PDFs.</small>
-              </div>
-
-            </div>
-
-            <div class="accesoadd-bottom-actions">
-              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
-                Guardar
-              </button>
-              <a href="{{ url_for('accesos_matriz') }}"
-                 class="btn rounded-pill px-4 fw-bold accesoadd-cancel-btn">
-                Cancelar
-              </a>
-            </div>
-          </form>
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .accesoadd-shell{
-        width:96%;
-        max-width:1550px;
-        margin:10px auto 24px auto;
-      }
-
-      .accesoadd-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .accesoadd-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .accesoadd-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent;
-        padding:0;
-        position:relative;
-        z-index:1;
-      }
-
-      .accesoadd-header-overlay::before{
-        content:"🔐";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .accesoadd-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .accesoadd-header-text::before{
-        content:"SGSI · Gestión de Accesos";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .accesoadd-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .accesoadd-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .accesoadd-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .accesoadd-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .accesoadd-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .accesoadd-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .accesoadd-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .accesoadd-card-body{
-        padding:18px;
-      }
-
-      .accesoadd-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .accesoadd-card .form-control,
-      .accesoadd-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .accesoadd-card textarea.form-control{
-        min-height:70px;
-        resize:vertical;
-      }
-
-      .accesoadd-card .form-control:focus,
-      .accesoadd-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#fff;
-      }
-
-      .accesoadd-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:18px;
-        flex-wrap:wrap;
-      }
-
-      .accesoadd-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .accesoadd-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .accesoadd-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      @media (max-width:992px){
-        .accesoadd-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .accesoadd-header-card{
-          min-height:88px;
-        }
-
-        .accesoadd-title{
-          font-size:1.20rem;
-        }
-
-        .accesoadd-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .accesoadd-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .accesoadd-header-overlay::before{
-          margin:0;
-        }
-
-        .accesoadd-header-actions .btn,
-        .accesoadd-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(html, areas=areas, estados=estados, niveles=niveles)
-    return render_template_string(BASE, content=Markup(inner))
-
-
-# ==========================
-# Matriz de accesos
-# ==========================
-@app.route('/accesos_matriz')
-@login_required
-def accesos_matriz():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        read_only = True
-    else:
-        if user.role != 'admin' and not verificar_permiso(user, "Gestión de Accesos"):
-            flash("No tiene permiso para ver la matriz de accesos.", "danger")
-            return redirect(url_for('menu'))
-        read_only = False
-
-    filtro_usuario = (request.args.get('usuario') or '').strip()
-    filtro_area = (request.args.get('area') or '').strip()
-    filtro_tipo_acceso = (request.args.get('tipo_acceso') or '').strip()
-    filtro_nivel_privilegio = (request.args.get('nivel_privilegio') or '').strip()
-    filtro_estado = (request.args.get('estado') or '').strip()
-
-    query = (
-        GestionAcceso.query
-        .options(
-            selectinload(GestionAcceso.area),
-            selectinload(GestionAcceso.estado),
-            selectinload(GestionAcceso.evidencias)
-        )
-    )
-
-    if filtro_usuario:
-        query = query.filter(GestionAcceso.usuario == filtro_usuario)
-
-    if filtro_area:
-        query = query.filter(GestionAcceso.area.has(area=filtro_area))
-
-    if filtro_tipo_acceso:
-        query = query.filter(GestionAcceso.tipo_acceso == filtro_tipo_acceso)
-
-    if filtro_nivel_privilegio:
-        query = query.filter(GestionAcceso.nivel_privilegio == filtro_nivel_privilegio)
-
-    if filtro_estado:
-        query = query.filter(GestionAcceso.estado.has(nombre=filtro_estado))
-
-    items = query.order_by(GestionAcceso.id.desc()).all()
-
-    opciones_usuario = [
-        x[0] for x in db.session.query(GestionAcceso.usuario)
-        .filter(GestionAcceso.usuario.isnot(None))
-        .filter(GestionAcceso.usuario != '')
-        .distinct()
-        .order_by(GestionAcceso.usuario.asc())
-        .all()
-    ]
-
-    opciones_tipo_acceso = [
-        x[0] for x in db.session.query(GestionAcceso.tipo_acceso)
-        .filter(GestionAcceso.tipo_acceso.isnot(None))
-        .filter(GestionAcceso.tipo_acceso != '')
-        .distinct()
-        .order_by(GestionAcceso.tipo_acceso.asc())
-        .all()
-    ]
-
-    opciones_nivel_privilegio = [
-        x[0] for x in db.session.query(GestionAcceso.nivel_privilegio)
-        .filter(GestionAcceso.nivel_privilegio.isnot(None))
-        .filter(GestionAcceso.nivel_privilegio != '')
-        .distinct()
-        .order_by(GestionAcceso.nivel_privilegio.asc())
-        .all()
-    ]
-
-    opciones_area = sorted({
-        it.area.area.strip()
-        for it in (
-            GestionAcceso.query
-            .options(selectinload(GestionAcceso.area))
-            .all()
-        )
-        if it.area and it.area.area and it.area.area.strip()
-    })
-
-    opciones_estado = sorted({
-        it.estado.nombre.strip()
-        for it in (
-            GestionAcceso.query
-            .options(selectinload(GestionAcceso.estado))
-            .all()
-        )
-        if it.estado and it.estado.nombre and it.estado.nombre.strip()
-    })
-
-    total_filtrados = len(items)
-    total_general = GestionAcceso.query.count()
-
-    html = """
-    <div class="accesomat-shell">
-
-      <div class="accesomat-header-card">
-        <div class="accesomat-header-overlay">
-          <div class="accesomat-header-text">
-            <h3 class="accesomat-title m-0">Gestión de Accesos</h3>
-            <div class="accesomat-subtitle">
-              Visualización resumida de accesos, privilegios, estados y evidencias del Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="accesomat-header-actions">
-        
-
-        {% if not read_only %}
-          <a href="{{ url_for('accesos_new') }}"
-             class="btn btn-primary rounded-pill px-4 fw-bold">
-            ➕ Agregar Acceso
-          </a>
-
-          <a href="{{ url_for('accesos_estados') }}"
-             class="btn btn-primary rounded-pill px-4 fw-bold">
-            👤 Estados de Usuarios
-          </a>
-        {% else %}
-          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
-            ➕ Agregar Acceso
-          </button>
-
-          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
-            👤 Estados de Usuarios
-          </button>
-        {% endif %}
-      </div>
-
-      <div class="accesomat-filter-card">
-        <div class="accesomat-filter-body">
-          <form method="get" action="{{ url_for('accesos_matriz') }}">
-            <div class="row g-2 align-items-end">
-
-              <div class="col-md-3">
-                <label class="form-label fw-bold">Usuario</label>
-                <select name="usuario" class="form-select rounded-3">
-                  <option value="">Todos</option>
-                  {% for op in opciones_usuario %}
-                    <option value="{{ op }}" {% if filtro_usuario == op %}selected{% endif %}>{{ op }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label fw-bold">Área</label>
-                <select name="area" class="form-select rounded-3">
-                  <option value="">Todas</option>
-                  {% for op in opciones_area %}
-                    <option value="{{ op }}" {% if filtro_area == op %}selected{% endif %}>{{ op }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-2">
-                <label class="form-label fw-bold">Tipo de Acceso</label>
-                <select name="tipo_acceso" class="form-select rounded-3">
-                  <option value="">Todos</option>
-                  {% for op in opciones_tipo_acceso %}
-                    <option value="{{ op }}" {% if filtro_tipo_acceso == op %}selected{% endif %}>{{ op }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-2">
-                <label class="form-label fw-bold">Nivel de Privilegio</label>
-                <select name="nivel_privilegio" class="form-select rounded-3">
-                  <option value="">Todos</option>
-                  {% for op in opciones_nivel_privilegio %}
-                    <option value="{{ op }}" {% if filtro_nivel_privilegio == op %}selected{% endif %}>{{ op }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-2">
-                <label class="form-label fw-bold">Estado</label>
-                <select name="estado" class="form-select rounded-3">
-                  <option value="">Todos</option>
-                  {% for op in opciones_estado %}
-                    <option value="{{ op }}" {% if filtro_estado == op %}selected{% endif %}>{{ op }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-12">
-                <div class="d-flex gap-2 flex-wrap justify-content-end">
-                  <button type="submit" class="btn btn-primary rounded-pill px-4 fw-bold">Filtrar</button>
-                  <a href="{{ url_for('accesos_matriz') }}" class="btn btn-secondary rounded-pill px-4 fw-bold">Limpiar</a>
-                </div>
-              </div>
-
-            </div>
-          </form>
-        </div>
-      </div>
-
-      <div class="accesomat-card">
-        <div class="accesomat-topbar">
-          <div>
-            <h5 class="accesomat-top-title mb-1">Resumen de registros</h5>
-            <div class="accesomat-top-note">
-              La matriz presenta los campos más importantes. Para revisar el registro completo usa el botón <strong>Ver detalle</strong>.
-            </div>
-          </div>
-          <div class="accesomat-counter-badge">
-            Registros filtrados: {{ total_filtrados }} | Total general: {{ total_general }}
-          </div>
-        </div>
-
-        <div class="accesomat-card-body">
-          <div class="accesomat-table-wrap">
-            <div class="table-responsive">
-              <table class="table table-bordered table-hover align-middle accesomat-table mb-0">
-                <colgroup>
-                  <col style="width: 8%;">
-                  <col style="width: 12%;">
-                  <col style="width: 12%;">
-                  <col style="width: 12%;">
-                  <col style="width: 12%;">
-                  <col style="width: 12%;">
-                  <col style="width: 10%;">
-                  <col style="width: 10%;">
-                  <col style="width: 12%;">
-                </colgroup>
-
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Usuario</th>
-                    <th>Área</th>
-                    <th>Aplicación</th>
-                    <th>Tipo de Acceso</th>
-                    <th>Nivel de Privilegio</th>
-                    <th>Estado</th>
-                    <th>Evidencias</th>
-                    <th class="accesomat-col-acciones">Acciones</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {% for it in items %}
-                    <tr>
-                      <td class="text-center">{{ it.id_acceso or '—' }}</td>
-                      <td class="accesomat-cell-main">
-                        <div class="accesomat-main-text">{{ it.usuario or '—' }}</div>
-                      </td>
-                      <td>{{ it.area.area if it.area else '—' }}</td>
-                      <td>{{ it.aplicacion or '—' }}</td>
-                      <td>{{ it.tipo_acceso or '—' }}</td>
-                      <td class="text-center">{{ it.nivel_privilegio or '—' }}</td>
-                      <td class="text-center">
-                        {{ it.estado.nombre if it.estado else '—' }}
-                      </td>
-                      <td class="text-center">
-                        {% set total_ev = it.evidencias|length %}
-                        {% if total_ev > 0 %}
-                          <span class="badge bg-primary">{{ total_ev }} PDF{{ 's' if total_ev != 1 else '' }}</span>
-                        {% else %}
-                          <span class="text-muted">—</span>
-                        {% endif %}
-                      </td>
-
-                      <td class="text-center accesomat-col-acciones">
-                        <div class="accesomat-actions-wrap">
-                          <a href="{{ url_for('accesos_detalle', id=it.id) }}"
-                             class="btn btn-info btn-sm rounded-pill accesomat-btn-action fw-bold text-white">
-                            Ver detalle
-                          </a>
-
-                          {% if not read_only %}
-                            <a href="{{ url_for('accesos_edit', id=it.id) }}"
-                               class="btn btn-warning btn-sm rounded-pill accesomat-btn-action fw-bold">
-                              Editar
-                            </a>
-
-                            <a href="{{ url_for('accesos_delete', id=it.id) }}"
-                               class="btn btn-danger btn-sm rounded-pill accesomat-btn-action fw-bold"
-                               onclick="return confirm('¿Eliminar este acceso?');">
-                              Eliminar
-                            </a>
-                          {% else %}
-                            <span class="badge bg-secondary accesomat-badge-readonly">Solo lectura</span>
-                          {% endif %}
-                        </div>
-                      </td>
-                    </tr>
-                  {% endfor %}
-
-                  {% if items|length == 0 %}
-                    <tr>
-                      <td colspan="9" class="text-center text-muted py-5">
-                        Sin registros
-                      </td>
-                    </tr>
-                  {% endif %}
-                </tbody>
-
-              </table>
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .accesomat-shell{
-        width:96%;
-        max-width:1650px;
-        margin:10px auto 24px auto;
-      }
-
-      .accesomat-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .accesomat-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .accesomat-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent;
-        padding:0;
-        position:relative;
-        z-index:1;
-      }
-
-      .accesomat-header-overlay::before{
-        content:"🔐";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .accesomat-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .accesomat-header-text::before{
-        content:"SGSI · Matriz de Accesos";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .accesomat-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .accesomat-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .accesomat-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .accesomat-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .accesomat-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .accesomat-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .accesomat-filter-card,
-      .accesomat-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .accesomat-filter-card{
-        margin-bottom:14px;
-      }
-
-      .accesomat-filter-body{
-        padding:14px 16px;
-      }
-
-      .accesomat-filter-body .form-label{
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-        font-weight:800;
-      }
-
-      .accesomat-filter-body .form-select,
-      .accesomat-filter-body .form-control{
-        min-height:36px;
-        height:36px;
-        font-size:.80rem;
-        border:1px solid #d9e3f0;
-        border-radius:9px;
-        background:#f8fafc;
-        box-shadow:none;
-      }
-
-      .accesomat-filter-body .btn{
-        border-radius:10px !important;
-        min-height:36px;
-        padding:7px 18px !important;
-        font-size:.80rem;
-        font-weight:900;
-      }
-
-      .accesomat-filter-body .form-select:focus,
-      .accesomat-filter-body .form-control:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .18rem rgba(63,134,214,.18);
-      }
-
-      .accesomat-topbar{
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:12px;
-        padding:14px 16px 0 16px;
-        flex-wrap:wrap;
-      }
-
-      .accesomat-top-title{
-        color:#0f172a;
-        font-weight:950;
-        font-size:.92rem;
-      }
-
-      .accesomat-top-note{
-        color:#475569;
-        font-size:.78rem;
-      }
-
-      .accesomat-counter-badge{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        color:#fff;
-        font-weight:900;
-        border-radius:999px;
-        padding:7px 14px;
-        font-size:.78rem;
-        box-shadow:0 8px 16px rgba(15,23,42,.16);
-      }
-
-      .accesomat-card-body{
-        padding:12px 16px 16px 16px;
-      }
-
-      .accesomat-table-wrap{
-        max-height:70vh;
-        overflow-y:auto;
-        overflow-x:auto;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:#fff;
-      }
-
-      .accesomat-table{
-        min-width:1500px;
-        table-layout:fixed;
-        margin-bottom:0;
-      }
-
-      .accesomat-table thead th{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#ffffff;
-        font-weight:900;
-        text-align:center;
-        vertical-align:middle;
-        border-color:rgba(0,0,0,.08);
-      }
-
-      .accesomat-table th,
-      .accesomat-table td{
-        vertical-align:top;
-        font-size:.78rem;
-        padding:9px 8px;
-        white-space:normal;
-        word-break:break-word;
-        overflow-wrap:anywhere;
-      }
-
-      .accesomat-table td{
-        border-bottom:1px solid #e5edf7;
-      }
-
-      .accesomat-table tbody tr:nth-child(even){
-        background:#f8fbff;
-      }
-
-      .accesomat-table tbody tr:hover{
-        background:#eef6ff;
-      }
-
-      .accesomat-cell-main .accesomat-main-text{
-        font-weight:900;
-        color:#0f172a;
-      }
-
-      .accesomat-col-acciones,
-      .accesomat-table th.accesomat-col-acciones,
-      .accesomat-table td.accesomat-col-acciones{
-        min-width:190px !important;
-        width:190px !important;
-        text-align:center;
-        vertical-align:middle;
-      }
-
-      .accesomat-actions-wrap{
-        display:flex;
-        flex-direction:column;
-        gap:6px;
-        align-items:center;
-        justify-content:center;
-      }
-
-      .accesomat-btn-action{
-        min-width:110px;
-        max-width:125px;
-        padding:4px 12px !important;
-        font-size:.64rem !important;
-        line-height:1.2;
-        text-align:center;
-        white-space:nowrap;
-        border-radius:999px !important;
-        font-weight:900;
-      }
-
-      .accesomat-badge-readonly{
-        font-size:.70rem;
-        padding:5px 10px;
-        border-radius:999px;
-        white-space:nowrap;
-        font-weight:900;
-      }
-
-      @media (max-width:992px){
-        .accesomat-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .accesomat-header-card{
-          min-height:88px;
-        }
-
-        .accesomat-title{
-          font-size:1.20rem;
-        }
-
-        .accesomat-filter-body,
-        .accesomat-card-body{
-          padding:12px;
-        }
-
-        .accesomat-topbar{
-          padding:12px 14px 0 14px;
-        }
-      }
-
-      @media (max-width:768px){
-        .accesomat-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .accesomat-header-overlay::before{
-          margin:0;
-        }
-
-        .accesomat-header-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-
-    inner = render_template_string(
-        html,
-        items=items,
-        read_only=read_only,
-        opciones_usuario=opciones_usuario,
-        opciones_area=opciones_area,
-        opciones_tipo_acceso=opciones_tipo_acceso,
-        opciones_nivel_privilegio=opciones_nivel_privilegio,
-        opciones_estado=opciones_estado,
-        filtro_usuario=filtro_usuario,
-        filtro_area=filtro_area,
-        filtro_tipo_acceso=filtro_tipo_acceso,
-        filtro_nivel_privilegio=filtro_nivel_privilegio,
-        filtro_estado=filtro_estado,
-        total_filtrados=total_filtrados,
-        total_general=total_general
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-# ==========================
-# Detalle de acceso
-# ==========================
-
-@app.route('/accesos/detalle/<int:id>')
-@login_required
-def accesos_detalle(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        read_only = True
-    else:
-        if user.role != 'admin' and not verificar_permiso(user, "Gestión de Accesos"):
-            flash("No tiene permiso para ver el detalle del acceso.", "danger")
-            return redirect(url_for('accesos_menu'))
-        read_only = False
-
-    item = (
-        GestionAcceso.query
-        .options(
-            selectinload(GestionAcceso.area),
-            selectinload(GestionAcceso.estado),
-            selectinload(GestionAcceso.evidencias)
-        )
-        .get_or_404(id)
-    )
-
-    html = """
-    <div class="accdet-shell">
-
-      <!-- CABECERA -->
-      <div class="accdet-header-card">
-        <div class="accdet-header-overlay">
-          <div class="accdet-header-text">
-            <h3 class="accdet-title m-0">Detalle del Acceso</h3>
-            <div class="accdet-subtitle">
-              Consulta completa del registro en modo solo lectura
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOTONES -->
-      <div class="accdet-header-actions">
-        <a href="{{ url_for('accesos_matriz') }}"
-           class="btn rounded-pill px-4 fw-bold accdet-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-
-        {% if not read_only %}
-          <a href="{{ url_for('accesos_edit', id=item.id) }}"
-             class="btn btn-warning rounded-pill px-4 fw-bold">
-            Editar registro
-          </a>
-        {% endif %}
-      </div>
-
-      <div class="accdet-card">
-        <div class="accdet-card-body">
-
-          <div class="accdet-section">
-            <div class="accdet-section-title">Información principal</div>
-            <div class="row g-3">
-
-              <div class="col-md-3">
-                <div class="accdet-field">
-                  <div class="accdet-label">ID</div>
-                  <div class="accdet-value">{{ item.id_acceso or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-3">
-                <div class="accdet-field">
-                  <div class="accdet-label">Rol del Usuario</div>
-                  <div class="accdet-value">{{ item.rol_usuario or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-3">
-                <div class="accdet-field">
-                  <div class="accdet-label">Usuario</div>
-                  <div class="accdet-value">{{ item.usuario or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-3">
-                <div class="accdet-field">
-                  <div class="accdet-label">Área</div>
-                  <div class="accdet-value">{{ item.area.area if item.area else '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-4">
-                <div class="accdet-field">
-                  <div class="accdet-label">Aplicación / Sistema</div>
-                  <div class="accdet-value">{{ item.aplicacion or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-4">
-                <div class="accdet-field">
-                  <div class="accdet-label">Tipo de Acceso</div>
-                  <div class="accdet-value">{{ item.tipo_acceso or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-4">
-                <div class="accdet-field">
-                  <div class="accdet-label">Rol Técnico en App</div>
-                  <div class="accdet-value">{{ item.rol_tecnico_app or '—' }}</div>
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-          <div class="accdet-section">
-            <div class="accdet-section-title">Privilegios y seguimiento</div>
-            <div class="row g-3">
-
-              <div class="col-md-3">
-                <div class="accdet-field">
-                  <div class="accdet-label">Nivel de Privilegio</div>
-                  <div class="accdet-value">{{ item.nivel_privilegio or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-3">
-                <div class="accdet-field">
-                  <div class="accdet-label">Estado</div>
-                  <div class="accdet-value">{{ item.estado.nombre if item.estado else '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-3">
-                <div class="accdet-field">
-                  <div class="accdet-label">Fecha de Alta</div>
-                  <div class="accdet-value">{{ item.fecha_alta or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-3">
-                <div class="accdet-field">
-                  <div class="accdet-label">Fecha de Baja</div>
-                  <div class="accdet-value">{{ item.fecha_baja or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-6">
-                <div class="accdet-field">
-                  <div class="accdet-label">Aprobado por</div>
-                  <div class="accdet-value">{{ item.aprobado_por or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-6">
-                <div class="accdet-field">
-                  <div class="accdet-label">Gestionado por</div>
-                  <div class="accdet-value">{{ item.gestionado_por or '—' }}</div>
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-          <div class="accdet-section">
-            <div class="accdet-section-title">Justificación y evidencias</div>
-            <div class="row g-3">
-
-              <div class="col-md-12">
-                <div class="accdet-field">
-                  <div class="accdet-label">Justificación del Acceso</div>
-                  <div class="accdet-value">{{ item.justificacion or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-12">
-                <div class="accdet-field">
-                  <div class="accdet-label">Evidencia (texto)</div>
-                  <div class="accdet-value">{{ item.evidencia or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-12">
-                <div class="accdet-field">
-                  <div class="accdet-label">Evidencias PDF</div>
-
-                  {% if item.evidencias %}
-                    <div class="accdet-ev-grid">
-                      {% for ev in item.evidencias %}
-                        <div class="accdet-file-card">
-                          <div class="accdet-file-left">
-                            <div class="accdet-file-icon">PDF</div>
-                            <div class="accdet-file-meta">
-                              <a href="{{ url_for('accesos_evidencia_view', evi_id=ev.id, next='accesos_detalle', reg_id=item.id) }}" class="accdet-file-name">
-                                {{ ev.original_name }}
-                              </a>
-                              <div class="accdet-file-size">{{ (ev.size or 0) // 1024 }} KB</div>
-                            </div>
-                          </div>
-                        </div>
-                      {% endfor %}
-                    </div>
-                  {% else %}
-                    <div class="accdet-value">—</div>
-                  {% endif %}
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .accdet-shell{
-        width:96%;
-        max-width:1200px;
-        margin:10px auto 24px auto;
-      }
-
-      .accdet-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .accdet-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .accdet-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent;
-        padding:0;
-        position:relative;
-        z-index:1;
-      }
-
-      .accdet-header-overlay::before{
-        content:"🔎";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .accdet-header-text{
-        max-width:1000px;
-        width:100%;
-        transform:none;
-      }
-
-      .accdet-header-text::before{
-        content:"SGSI · Detalle de Acceso";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .accdet-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .accdet-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .accdet-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .accdet-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .accdet-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .accdet-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .accdet-card{
-        background:rgba(255,255,255,.96);
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .accdet-card-body{
-        padding:18px;
-      }
-
-      .accdet-section{
-        margin-bottom:14px;
-        background:#fff;
-        border:1px solid #dbe6f4;
-        border-radius:16px;
-        padding:8px 7px;
-        box-shadow:0 8px 18px rgba(15,23,42,.08);
-      }
-
-      .accdet-section:last-child{
-        margin-bottom:0;
-      }
-
-      .accdet-section-title{
-        font-weight:950;
-        font-size:.78rem;
-        color:#0b4a8f;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin:0 0 12px 0;
-      }
-
-      .accdet-field{
-        background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        padding:12px;
-        min-height:78px;
-        height:100%;
-      }
-
-      .accdet-label{
-        font-size:.70rem;
-        font-weight:900;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        color:#0b4a8f;
-        margin-bottom:6px;
-      }
-
-      .accdet-value{
-        color:#101827;
-        font-size:.82rem;
-        line-height:1.38;
-        white-space:pre-wrap;
-        word-break:break-word;
-      }
-
-      .accdet-ev-grid{
-        display:grid;
-        gap:10px;
-      }
-
-      .accdet-file-card{
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:10px;
-        background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        padding:10px 12px;
-        box-shadow:0 6px 14px rgba(15,23,42,.08);
-        flex-wrap:wrap;
-      }
-
-      .accdet-file-left{
-        display:flex;
-        align-items:center;
-        gap:7px;
-        min-width:0;
-      }
-
-      .accdet-file-icon{
-        width:32px;
-        height:32px;
-        min-width:32px;
-        border-radius:11px;
-        background:linear-gradient(135deg,#1d4ed8,#60a5fa);
-        color:#fff;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:.72rem;
-        font-weight:900;
-        box-shadow:0 6px 14px rgba(29,78,216,.20);
-      }
-
-      .accdet-file-meta{
-        min-width:0;
-      }
-
-      .accdet-file-name{
-        display:block;
-        font-size:.78rem;
-        font-weight:900;
-        color:#1d4ed8;
-        text-decoration:none;
-        word-break:break-word;
-      }
-
-      .accdet-file-name:hover{
-        text-decoration:underline;
-      }
-
-      .accdet-file-size{
-        font-size:.70rem;
-        color:#475569;
-        margin-top:2px;
-      }
-
-      .form-control,
-      .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .form-control:focus,
-      .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#fff;
-      }
-
-      @media (max-width:992px){
-        .accdet-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .accdet-header-card{
-          min-height:88px;
-        }
-
-        .accdet-title{
-          font-size:1.20rem;
-        }
-
-        .accdet-card-body{
-          padding:8px 7px;
-        }
-
-        .accdet-section{
-          padding:12px;
-        }
-      }
-
-      @media (max-width:768px){
-        .accdet-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .accdet-header-overlay::before{
-          margin:0;
-        }
-
-        .accdet-header-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-
-    inner = render_template_string(
-        html,
-        item=item,
-        read_only=read_only
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-# ==========================
-# Editar Accesos
-# ==========================
-
-@app.route('/accesos/edit/<int:id>', methods=['GET','POST'])
-@login_required
-def accesos_edit(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor' or (
-        user.role != 'admin' and not verificar_permiso(user, "Gestión de Accesos")
-    ):
-        flash("No tiene permiso para editar accesos.", "danger")
-        return redirect(url_for('accesos_matriz'))
-
-    item    = GestionAcceso.query.get_or_404(id)
-    areas   = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
-    estados = EstadoUsuarioAcceso.query.order_by(EstadoUsuarioAcceso.nombre.asc()).all()
-    niveles = ["Alto", "Medio", "Bajo"]
-
-    if request.method == 'POST':
-        item.id_acceso        = (request.form.get('id_acceso') or '').strip()
-        item.rol_usuario      = (request.form.get('rol_usuario') or '').strip()
-        item.usuario          = (request.form.get('usuario') or '').strip()
-        item.area_id          = request.form.get('area_id', type=int)
-        item.aplicacion       = (request.form.get('aplicacion') or '').strip()
-        item.tipo_acceso      = (request.form.get('tipo_acceso') or '').strip()
-        item.rol_tecnico_app  = (request.form.get('rol_tecnico_app') or '').strip()
-        item.nivel_privilegio = (request.form.get('nivel_privilegio') or '').strip()
-        item.justificacion    = (request.form.get('justificacion') or '').strip()
-        item.aprobado_por     = (request.form.get('aprobado_por') or '').strip()
-        item.gestionado_por   = (request.form.get('gestionado_por') or '').strip()
-        item.fecha_alta       = request.form.get('fecha_alta') or ''
-        item.fecha_baja       = request.form.get('fecha_baja') or ''
-        item.estado_id        = request.form.get('estado_id', type=int)
-        item.evidencia        = (request.form.get('evidencia') or '').strip()
-
-        # Nuevas evidencias PDF
-        files = request.files.getlist('evidencias')
-        for f in files:
-            if not f or not f.filename:
-                continue
-            if not is_allowed_pdf(f.filename):
-                flash(f"Archivo no permitido (solo PDF): {f.filename}", "danger")
-                continue
-
-            upload_dir = app.config.get('UPLOAD_GESTION_ACCESOS_DIR')
-            if not upload_dir:
-                raise RuntimeError("No está configurada la carpeta UPLOAD_GESTION_ACCESOS_DIR.")
-
-            os.makedirs(upload_dir, exist_ok=True)
-
-            store_name = unique_store_name(f.filename)
-            path = os.path.join(upload_dir, store_name)
-            f.save(path)
-
-            ev = GestionAccesoEvidencia(
-                registro=item,
-                filename=store_name,
-                original_name=secure_filename(f.filename),
-                mime='application/pdf',
-                size=os.path.getsize(path)
-            )
-            db.session.add(ev)
-
-        db.session.commit()
-        flash("Acceso actualizado correctamente.", "success")
-        return redirect(url_for('accesos_matriz'))
-
-    html = """
-    <div class="accesoedit-shell">
-
-      <!-- CABECERA -->
-      <div class="accesoedit-header-card">
-        <div class="accesoedit-header-overlay">
-          <div class="accesoedit-header-text">
-            <h3 class="accesoedit-title m-0">Editar Acceso</h3>
-            <div class="accesoedit-subtitle">
-              Actualización de privilegios, roles, justificaciones, estados y evidencias de acceso del Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOTÓN VOLVER -->
-      <div class="accesoedit-header-actions">
-        <a href="{{ url_for('accesos_matriz') }}"
-           class="btn rounded-pill px-5 fw-bold accesoedit-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-      </div>
-
-      <!-- TARJETA -->
-      <div class="accesoedit-card">
-        <div class="accesoedit-card-body">
-
-          <form method="post" enctype="multipart/form-data">
-
-            <div class="row g-3">
-
-              <div class="col-md-3">
-                <label class="form-label">ID</label>
-                <input class="form-control" name="id_acceso" required value="{{ item.id_acceso or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Rol del Usuario</label>
-                <input class="form-control" name="rol_usuario" value="{{ item.rol_usuario or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Usuario</label>
-                <input class="form-control" name="usuario" value="{{ item.usuario or '' }}">
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Área</label>
-                <select name="area_id" class="form-select">
-                  <option value="">-- Seleccione --</option>
-                  {% for a in areas %}
-                    <option value="{{ a.id }}" {% if item.area_id == a.id %}selected{% endif %}>
-                      {{ a.area }}
-                    </option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Aplicación / Sistema</label>
-                <input class="form-control" name="aplicacion" value="{{ item.aplicacion or '' }}">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Tipo de Acceso</label>
-                <input class="form-control" name="tipo_acceso" value="{{ item.tipo_acceso or '' }}">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Rol Técnico en App</label>
-                <input class="form-control" name="rol_tecnico_app" value="{{ item.rol_tecnico_app or '' }}">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Nivel de Privilegio</label>
-                <select name="nivel_privilegio" class="form-select">
-                  <option value="">-- Seleccione --</option>
-                  {% for n in niveles %}
-                    <option value="{{ n }}" {% if (item.nivel_privilegio or '') == n %}selected{% endif %}>{{ n }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-8">
-                <label class="form-label">Justificación del Acceso</label>
-                <textarea class="form-control" name="justificacion" rows="2">{{ item.justificacion or '' }}</textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Aprobado por</label>
-                <input class="form-control" name="aprobado_por" value="{{ item.aprobado_por or '' }}">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Gestionado por</label>
-                <input class="form-control" name="gestionado_por" value="{{ item.gestionado_por or '' }}">
-              </div>
-
-              <div class="col-md-2">
-                <label class="form-label">Fecha de Alta</label>
-                <input type="date" class="form-control" name="fecha_alta" value="{{ item.fecha_alta or '' }}">
-              </div>
-
-              <div class="col-md-2">
-                <label class="form-label">Fecha de Baja</label>
-                <input type="date" class="form-control" name="fecha_baja" value="{{ item.fecha_baja or '' }}">
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Estado</label>
-                <select name="estado_id" class="form-select">
-                  <option value="">-- Seleccione --</option>
-                  {% for e in estados %}
-                    <option value="{{ e.id }}" {% if item.estado_id == e.id %}selected{% endif %}>{{ e.nombre }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-8">
-                <label class="form-label">Evidencia (texto)</label>
-                <textarea class="form-control" name="evidencia" rows="2">{{ item.evidencia or '' }}</textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Agregar Evidencias PDF</label>
-                <input type="file" name="evidencias" class="form-control" accept=".pdf" multiple>
-                <small class="text-muted">Puede adjuntar uno o varios PDFs.</small>
-              </div>
-
-              <div class="col-12">
-
-                <hr>
-
-                <h6 class="mb-2 fw-bold">📎 Evidencias existentes</h6>
-
-                {% if item.evidencias %}
-
-                  <ul class="mb-0 list-unstyled">
-
-                    {% for ev in item.evidencias %}
-
-                      <li class="accesoedit-evidence-row"
-                          id="ev-row-{{ ev.id }}">
-
-                        <div>
-                          <a href="{{ url_for('accesos_evidencia_view', evi_id=ev.id, next='accesos_edit', reg_id=item.id) }}">
-                            {{ ev.original_name }}
-                          </a>
-                          <span class="text-muted small">
-                            ({{ (ev.size or 0) // 1024 }} KB)
-                          </span>
-                        </div>
-
-                        <button type="button"
-                                class="btn btn-outline-danger btn-sm rounded-pill px-3"
-                                onclick="eliminarEvidenciaAcceso({{ ev.id }})">
-                          Eliminar PDF
-                        </button>
-
-                      </li>
-
-                    {% endfor %}
-
-                  </ul>
-
-                {% else %}
-
-                  <div class="text-muted">
-                    No hay evidencias PDF cargadas.
-                  </div>
-
-                {% endif %}
-
-              </div>
-
-            </div>
-
-            <div class="accesoedit-bottom-actions">
-
-              <button class="btn btn-success rounded-pill px-4 fw-bold"
-                      type="submit">
-                Guardar cambios
-              </button>
-
-              <a href="{{ url_for('accesos_matriz') }}"
-                 class="btn rounded-pill px-4 fw-bold accesoedit-cancel-btn">
-                Cancelar
-              </a>
-
-            </div>
-
-          </form>
-
-        </div>
-      </div>
-
-    </div>
-
-    <script>
-
-    async function eliminarEvidenciaAcceso(eviId) {
-
-      if (!confirm('¿Eliminar esta evidencia?')) return;
-
-      try {
-
-        const resp = await fetch(`/accesos/evidencia/${eviId}/delete`,{
-          method:'POST',
-          headers:{'X-Requested-With':'XMLHttpRequest'}
-        });
-
-        if(resp.ok){
-
-          const row=document.getElementById(`ev-row-${eviId}`);
-
-          if(row) row.remove();
-
-        }else{
-
-          alert('No se pudo eliminar la evidencia.');
-
-        }
-
-      }catch(err){
-
-        console.error(err);
-        alert('Error de conexión al eliminar la evidencia.');
-
-      }
-
-    }
-
-    </script>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .accesoedit-shell{
-        width:96%;
-        max-width:1200px;
-        margin:10px auto 24px auto;
-      }
-
-      /* =========================
-         HEADER SGSI MODERNO
-      ========================= */
-      .accesoedit-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .accesoedit-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .accesoedit-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-      }
-
-      .accesoedit-header-overlay::before{
-        content:"✏️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .accesoedit-header-text{
-        max-width:1000px;
-        width:100%;
-      }
-
-      .accesoedit-header-text::before{
-        content:"SGSI · Edición de Acceso";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .accesoedit-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        margin:0 !important;
-      }
-
-      .accesoedit-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      /* =========================
-         BOTONES SUPERIORES
-      ========================= */
-      .accesoedit-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .accesoedit-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .accesoedit-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .accesoedit-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-      }
-
-      /* =========================
-         CARD PRINCIPAL
-      ========================= */
-      .accesoedit-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-      }
-
-      .accesoedit-card-body{
-        padding:18px;
-      }
-
-      .accesoedit-section-title{
-        font-weight:950;
-        font-size:.90rem;
-        color:#0b4a8f;
-        padding:10px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin-bottom:14px;
-      }
-
-      /* =========================
-         FORMULARIOS
-      ========================= */
-      .accesoedit-card .form-label{
-        font-weight:800;
-        font-size:.78rem;
-        color:#101827;
-        margin-bottom:5px;
-      }
-
-      .accesoedit-card .form-control,
-      .accesoedit-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .accesoedit-card textarea.form-control{
-        min-height:80px;
-      }
-
-      .accesoedit-card .form-control:focus,
-      .accesoedit-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#fff;
-      }
-
-      /* =========================
-         EVIDENCIAS
-      ========================= */
-      .accesoedit-evidence-row{
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:10px;
-        background:linear-gradient(180deg,#ffffff,#f8fbff);
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        padding:10px 12px;
-        margin-bottom:8px;
-        box-shadow:0 6px 14px rgba(15,23,42,.08);
-        flex-wrap:wrap;
-      }
-
-      .accesoedit-evidence-name{
-        font-size:.78rem;
-        font-weight:800;
-        color:#1d4ed8;
-      }
-
-      /* =========================
-         ACCIONES
-      ========================= */
-      .accesoedit-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:12px;
-        margin-top:22px;
-        flex-wrap:wrap;
-      }
-
-      .accesoedit-cancel-btn{
-        background:#ffffff;
-        color:#000;
-        border:1px solid #cfd8e3;
-      }
-
-      .accesoedit-cancel-btn:hover{
-        background:#f3f4f6;
-      }
-
-      .accesoedit-save-btn{
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      /* =========================
-         RESPONSIVE
-      ========================= */
-      @media (max-width:992px){
-        .accesoedit-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .accesoedit-title{
-          font-size:1.20rem;
-        }
-
-        .accesoedit-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .accesoedit-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .accesoedit-header-overlay::before{
-          margin:0;
-        }
-
-        .accesoedit-header-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(
-        html,
-        item=item,
-        areas=areas,
-        estados=estados,
-        niveles=niveles
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-# ==========================
-# Eliminar
-# ==========================
-
-@app.route('/accesos/delete/<int:id>')
-@login_required
-def accesos_delete(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor' or (
-        user.role != 'admin' and not verificar_permiso(user, "Gestión de Accesos")
-    ):
-        flash("No tiene permiso para eliminar accesos.", "danger")
-        return redirect(url_for('accesos_matriz'))
-
-    item = GestionAcceso.query.get_or_404(id)
-    db.session.delete(item)
-    db.session.commit()
-    flash("Acceso eliminado.", "success")
-    return redirect(url_for('accesos_matriz'))
-
-# ==========================
-# Evidencias
-# ==========================
-
-@app.route('/accesos/evidencia/<int:evi_id>/file')
-@login_required
-def accesos_evidencia_file(evi_id):
-    evi = GestionAccesoEvidencia.query.get_or_404(evi_id)
-    fullpath = os.path.join(app.config['UPLOAD_GESTION_ACCESOS_DIR'], evi.filename)
-
-    if not os.path.isfile(fullpath):
-        abort(404)
-
-    return send_file(
-        fullpath,
-        mimetype=evi.mime or 'application/pdf',
-        as_attachment=False,
-        download_name=evi.original_name or evi.filename,
-        conditional=True
-    )
-
-# ==========================
-# Ver Evidencia — Gestión de Accesos
-# ==========================
-@app.route('/accesos/evidencia/<int:evi_id>/view')
-@login_required
-def accesos_evidencia_view(evi_id):
-    evi = GestionAccesoEvidencia.query.get_or_404(evi_id)
-
-    path = os.path.join(app.config['UPLOAD_GESTION_ACCESOS_DIR'], evi.filename)
-    if not os.path.isfile(path):
-        abort(404)
-
-    ext = os.path.splitext(evi.filename or '')[1].lower()
-    is_pdf = ext == '.pdf'
-    is_office = ext in {'.doc', '.docx', '.xls', '.xlsx'}
-    is_image = ext in {'.png', '.jpg', '.jpeg', '.webp', '.gif'}
-
-    # =========================
-    # Botón volver
-    # =========================
-    next_ep = request.args.get('next')
-
-    back_label_map = {
-        'accesos_matriz': '⬅ Volver a la Matriz',
-        'accesos_menu': '⬅ Volver al Menú de Accesos',
-        'menu': '⬅ Volver al menú principal',
-    }
-
-    allowed_back = set(back_label_map.keys())
-
-    if next_ep in allowed_back:
-        back_url = url_for(next_ep)
-        back_label = back_label_map[next_ep]
-    else:
-        back_url = request.referrer or url_for('accesos_matriz')
-        back_label = '⬅ Volver'
-
-    # =========================
-    # Conversión Office -> PDF
-    # =========================
-    pdf_converted_name = None
-    if is_office:
-        try:
-            converted_dir = app.config.get(
-                'UPLOAD_GESTION_ACCESOS_CONVERTED_DIR',
-                os.path.join(app.root_path, 'static', 'converted_accesos_evidencias')
-            )
-            os.makedirs(converted_dir, exist_ok=True)
-
-            pdf_converted_path = ensure_pdf_from_office(path, output_dir=converted_dir)
-
-            if pdf_converted_path and os.path.isfile(pdf_converted_path):
-                pdf_converted_name = os.path.basename(pdf_converted_path)
-        except Exception:
-            pdf_converted_name = None
-
-    inner_html = """
-    <div class="accevi-shell">
-
-      <div class="accevi-header-actions">
-        <a href="{{ back_url }}"
-           class="btn rounded-pill px-4 py-2 fw-bold accevi-back-btn">
-          {{ back_label }}
-        </a>
-
-        <div class="accevi-file-pill" title="{{ original_name }}">
-          📎 {{ original_name }}
-        </div>
-      </div>
-
-      <div class="accevi-card">
-        <div class="accevi-card-body">
-
-          {% if is_pdf %}
-            <div class="accevi-pdf-container">
-              <iframe id="pdfFrame"
-                      src="{{ url_for('accesos_evidencia_file', evi_id=evi_id) }}#zoom=page-width"
-                      title="Visor PDF"></iframe>
-            </div>
-
-          {% elif pdf_converted_name %}
-            <div class="accevi-pdf-container">
-              <iframe id="pdfFrame"
-                      src="{{ url_for('accesos_evidencia_convertido', filename=pdf_converted_name) }}#zoom=page-width"
-                      title="Visor PDF convertido"></iframe>
-            </div>
-
-            <div class="accevi-extra-actions">
-              <a class="btn btn-outline-primary rounded-pill px-4"
-                 href="{{ url_for('accesos_evidencia_file', evi_id=evi_id) }}">
-                Abrir archivo original
-              </a>
-            </div>
-
-          {% elif is_image %}
-            <div class="text-center p-3">
-              <img src="{{ url_for('accesos_evidencia_file', evi_id=evi_id) }}"
-                   alt="{{ original_name }}"
-                   class="img-fluid rounded-4 shadow-sm"
-                   style="max-height: 78vh; object-fit: contain;">
-            </div>
-
-          {% elif is_office %}
-            <div class="alert alert-warning m-2 rounded-4">
-              No fue posible generar una vista previa interna del archivo Office.
-              Verifica que LibreOffice esté instalado en el servidor.
-            </div>
-
-            <div class="accevi-extra-actions">
-              <a class="btn btn-outline-primary rounded-pill px-4"
-                 href="{{ url_for('accesos_evidencia_file', evi_id=evi_id) }}">
-                Abrir / descargar archivo original
-              </a>
-            </div>
-
-          {% else %}
-            <div class="alert alert-info m-2 rounded-4">
-              Este tipo de archivo (<b>{{ ext }}</b>) no se puede previsualizar.
-              Puedes abrirlo o descargarlo.
-            </div>
-
-            <div class="accevi-extra-actions">
-              <a class="btn btn-outline-primary rounded-pill px-4"
-                 href="{{ url_for('accesos_evidencia_file', evi_id=evi_id) }}">
-                Abrir archivo
-              </a>
-            </div>
-          {% endif %}
-
-        </div>
-      </div>
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .accevi-shell{
-        width:96%;
-        max-width:1500px;
-        margin:22px auto 30px auto;
-      }
-
-      .accevi-header-actions{
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:12px;
-        flex-wrap:wrap;
-        margin-bottom:16px;
-      }
-
-      .accevi-back-btn{
-        background:#ffffff;
-        color:#000000;
-        border:2px solid #ffffff;
-        box-shadow:0 4px 10px rgba(0,0,0,.10);
-      }
-
-      .accevi-back-btn:hover{
-        background:#f3f4f6;
-        color:#000000;
-        border-color:#f3f4f6;
-      }
-
-      .accevi-file-pill{
-        max-width:70%;
-        background:rgba(255,255,255,.92);
-        color:#101827;
-        border:1px solid rgba(0,0,0,.08);
-        border-radius:999px;
-        padding:10px 16px;
-        font-size:.90rem;
-        font-weight:700;
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-        box-shadow:0 4px 10px rgba(0,0,0,.10);
-      }
-
-      .accevi-card{
-        background:rgba(255,255,255,.88)!important;
-        border-radius:18px;
-        backdrop-filter:blur(6px);
-        box-shadow:0 10px 24px rgba(0,0,0,.18);
-        overflow:hidden;
-      }
-
-      .accevi-card-body{
-        padding:8px 7px;
-      }
-
-      .accevi-pdf-container{
-        height:min(82vh,1000px);
-        min-height:600px;
-        width:100%;
-      }
-
-      .accevi-pdf-container iframe{
-        width:100%;
-        height:100%;
-        border:1px solid #dee2e6;
-        border-radius:16px;
-        background:#fff;
-      }
-
-      .accevi-extra-actions{
-        text-align:center;
-        margin-top:14px;
-      }
-
-      @media (max-width:992px){
-        .accevi-shell{
-          width:98%;
-          margin:14px auto 24px auto;
-        }
-
-        .accevi-header-actions{
-          flex-direction:column;
-          align-items:stretch;
-        }
-
-        .accevi-file-pill{
-          max-width:100%;
-        }
-
-        .accevi-card-body{
-          padding:10px;
-        }
-
-        .accevi-pdf-container{
-          min-height:520px;
-        }
-      }
-    </style>
-
-    <script>
-      function setZoom(z) {
-        var f = document.getElementById('pdfFrame');
-        if (!f) return;
-        var base = f.src.split('#')[0];
-        f.src = base + '#zoom=' + encodeURIComponent(z);
-      }
-    </script>
-    """
-
-    return render_template_string(
-        BASE,
-        content=Markup(render_template_string(
-            inner_html,
-            evi_id=evi_id,
-            original_name=evi.original_name or evi.filename,
-            ext=ext,
-            is_pdf=is_pdf,
-            is_office=is_office,
-            is_image=is_image,
-            pdf_converted_name=pdf_converted_name,
-            back_url=back_url,
-            back_label=back_label
-        ))
-    )
-
-@app.route('/accesos/evidencia/convertido/<path:filename>')
-@login_required
-def accesos_evidencia_convertido(filename):
-    converted_dir = app.config.get(
-        'UPLOAD_GESTION_ACCESOS_CONVERTED_DIR',
-        os.path.join(app.root_path, 'static', 'converted_accesos_evidencias')
-    )
-
-    full_path = safe_join(converted_dir, filename)
-    if not full_path or not os.path.isfile(full_path):
-        abort(404)
-
-    return send_file(
-        full_path,
-        mimetype='application/pdf',
-        as_attachment=False,
-        download_name=filename,
-        conditional=True
-    )
-
-@app.route('/accesos/evidencia/<int:evi_id>/delete', methods=['POST'])
-@login_required
-def accesos_evidencia_delete(evi_id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor' or (
-        user.role != 'admin' and not verificar_permiso(user, "Gestión de Accesos")
-    ):
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify({"ok": False, "error": "No autorizado"}), 403
-        flash("No tiene permiso para eliminar evidencias.", "danger")
-        return redirect(url_for('accesos_matriz'))
-
-    evi = GestionAccesoEvidencia.query.get_or_404(evi_id)
-    path = os.path.join(app.config['UPLOAD_GESTION_ACCESOS_DIR'], evi.filename)
-
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-    except Exception as ex:
-        print("Error eliminando archivo físico:", ex)
-
-    reg_id = evi.registro_id
-    db.session.delete(evi)
-    db.session.commit()
-
-    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-        return jsonify({"ok": True})
-
-    flash("Evidencia eliminada.", "success")
-    return redirect(url_for('accesos_edit', id=reg_id))
-
-# ==========================================================================================================================================
-#                                                       Fin Módulo de Gestión de Accesos
-# ==========================================================================================================================================
-
-
-# ==========================================================================================================================================
-#                                                       Módulo de Revisión de Accesos
-# ==========================================================================================================================================
-
-# ==========================
-# ENTRADA DIRECTA — Revisión de Accesos
-# ==========================
-@app.route('/revision_accesos_menu')
-@login_required
-def revision_accesos_menu():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Revisión de Accesos"):
-        flash("No tiene permiso para acceder al módulo de revisión de accesos.", "danger")
-        return redirect(url_for('menu'))
-
-    return redirect(url_for('revision_accesos_matriz'))
-
-
-# ===========================
-# Agregar revisión de accesos
-# ===========================
-@app.route('/revision_accesos/new', methods=['GET', 'POST'])
-@login_required
-def revision_accesos_new():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede agregar registros.", "danger")
-        return redirect(url_for('revision_accesos_matriz'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Revisión de Accesos"):
-        flash("No tiene permiso para agregar registro de revisión de accesos.", "danger")
-        return redirect(url_for('revision_accesos_matriz'))
-
-    if request.method == 'POST':
-        it = RevisionAccesoRegistro(
-            usuario_rol     = (request.form.get('usuario_rol') or '').strip(),
-            aplicacion      = (request.form.get('aplicacion') or '').strip(),
-            tipo_acceso     = (request.form.get('tipo_acceso') or '').strip(),
-            revisado_por    = (request.form.get('revisado_por') or '').strip(),
-            fecha_revision  = request.form.get('fecha_revision') or '',
-            sigue_necesario = (request.form.get('sigue_necesario') or '').strip(),
-            observaciones   = (request.form.get('observaciones') or '').strip(),
-        )
-        db.session.add(it)
-        db.session.commit()
-        flash("Revisión de acceso registrada.", "success")
-        return redirect(url_for('revision_accesos_matriz'))
-
-    html = """
-    <div class="revadd-shell">
-
-      <div class="revadd-header-card">
-        <div class="revadd-header-overlay">
-          <div class="revadd-header-text">
-            <h3 class="revadd-title m-0">Agregar Revisión de Acceso</h3>
-            <div class="revadd-subtitle">
-              Registro de revisiones periódicas de accesos para validar vigencia, necesidad y cumplimiento dentro del Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="revadd-header-actions">
-        <a href="{{ url_for('revision_accesos_matriz') }}"
-           class="btn rounded-pill px-4 fw-bold revadd-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-
-
-      </div>
-
-      <div class="revadd-card">
-        <div class="revadd-card-body">
-          <form method="post">
-
-            <div class="row g-3">
-
-              <div class="col-md-4">
-                <label class="form-label">Usuario / Rol</label>
-                <input class="form-control" name="usuario_rol" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Aplicación</label>
-                <input class="form-control" name="aplicacion" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Tipo de Acceso</label>
-                <select class="form-select" name="tipo_acceso" required>
-                  <option value="">-- Seleccione --</option>
-                  {% for t in tipos_acceso %}
-                    <option value="{{ t }}">{{ t }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Revisado por</label>
-                <input class="form-control" name="revisado_por" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Fecha de Revisión</label>
-                <input type="date" class="form-control" name="fecha_revision" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">¿Sigue Siendo Necesario?</label>
-                <select class="form-select" name="sigue_necesario" required>
-                  <option value="">-- Seleccione --</option>
-                  {% for v in valores_si_no %}
-                    <option value="{{ v }}">{{ v }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Observaciones</label>
-                <textarea class="form-control" name="observaciones" rows="2"></textarea>
-              </div>
-
-            </div>
-
-            <div class="revadd-bottom-actions">
-              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
-                Guardar
-              </button>
-
-              <a href="{{ url_for('revision_accesos_matriz') }}"
-                 class="btn rounded-pill px-4 fw-bold revadd-cancel-btn">
-                Cancelar
-              </a>
-            </div>
-
-          </form>
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .revadd-shell{
-        width:96%;
-        max-width:1500px;
-        margin:10px auto 24px auto;
-      }
-
-      .revadd-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .revadd-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .revadd-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent;
-        padding:0;
-        position:relative;
-        z-index:1;
-      }
-
-      .revadd-header-overlay::before{
-        content:"🔎";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .revadd-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .revadd-header-text::before{
-        content:"SGSI · Revisión de Accesos";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .revadd-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .revadd-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .revadd-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .revadd-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .revadd-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .revadd-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .revadd-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .revadd-card-body{
-        padding:18px;
-      }
-
-      .revadd-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .revadd-card .form-control,
-      .revadd-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .revadd-card textarea.form-control{
-        min-height:70px;
-        resize:vertical;
-      }
-
-      .revadd-card .form-control:focus,
-      .revadd-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#fff;
-      }
-
-      .revadd-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:18px;
-        flex-wrap:wrap;
-      }
-
-      .revadd-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .revadd-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .revadd-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      @media (max-width:992px){
-        .revadd-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .revadd-header-card{
-          min-height:88px;
-        }
-
-        .revadd-title{
-          font-size:1.20rem;
-        }
-
-        .revadd-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .revadd-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .revadd-header-overlay::before{
-          margin:0;
-        }
-
-        .revadd-header-actions .btn,
-        .revadd-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(
-        html,
-        tipos_acceso=REVISION_TIPOS_ACCESO,
-        valores_si_no=REVISION_SI_NO
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-
-# ==========================
-# Matriz Revisión de Accesos
-# ==========================
-@app.route('/revision_accesos_matriz')
-@login_required
-def revision_accesos_matriz():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        read_only = True
-    else:
-        if user.role != 'admin' and not verificar_permiso(user, "Revisión de Accesos"):
-            flash("No tiene permiso para ver la revisión de accesos.", "danger")
-            return redirect(url_for('menu'))
-        read_only = False
-
-    filtro_usuario = (request.args.get('usuario') or '').strip()
-    filtro_aplicacion = (request.args.get('aplicacion') or '').strip()
-    filtro_sigue_necesario = (request.args.get('sigue_necesario') or '').strip()
-
-    query = RevisionAccesoRegistro.query
-
-    if filtro_usuario:
-        query = query.filter(RevisionAccesoRegistro.usuario_rol == filtro_usuario)
-
-    if filtro_aplicacion:
-        query = query.filter(RevisionAccesoRegistro.aplicacion == filtro_aplicacion)
-
-    if filtro_sigue_necesario:
-        query = query.filter(RevisionAccesoRegistro.sigue_necesario == filtro_sigue_necesario)
-
-    items = query.order_by(RevisionAccesoRegistro.id.desc()).all()
-
-    opciones_usuario = [
-        x[0] for x in db.session.query(RevisionAccesoRegistro.usuario_rol)
-        .filter(RevisionAccesoRegistro.usuario_rol.isnot(None))
-        .filter(RevisionAccesoRegistro.usuario_rol != '')
-        .distinct()
-        .order_by(RevisionAccesoRegistro.usuario_rol.asc())
-        .all()
-    ]
-
-    opciones_aplicacion = [
-        x[0] for x in db.session.query(RevisionAccesoRegistro.aplicacion)
-        .filter(RevisionAccesoRegistro.aplicacion.isnot(None))
-        .filter(RevisionAccesoRegistro.aplicacion != '')
-        .distinct()
-        .order_by(RevisionAccesoRegistro.aplicacion.asc())
-        .all()
-    ]
-
-    opciones_sigue_necesario = [
-        x[0] for x in db.session.query(RevisionAccesoRegistro.sigue_necesario)
-        .filter(RevisionAccesoRegistro.sigue_necesario.isnot(None))
-        .filter(RevisionAccesoRegistro.sigue_necesario != '')
-        .distinct()
-        .order_by(RevisionAccesoRegistro.sigue_necesario.asc())
-        .all()
-    ]
-
-    total_filtrados = len(items)
-    total_general = RevisionAccesoRegistro.query.count()
-
-    html = """
-    <div class="revmat-shell">
-
-      <div class="revmat-header-card">
-        <div class="revmat-header-overlay">
-          <div class="revmat-header-text">
-            <h3 class="revmat-title m-0">Revisión de Accesos</h3>
-            <div class="revmat-subtitle">
-              Visualización resumida de revisiones periódicas de accesos para validar necesidad, vigencia y control dentro del Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="revmat-header-actions">
-        
-
-        {% if not read_only %}
-          <a href="{{ url_for('revision_accesos_new') }}"
-             class="btn btn-primary rounded-pill px-4 fw-bold">
-            ➕ Agregar Revisión
-          </a>
-        {% else %}
-          <button class="btn btn-secondary rounded-pill px-4 fw-bold" disabled>
-            ➕ Agregar Revisión
-          </button>
-        {% endif %}
-      </div>
-
-      <div class="revmat-filter-card">
-        <div class="revmat-filter-body">
-          <form method="get" action="{{ url_for('revision_accesos_matriz') }}">
-            <div class="row g-2 align-items-end">
-
-              <div class="col-md-4">
-                <label class="form-label fw-bold">Usuario / Rol</label>
-                <select name="usuario" class="form-select rounded-3">
-                  <option value="">Todos</option>
-                  {% for op in opciones_usuario %}
-                    <option value="{{ op }}" {% if filtro_usuario == op %}selected{% endif %}>{{ op }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label fw-bold">Aplicación</label>
-                <select name="aplicacion" class="form-select rounded-3">
-                  <option value="">Todas</option>
-                  {% for op in opciones_aplicacion %}
-                    <option value="{{ op }}" {% if filtro_aplicacion == op %}selected{% endif %}>{{ op }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label fw-bold">¿Sigue siendo necesario?</label>
-                <select name="sigue_necesario" class="form-select rounded-3">
-                  <option value="">Todos</option>
-                  {% for op in opciones_sigue_necesario %}
-                    <option value="{{ op }}" {% if filtro_sigue_necesario == op %}selected{% endif %}>{{ op }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-12">
-                <div class="d-flex gap-2 flex-wrap justify-content-end">
-                  <button type="submit" class="btn btn-primary rounded-pill px-4 fw-bold">Filtrar</button>
-                  <a href="{{ url_for('revision_accesos_matriz') }}"
-                     class="btn btn-secondary rounded-pill px-4 fw-bold">Limpiar</a>
-                </div>
-              </div>
-
-            </div>
-          </form>
-        </div>
-      </div>
-
-      <div class="revmat-card">
-
-        <div class="revmat-topbar">
-          <div>
-            <h5 class="revmat-top-title mb-1">Resumen de revisiones</h5>
-            <div class="revmat-top-note">
-              La matriz muestra los campos principales. Para consultar toda la información usa el botón <strong>Ver detalle</strong>.
-            </div>
-          </div>
-          <div class="revmat-counter-badge">
-            Registros filtrados: {{ total_filtrados }} | Total general: {{ total_general }}
-          </div>
-        </div>
-
-        <div class="revmat-card-body">
-          <div class="revmat-table-wrap">
-            <div class="table-responsive">
-              <table class="table table-bordered table-hover align-middle revmat-table mb-0">
-                <colgroup>
-                  <col style="width: 20%;">
-                  <col style="width: 18%;">
-                  <col style="width: 16%;">
-                  <col style="width: 14%;">
-                  <col style="width: 12%;">
-                  <col style="width: 20%;">
-                </colgroup>
-
-                <thead>
-                  <tr>
-                    <th>Usuario / Rol</th>
-                    <th>Aplicación</th>
-                    <th>Tipo de Acceso</th>
-                    <th>Fecha de Revisión</th>
-                    <th>¿Sigue siendo necesario?</th>
-                    <th class="revmat-col-acciones">Acciones</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {% for it in items %}
-                    <tr>
-                      <td>{{ it.usuario_rol or '—' }}</td>
-                      <td>{{ it.aplicacion or '—' }}</td>
-                      <td>{{ it.tipo_acceso or '—' }}</td>
-                      <td class="text-center">{{ it.fecha_revision or '—' }}</td>
-                      <td class="text-center">{{ it.sigue_necesario or '—' }}</td>
-
-                      <td class="text-center revmat-col-acciones">
-                        <div class="revmat-actions-wrap">
-                          <a href="{{ url_for('revision_accesos_detalle', id=it.id) }}"
-                             class="btn btn-info btn-sm rounded-pill revmat-btn-action text-white fw-bold">
-                            Ver detalle
-                          </a>
-
-                          {% if not read_only %}
-                            <a href="{{ url_for('revision_accesos_edit', id=it.id) }}"
-                               class="btn btn-warning btn-sm rounded-pill revmat-btn-action fw-bold">
-                              Editar
-                            </a>
-
-                            <a href="{{ url_for('revision_accesos_delete', id=it.id) }}"
-                               class="btn btn-danger btn-sm rounded-pill revmat-btn-action fw-bold"
-                               onclick="return confirm('¿Eliminar este registro de revisión?');">
-                              Eliminar
-                            </a>
-                          {% else %}
-                            <span class="badge bg-secondary">Solo lectura</span>
-                          {% endif %}
-                        </div>
-                      </td>
-                    </tr>
-                  {% endfor %}
-
-                  {% if items|length == 0 %}
-                    <tr>
-                      <td colspan="6" class="text-center text-muted py-5">
-                        Sin registros
-                      </td>
-                    </tr>
-                  {% endif %}
-                </tbody>
-
-              </table>
-            </div>
-          </div>
-        </div>
-
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .revmat-shell{
-        width:96%;
-        max-width:1650px;
-        margin:10px auto 24px auto;
-      }
-
-      .revmat-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .revmat-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .revmat-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-      }
-
-      .revmat-header-overlay::before{
-        content:"🔎";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .revmat-header-text{
-        max-width:1100px;
-        width:100%;
-      }
-
-      .revmat-header-text::before{
-        content:"SGSI · Matriz de Revisión de Accesos";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .revmat-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .revmat-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .revmat-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .revmat-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .revmat-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .revmat-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .revmat-filter-card,
-      .revmat-card{
-        background:rgba(255,255,255,.96);
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .revmat-filter-card{
-        margin-bottom:14px;
-      }
-
-      .revmat-filter-body{
-        padding:14px 16px;
-      }
-
-      .revmat-filter-body .form-label{
-        font-size:.78rem;
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-      }
-
-      .revmat-filter-body .form-select,
-      .revmat-filter-body .form-control{
-        min-height:36px;
-        height:36px;
-        font-size:.80rem;
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        background:#f8fafc;
-      }
-
-      .revmat-filter-body .btn{
-        border-radius:10px !important;
-        min-height:36px;
-        padding:7px 18px !important;
-        font-size:.80rem;
-        font-weight:900;
-      }
-
-      .revmat-filter-body .form-select:focus,
-      .revmat-filter-body .form-control:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .18rem rgba(63,134,214,.18);
-        background:#ffffff;
-      }
-
-      .revmat-topbar{
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:12px;
-        padding:14px 16px 0 16px;
-        flex-wrap:wrap;
-      }
-
-      .revmat-top-title{
-        color:#0f172a;
-        font-weight:950;
-        font-size:.92rem;
-      }
-
-      .revmat-top-note{
-        color:#475569;
-        font-size:.78rem;
-      }
-
-      .revmat-counter-badge{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        color:#fff;
-        font-weight:900;
-        border-radius:999px;
-        padding:7px 14px;
-        font-size:.78rem;
-        box-shadow:0 8px 16px rgba(15,23,42,.16);
-      }
-
-      .revmat-card-body{
-        padding:12px 16px 16px 16px;
-      }
-
-      .revmat-table-wrap{
-        max-height:70vh;
-        overflow-y:auto;
-        overflow-x:auto;
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        background:#fff;
-      }
-
-      .revmat-table{
-        min-width:1300px;
-        table-layout:fixed;
-        margin-bottom:0;
-      }
-
-      .revmat-table thead th{
-        position:sticky;
-        top:0;
-        z-index:10;
-        background:linear-gradient(135deg,#1d5fa9,#2f7fd1) !important;
-        color:#ffffff !important;
-        font-weight:900;
-        text-align:center;
-        vertical-align:middle;
-        border-color:rgba(0,0,0,.08);
-        font-size:.78rem;
-        padding:9px 8px;
-        white-space:normal;
-      }
-
-      .revmat-table th,
-      .revmat-table td{
-        vertical-align:top;
-        font-size:.78rem;
-        padding:9px 8px;
-        white-space:normal;
-        word-break:break-word;
-        overflow-wrap:anywhere;
-      }
-
-      .revmat-table td{
-        border-bottom:1px solid #e5edf7;
-        color:#101827;
-      }
-
-      .revmat-table tbody tr:nth-child(even){
-        background:#f8fbff;
-      }
-
-      .revmat-table tbody tr:hover{
-        background:#eef6ff;
-      }
-
-      .revmat-table th.revmat-col-acciones,
-      .revmat-table td.revmat-col-acciones,
-      .revmat-col-acciones{
-        width:190px !important;
-        min-width:190px !important;
-        max-width:190px !important;
-        text-align:center;
-        vertical-align:middle;
-      }
-
-      .revmat-actions-wrap{
-        display:flex;
-        flex-direction:column;
-        gap:6px;
-        align-items:center;
-        justify-content:center;
-      }
-
-      .revmat-btn-action{
-        min-width:110px;
-        max-width:125px;
-        padding:4px 12px !important;
-        font-size:.64rem !important;
-        line-height:1.2;
-        text-align:center;
-        white-space:nowrap;
-        border-radius:999px !important;
-        font-weight:900;
-      }
-
-      .revmat-actions-wrap .badge{
-        font-size:.70rem;
-        padding:5px 10px;
-        border-radius:999px;
-        font-weight:900;
-        white-space:nowrap;
-      }
-
-      .badge{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }
-
-      .btn.rounded-pill{
-        border-radius:999px !important;
-      }
-
-      @media (max-width:992px){
-        .revmat-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .revmat-header-card{
-          min-height:88px;
-        }
-
-        .revmat-title{
-          font-size:1.20rem;
-        }
-
-        .revmat-filter-body,
-        .revmat-card-body{
-          padding:12px;
-        }
-
-        .revmat-topbar{
-          padding:12px 14px 0 14px;
-        }
-
-        .revmat-table th.revmat-col-acciones,
-        .revmat-table td.revmat-col-acciones,
-        .revmat-col-acciones{
-          width:170px !important;
-          min-width:170px !important;
-          max-width:170px !important;
-        }
-      }
-
-      @media (max-width:768px){
-        .revmat-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .revmat-header-overlay::before{
-          margin:0;
-        }
-
-        .revmat-header-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(
-        html,
-        items=items,
-        read_only=read_only,
-        opciones_usuario=opciones_usuario,
-        opciones_aplicacion=opciones_aplicacion,
-        opciones_sigue_necesario=opciones_sigue_necesario,
-        filtro_usuario=filtro_usuario,
-        filtro_aplicacion=filtro_aplicacion,
-        filtro_sigue_necesario=filtro_sigue_necesario,
-        total_filtrados=total_filtrados,
-        total_general=total_general
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-# ==========================
-# Detalle revisión de accesos
-# ==========================
-
-@app.route('/revision_accesos/detalle/<int:id>')
-@login_required
-def revision_accesos_detalle(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        read_only = True
-    else:
-        if user.role != 'admin' and not verificar_permiso(user, "Revisión de Accesos"):
-            flash("No tiene permiso para ver el detalle de la revisión de accesos.", "danger")
-            return redirect(url_for('revision_accesos_menu'))
-        read_only = False
-
-    it = RevisionAccesoRegistro.query.get_or_404(id)
-
-    html = """
-    <div class="revdet-shell">
-
-      <!-- CABECERA -->
-      <div class="revdet-header-card">
-        <div class="revdet-header-overlay">
-          <div class="revdet-header-text">
-            <h3 class="revdet-title m-0">Detalle de la Revisión de Acceso</h3>
-            <div class="revdet-subtitle">
-              Consulta completa del registro en modo solo lectura
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOTONES -->
-      <div class="revdet-header-actions">
-        <a href="{{ url_for('revision_accesos_matriz') }}"
-           class="btn rounded-pill px-4 fw-bold revdet-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-
-        {% if not read_only %}
-          <a href="{{ url_for('revision_accesos_edit', id=it.id) }}"
-             class="btn btn-warning rounded-pill px-4 fw-bold">
-            Editar registro
-          </a>
-        {% endif %}
-      </div>
-
-      <!-- TARJETA -->
-      <div class="revdet-card">
-        <div class="revdet-card-body">
-
-          <div class="revdet-section">
-            <div class="revdet-section-title">Información principal</div>
-            <div class="row g-3">
-
-              <div class="col-md-4">
-                <div class="revdet-field">
-                  <div class="revdet-label">Usuario / Rol</div>
-                  <div class="revdet-value">{{ it.usuario_rol or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-4">
-                <div class="revdet-field">
-                  <div class="revdet-label">Aplicación</div>
-                  <div class="revdet-value">{{ it.aplicacion or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-4">
-                <div class="revdet-field">
-                  <div class="revdet-label">Tipo de Acceso</div>
-                  <div class="revdet-value">{{ it.tipo_acceso or '—' }}</div>
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-          <div class="revdet-section">
-            <div class="revdet-section-title">Control y validación</div>
-            <div class="row g-3">
-
-              <div class="col-md-4">
-                <div class="revdet-field revdet-field-compact">
-                  <div class="revdet-label">Revisado por</div>
-                  <div class="revdet-value revdet-value-compact">{{ it.revisado_por or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-4">
-                <div class="revdet-field revdet-field-compact">
-                  <div class="revdet-label">Fecha de Revisión</div>
-                  <div class="revdet-value revdet-value-compact">{{ it.fecha_revision or '—' }}</div>
-                </div>
-              </div>
-
-              <div class="col-md-4">
-                <div class="revdet-field revdet-field-compact">
-                  <div class="revdet-label">¿Sigue siendo necesario?</div>
-                  <div class="revdet-value revdet-value-compact">{{ it.sigue_necesario or '—' }}</div>
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-          <div class="revdet-section">
-            <div class="revdet-section-title">Observaciones</div>
-            <div class="row g-3">
-
-              <div class="col-md-12">
-                <div class="revdet-field">
-                  <div class="revdet-label">Observaciones</div>
-                  <div class="revdet-value">{{ it.observaciones or '—' }}</div>
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .revdet-shell{
-        width:96%;
-        max-width:1200px;
-        margin:10px auto 24px auto;
-      }
-
-      .revdet-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .revdet-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .revdet-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        padding:0;
-        background:transparent;
-        position:relative;
-        z-index:1;
-      }
-
-      .revdet-header-overlay::before{
-        content:"🔎";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#fff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .revdet-header-text{
-        max-width:1000px;
-        width:100%;
-        transform:none;
-      }
-
-      .revdet-header-text::before{
-        content:"SGSI · Detalle de Revisión";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .revdet-title{
-        color:#fff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .revdet-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .revdet-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .revdet-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .revdet-back-btn{
-        background:#fff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .revdet-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .revdet-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .revdet-card-body{
-        padding:18px;
-      }
-
-      .revdet-section{
-        margin-bottom:14px;
-        background:#fff;
-        border:1px solid #dbe6f4;
-        border-radius:16px;
-        padding:8px 7px;
-        box-shadow:0 8px 18px rgba(15,23,42,.08);
-      }
-
-      .revdet-section:last-child{
-        margin-bottom:0;
-      }
-
-      .revdet-section-title{
-        font-weight:950;
-        font-size:.78rem;
-        color:#0b4a8f;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin:0 0 12px 0;
-      }
-
-      .revdet-field{
-        background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);
-        border:1px solid #dbe6f4;
-        border-radius:14px;
-        padding:12px;
-        min-height:78px;
-        height:100%;
-        display:flex;
-        flex-direction:column;
-        justify-content:flex-start;
-      }
-
-      .revdet-field-compact{
-        min-height:78px;
-        justify-content:center;
-        align-items:center;
-        text-align:center;
-      }
-
-      .revdet-label{
-        font-size:.70rem;
-        font-weight:900;
-        text-transform:uppercase;
-        letter-spacing:.35px;
-        color:#0b4a8f;
-        margin-bottom:6px;
-      }
-
-      .revdet-value{
-        color:#101827;
-        font-size:.82rem;
-        line-height:1.38;
-        white-space:pre-wrap;
-        word-break:break-word;
-      }
-
-      .revdet-value-compact{
-        font-weight:900;
-        font-size:.80rem;
-        line-height:1.2;
-      }
-
-      .revdet-section .row.g-3{
-        --bs-gutter-x:.8rem;
-        --bs-gutter-y:.8rem;
-      }
-
-      .form-control,
-      .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .form-control:focus,
-      .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#fff;
-      }
-
-      .revdet-soft-box{
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        border-radius:14px;
-        padding:12px 14px;
-        box-shadow:0 6px 14px rgba(15,23,42,.06);
-      }
-
-      @media (max-width:992px){
-        .revdet-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .revdet-header-card{
-          min-height:88px;
-        }
-
-        .revdet-title{
-          font-size:1.20rem;
-        }
-
-        .revdet-card-body{
-          padding:8px 7px;
-        }
-
-        .revdet-section{
-          padding:12px;
-        }
-
-        .revdet-field,
-        .revdet-field-compact{
-          min-height:72px;
-        }
-      }
-
-      @media (max-width:768px){
-        .revdet-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .revdet-header-overlay::before{
-          margin:0;
-        }
-
-        .revdet-header-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-
-    inner = render_template_string(
-        html,
-        it=it,
-        read_only=read_only
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-# ==========================
-# Editar revision de accesos
-# ==========================
-
-@app.route('/revision_accesos/edit/<int:id>', methods=['GET','POST'])
-@login_required
-def revision_accesos_edit(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor' or (
-        user.role != 'admin' and not verificar_permiso(user, "Revisión de Accesos")
-    ):
-        flash("No tiene permiso para editar registros de la revisión de accesos.", "danger")
-        return redirect(url_for('revision_accesos_matriz'))
-
-
-    item = RevisionAccesoRegistro.query.get_or_404(id)
-
-    if request.method == 'POST':
-        item.usuario_rol     = (request.form.get('usuario_rol') or '').strip()
-        item.aplicacion      = (request.form.get('aplicacion') or '').strip()
-        item.tipo_acceso     = (request.form.get('tipo_acceso') or '').strip()
-        item.revisado_por    = (request.form.get('revisado_por') or '').strip()
-        item.fecha_revision  = request.form.get('fecha_revision') or ''
-        item.sigue_necesario = (request.form.get('sigue_necesario') or '').strip()
-        item.observaciones   = (request.form.get('observaciones') or '').strip()
-
-        db.session.commit()
-        flash("Revisión de acceso actualizada.", "success")
-        return redirect(url_for('revision_accesos_matriz'))
-
-    html = """
-    <div class="revedit-shell">
-
-      <!-- CABECERA -->
-      <div class="revedit-header-card">
-        <div class="revedit-header-overlay">
-          <div class="revedit-header-text">
-            <h3 class="revedit-title m-0">Editar Revisión de Acceso</h3>
-            <div class="revedit-subtitle">
-              Actualización de revisiones de acceso para validar necesidad, vigencia y control dentro del Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOTÓN VOLVER -->
-      <div class="revedit-header-actions">
-        <a href="{{ url_for('revision_accesos_matriz') }}"
-           class="btn rounded-pill px-5 fw-bold revedit-back-btn">
-          ⬅ Volver a la Matriz
-        </a>
-      </div>
-
-      <!-- TARJETA -->
-      <div class="revedit-card">
-        <div class="revedit-card-body">
-          <form method="post">
-
-            <div class="row g-3">
-
-              <div class="col-md-4">
-                <label class="form-label">Usuario / Rol</label>
-                <input class="form-control"
-                       name="usuario_rol"
-                       value="{{ item.usuario_rol or '' }}"
-                       required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Aplicación</label>
-                <input class="form-control"
-                       name="aplicacion"
-                       value="{{ item.aplicacion or '' }}"
-                       required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Tipo de Acceso</label>
-                <select class="form-select" name="tipo_acceso" required>
-                  {% for t in tipos_acceso %}
-                    <option value="{{ t }}" {% if item.tipo_acceso==t %}selected{% endif %}>
-                      {{ t }}
-                    </option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Revisado por</label>
-                <input class="form-control"
-                       name="revisado_por"
-                       value="{{ item.revisado_por or '' }}"
-                       required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Fecha de Revisión</label>
-                <input type="date"
-                       class="form-control"
-                       name="fecha_revision"
-                       value="{{ item.fecha_revision or '' }}"
-                       required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">¿Sigue Siendo Necesario?</label>
-                <select class="form-select" name="sigue_necesario" required>
-                  {% for v in valores_si_no %}
-                    <option value="{{ v }}" {% if item.sigue_necesario==v %}selected{% endif %}>
-                      {{ v }}
-                    </option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-12">
-                <label class="form-label">Observaciones</label>
-                <textarea class="form-control"
-                          name="observaciones"
-                          rows="2">{{ item.observaciones or '' }}</textarea>
-              </div>
-
-            </div>
-
-            <div class="revedit-bottom-actions">
-              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
-                Guardar cambios
-              </button>
-
-              <a href="{{ url_for('revision_accesos_matriz') }}"
-                 class="btn rounded-pill px-4 fw-bold revedit-cancel-btn">
-                Cancelar
-              </a>
-            </div>
-
-          </form>
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .revedit-shell{
-        width:96%;
-        max-width:1200px;
-        margin:10px auto 24px auto;
-      }
-
-      .revedit-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .revedit-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .revedit-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        padding:0;
-        background:transparent;
-        position:relative;
-        z-index:1;
-      }
-
-      .revedit-header-overlay::before{
-        content:"✏️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .revedit-header-text{
-        max-width:1000px;
-        width:100%;
-        transform:none;
-      }
-
-      .revedit-header-text::before{
-        content:"SGSI · Edición de Revisión";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .revedit-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .revedit-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-      }
-
-      .revedit-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .revedit-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .revedit-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .revedit-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .revedit-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .revedit-card-body{
-        padding:18px;
-      }
-
-      .revedit-section-title{
-        font-weight:950;
-        font-size:.78rem;
-        color:#0b4a8f;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin:0 0 14px 0;
-      }
-
-      .revedit-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .revedit-card .form-control,
-      .revedit-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .revedit-card textarea.form-control{
-        min-height:70px;
-        resize:vertical;
-      }
-
-      .revedit-card .form-control:focus,
-      .revedit-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#ffffff;
-      }
-
-      .revedit-card .input-group-text{
-        border-radius:0 9px 9px 0;
-        border:1px solid #d9e3f0;
-        background:#eef5ff;
-        color:#0b4a8f;
-        font-weight:900;
-      }
-
-      .revedit-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:22px;
-        flex-wrap:wrap;
-      }
-
-      .revedit-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .revedit-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .revedit-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .revedit-save-btn{
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .revedit-soft-box{
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        border-radius:14px;
-        padding:12px 14px;
-        box-shadow:0 6px 14px rgba(15,23,42,.06);
-      }
-
-      @media (max-width:992px){
-        .revedit-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .revedit-header-card{
-          min-height:88px;
-        }
-
-        .revedit-title{
-          font-size:1.20rem;
-        }
-
-        .revedit-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .revedit-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .revedit-header-overlay::before{
-          margin:0;
-        }
-
-        .revedit-header-actions .btn,
-        .revedit-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-    """
-    inner = render_template_string(
-        html,
-        item=item,
-        tipos_acceso=REVISION_TIPOS_ACCESO,
-        valores_si_no=REVISION_SI_NO
-    )
-    return render_template_string(BASE, content=Markup(inner))
-
-# ==========================
-# Eliminar
-# ==========================
-
-@app.route('/revision_accesos/delete/<int:id>')
-@login_required
-def revision_accesos_delete(id):
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor' or (user.role != 'admin' and not verificar_permiso(user, "Revisión de Accesos")
-    ):
-        flash("No tiene permiso para eliminar registros de la revisión de accesos.", "danger")
-        return redirect(url_for('revision_accesos_matriz'))
-
-    item = RevisionAccesoRegistro.query.get_or_404(id)
-    db.session.delete(item)
-    db.session.commit()
-    flash("Revisión de acceso eliminada.", "success")
-    return redirect(url_for('revision_accesos_matriz'))
-
-# ==========================================================================================================================================
-#                                                       Fin Módulo de Revisión de Accesos
-# ==========================================================================================================================================
-
-# ==========================================================================================================================================
-#                                                               Módulo Control de Cambios
-# ==========================================================================================================================================
-
-
-class CambioRFCRegistro(db.Model):
-    __tablename__ = 'cambio_rfc_registro'
-
-    id = db.Column(db.Integer, primary_key=True)
-
-    # --- Información general ---
-    ticket = db.Column(db.String(50), nullable=False)
-    fecha_solicitud = db.Column(db.Date, nullable=False)
-
-    responsable_solicitud_id = db.Column(db.Integer, nullable=True)  # FK opcional
-    responsable_solicitud_nombre = db.Column(db.String(150))
-    responsable_solicitud_cargo = db.Column(db.String(150))
-
-    # --- Información del cambio ---
-    descripcion = db.Column(db.Text)          # Qué se requiere
-    antecedentes = db.Column(db.Text)        # Por qué se requiere
-    objetivo = db.Column(db.Text)            # Qué se busca lograr
-    alcance = db.Column(db.Text)
-    ambiente = db.Column(db.String(30))      # Producción / Contingencia
-    partes_interesadas = db.Column(db.Text)
-    recursos_necesarios = db.Column(db.Text)
-
-    estado_seguridad = db.Column(db.String(80), default="Pendiente de aprobación por seguridad")
-
-    aprueba_seguridad_fecha = db.Column(db.Date, nullable=True)
-    aprueba_seguridad_nombre = db.Column(db.String(255), nullable=True)
-    aprueba_seguridad_cargo = db.Column(db.String(255), nullable=True)
-    aprueba_seguridad_observacion = db.Column(db.Text, nullable=True)
-
-    tipo_cambio = db.Column(db.String(30))   # Planificado / No planificado / Tipificado
-    prioridad = db.Column(db.String(10))     # Alta / Media / Baja
-
-    # --- Aprobación del cambio ---
-    ajustes_requeridos = db.Column(db.String(2))     # 'Si' / 'No'
-    cambios_requeridos = db.Column(db.Text)
-
-    # Revisa
-    revisa_persona_id = db.Column(db.Integer)
-    revisa_nombre = db.Column(db.String(150))
-    revisa_cargo = db.Column(db.String(150))
-    revisa_observaciones = db.Column(db.Text)
-    revisa_fecha = db.Column(db.Date)
-
-    # Aprueba (Comité)
-    aprueba_persona_id = db.Column(db.Integer)
-    aprueba_nombre = db.Column(db.String(150))
-    aprueba_cargo = db.Column(db.String(150))
-    aprueba_observaciones = db.Column(db.Text)
-    aprueba_fecha = db.Column(db.Date)
-
-    # Implementa
-    implementa_persona_id = db.Column(db.Integer)
-    implementa_nombre = db.Column(db.String(150))
-    implementa_cargo = db.Column(db.String(150))
-    implementa_observaciones = db.Column(db.Text)
-    implementa_fecha = db.Column(db.Date)
-
-    # Seguimiento del cambio
-    cambio_eficaz = db.Column(db.String(2))   # 'Si' / 'No'
-    descripcion_seguimiento = db.Column(db.Text)
-
-    # Relación con evidencias
-    evidencias = db.relationship('CambioRFCEvidencia', backref='rfc', lazy=True)
-
-
-# =========================
-# DETALLE — Evaluación de riesgos RFC
-# =========================
-class CambioRFCRiesgo(db.Model):
-    __tablename__ = 'cambio_rfc_riesgo'
-
-    id = db.Column(db.Integer, primary_key=True)
-    rfc_id = db.Column(db.Integer, db.ForeignKey('cambio_rfc_registro.id'), nullable=False, index=True)
-
-    sistema_procedente = db.Column(db.Text, nullable=True)
-    riesgo = db.Column(db.Text, nullable=True)
-    impacto = db.Column(db.Text, nullable=True)
-    controles_aplicar = db.Column(db.Text, nullable=True)
-    responsable_riesgo = db.Column(db.Text, nullable=True)
-
-    rfc = db.relationship('CambioRFCRegistro', backref=db.backref(
-        'riesgos',
-        lazy=True,
-        cascade='all, delete-orphan'
-    ))
-
-# =========================
-# DETALLE — Plan de pruebas RFC
-# =========================
-class CambioRFCPlanPruebas(db.Model):
-    __tablename__ = 'cambio_rfc_plan_pruebas'
-
-    id = db.Column(db.Integer, primary_key=True)
-    rfc_id = db.Column(db.Integer, db.ForeignKey('cambio_rfc_registro.id'), nullable=False, index=True)
-
-    actividad = db.Column(db.Text, nullable=True)
-    fecha_inicio = db.Column(db.String(30), nullable=True)   # o DateTime si luego quieres tiparlo mejor
-    fecha_fin = db.Column(db.String(30), nullable=True)
-    responsable = db.Column(db.Text, nullable=True)
-    entregables = db.Column(db.Text, nullable=True)
-    acciones = db.Column(db.Text, nullable=True)
-
-    rfc = db.relationship('CambioRFCRegistro', backref=db.backref(
-        'planes_pruebas',
-        lazy=True,
-        cascade='all, delete-orphan'
-    ))
-
-
-# =========================
-# DETALLE — Rollback RFC
-# =========================
-class CambioRFCRollback(db.Model):
-    __tablename__ = 'cambio_rfc_rollback'
-
-    id = db.Column(db.Integer, primary_key=True)
-    rfc_id = db.Column(db.Integer, db.ForeignKey('cambio_rfc_registro.id'), nullable=False, index=True)
-
-    actividad = db.Column(db.Text, nullable=True)
-    responsable = db.Column(db.Text, nullable=True)
-    ejecucion = db.Column(db.Text, nullable=True)
-
-    rfc = db.relationship('CambioRFCRegistro', backref=db.backref(
-        'rollbacks',
-        lazy=True,
-        cascade='all, delete-orphan'
-    ))
-
-
-# =========================
-# DETALLE — Actividades implementadas RFC
-# =========================
-class CambioRFCImplementacion(db.Model):
-    __tablename__ = 'cambio_rfc_implementacion'
-
-    id = db.Column(db.Integer, primary_key=True)
-    rfc_id = db.Column(db.Integer, db.ForeignKey('cambio_rfc_registro.id'), nullable=False, index=True)
-
-    actividad = db.Column(db.Text, nullable=True)
-    responsable = db.Column(db.Text, nullable=True)
-    fecha = db.Column(db.String(20), nullable=True)
-    ejecucion = db.Column(db.Text, nullable=True)
-    tiempo_monitoreo = db.Column(db.String(120), nullable=True)
-    fecha_aprobacion = db.Column(db.String(20), nullable=True)
-    fecha_tentativa_cierre = db.Column(db.String(20), nullable=True)
-    fecha_real_cierre = db.Column(db.String(20), nullable=True)
-    observaciones = db.Column(db.Text, nullable=True)
-
-    rfc = db.relationship('CambioRFCRegistro', backref=db.backref(
-        'implementaciones',
-        lazy=True,
-        cascade='all, delete-orphan'
-    ))
-        
-
-class CambioRFCEvidencia(db.Model):
-    __tablename__ = 'cambio_rfc_evidencia'
-
-    id = db.Column(db.Integer, primary_key=True)
-    rfc_id = db.Column(db.Integer, db.ForeignKey('cambio_rfc_registro.id'), nullable=False)
-
-    filename = db.Column(db.String(255), nullable=False)      # nombre interno
-    original_name = db.Column(db.String(255), nullable=False) # nombre original
-    mime = db.Column(db.String(100))
-    size = db.Column(db.Integer)
-    created_at = db.Column(db.DateTime, server_default=db.func.now())
-
-def asegurar_columnas_aprobacion_seguridad_rfc():
-    with app.app_context():
-        inspector = db.inspect(db.engine)
-        table_name = CambioRFCRegistro.__tablename__
-
-        columnas = [c["name"] for c in inspector.get_columns(table_name)]
-
-        alteraciones = []
-
-        if "estado_seguridad" not in columnas:
-            alteraciones.append(
-                "ALTER TABLE {} ADD COLUMN estado_seguridad VARCHAR(80) DEFAULT 'Pendiente de aprobación por seguridad'".format(table_name)
-            )
-
-        if "aprueba_seguridad_fecha" not in columnas:
-            alteraciones.append(
-                "ALTER TABLE {} ADD COLUMN aprueba_seguridad_fecha DATE".format(table_name)
-            )
-
-        if "aprueba_seguridad_nombre" not in columnas:
-            alteraciones.append(
-                "ALTER TABLE {} ADD COLUMN aprueba_seguridad_nombre VARCHAR(255)".format(table_name)
-            )
-
-        if "aprueba_seguridad_cargo" not in columnas:
-            alteraciones.append(
-                "ALTER TABLE {} ADD COLUMN aprueba_seguridad_cargo VARCHAR(255)".format(table_name)
-            )
-
-        if "aprueba_seguridad_observacion" not in columnas:
-            alteraciones.append(
-                "ALTER TABLE {} ADD COLUMN aprueba_seguridad_observacion TEXT".format(table_name)
-            )
-
-        for sql in alteraciones:
-            db.session.execute(db.text(sql))
-
-        db.session.commit()
-
-# ==========================
-# ENTRADA DIRECTA — RFC
-# ==========================
-@app.route('/rfc_menu')
-@login_required
-def rfc_menu():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role != 'admin' and user.role != 'auditor' and not verificar_permiso(user, "Gestión de Cambios (RFC)"):
-        flash("No tiene permiso para acceder al módulo de gestión de cambios.", "danger")
-        return redirect(url_for('menu'))
-
-    return redirect(url_for('rfc_matriz'))
-
-# =========================
-# AGREGAR — RFC
-# =========================
-@app.route('/rfc/new', methods=['GET', 'POST'])
-@login_required
-def rfc_new():
-    user = User.query.get(session.get('user_id'))
-
-    if user.role == 'auditor':
-        flash("El rol Auditor no puede agregar registros.", "danger")
-        return redirect(url_for('rfc_matriz'))
-
-    if user.role != 'admin' and not verificar_permiso(user, "Gestión de Cambios (RFC)"):
-        flash("No tiene permiso para agregar cambios.", "danger")
-        return redirect(url_for('rfc_matriz'))
-    
-    areas = AreaEmpresa.query.order_by(AreaEmpresa.area.asc()).all()
-
-    if request.method == 'POST':
-        # --- Información general ---
-        ticket = (request.form.get('ticket') or '').strip()
-        fecha_solicitud = parse_date_safe(request.form.get('fecha_solicitud'))
-
-        if not fecha_solicitud:
-            flash("La fecha de solicitud es obligatoria y debe tener formato válido.", "danger")
-            return redirect(url_for('rfc_new'))
-
-        responsable_id = request.form.get('responsable_solicitud_id', type=int)
-
-        resp_nombre = ''
-        resp_cargo = ''
-        if responsable_id:
-            a = AreaEmpresa.query.get(responsable_id)
-            if a:
-                resp_nombre = getattr(a, 'responsable_nombre', '') or ''
-                resp_cargo  = getattr(a, 'responsable_cargo', '') or ''
-
-        # --- Información del cambio ---
-        descripcion  = (request.form.get('descripcion') or '').strip()
-        antecedentes = (request.form.get('antecedentes') or '').strip()
-        objetivo     = (request.form.get('objetivo') or '').strip()
-        alcance      = (request.form.get('alcance') or '').strip()
-        ambiente     = (request.form.get('ambiente') or '').strip()
-        partes       = (request.form.get('partes_interesadas') or '').strip()
-        recursos     = (request.form.get('recursos_necesarios') or '').strip()
-        tipo_cambio  = (request.form.get('tipo_cambio') or '').strip()
-        prioridad    = (request.form.get('prioridad') or '').strip()
-
-        # --- Evaluación de riesgos (múltiples) ---
-        riesgos_sistema      = request.form.getlist('sistema_procedente[]')
-        riesgos_riesgo       = request.form.getlist('riesgo[]')
-        riesgos_impacto      = request.form.getlist('impacto[]')
-        riesgos_controles    = request.form.getlist('controles_aplicar[]')
-        riesgos_responsable  = request.form.getlist('responsable_riesgo[]')
-        
-
-        # --- Plan de pruebas (múltiples) ---
-        planes_act       = request.form.getlist('plan_pruebas_actividad[]')
-        planes_inicio    = request.form.getlist('plan_pruebas_fecha_inicio[]')
-        planes_fin       = request.form.getlist('plan_pruebas_fecha_fin[]')
-        planes_resp      = request.form.getlist('plan_pruebas_responsable[]')
-        planes_entreg    = request.form.getlist('plan_pruebas_entregables[]')
-        planes_acciones  = request.form.getlist('plan_pruebas_acciones[]')
-
-        # --- Rollback (múltiples) ---
-        rb_acts   = request.form.getlist('rollback_actividad[]')
-        rb_resps  = request.form.getlist('rollback_responsable[]')
-        rb_ejecs  = request.form.getlist('rollback_ejecucion[]')
-
-        # --- Actividades implementadas (múltiples) ---
-        impl_acts    = request.form.getlist('impl_actividad[]')
-        impl_resps   = request.form.getlist('impl_responsable[]')
-        impl_fechas  = request.form.getlist('impl_fecha[]')
-        impl_ejecs   = request.form.getlist('impl_ejecucion[]')
-
-        # ===== CAMPOS ÚNICOS DEL CAPÍTULO =====
-        impl_tmon_unico  = (request.form.get('impl_tiempo_monitoreo_unico') or '').strip()
-        impl_fap_unica   = (request.form.get('impl_fecha_aprobacion_unica') or '').strip()
-        impl_ftc_unica   = (request.form.get('impl_fecha_tentativa_cierre_unica') or '').strip()
-        impl_frc_unica   = (request.form.get('impl_fecha_real_cierre_unica') or '').strip()
-        impl_obs_unica   = (request.form.get('impl_observaciones_unicas') or '').strip()
-
-        # --- Aprobación del cambio ---
-        ajustes_req   = (request.form.get('ajustes_requeridos') or '').strip()
-        cambios_req   = (request.form.get('cambios_requeridos') or '').strip()
-
-        # Revisa
-        revisa_id    = request.form.get('revisa_persona_id', type=int)
-        revisa_obs   = (request.form.get('revisa_observaciones') or '').strip()
-        revisa_fecha = parse_date_safe(request.form.get('revisa_fecha'))
-        revisa_nombre = revisa_cargo = ''
-        if revisa_id:
-            ar = AreaEmpresa.query.get(revisa_id)
-            if ar:
-                revisa_nombre = getattr(ar, 'responsable_nombre', '') or ''
-                revisa_cargo  = getattr(ar, 'responsable_cargo', '') or ''
-
-        # Aprueba (comité)
-        aprueba_id    = request.form.get('aprueba_persona_id', type=int)
-        aprueba_obs   = (request.form.get('aprueba_observaciones') or '').strip()
-        aprueba_fecha = parse_date_safe(request.form.get('aprueba_fecha'))
-        aprueba_nombre = aprueba_cargo = ''
-        if aprueba_id:
-            aa = AreaEmpresa.query.get(aprueba_id)
-            if aa:
-                aprueba_nombre = getattr(aa, 'responsable_nombre', '') or ''
-                aprueba_cargo  = getattr(aa, 'responsable_cargo', '') or ''
-
-        # Implementa
-        impl_id_pers    = request.form.get('implementa_persona_id', type=int)
-        impl_obs_pers   = (request.form.get('implementa_observaciones') or '').strip()
-        impl_fecha_pers = parse_date_safe(request.form.get('implementa_fecha'))
-        implementa_nombre = implementa_cargo = ''
-        if impl_id_pers:
-            ai = AreaEmpresa.query.get(impl_id_pers)
-            if ai:
-                implementa_nombre = getattr(ai, 'responsable_nombre', '') or ''
-                implementa_cargo  = getattr(ai, 'responsable_cargo', '') or ''
-
-        # Seguimiento
-        cambio_eficaz = (request.form.get('cambio_eficaz') or '').strip()
-        desc_seg      = (request.form.get('descripcion_seguimiento') or '').strip()
-
-        # Crear registro
-        rfc = CambioRFCRegistro(
-            ticket=ticket,
-            fecha_solicitud=fecha_solicitud,
-            responsable_solicitud_id=responsable_id,
-            responsable_solicitud_nombre=resp_nombre,
-            responsable_solicitud_cargo=resp_cargo,
-
-            descripcion=descripcion,
-            antecedentes=antecedentes,
-            objetivo=objetivo,
-            alcance=alcance,
-            ambiente=ambiente,
-            partes_interesadas=partes,
-            recursos_necesarios=recursos,
-            tipo_cambio=tipo_cambio,
-            prioridad=prioridad,
-
-            ajustes_requeridos=ajustes_req,
-            cambios_requeridos=cambios_req,
-            estado_seguridad="Pendiente de aprobación por seguridad",
-            revisa_persona_id=revisa_id,
-            revisa_nombre=revisa_nombre,
-            revisa_cargo=revisa_cargo,
-            revisa_observaciones=revisa_obs,
-            revisa_fecha=revisa_fecha,
-
-            aprueba_persona_id=aprueba_id,
-            aprueba_nombre=aprueba_nombre,
-            aprueba_cargo=aprueba_cargo,
-            aprueba_observaciones=aprueba_obs,
-            aprueba_fecha=aprueba_fecha,
-
-            implementa_persona_id=impl_id_pers,
-            implementa_nombre=implementa_nombre,
-            implementa_cargo=implementa_cargo,
-            implementa_observaciones=impl_obs_pers,
-            implementa_fecha=impl_fecha_pers,
-
-            cambio_eficaz=cambio_eficaz,
-            descripcion_seguimiento=desc_seg
-        )
-
-        db.session.add(rfc)
-        db.session.flush()
-
-        # =========================
-        # Guardar Evaluación de riesgos
-        # =========================
-        total_riesgos = max(
-            len(riesgos_sistema),
-            len(riesgos_riesgo),
-            len(riesgos_impacto),
-            len(riesgos_controles),
-            len(riesgos_responsable)
-        )
-
-        for i in range(total_riesgos):
-            sistema      = (riesgos_sistema[i] if i < len(riesgos_sistema) else '').strip()
-            riesgo_txt   = (riesgos_riesgo[i] if i < len(riesgos_riesgo) else '').strip()
-            impacto_txt  = (riesgos_impacto[i] if i < len(riesgos_impacto) else '').strip()
-            controles    = (riesgos_controles[i] if i < len(riesgos_controles) else '').strip()
-            responsable  = (riesgos_responsable[i] if i < len(riesgos_responsable) else '').strip()
-
-            if any([sistema, riesgo_txt, impacto_txt, controles, responsable]):
-                db.session.add(CambioRFCRiesgo(
-                    rfc_id=rfc.id,
-                    sistema_procedente=sistema,
-                    riesgo=riesgo_txt,
-                    impacto=impacto_txt,
-                    controles_aplicar=controles,
-                    responsable_riesgo=responsable
-                ))
-
-        # =========================
-        # Guardar Planes de pruebas
-        # =========================
-        total_planes = max(
-            len(planes_act), len(planes_inicio), len(planes_fin),
-            len(planes_resp), len(planes_entreg), len(planes_acciones)
-        )
-
-        for i in range(total_planes):
-            actividad   = (planes_act[i] if i < len(planes_act) else '').strip()
-            fecha_ini   = (planes_inicio[i] if i < len(planes_inicio) else '').strip()
-            fecha_fin   = (planes_fin[i] if i < len(planes_fin) else '').strip()
-            responsable = (planes_resp[i] if i < len(planes_resp) else '').strip()
-            entregables = (planes_entreg[i] if i < len(planes_entreg) else '').strip()
-            acciones    = (planes_acciones[i] if i < len(planes_acciones) else '').strip()
-
-            if any([actividad, fecha_ini, fecha_fin, responsable, entregables, acciones]):
-                db.session.add(CambioRFCPlanPruebas(
-                    rfc_id=rfc.id,
-                    actividad=actividad,
-                    fecha_inicio=fecha_ini,
-                    fecha_fin=fecha_fin,
-                    responsable=responsable,
-                    entregables=entregables,
-                    acciones=acciones
-                ))
-
-        # =========================
-        # Guardar Rollbacks
-        # =========================
-        total_rb = max(len(rb_acts), len(rb_resps), len(rb_ejecs))
-
-        for i in range(total_rb):
-            actividad   = (rb_acts[i] if i < len(rb_acts) else '').strip()
-            responsable = (rb_resps[i] if i < len(rb_resps) else '').strip()
-            ejecucion   = (rb_ejecs[i] if i < len(rb_ejecs) else '').strip()
-
-            if any([actividad, responsable, ejecucion]):
-                db.session.add(CambioRFCRollback(
-                    rfc_id=rfc.id,
-                    actividad=actividad,
-                    responsable=responsable,
-                    ejecucion=ejecucion
-                ))
-
-        # =========================
-        # Guardar Implementaciones
-        # =========================
-        total_impl = max(
-            len(impl_acts), len(impl_resps), len(impl_fechas), len(impl_ejecs)
-        )
-
-        for i in range(total_impl):
-            actividad   = (impl_acts[i] if i < len(impl_acts) else '').strip()
-            responsable = (impl_resps[i] if i < len(impl_resps) else '').strip()
-            fecha       = (impl_fechas[i] if i < len(impl_fechas) else '').strip()
-            ejecucion   = (impl_ejecs[i] if i < len(impl_ejecs) else '').strip()
-
-            # Los campos del capítulo solo se guardan en el PRIMER registro
-            tmon          = impl_tmon_unico if i == 0 else ''
-            fecha_apr     = impl_fap_unica if i == 0 else ''
-            fecha_tent    = impl_ftc_unica if i == 0 else ''
-            fecha_real    = impl_frc_unica if i == 0 else ''
-            observaciones = impl_obs_unica if i == 0 else ''
-
-            if any([actividad, responsable, fecha, ejecucion, tmon, fecha_apr, fecha_tent, fecha_real, observaciones]):
-                db.session.add(CambioRFCImplementacion(
-                    rfc_id=rfc.id,
-                    actividad=actividad,
-                    responsable=responsable,
-                    fecha=fecha,
-                    ejecucion=ejecucion,
-                    tiempo_monitoreo=tmon,
-                    fecha_aprobacion=fecha_apr,
-                    fecha_tentativa_cierre=fecha_tent,
-                    fecha_real_cierre=fecha_real,
-                    observaciones=observaciones
-                ))
-
-        # Evidencias (PDF)
-        files = request.files.getlist('evidencias')
-        for f in files:
-            if not f or not f.filename:
-                continue
-            if not is_allowed_pdf_rfc(f.filename):
-                flash(f"Archivo no permitido (solo PDF): {f.filename}", "danger")
-                continue
-
-            store_name = unique_store_name(f.filename)
-            path = os.path.join(app.config['UPLOAD_RFC_DIR'], store_name)
-            f.save(path)
-
-            ev = CambioRFCEvidencia(
-                rfc=rfc,
-                filename=store_name,
-                original_name=secure_filename(f.filename),
-                mime='application/pdf',
-                size=os.path.getsize(path)
-            )
-            db.session.add(ev)
-
-        db.session.commit()
-        flash("Solicitud de cambio (RFC) registrada.", "success")
-        return redirect(url_for('rfc_matriz'))
-
-    # GET – formulario
-    html = """
-    <div class="rfcadd-shell">
-
-      <!-- CABECERA -->
-      <div class="rfcadd-header-card">
-        <div class="rfcadd-header-overlay">
-          <div class="rfcadd-header-text">
-            <h3 class="rfcadd-title m-0">Agregar Solicitud de Cambios (RFC)</h3>
-            <div class="rfcadd-subtitle">
-              Registro, evaluación, aprobación, implementación y seguimiento de solicitudes de cambio del Sistema de Gestión de Seguridad de la Información
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- BOTÓN VOLVER -->
-      <div class="rfcadd-header-actions">
-        <a href="{{ url_for('rfc_menu') }}"
-           class="btn rounded-pill px-5 fw-bold rfcadd-back-btn">
-          ⬅ Volver a la Matriz Solicitud de Cambios
-        </a>
-      </div>
-
-      <!-- TARJETA PRINCIPAL -->
-      <div class="rfcadd-card">
-        <div class="rfcadd-card-body">
-
-          <form method="post" enctype="multipart/form-data">
-            <div class="row g-3">
-
-              <!-- Información general -->
-              <div class="col-12">
-                <div class="rfcadd-section-title">Información general</div>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Ticket o No. de solicitud</label>
-                <input type="text" name="ticket" class="form-control" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Fecha Solicitud</label>
-                <input type="date" name="fecha_solicitud" class="form-control" required>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Responsable de la solicitud (Nombre responsable del área)</label>
-                <select name="responsable_solicitud_id"
-                        id="responsable_solicitud_id"
-                        class="form-select"
-                        onchange="fillCargoDesdeArea('responsable_solicitud_id','responsable_solicitud_cargo')">
-                  <option value="">-- Seleccione --</option>
-                  {% for a in areas %}
-                    <option value="{{ a.id }}" data-cargo="{{ a.responsable_cargo or '' }}">
-                      {{ a.responsable_nombre }}
-                    </option>
-                  {% endfor %}
-                </select>
-
-                <input type="text"
-                       id="responsable_solicitud_cargo"
-                       class="form-control mt-1"
-                       placeholder="Cargo (Responsable de área)"
-                       readonly>
-              </div>
-
-              <!-- Información del cambio -->
-              <div class="col-12 mt-3">
-                <div class="rfcadd-section-title">Información del cambio</div>
-              </div>
-
-              <div class="col-12">
-                <label class="form-label">Descripción (Qué se requiere)</label>
-                <textarea name="descripcion" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-12">
-                <label class="form-label">Antecedentes (Por qué se requiere)</label>
-                <textarea name="antecedentes" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-12">
-                <label class="form-label">Objetivo (Qué se busca lograr)</label>
-                <textarea name="objetivo" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-12">
-                <label class="form-label">Alcance</label>
-                <textarea name="alcance" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Ambiente</label>
-                <select name="ambiente" class="form-select">
-                  <option value="">-- Seleccione --</option>
-                  <option value="Producción">Producción</option>
-                  <option value="Contingencia">Contingencia</option>
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Tipo de cambio</label>
-                <select name="tipo_cambio" class="form-select">
-                  <option value="">-- Seleccione --</option>
-                  <option value="Planificado (normal)">Planificado (normal)</option>
-                  <option value="No planificado (emergencia)">No planificado (emergencia)</option>
-                  <option value="Tipificado (recurrente)">Tipificado (recurrente)</option>
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Prioridad del cambio</label>
-                <select name="prioridad" id="prioridad" class="form-select" onchange="setPrioridadColor()">
-                  <option value="">-- Seleccione --</option>
-                  <option value="Alta">Alta</option>
-                  <option value="Media">Media</option>
-                  <option value="Baja">Baja</option>
-                </select>
-                <small id="prioridad_badge" class="badge mt-1">Sin definir</small>
-              </div>
-
-              <div class="col-12">
-                <label class="form-label">Partes interesadas impactadas</label>
-                <textarea name="partes_interesadas" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-12">
-                <label class="form-label">Recursos necesarios</label>
-                <textarea name="recursos_necesarios" class="form-control" rows="2"></textarea>
-              </div>
-
-              <!-- Evaluación de riesgos -->
-              <div class="col-12 mt-3">
-                <div class="d-flex justify-content-between align-items-center">
-                  <div class="rfcadd-section-title mb-0">Evaluación de riesgos</div>
-                  <button type="button" class="btn btn-outline-primary btn-sm rounded-pill" onclick="addRiesgoRow()">
-                    + Agregar registro
-                  </button>
-                </div>
-              </div>
-
-              <div class="col-12">
-                <div id="riesgos-container"></div>
-              </div>
-
-              <!-- Plan de pruebas -->
-              <div class="col-12 mt-3">
-                <div class="d-flex justify-content-between align-items-center">
-                  <div class="rfcadd-section-title mb-0">Plan de pruebas (si aplica)</div>
-                  <button type="button" class="btn btn-outline-primary btn-sm rounded-pill" onclick="addPlanPruebasRow()">
-                    + Agregar registro
-                  </button>
-                </div>
-              </div>
-
-              <div class="col-12">
-                <div id="plan-pruebas-container"></div>
-              </div>
-
-              <!-- Rollback -->
-              <div class="col-12 mt-3">
-                <div class="d-flex justify-content-between align-items-center">
-                  <div class="rfcadd-section-title mb-0">Plan de Marcha Atrás (Rollback)</div>
-                  <button type="button" class="btn btn-outline-primary btn-sm rounded-pill" onclick="addRollbackRow()">
-                    + Agregar registro
-                  </button>
-                </div>
-              </div>
-
-              <div class="col-12">
-                <div id="rollback-container"></div>
-              </div>
-
-              <!-- Actividades implementadas -->
-              <div class="col-12 mt-3">
-                <div class="d-flex justify-content-between align-items-center">
-                  <div class="rfcadd-section-title mb-0">Actividades implementadas del cambio</div>
-                  <button type="button" class="btn btn-outline-primary btn-sm rounded-pill" onclick="addImplementacionRow()">
-                    + Agregar registro
-                  </button>
-                </div>
-              </div>
-
-              <!-- PRIMERO: registros implementación -->
-              <div class="col-12">
-                <div id="implementacion-container"></div>
-              </div>
-
-              <!-- DESPUÉS: datos generales del capítulo -->
-              <div class="col-12">
-                <div class="dynamic-block border rounded p-3 mb-3 bg-light">
-                  <div class="mb-2">
-                    <strong>Datos generales de implementación del cambio</strong>
-                  </div>
-
-                  <div class="row g-3">
-                    <div class="col-md-3">
-                      <label class="form-label">Tiempo estimado monitoreo</label>
-                      <input type="text" name="impl_tiempo_monitoreo_unico" class="form-control">
-                    </div>
-
-                    <div class="col-md-3">
-                      <label class="form-label">Fecha aprobación</label>
-                      <input type="date" name="impl_fecha_aprobacion_unica" class="form-control">
-                    </div>
-
-                    <div class="col-md-3">
-                      <label class="form-label">Fecha tentativa cierre</label>
-                      <input type="date" name="impl_fecha_tentativa_cierre_unica" class="form-control">
-                    </div>
-
-                    <div class="col-md-3">
-                      <label class="form-label">Fecha real cierre</label>
-                      <input type="date" name="impl_fecha_real_cierre_unica" class="form-control">
-                    </div>
-
-                    <div class="col-md-12">
-                      <label class="form-label">Observaciones</label>
-                      <textarea name="impl_observaciones_unicas" class="form-control" rows="2"></textarea>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Aprobación del cambio -->
-              <div class="col-12 mt-3">
-                <div class="rfcadd-section-title">Aprobación del cambio</div>
-              </div>
-
-              <div class="col-md-3">
-                <label class="form-label">Se requiere realizar ajustes?</label>
-                <select name="ajustes_requeridos" class="form-select">
-                  <option value="">-- Seleccione --</option>
-                  <option value="Si">Si</option>
-                  <option value="No">No</option>
-                </select>
-              </div>
-
-              <div class="col-md-9">
-                <label class="form-label">Cambios requeridos (si se requieren)</label>
-                <textarea name="cambios_requeridos" class="form-control" rows="2"></textarea>
-              </div>
-
-              <!-- Revisa -->
-              <div class="col-12 mt-2">
-                <div class="rfcadd-subsection-title">Revisa</div>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Nombre responsable del área</label>
-                <select name="revisa_persona_id"
-                        id="revisa_persona_id"
-                        class="form-select"
-                        onchange="fillCargoDesdeArea('revisa_persona_id','revisa_cargo')">
-                  <option value="">-- Seleccione --</option>
-                  {% for a in areas %}
-                    <option value="{{ a.id }}" data-cargo="{{ a.responsable_cargo or '' }}">
-                      {{ a.responsable_nombre }}
-                    </option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Cargo (Responsable de área)</label>
-                <input type="text" id="revisa_cargo" class="form-control" readonly>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Observaciones</label>
-                <textarea name="revisa_observaciones" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Fecha revisión</label>
-                <input type="date" name="revisa_fecha" class="form-control">
-              </div>
-
-              <!-- Aprueba -->
-              <div class="col-12 mt-2">
-                <div class="rfcadd-subsection-title">Aprueba (Comité de cambios)</div>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Nombre responsable del área</label>
-                <select name="aprueba_persona_id"
-                        id="aprueba_persona_id"
-                        class="form-select"
-                        onchange="fillCargoDesdeArea('aprueba_persona_id','aprueba_cargo')">
-                  <option value="">-- Seleccione --</option>
-                  {% for a in areas %}
-                    <option value="{{ a.id }}" data-cargo="{{ a.responsable_cargo or '' }}">
-                      {{ a.responsable_nombre }}
-                    </option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Cargo (Responsable de área)</label>
-                <input type="text" id="aprueba_cargo" class="form-control" readonly>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Observaciones</label>
-                <textarea name="aprueba_observaciones" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Fecha revisión</label>
-                <input type="date" name="aprueba_fecha" class="form-control">
-              </div>
-
-              <!-- Implementa -->
-              <div class="col-12 mt-2">
-                <div class="rfcadd-subsection-title">Implementa</div>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Nombre responsable del área</label>
-                <select name="implementa_persona_id"
-                        id="implementa_persona_id"
-                        class="form-select"
-                        onchange="fillCargoDesdeArea('implementa_persona_id','implementa_cargo')">
-                  <option value="">-- Seleccione --</option>
-                  {% for a in areas %}
-                    <option value="{{ a.id }}" data-cargo="{{ a.responsable_cargo or '' }}">
-                      {{ a.responsable_nombre }}
-                    </option>
-                  {% endfor %}
-                </select>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Cargo (Responsable de área)</label>
-                <input type="text" id="implementa_cargo" class="form-control" readonly>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Observaciones</label>
-                <textarea name="implementa_observaciones" class="form-control" rows="2"></textarea>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">Fecha revisión</label>
-                <input type="date" name="implementa_fecha" class="form-control">
-              </div>
-
-              <!-- Seguimiento -->
-              <div class="col-12 mt-3">
-                <div class="rfcadd-section-title">Seguimiento del cambio</div>
-              </div>
-
-              <div class="col-md-4">
-                <label class="form-label">¿El cambio fue eficaz?</label>
-                <select name="cambio_eficaz" class="form-select">
-                  <option value="">-- Seleccione --</option>
-                  <option value="Si">Si</option>
-                  <option value="No">No</option>
-                </select>
-              </div>
-
-              <div class="col-md-8">
-                <label class="form-label">Descripción del seguimiento</label>
-                <textarea name="descripcion_seguimiento" class="form-control" rows="2"></textarea>
-              </div>
-
-              <!-- Evidencias -->
-              <div class="col-12 mt-3">
-                <label class="form-label">Evidencias (PDF, puedes adjuntar varios)</label>
-
-                <input
-                  type="file"
-                  id="evidencias"
-                  name="evidencias"
-                  accept=".pdf"
-                  multiple
-                  class="form-control"
-                  onchange="acumularEvidenciasRFC(this)"
-                >
-                <small class="text-muted">
-                  Puedes seleccionar varios a la vez o ir agregando en varias rondas.
-                </small>
-
-                <div id="lista_evidencias_nuevas" class="mt-2"></div>
-              </div>
-
-            </div>
-
-            <div class="rfcadd-bottom-actions">
-              <button class="btn btn-success rounded-pill px-4 fw-bold" type="submit">
-                Guardar
-              </button>
-              <a href="{{ url_for('rfc_menu') }}"
-                 class="btn rounded-pill px-4 fw-bold rfcadd-cancel-btn">
-                Cancelar
-              </a>
-            </div>
-          </form>
-
-        </div>
-      </div>
-
-    </div>
-
-    <style>
-      body{
-        background-image:url('/static/img/ccsgsi.jpg');
-        background-size:cover;
-        background-position:center;
-        background-attachment:fixed;
-        background-repeat:no-repeat;
-      }
-
-      .rfcadd-shell{
-        width:96%;
-        max-width:1650px;
-        margin:10px auto 24px auto;
-      }
-
-      .rfcadd-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .rfcadd-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .rfcadd-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent;
-        padding:0;
-        position:relative;
-        z-index:1;
-      }
-
-      .rfcadd-header-overlay::before{
-        content:"🔄";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-
-      .rfcadd-header-text{
-        max-width:1200px;
-        width:100%;
-      }
-
-      .rfcadd-header-text::before{
-        content:"SGSI · Gestión de Cambios / RFC";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .rfcadd-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .rfcadd-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }
-
-      .rfcadd-header-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:wrap;
-        margin:10px 0 14px;
-      }
-
-      .rfcadd-header-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .rfcadd-back-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .rfcadd-back-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .rfcadd-card{
-        background:rgba(255,255,255,.96)!important;
-        border-radius:18px;
-        backdrop-filter:blur(8px);
-        box-shadow:0 12px 24px rgba(15,23,42,.18);
-        border:1px solid rgba(219,230,244,.9);
-        overflow:hidden;
-      }
-
-      .rfcadd-card-body{
-        padding:18px;
-      }
-
-      .rfcadd-card .form-label{
-        font-weight:800;
-        color:#25324a;
-        margin-bottom:4px;
-        font-size:.78rem;
-      }
-
-      .rfcadd-card .form-control,
-      .rfcadd-card .form-select{
-        border-radius:9px;
-        border:1px solid #d9e3f0;
-        min-height:32px;
-        font-size:.80rem;
-        background:#f8fafc;
-      }
-
-      .rfcadd-card textarea.form-control{
-        min-height:70px;
-        resize:vertical;
-      }
-
-      .rfcadd-card .form-control:focus,
-      .rfcadd-card .form-select:focus{
-        border-color:#3f86d6;
-        box-shadow:0 0 0 .15rem rgba(63,134,214,.18);
-        background:#ffffff;
-      }
-
-      .rfcadd-section-title{
-        font-weight:950;
-        font-size:.78rem;
-        color:#0b4a8f;
-        padding:9px 12px;
-        border-radius:12px;
-        background:#eef5ff;
-        border:1px solid #d9eaff;
-        margin:10px 0 12px;
-      }
-
-      .rfcadd-subsection-title{
-        font-weight:900;
-        font-size:.82rem;
-        color:#25324a;
-        padding:9px 12px;
-        background:#f8fbff;
-        border-radius:12px;
-        border:1px solid #dbe6f4;
-        margin-bottom:10px;
-      }
-
-      .dynamic-block{
-        background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%) !important;
-        border:1px solid #dbe6f4 !important;
-        border-radius:14px !important;
-        box-shadow:0 6px 14px rgba(15,23,42,.08);
-        padding:12px !important;
-      }
-
-      .rfcadd-bottom-actions{
-        display:flex;
-        justify-content:center;
-        gap:10px;
-        margin-top:22px;
-        flex-wrap:wrap;
-      }
-
-      .rfcadd-bottom-actions .btn{
-        border-radius:10px !important;
-        min-height:32px;
-        padding:8px 22px !important;
-        font-size:.82rem;
-        font-weight:900;
-        box-shadow:0 8px 16px rgba(15,23,42,.15);
-      }
-
-      .rfcadd-cancel-btn{
-        background:#ffffff;
-        color:#0f172a;
-        border:1px solid #cfd8e3;
-      }
-
-      .rfcadd-cancel-btn:hover{
-        background:#edf5ff;
-        color:#0b65d8;
-        border-color:#9ec5fe;
-      }
-
-      .badge-prio-alta,
-      .badge-prio-media,
-      .badge-prio-baja{
-        border-radius:999px;
-        font-size:.70rem;
-        padding:.35rem .65rem;
-        font-weight:900;
-      }
-
-      .badge-prio-alta{ background:#e74c3c; color:#fff; }
-      .badge-prio-media{ background:#f1c40f; color:#111; }
-      .badge-prio-baja{ background:#2ecc71; color:#fff; }
-
-      @media (max-width:992px){
-        .rfcadd-shell{
-          width:98%;
-          margin:8px auto 22px auto;
-        }
-
-        .rfcadd-header-card{
-          min-height:88px;
-        }
-
-        .rfcadd-title{
-          font-size:1.20rem;
-        }
-
-        .rfcadd-card-body{
-          padding:8px 7px;
-        }
-      }
-
-      @media (max-width:768px){
-        .rfcadd-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
-
-        .rfcadd-header-overlay::before{
-          margin:0;
-        }
-
-        .rfcadd-header-actions .btn,
-        .rfcadd-bottom-actions .btn{
-          width:100%;
-        }
-      }
-    </style>
-
-    <script>
-      function setPrioridadColor(){
-        const sel = document.getElementById('prioridad');
-        const badge = document.getElementById('prioridad_badge');
-        if(!sel || !badge) return;
-        badge.className = 'badge mt-1';
-        const val = sel.value || '';
-        if (val === 'Alta'){
-          badge.classList.add('badge-prio-alta');
-          badge.innerText = 'Alta';
-        } else if (val === 'Media'){
-          badge.classList.add('badge-prio-media');
-          badge.innerText = 'Media';
-        } else if (val === 'Baja'){
-          badge.classList.add('badge-prio-baja');
-          badge.innerText = 'Baja';
-        } else {
-          badge.innerText = 'Sin definir';
-        }
-      }
-
-      function fillCargoDesdeArea(selectId, cargoInputId){
-        const sel = document.getElementById(selectId);
-        const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
-        const cargo = opt ? (opt.getAttribute('data-cargo') || '') : '';
-
-        const inpCar = document.getElementById(cargoInputId);
-        if (inpCar) inpCar.value = cargo;
-      }
-    </script>
-
-    <script>
-      let evidenciasRFCBufferDT = new DataTransfer();
-
-      function renderListaEvidenciasRFC() {
-        const cont = document.getElementById('lista_evidencias_nuevas');
-        if (!cont) return;
-
-        cont.innerHTML = '';
-        if (evidenciasRFCBufferDT.files.length === 0) {
-          cont.innerHTML = '<div class="text-muted small">No hay archivos seleccionados</div>';
-          return;
-        }
-
-        for (let i = 0; i < evidenciasRFCBufferDT.files.length; i++) {
-          const f = evidenciasRFCBufferDT.files[i];
-          const row = document.createElement('div');
-          row.className = 'd-flex align-items-center justify-content-between mb-1';
-          row.innerHTML = `
-            <span class="text-truncate small" style="max-width:260px;">📎 ${f.name}</span>
-            <button type="button"
-                    class="btn btn-link text-danger p-0 small"
-                    onclick="removeEvidenciaRFC(${i})">
-              🗑️
-            </button>
-          `;
-          cont.appendChild(row);
-        }
-      }
-
-      function acumularEvidenciasRFC(inputEl) {
-        for (const f of inputEl.files) {
-          evidenciasRFCBufferDT.items.add(f);
-        }
-        inputEl.files = evidenciasRFCBufferDT.files;
-        renderListaEvidenciasRFC();
-      }
-
-      function removeEvidenciaRFC(index) {
-        const tmp = new DataTransfer();
-        for (let i = 0; i < evidenciasRFCBufferDT.files.length; i++) {
-          if (i !== index) {
-            tmp.items.add(evidenciasRFCBufferDT.files[i]);
-          }
-        }
-        evidenciasRFCBufferDT = tmp;
-
-        const inputEl = document.getElementById('evidencias');
-        if (inputEl) {
-          inputEl.files = evidenciasRFCBufferDT.files;
-        }
-        renderListaEvidenciasRFC();
-      }
-
-      window.addEventListener('DOMContentLoaded', () => {
-        renderListaEvidenciasRFC();
-      });
-    </script>
-
-    <script>
-      function removeDynamicBlock(btn){
-        const block = btn.closest('.dynamic-block');
-        if (block) block.remove();
-      }
-
-      function addPlanPruebasRow(data = {}) {
-        const container = document.getElementById('plan-pruebas-container');
-        const div = document.createElement('div');
-        div.className = 'dynamic-block border rounded p-3 mb-3 bg-light';
-
-        div.innerHTML = `
-          <div class="d-flex justify-content-between align-items-center mb-2">
-            <strong>Registro plan de pruebas</strong>
-            <button type="button" class="btn btn-outline-danger btn-sm rounded-pill" onclick="removeDynamicBlock(this)">Eliminar</button>
-          </div>
-
-          <div class="row g-3">
-            <div class="col-md-4">
-              <label class="form-label">Actividad</label>
-              <textarea name="plan_pruebas_actividad[]" class="form-control" rows="2">${data.actividad || ''}</textarea>
-            </div>
-
-            <div class="col-md-4">
-              <label class="form-label">Fecha/hora inicio</label>
-              <input type="datetime-local" name="plan_pruebas_fecha_inicio[]" class="form-control" value="${data.fecha_inicio || ''}">
-            </div>
-
-            <div class="col-md-4">
-              <label class="form-label">Fecha/hora fin</label>
-              <input type="datetime-local" name="plan_pruebas_fecha_fin[]" class="form-control" value="${data.fecha_fin || ''}">
-            </div>
-
-            <div class="col-md-4">
-              <label class="form-label">Responsable</label>
-              <textarea name="plan_pruebas_responsable[]" class="form-control" rows="2">${data.responsable || ''}</textarea>
-            </div>
-
-            <div class="col-md-4">
-              <label class="form-label">Entregables</label>
-              <textarea name="plan_pruebas_entregables[]" class="form-control" rows="2">${data.entregables || ''}</textarea>
-            </div>
-
-            <div class="col-md-4">
-              <label class="form-label">Acciones a seguir</label>
-              <textarea name="plan_pruebas_acciones[]" class="form-control" rows="2">${data.acciones || ''}</textarea>
-            </div>
-          </div>
-        `;
-
-        container.appendChild(div);
-      }
-
-      function addRollbackRow(data = {}) {
-        const container = document.getElementById('rollback-container');
-        const div = document.createElement('div');
-        div.className = 'dynamic-block border rounded p-3 mb-3 bg-light';
-
-        div.innerHTML = `
-          <div class="d-flex justify-content-between align-items-center mb-2">
-            <strong>Registro rollback</strong>
-            <button type="button" class="btn btn-outline-danger btn-sm rounded-pill" onclick="removeDynamicBlock(this)">Eliminar</button>
-          </div>
-
-          <div class="row g-3">
-            <div class="col-md-4">
-              <label class="form-label">Actividad</label>
-              <textarea name="rollback_actividad[]" class="form-control" rows="2">${data.actividad || ''}</textarea>
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Responsable</label>
-              <textarea name="rollback_responsable[]" class="form-control" rows="2">${data.responsable || ''}</textarea>
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Ejecución y seguimiento</label>
-              <textarea name="rollback_ejecucion[]" class="form-control" rows="2">${data.ejecucion || ''}</textarea>
-            </div>
-          </div>
-        `;
-
-        container.appendChild(div);
-      }
-
-      function addImplementacionRow(data = {}) {
-        const container = document.getElementById('implementacion-container');
-        const div = document.createElement('div');
-        div.className = 'dynamic-block border rounded p-3 mb-3 bg-light';
-
-        div.innerHTML = `
-          <div class="d-flex justify-content-between align-items-center mb-2">
-            <strong>Registro implementación</strong>
-            <button type="button" class="btn btn-outline-danger btn-sm rounded-pill" onclick="removeDynamicBlock(this)">Eliminar</button>
-          </div>
-
-          <div class="row g-3">
-            <div class="col-md-4">
-              <label class="form-label">Actividad</label>
-              <textarea name="impl_actividad[]" class="form-control" rows="2">${data.actividad || ''}</textarea>
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Responsable</label>
-              <textarea name="impl_responsable[]" class="form-control" rows="2">${data.responsable || ''}</textarea>
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Fecha</label>
-              <input type="date" name="impl_fecha[]" class="form-control" value="${data.fecha || ''}">
-            </div>
-
-            <div class="col-md-12">
-              <label class="form-label">Ejecución y seguimiento</label>
-              <textarea name="impl_ejecucion[]" class="form-control" rows="2">${data.ejecucion || ''}</textarea>
-            </div>
-          </div>
-        `;
-
-        container.appendChild(div);
-      }
-
-    </script>
-
-    <script>
-      function addRiesgoRow(data = {}) {
-        const container = document.getElementById('riesgos-container');
-        const div = document.createElement('div');
-        div.className = 'dynamic-block border rounded p-3 mb-3 bg-light';
-
-        div.innerHTML = `
-          <div class="d-flex justify-content-between align-items-center mb-2">
-            <strong>Registro evaluación de riesgo</strong>
-            <button type="button" class="btn btn-outline-danger btn-sm rounded-pill" onclick="removeDynamicBlock(this)">
-              Eliminar
-            </button>
-          </div>
-
-          <div class="row g-3">
-            <div class="col-md-4">
-              <label class="form-label">Sistema procedente</label>
-              <textarea name="sistema_procedente[]" class="form-control" rows="2">${data.sistema_procedente || ''}</textarea>
-            </div>
-
-            <div class="col-md-4">
-              <label class="form-label">Riesgo</label>
-              <textarea name="riesgo[]" class="form-control" rows="2">${data.riesgo || ''}</textarea>
-            </div>
-
-            <div class="col-md-4">
-              <label class="form-label">Impacto</label>
-              <textarea name="impacto[]" class="form-control" rows="2">${data.impacto || ''}</textarea>
-            </div>
-
-            <div class="col-md-6">
-              <label class="form-label">Controles a aplicar</label>
-              <textarea name="controles_aplicar[]" class="form-control" rows="2">${data.controles_aplicar || ''}</textarea>
-            </div>
-
-            <div class="col-md-6">
-              <label class="form-label">Responsable</label>
-              <textarea name="responsable_riesgo[]" class="form-control" rows="2">${data.responsable_riesgo || ''}</textarea>
-            </div>
-          </div>
-        `;
-
-        container.appendChild(div);
-      }
-    </script>
-    """
-    inner = render_template_string(html, areas=areas)
-    return render_template_string(BASE, content=Markup(inner))
 
