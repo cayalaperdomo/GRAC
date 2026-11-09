@@ -2329,13 +2329,22 @@ def inject_global_blue_button_style(response):
         if 'id="grac-global-blue-buttons"' in html_response:
             return response
 
-        if "</body>" in html_response:
-            html_response = html_response.replace("</body>", GLOBAL_BLUE_BUTTONS_STYLE + GLOBAL_GRAC_NAVIGATION_BUTTONS_SCRIPT + GLOBAL_GRAC_ACTIONS_COLUMNS_SCRIPT + "\n</body>")
+        if _GRAC_RENDER_LOW_MEMORY:
+            # Same styling/behavior, loaded once by the browser instead of
+            # duplicating ~40 KB of HTML in every Render response.
+            assets = ('<link rel="stylesheet" id="grac-global-blue-buttons" '
+                      'href="/_grac_lowmem/assets/buttons.css?v=2">'
+                      '<script id="grac-navigation-buttons-v4" defer '
+                      'src="/_grac_lowmem/assets/buttons.js?v=2"></script>')
         else:
-            html_response += GLOBAL_BLUE_BUTTONS_STYLE + GLOBAL_GRAC_NAVIGATION_BUTTONS_SCRIPT + GLOBAL_GRAC_ACTIONS_COLUMNS_SCRIPT
+            assets = (GLOBAL_BLUE_BUTTONS_STYLE + GLOBAL_GRAC_NAVIGATION_BUTTONS_SCRIPT
+                      + GLOBAL_GRAC_ACTIONS_COLUMNS_SCRIPT)
+        if "</body>" in html_response:
+            html_response = html_response.replace("</body>", assets + "\n</body>", 1)
+        else:
+            html_response += assets
 
         response.set_data(html_response)
-        response.headers["Content-Length"] = str(len(response.get_data()))
     except Exception as e:
         print("No se pudo inyectar el estilo global de botones azules:", repr(e))
     return response
@@ -13024,7 +13033,8 @@ def _dashboard_fig_to_b64(fig):
         buf,
         format="png",
         bbox_inches="tight",
-        dpi=220,
+        dpi=(max(72, min(220, int(os.getenv("GRAC_RENDER_CHART_DPI", "100"))))
+             if _GRAC_RENDER_LOW_MEMORY else 220),
         facecolor=fig.get_facecolor()
     )
     plt.close(fig)
@@ -213675,9 +213685,15 @@ def _grac_apply_corporate_workspace(response):
             return re.sub(r'(\bclass\s*=\s*["\'])', r'\1grac-workspace ', tag, count=1, flags=re.I)
         return tag[:-1] + ' class="grac-workspace">'
     page = re.sub(r'<body\b[^>]*>', body_class, page, count=1, flags=re.I)
-    assets = ('<style id="grac-corporate-workspace">' + GRAC_WORKSPACE_CSS
-              + '</style><script id="grac-corporate-workspace-js">'
-              + GRAC_WORKSPACE_JS + '</script>')
+    if _GRAC_RENDER_LOW_MEMORY:
+        assets = ('<link rel="stylesheet" id="grac-corporate-workspace" '
+                  'href="/_grac_lowmem/assets/workspace.css?v=2">'
+                  '<script id="grac-corporate-workspace-js" defer '
+                  'src="/_grac_lowmem/assets/workspace.js?v=2"></script>')
+    else:
+        assets = ('<style id="grac-corporate-workspace">' + GRAC_WORKSPACE_CSS
+                  + '</style><script id="grac-corporate-workspace-js">'
+                  + GRAC_WORKSPACE_JS + '</script>')
     page = re.sub(r'</body\s*>', lambda m: assets + m.group(0), page, count=1, flags=re.I)
     response.set_data(page)
     return response
@@ -213686,44 +213702,100 @@ def _grac_apply_corporate_workspace(response):
 app.after_request_funcs.setdefault(None, []).insert(0, _grac_apply_corporate_workspace)
 # FIN CORPORATIVO WORKSPACE
 
-# ARKYNTECH GRAC -- minimal memory visibility (no new pip dependencies).
-# Runs only in Render low-memory mode, without changing response payloads.
+# Render REV2: Static-like assets from existing in-memory constants. This
+# keeps the same CSS/JS without inflating every HTML response. No JS packages.
+if _GRAC_RENDER_LOW_MEMORY:
+    from flask import Response as _GracAssetResponse
+
+    def _grac_asset_response(source, mime):
+        r = _GracAssetResponse(source, mimetype=mime)
+        r.headers["Cache-Control"] = "public, max-age=600"
+        r.headers["X-Content-Type-Options"] = "nosniff"
+        return r
+
+    @app.route("/_grac_lowmem/assets/buttons.css")
+    def _grac_lowmem_blue_css():
+        css = re.sub(r'^\s*<style[^>]*>\s*|\s*</style>\s*$', '',
+                     GLOBAL_BLUE_BUTTONS_STYLE, flags=re.I)
+        return _grac_asset_response(css, "text/css")
+
+    @app.route("/_grac_lowmem/assets/buttons.js")
+    def _grac_lowmem_blue_js():
+        parts = (GLOBAL_GRAC_NAVIGATION_BUTTONS_SCRIPT, GLOBAL_GRAC_ACTIONS_COLUMNS_SCRIPT)
+        js = '\n'.join(re.sub(r'^\s*<script[^>]*>\s*|\s*</script>\s*$', '',
+                              part, flags=re.I) for part in parts)
+        return _grac_asset_response(js, "application/javascript")
+
+    @app.route("/_grac_lowmem/assets/workspace.css")
+    def _grac_lowmem_workspace_css():
+        return _grac_asset_response(GRAC_WORKSPACE_CSS, "text/css")
+
+    @app.route("/_grac_lowmem/assets/workspace.js")
+    def _grac_lowmem_workspace_js():
+        return _grac_asset_response(GRAC_WORKSPACE_JS, "application/javascript")
+
+    # Free Render health check must not render the full matplotlib dashboard.
+    @app.route("/_grac_lowmem/health", methods=["GET"])
+    def _grac_lowmem_health():
+        return _grac_asset_response("GRAC Render REV2 OK\n", "text/plain")
+
+
+# ARKYNTECH GRAC -- Render REV2 RAM diagnostics, worker-safe.
 if _GRAC_RENDER_LOW_MEMORY:
     import gc as _grac_gc
     import ctypes as _grac_ctypes
     import sys as _grac_sys
+    from flask import g as _grac_request_g
     _GRAC_REQUEST_COUNTER = 0
-    _GRAC_MEMORY_LOG_EVERY = max(1, int(os.getenv("GRAC_MEMORY_LOG_EVERY", "20")))
-    _GRAC_GC_EVERY = max(1, int(os.getenv("GRAC_GC_EVERY", "20")))
+    _GRAC_MEMORY_LOG_EVERY = max(1, int(os.getenv("GRAC_MEMORY_LOG_EVERY", "1")))
+    _GRAC_GC_EVERY = max(1, int(os.getenv("GRAC_GC_EVERY", "5")))
+    _GRAC_HIGH_MEMORY_MB = max(100, int(os.getenv("GRAC_HIGH_MEMORY_MB", "280")))
+    # 20 MB matches the maximum combined size of uploaded process documents.
+    app.config["MAX_CONTENT_LENGTH"] = max(1, int(os.getenv("GRAC_RENDER_MAX_UPLOAD_MB", "24"))) * 1024 * 1024
 
     def _grac_rss_mb():
         try:
-            with open("/proc/self/status", "rt", encoding="utf-8") as fh:
+            with open("/proc/self/status", encoding="utf-8") as fh:
                 for line in fh:
                     if line.startswith("VmRSS:"):
                         return int(line.split()[1]) / 1024.0
-        except OSError:
+        except (OSError, ValueError):
             pass
         return None
 
+    def _grac_trim_memory():
+        _grac_gc.collect()
+        if _grac_sys.platform.startswith("linux"):
+            try:
+                _grac_ctypes.CDLL("libc.so.6").malloc_trim(0)
+            except (OSError, AttributeError):
+                pass
+
+    @app.before_request
+    def _grac_lowmem_request_begin():
+        _grac_request_g.grac_rss_start = _grac_rss_mb()
+
     @app.teardown_request
-    def _grac_low_memory_teardown(error=None):
+    def _grac_lowmem_teardown(error=None):
         global _GRAC_REQUEST_COUNTER
         _GRAC_REQUEST_COUNTER += 1
-        if _GRAC_REQUEST_COUNTER % _GRAC_GC_EVERY == 0:
-            _grac_gc.collect()
-            # On Linux, glibc may hold released heap pages until malloc_trim.
-            if _grac_sys.platform.startswith("linux"):
-                try:
-                    libc = _grac_ctypes.CDLL("libc.so.6")
-                    libc.malloc_trim(0)
-                except (OSError, AttributeError):
-                    pass
-        if _GRAC_REQUEST_COUNTER % _GRAC_MEMORY_LOG_EVERY == 0:
-            rss = _grac_rss_mb()
-            app.logger.info("[GRAC lowmem] requests=%s rss_mb=%s",
-                            _GRAC_REQUEST_COUNTER,
-                            round(rss, 1) if rss is not None else "unknown")
+        rss_before = getattr(_grac_request_g, "grac_rss_start", None)
+        rss_after = _grac_rss_mb()
+        high = rss_after is not None and rss_after > _GRAC_HIGH_MEMORY_MB
+        if high or _GRAC_REQUEST_COUNTER % _GRAC_GC_EVERY == 0:
+            _grac_trim_memory()
+            rss_after = _grac_rss_mb()
+        if (high or error is not None or
+                _GRAC_REQUEST_COUNTER % _GRAC_MEMORY_LOG_EVERY == 0):
+            app.logger.info(
+                "[GRAC REV2 RAM] path=%s count=%s rss_start=%sMB rss_end=%sMB err=%s",
+                request.path[:160], _GRAC_REQUEST_COUNTER,
+                round(rss_before,1) if rss_before is not None else "unknown",
+                round(rss_after,1) if rss_after is not None else "unknown",
+                type(error).__name__ if error else "none",
+            )
+
+    app.logger.warning("[GRAC Render REV2] modo de memoria reducida activo; workers=1")
 
 if __name__ == "__main__":
     if _GRAC_RENDER_LOW_MEMORY:
