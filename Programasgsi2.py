@@ -2,7 +2,39 @@
 # Aplicación Flask autocontenida: Declaración de Aplicabilidad ISO 27001:2022 (todo en un archivo)
 # Requisitos: pip install flask flask_sqlalchemy
 
-#from flask import Flask, request, redirect, url_for, render_template_string, send_file, flash, session, Blueprint
+## Memory controls for Render; no routes or visual templates are changed.
+import os as _grac_mem_os
+import importlib as _grac_mem_importlib
+import threading as _grac_mem_threading
+from collections import OrderedDict as _GracOrderedDict
+_GRAC_LOW_MEMORY = _grac_mem_os.getenv("GRAC_RENDER_LOW_MEMORY", "0").lower() in {"1", "true", "yes"}
+if _GRAC_LOW_MEMORY:
+    for _grac_var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        _grac_mem_os.environ[_grac_var] = "1"
+
+class _GracLazyModule:
+    """Resolve pandas on first access, preserving normal attribute semantics."""
+    def __init__(self, name):
+        self._name = name
+        self._module = None
+        self._lock = _grac_mem_threading.RLock()
+    def __getattr__(self, name):
+        with self._lock:
+            if self._module is None:
+                self._module = _grac_mem_importlib.import_module(self._name)
+        return getattr(self._module, name)
+
+class _GracBoundedCache(_GracOrderedDict):
+    """FIFO cache; eviction only causes a normal cache miss and recomputation."""
+    def __init__(self, limit=256):
+        super().__init__()
+        self.limit = limit
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        while len(self) > self.limit:
+            self.popitem(last=False)
+
+from flask import Flask, request, redirect, url_for, render_template_string, send_file, flash, session, Blueprint
 from flask import Flask, request, redirect, url_for, render_template_string, send_file, flash, session, Blueprint, make_response
 from flask_sqlalchemy import SQLAlchemy
 from passlib.hash import ldap_salted_sha1 as ssha
@@ -25,7 +57,7 @@ from datetime import datetime as dt
 from flask import Flask, render_template_string, request, redirect, url_for, session, flash
 from flask import abort
 import re
-import pandas as pd
+pd = _GracLazyModule('pandas') if _GRAC_LOW_MEMORY else _grac_mem_importlib.import_module('pandas')
 from markupsafe import Markup, escape
 from werkzeug.utils import secure_filename
 from io import BytesIO
@@ -37,54 +69,11 @@ import secrets
 import io
 import math
 import numpy as np
-# GRAC Render bajo consumo: importaciones de graficos bajo demanda.
-# En macOS y otras instalaciones se conserva la ruta de importacion anterior.
-import os as _grac_render_os
-GRAC_RENDER_LOW_MEMORY = str(_grac_render_os.getenv(
-    "GRAC_RENDER_LOW_MEMORY", _grac_render_os.getenv("RENDER", "0")
-)).strip().lower() in ("1", "true", "yes", "on")
-if GRAC_RENDER_LOW_MEMORY:
-    _grac_render_os.environ.setdefault("MPLBACKEND", "Agg")
-    _grac_render_os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-    _grac_render_os.environ.setdefault("OMP_NUM_THREADS", "1")
-    _grac_render_os.environ.setdefault("MKL_NUM_THREADS", "1")
-    import importlib as _grac_importlib
-    class _GracLazyGraphModule:
-        def __init__(self, module_name):
-            self._module_name = module_name
-            self._target = None
-        def _module(self):
-            if self._target is None:
-                self._target = _grac_importlib.import_module(self._module_name)
-            return self._target
-        def __getattr__(self, key):
-            return getattr(self._module(), key)
-    class _GracLazyGraphClass:
-        def __init__(self, module_name, class_name):
-            self._module_name, self._class_name = module_name, class_name
-            self._target = None
-        def _class(self):
-            if self._target is None:
-                self._target = getattr(_grac_importlib.import_module(
-                    self._module_name), self._class_name)
-            return self._target
-        def __call__(self, *args, **kwargs):
-            return self._class()(*args, **kwargs)
-        def __getattr__(self, key):
-            return getattr(self._class(), key)
-    matplotlib = _GracLazyGraphModule("matplotlib")
-    plt = _GracLazyGraphModule("matplotlib.pyplot")
-    patches = _GracLazyGraphModule("matplotlib.patches")
-    Wedge = _GracLazyGraphClass("matplotlib.patches", "Wedge")
-    Circle = _GracLazyGraphClass("matplotlib.patches", "Circle")
-    FancyArrowPatch = _GracLazyGraphClass("matplotlib.patches", "FancyArrowPatch")
-    FigureCanvas = _GracLazyGraphClass("matplotlib.backends.backend_agg", "FigureCanvasAgg")
-else:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Wedge, Circle, FancyArrowPatch
-    from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.patches import Wedge, Circle, FancyArrowPatch
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import shutil
 import numpy as np
 from werkzeug.utils import secure_filename
@@ -95,7 +84,7 @@ import string
 from flask_sqlalchemy import SQLAlchemy
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib import colors
-import pandas as pd
+pd = _GracLazyModule('pandas') if _GRAC_LOW_MEMORY else _grac_mem_importlib.import_module('pandas')
 import os
 from cryptography.fernet import Fernet
 from werkzeug.utils import secure_filename
@@ -182,7 +171,7 @@ from reportlab.lib.enums import TA_LEFT
 from reportlab.lib import colors
 from werkzeug.exceptions import HTTPException
 import uuid
-import pandas as pd
+pd = _GracLazyModule('pandas') if _GRAC_LOW_MEMORY else _grac_mem_importlib.import_module('pandas')
 from openpyxl import load_workbook
 
 
@@ -191,17 +180,16 @@ from flask import (
 )
 from flask_sqlalchemy import SQLAlchemy
 
-import pandas as pd
+pd = _GracLazyModule('pandas') if _GRAC_LOW_MEMORY else _grac_mem_importlib.import_module('pandas')
 import numpy as np
 
 
 
 # ✅ Matplotlib sin GUI (macOS/Flask)
 os.environ["MPLBACKEND"] = "Agg"
-if not GRAC_RENDER_LOW_MEMORY:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 # OpenAI SDK
 from openai import OpenAI
@@ -216,10 +204,9 @@ from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
 )
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
-if not GRAC_RENDER_LOW_MEMORY:
-    import matplotlib
-    matplotlib.use("Agg")  # IMPORTANT para servidores Flask
-    import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use("Agg")  # IMPORTANT para servidores Flask
+import matplotlib.pyplot as plt
 from flask import send_file
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.pagesizes import A4, landscape
@@ -1140,15 +1127,13 @@ def inject_sgsi_progress_bar(response):
         if "id=\"sgsiProgressOverlay\"" in html_response or "id='sgsiProgressOverlay'" in html_response:
             return response
 
-        _progress_fragment = (_grac_render_progress_fragment()
-                              if GRAC_RENDER_LOW_MEMORY else SGSI_PROGRESS_GLOBAL)
         if "</body>" in html_response:
             html_response = html_response.replace(
                 "</body>",
-                _progress_fragment + "\n</body>", 1
+                SGSI_PROGRESS_GLOBAL + "\n</body>"
             )
         else:
-            html_response += _progress_fragment
+            html_response += SGSI_PROGRESS_GLOBAL
 
         response.set_data(html_response)
         response.headers["Content-Length"] = str(len(response.get_data()))
@@ -2352,13 +2337,10 @@ def inject_global_blue_button_style(response):
         if 'id="grac-global-blue-buttons"' in html_response:
             return response
 
-        _buttons_fragment = (_grac_render_buttons_fragment()
-                             if GRAC_RENDER_LOW_MEMORY else
-                             GLOBAL_BLUE_BUTTONS_STYLE + GLOBAL_GRAC_NAVIGATION_BUTTONS_SCRIPT + GLOBAL_GRAC_ACTIONS_COLUMNS_SCRIPT)
         if "</body>" in html_response:
-            html_response = html_response.replace("</body>", _buttons_fragment + "\n</body>", 1)
+            html_response = html_response.replace("</body>", GLOBAL_BLUE_BUTTONS_STYLE + GLOBAL_GRAC_NAVIGATION_BUTTONS_SCRIPT + GLOBAL_GRAC_ACTIONS_COLUMNS_SCRIPT + "\n</body>")
         else:
-            html_response += _buttons_fragment
+            html_response += GLOBAL_BLUE_BUTTONS_STYLE + GLOBAL_GRAC_NAVIGATION_BUTTONS_SCRIPT + GLOBAL_GRAC_ACTIONS_COLUMNS_SCRIPT
 
         response.set_data(html_response)
         response.headers["Content-Length"] = str(len(response.get_data()))
@@ -2880,11 +2862,9 @@ def inject_browser_session_lifecycle(response):
         ):
             return response
 
-        _session_fragment = (_grac_render_session_fragment()
-                             if GRAC_RENDER_LOW_MEMORY else BROWSER_SESSION_LIFECYCLE_HTML)
         html_response = html_response.replace(
             "</body>",
-            _session_fragment + "\n</body>",
+            BROWSER_SESSION_LIFECYCLE_HTML + "\n</body>",
             1
         )
         response.set_data(html_response)
@@ -13022,9 +13002,8 @@ import math
 import re
 import json
 import sqlite3
-if not GRAC_RENDER_LOW_MEMORY:
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 from flask import jsonify
 
 
@@ -13034,7 +13013,7 @@ def _dashboard_fig_to_b64(fig):
         buf,
         format="png",
         bbox_inches="tight",
-        dpi=(105 if GRAC_RENDER_LOW_MEMORY else 220),
+        dpi=220,
         facecolor=fig.get_facecolor()
     )
     plt.close(fig)
@@ -55271,7 +55250,7 @@ def _glpi_invfis_fetch_computer_detail(cfg, session_token, computer_id):
     return data if isinstance(data, dict) else {}
 
 
-_GLPI_INVFIS_ITEM_CACHE = {}
+_GLPI_INVFIS_ITEM_CACHE = _GracBoundedCache(512) if _GRAC_LOW_MEMORY else {}
 
 
 def _glpi_invfis_api_get(cfg, session_token, path, params=None):
@@ -125556,7 +125535,7 @@ def _translate_to_es_cached(text: str) -> str:
 
     # caching simple (en memoria) para no repetir en la misma ejecución
     if not hasattr(_translate_to_es_cached, "_cache"):
-        _translate_to_es_cached._cache = {}
+        _translate_to_es_cached._cache = _GracBoundedCache(256) if _GRAC_LOW_MEMORY else {}
     cache = _translate_to_es_cached._cache
     if t in cache:
         return cache[t]
@@ -209899,8 +209878,7 @@ def _alert_scheduler_loop():
 
 def alert_start_scheduler():
     global _ALERT_SCHEDULER_STARTED
-    _grac_alert_default = "0" if GRAC_RENDER_LOW_MEMORY else "1"
-    if str(os.getenv("GRAC_ALERTS_BACKGROUND", _grac_alert_default)).strip().lower() in {"0", "false", "no", "off"}:
+    if str(os.getenv("GRAC_ALERTS_BACKGROUND", "1")).strip().lower() in {"0", "false", "no", "off"}:
         return False
     if str(os.getenv("FLASK_DEBUG", "0")).strip().lower() in {"1", "true", "yes", "on"} \
             and os.getenv("WERKZEUG_RUN_MAIN") != "true":
@@ -213495,9 +213473,7 @@ with app.app_context():
     db.create_all()
     alert_seed_defaults()
     cont_comp_migrate_evidence_schema()
-    if (not GRAC_RENDER_LOW_MEMORY or str(os.getenv(
-            "GRAC_RENDER_STARTUP_GOV_SYNC", "0")).strip().lower() in ("1", "true", "yes", "on")):
-        cont_comp_sync_governance_findings()
+    cont_comp_sync_governance_findings()
     ensure_attack_auto_db()
     asegurar_columnas_marcos_controles_riesgo()
     riesgo_asegurar_config_evaluacion_control()
@@ -213650,143 +213626,6 @@ body.grac-workspace .obj-matriz tbody td:last-child > button.gw-detail-action {
 """
 GRAC_WORKSPACE_CSS += GRAC_ACTIONS_FINAL_CSS
 
-
-# Render Free: evitar cargas de 300 MB que pueden agotar 512 MB de RAM.
-# En instalaciones locales se conserva el limite original.
-if GRAC_RENDER_LOW_MEMORY:
-    app.config["MAX_CONTENT_LENGTH"] = max(1, int(os.getenv(
-        "GRAC_RENDER_MAX_UPLOAD_MB", "24"))) * 1024 * 1024
-
-# ================================================================
-# GRAC RENDER — ASSETS REUTILIZABLES (solo modo bajo consumo)
-# Evita repetir CSS/JS grandes en TODAS las respuestas HTML.
-# Conserva marcado HTML del popup y funcionamiento de los scripts.
-# ================================================================
-import hashlib as _grac_render_hashlib
-import gc as _grac_render_gc
-from flask import Response as _GracRenderResponse
-
-def _grac_render_extract(block, tag):
-    match = re.search(r"<" + tag + r"\b[^>]*>(.*?)</" + tag + r"\s*>",
-                      block, flags=re.S | re.I)
-    if not match:
-        raise RuntimeError("No se encontro recurso de GRAC: " + tag)
-    return match.group(1)
-
-_GRAC_RENDER_ASSETS = {}
-_GRAC_RENDER_ASSETS_VERSION = {}
-if GRAC_RENDER_LOW_MEMORY:
-    _GRAC_RENDER_ASSETS = {
-        "progress.css": _grac_render_extract(SGSI_PROGRESS_GLOBAL, "style"),
-        "progress.js": _grac_render_extract(SGSI_PROGRESS_GLOBAL, "script"),
-        "buttons.css": _grac_render_extract(GLOBAL_BLUE_BUTTONS_STYLE, "style"),
-        "navigation.js": _grac_render_extract(GLOBAL_GRAC_NAVIGATION_BUTTONS_SCRIPT, "script"),
-        "actions.js": _grac_render_extract(GLOBAL_GRAC_ACTIONS_COLUMNS_SCRIPT, "script"),
-        "tabs.js": _grac_render_extract(BROWSER_SESSION_LIFECYCLE_HTML, "script"),
-        "workspace.css": GRAC_WORKSPACE_CSS,
-        "workspace.js": GRAC_WORKSPACE_JS,
-    }
-    _GRAC_RENDER_ASSETS_VERSION = {
-        k: _grac_render_hashlib.sha256(v.encode("utf-8")).hexdigest()[:12]
-        for k, v in _GRAC_RENDER_ASSETS.items()
-    }
-
-def _grac_render_asset_url(key):
-    return "/_grac_lowmem/assets/" + key + "?v=" + _GRAC_RENDER_ASSETS_VERSION.get(key, "0")
-
-def _grac_render_script(key, tagid=None):
-    marker = ' id="' + tagid + '"' if tagid else ''
-    return '<script' + marker + ' src="' + _grac_render_asset_url(key) + '"></script>'
-
-def _grac_render_link(key, tagid=None):
-    marker = ' id="' + tagid + '"' if tagid else ''
-    return '<link' + marker + ' rel="stylesheet" href="' + _grac_render_asset_url(key) + '">'
-
-def _grac_render_progress_fragment():
-    # Se conserva el DIV original: la barra sigue funcionando en pantalla.
-    markup = re.sub(r"<style\b[^>]*>.*?</style\s*>", "", SGSI_PROGRESS_GLOBAL, count=1, flags=re.S | re.I)
-    markup = re.sub(r"<script\b[^>]*>.*?</script\s*>", "", markup, count=1, flags=re.S | re.I)
-    return _grac_render_link("progress.css") + markup + _grac_render_script("progress.js")
-
-def _grac_render_buttons_fragment():
-    return (_grac_render_link("buttons.css", "grac-global-blue-buttons")
-            + _grac_render_script("navigation.js")
-            + _grac_render_script("actions.js"))
-
-def _grac_render_session_fragment():
-    return _grac_render_script("tabs.js", "gracBrowserSessionLifecycle")
-
-def _grac_render_workspace_fragment():
-    return (_grac_render_link("workspace.css", "grac-corporate-workspace")
-            + _grac_render_script("workspace.js", "grac-corporate-workspace-js"))
-
-@app.route("/_grac_lowmem/assets/<name>", methods=["GET"])
-def grac_render_optimized_asset(name):
-    source = _GRAC_RENDER_ASSETS.get(name)
-    if source is None:
-        return _GracRenderResponse(status=404)
-    mime = "text/css" if name.endswith(".css") else "application/javascript"
-    response = _GracRenderResponse(source, mimetype=mime)
-    response.headers["Cache-Control"] = "public, max-age=86400"
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.set_etag(_GRAC_RENDER_ASSETS_VERSION[name])
-    response.make_conditional(request)
-    return response
-
-@app.route("/_grac_lowmem/health", methods=["GET"])
-def grac_render_optimized_health():
-    # No genera graficas ni consulta DB: health check economico.
-    return _GracRenderResponse('ok\n', mimetype="text/plain")
-
-_GRAC_RENDER_REQUEST_COUNTER = 0
-
-def _grac_render_process_rss_mb():
-    # VmRSS es memoria residente REAL del proceso Linux, no el pico historico.
-    try:
-        with open("/proc/self/status", "rt") as handle:
-            for line in handle:
-                if line.startswith("VmRSS:"):
-                    return int(line.split()[1]) / 1024.0
-    except OSError:
-        pass
-    return None
-
-def _grac_render_cgroup_mb():
-    for path in ("/sys/fs/cgroup/memory.current",
-                 "/sys/fs/cgroup/memory/memory.usage_in_bytes"):
-        try:
-            with open(path, "rt") as handle:
-                return int(handle.read().strip()) / 1024.0 / 1024.0
-        except (OSError, ValueError):
-            continue
-    return None
-
-@app.after_request
-def grac_render_memory_metrics(response):
-    global _GRAC_RENDER_REQUEST_COUNTER
-    if not GRAC_RENDER_LOW_MEMORY or request.path.startswith("/_grac_lowmem/assets/"):
-        return response
-    _GRAC_RENDER_REQUEST_COUNTER += 1
-    try:
-        every = max(1, int(os.environ.get("GRAC_MEMORY_LOG_EVERY", "1")))
-        if _GRAC_RENDER_REQUEST_COUNTER % every == 0:
-            print("[GRAC lowmem] pid={} path={} status={} rss_mb={} cgroup_mb={}".format(
-                os.getpid(), request.path[:100], response.status_code,
-                _grac_render_process_rss_mb(), _grac_render_cgroup_mb()), flush=True)
-        # Recogida selectiva: no hacer gc.collect en cada peticion.
-        if (_GRAC_RENDER_REQUEST_COUNTER % 20 == 0 and
-                (_grac_render_process_rss_mb() or 0) > 370):
-            _grac_render_gc.collect()
-            if sys.platform.startswith("linux"):
-                try:
-                    import ctypes as _grac_render_ctypes
-                    _grac_render_ctypes.CDLL("libc.so.6").malloc_trim(0)
-                except (OSError, AttributeError):
-                    pass
-    except Exception as exc:
-        app.logger.debug("GRAC lowmem metricas: %r", exc)
-    return response
-
 def _grac_apply_corporate_workspace(response):
     """Último acabado visual de páginas HTML internas; omite archivos y APIs."""
     if (response.is_streamed or response.direct_passthrough
@@ -213817,8 +213656,7 @@ def _grac_apply_corporate_workspace(response):
             return re.sub(r'(\bclass\s*=\s*["\'])', r'\1grac-workspace ', tag, count=1, flags=re.I)
         return tag[:-1] + ' class="grac-workspace">'
     page = re.sub(r'<body\b[^>]*>', body_class, page, count=1, flags=re.I)
-    assets = (_grac_render_workspace_fragment() if GRAC_RENDER_LOW_MEMORY else
-              '<style id="grac-corporate-workspace">' + GRAC_WORKSPACE_CSS
+    assets = ('<style id="grac-corporate-workspace">' + GRAC_WORKSPACE_CSS
               + '</style><script id="grac-corporate-workspace-js">'
               + GRAC_WORKSPACE_JS + '</script>')
     page = re.sub(r'</body\s*>', lambda m: assets + m.group(0), page, count=1, flags=re.I)
@@ -213828,6 +213666,48 @@ def _grac_apply_corporate_workspace(response):
 # Flask ejecuta after_request en orden inverso: índice 0 aplica el tema al final.
 app.after_request_funcs.setdefault(None, []).insert(0, _grac_apply_corporate_workspace)
 # FIN CORPORATIVO WORKSPACE
+
+
+# Periodic collection and RSS logging. No forced worker termination.
+def _grac_install_memory_monitor():
+    if not _GRAC_LOW_MEMORY:
+        return
+    import gc as _gc
+    import ctypes as _ctypes
+    import sys as _sys
+    _counter = [0]
+    try:
+        _trim = _ctypes.CDLL(None).malloc_trim
+        _trim.argtypes = [_ctypes.c_size_t]
+        _trim.restype = _ctypes.c_int
+    except (AttributeError, OSError):
+        _trim = None
+    try:
+        _interval = max(1, int(_grac_mem_os.getenv("GRAC_MEMORY_LOG_EVERY", "10")))
+    except ValueError:
+        _interval = 10
+
+    @app.teardown_request
+    def _grac_memory_after_request(_error=None):
+        _counter[0] += 1
+        if _counter[0] % _interval:
+            return
+        _gc.collect()
+        if _trim is not None:
+            _trim(0)
+        try:
+            with open("/proc/self/statm", encoding="ascii") as _f:
+                rss = int(_f.read().split()[1]) * _grac_mem_os.sysconf("SC_PAGE_SIZE")
+            app.logger.warning("GRAC_MEMORY pid=%s rss_mb=%.1f requests=%s",
+                               _grac_mem_os.getpid(), rss / 1048576, _counter[0])
+        except (OSError, ValueError, IndexError):
+            pass
+    # Release cyclic import/startup garbage once all modules are initialized.
+    _gc.collect()
+    if _trim is not None:
+        _trim(0)
+
+_grac_install_memory_monitor()
 
 if __name__ == "__main__":
     print("🚀 Ejecutando en puerto 5002")
