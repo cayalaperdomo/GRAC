@@ -442,6 +442,20 @@ app = Flask(__name__)
 # La cookie de autenticación termina con la sesión del navegador.
 app.config["SESSION_PERMANENT"] = False
 
+# ==============================================================
+# RENDER HEALTH CHECK (11 NOV 2026)
+# El chequeo HTTP configurado en Render debe responder 200 en
+# /_grac_lowmem/health. NO utiliza autenticación, bases de datos,
+# pandas, Matplotlib ni reportes: una prueba rápida del proceso.
+# ============================================================== 
+@app.route("/_grac_lowmem/health", methods=["GET"])
+def _grac_lowmem_health():
+    return "ok", 200, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+    }
+
+
 # ============================================================
 # BARRA DE PROGRESO GLOBAL SGSI - PARA TODOS LOS PROCESOS
 # CORREGIDA: NO BLOQUEA CUANDO SE CANCELA UN CONFIRM()
@@ -214049,6 +214063,9 @@ def _grac_install_memory_monitor():
 
     @app.teardown_request
     def _grac_memory_after_request(_error=None):
+        # No ejecutar GC periódico por sondeos automáticos de Render.
+        if request.path == "/_grac_lowmem/health":
+            return
         _counter[0] += 1
         if _counter[0] % _interval:
             return
