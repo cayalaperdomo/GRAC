@@ -442,20 +442,6 @@ app = Flask(__name__)
 # La cookie de autenticación termina con la sesión del navegador.
 app.config["SESSION_PERMANENT"] = False
 
-# ==============================================================
-# RENDER HEALTH CHECK (11 NOV 2026)
-# El chequeo HTTP configurado en Render debe responder 200 en
-# /_grac_lowmem/health. NO utiliza autenticación, bases de datos,
-# pandas, Matplotlib ni reportes: una prueba rápida del proceso.
-# ============================================================== 
-@app.route("/_grac_lowmem/health", methods=["GET"])
-def _grac_lowmem_health():
-    return "ok", 200, {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-store",
-    }
-
-
 # ============================================================
 # BARRA DE PROGRESO GLOBAL SGSI - PARA TODOS LOS PROCESOS
 # CORREGIDA: NO BLOQUEA CUANDO SE CANCELA UN CONFIRM()
@@ -3493,6 +3479,10 @@ def get_company_logo_path(company_name: str) -> str | None:
     """
     if not company_name:
         return None
+    if '_grac_company_brand_info' in globals():
+        active_name, active_logo = _grac_company_brand_info()
+        if active_name and active_logo and active_name.casefold() == str(company_name).strip().casefold():
+            return active_logo
     cfg = EmpresaConfig.query.filter_by(company_name=company_name).first()
     if not cfg or not cfg.logo_filename:
         return None
@@ -12590,6 +12580,10 @@ AUDITOR_MODULES_DENY = {
     "OpenRouter API Key",
     "Gestión de Usuarios",
     "Aplicación móvil",
+    "Cuestionarios de Proponentes",
+    "Cuestionario de proveedores web",
+    "Bidder Evaluation",
+    "Web Supplier Questionnaires",
 }
 
 AUDITOR_ACTIONS_DENY_LABELS = (
@@ -16370,11 +16364,40 @@ def _grac_organizar_conexiones_herramientas():
 
 _grac_organizar_conexiones_herramientas()
 
+
+# GRAC: acceso directo al perfil corporativo bajo Administración > Empresa.
+def _grac_add_company_profile_menu():
+    section = next((s for s in MENU_SECTIONS if s.get('title') in ('Administración', 'Administration')), None)
+    if not section:
+        return
+    root = next((x for x in section.get('items', [])
+                 if x.get('module') == 'Configuración Parámetros de la Empresa' and x.get('children')), None)
+    if not root:
+        return
+    children = root['children']
+    if any(x.get('href') == '/admin/empresa/datos' for x in children):
+        return
+    english = section.get('title') == 'Administration'
+    children.insert(0, {
+        'label': 'Load Company Details' if english else 'Cargue datos de la empresa',
+        'href': '/admin/empresa/datos',
+        'icon': 'bi-building-check',
+        'btn': 'btn-primary',
+        'module': 'Configuración Parámetros de la Empresa',
+        'admin_only': True,
+    })
+_grac_add_company_profile_menu()
+
 def filtrar_items_menu(items, usuario_actual, seccion_admin=False):
     filtrados = []
 
     for it in items:
         item_copy = dict(it)
+        # La Selección de Proponentes es exclusivamente para perfiles no auditores.
+        # Ocultar la rama completa (web, archivo y evaluaciones), no solo sus hojas.
+        if (getattr(usuario_actual, 'role', None) == 'auditor'
+                and item_copy.get('label') in ('Selección de Proponentes', 'Bidder Selection')):
+            continue
         # En Administración los perfiles Usuario y Auditor solo ven el chat.
         # Este filtro es exclusivo de la sección: no toca otros módulos SGSI.
         if (seccion_admin and usuario_actual.role in ("user", "auditor")
@@ -16434,6 +16457,31 @@ def filtrar_items_menu(items, usuario_actual, seccion_admin=False):
 # ============================================================
 # SEGURIDAD: SOLO CHAT PARA USUARIO Y AUDITOR EN ADMINISTRACIÓN
 # ============================================================
+
+
+# GRAC: Seguridad de Selección de Proponentes para el perfil auditor.
+# Impide GET/POST y acceso por URL, además de ocultar esta rama del menú.
+# No bloquea Listas Restrictivas, Security Scorecard ni Registro de Proveedores.
+@app.before_request
+def _grac_restringir_seleccion_proponentes_auditor():
+    _path = (request.path or '/').rstrip('/') or '/'
+    if not (
+        _path == '/cuestionario_proveedores_web'
+        or _path.startswith('/cuestionario_proveedores_web/')
+        or _path == '/ingreso_informacion_proponente_archivo'
+        or _path.startswith('/ingreso_informacion_proponente_archivo/')
+        or _path == '/cuestionarios_proveedores'
+        or _path.startswith('/cuestionarios_proveedores/')
+    ):
+        return None
+    _uid = session.get('user_id')
+    if not _uid:
+        return None  # El login original sigue gestionando usuarios no autenticados.
+    _user = db.session.get(User, _uid)
+    if _user is not None and _user.role == 'auditor':
+        abort(403, description='El perfil auditor no tiene acceso a Selección de Proponentes.')
+    return None
+
 @app.before_request
 def _sgsi_restringir_administracion_a_chat():
     """Evita acceso por URL o POST a funciones administrativas ocultas del menú."""
@@ -18900,9 +18948,9 @@ def admin_mobile_app():
         <div class="mobile-admin-header-overlay">
           <div class="mobile-admin-header-icon"><i class="bi bi-phone"></i></div>
           <div class="mobile-admin-header-text">
-            <div class="mobile-admin-header-badge">SGSI · Administración</div>
+            
             <h2 class="mobile-admin-title">Aplicación móvil</h2>
-            <div class="mobile-admin-subtitle">Distribución controlada de GRAC Mobile para Android y iOS mediante TestFlight.</div>
+            
           </div>
         </div>
       </div>
@@ -22243,9 +22291,9 @@ def admin_alertas():
         <div class="grac-alert-header-overlay">
           <div class="grac-alert-header-icon"><i class="bi bi-bell-fill"></i></div>
           <div class="grac-alert-header-text">
-            <div class="grac-alert-header-badge">SGSI · Administración</div>
+            
             <h3 class="grac-alert-header-title">Administración de Alertas</h3>
-            <div class="grac-alert-header-subtitle">Configura destinatarios, umbrales, severidad y frecuencia. La conexión se toma de Parámetros Generales → Configuración del Correo.</div>
+            
           </div>
         </div>
       </div>
@@ -22396,9 +22444,9 @@ def alert_center():
         <div class="grac-alert-header-overlay">
           <div class="grac-alert-header-icon"><i class="bi bi-bell-fill"></i></div>
           <div class="grac-alert-header-text">
-            <div class="grac-alert-header-badge">SGSI · Monitoreo</div>
+            
             <h3 class="grac-alert-header-title">Centro de Alertas</h3>
-            <div class="grac-alert-header-subtitle">Seguimiento centralizado de condiciones que requieren atención.</div>
+            
           </div>
           <form method="post" class="grac-alert-header-actions">
             <input type="hidden" name="action" value="refresh">
@@ -22432,6 +22480,383 @@ def alert_center():
 # =========================
 # Logo Empresa
 # =========================
+
+_GRAC_BRANDING_ENGLISH = False
+
+
+# ================================================================
+# GRAC - IDENTIDAD CORPORATIVA DEL CLIENTE PARA INFORMES
+# Configuracion unica y reutilizable. Sin consultas adicionales
+# durante las peticiones normales ni carga de imagenes en memoria.
+# ================================================================
+_GRAC_COMPANY_DATA_DIR = os.environ.get('GRAC_COMPANY_DATA_DIR', INSTANCE_DIR)
+_GRAC_COMPANY_PROFILE_FILE = os.path.join(_GRAC_COMPANY_DATA_DIR, 'grac_company_profile.json')
+_GRAC_COMPANY_LOGO_FILE = 'grac_cliente_logo.png'
+_GRAC_COMPANY_LOGO_PATH = os.path.join(_GRAC_COMPANY_DATA_DIR, _GRAC_COMPANY_LOGO_FILE)
+
+
+def _grac_current_company_profile():
+    """Consulta ligera a disco; no usa caché global ni lectura de imágenes."""
+    try:
+        if os.path.isfile(_GRAC_COMPANY_PROFILE_FILE):
+            if os.path.getsize(_GRAC_COMPANY_PROFILE_FILE) > 8192:
+                return {}
+            with open(_GRAC_COMPANY_PROFILE_FILE, 'r', encoding='utf-8') as fd:
+                data = json.load(fd)
+            if isinstance(data, dict) and isinstance(data.get('name'), str):
+                return {'name': data['name'][:255].strip(), 'logo': bool(data.get('logo'))}
+    except (OSError, ValueError, TypeError):
+        app.logger.warning('No se pudo leer la identidad corporativa de GRAC.')
+    return {}
+
+
+def _grac_company_brand_info():
+    p = _grac_current_company_profile()
+    name = (p.get('name') or '').strip()
+    logo_path = _GRAC_COMPANY_LOGO_PATH
+    if not p.get('logo') or not os.path.isfile(logo_path):
+        logo_path = None
+    return name, logo_path
+
+
+def _grac_company_report_name(fallback=''):
+    """Nombre institucional único, definido en Administración. Sin consulta a la BD."""
+    configured, _logo_path = _grac_company_brand_info()
+    return configured or (str(fallback).strip() if fallback else '')
+
+
+def _grac_pdf_company_logo_flowable(logo_path, max_width=185, max_height=85):
+    """Logotipo para las portadas nativas PESI/Revision (sin carga en cada petición)."""
+    if not logo_path or not os.path.isfile(logo_path):
+        return None
+    try:
+        reader = ImageReader(logo_path)
+        width, height = reader.getSize()
+        if not width or not height:
+            return None
+        scale = min(float(max_width)/width, float(max_height)/height, 1.0)
+        item = RLImage(logo_path, width=width*scale, height=height*scale)
+        item.hAlign = 'CENTER'
+        return item
+    except (OSError, ValueError) as exc:
+        app.logger.warning('GRAC: No se pudo incluir el logo en el informe: %s', exc)
+        return None
+
+@app.route('/admin/empresa/logo-vista')
+@login_required
+def grac_company_logo_preview():
+    name, logo_path = _grac_company_brand_info()
+    if not name or not logo_path:
+        abort(404)
+    return send_file(logo_path, mimetype='image/png', max_age=0)
+
+
+@app.route('/admin/empresa/datos', methods=['GET', 'POST'])
+@login_required
+def grac_company_profile_admin():
+    usuario = User.query.get(session.get('user_id'))
+    if not usuario or usuario.role != 'admin':
+        abort(403)
+
+    english = _GRAC_BRANDING_ENGLISH
+    name, logo_path = _grac_company_brand_info()
+
+    csrf_token = session.get('grac_company_profile_csrf')
+    if not csrf_token:
+        csrf_token = secrets.token_urlsafe(24)
+        session['grac_company_profile_csrf'] = csrf_token
+
+    if request.method == 'POST':
+        if not secrets.compare_digest(request.form.get('csrf_token', ''), csrf_token):
+            abort(400)
+        company_name = ' '.join((request.form.get('company_name') or '').split()).strip()
+        f = request.files.get('logo')
+        remove_logo = request.form.get('remove_logo') == '1'
+        if not company_name or len(company_name) > 255:
+            flash('Enter a valid company name (max. 255 characters).' if english else
+                  'Ingrese el nombre de la empresa (máximo 255 caracteres).', 'danger')
+            return redirect(url_for('grac_company_profile_admin'))
+        if f and f.filename:
+            try:
+                ext = f.filename.rsplit('.', 1)[-1].lower()
+                if ext not in {'png', 'jpg', 'jpeg'}:
+                    raise ValueError('Only PNG/JPG/JPEG files are allowed.')
+                data = f.stream.read(2 * 1024 * 1024 + 1)
+                if len(data) > 2 * 1024 * 1024:
+                    raise ValueError('Maximum image size is 2 MB.')
+                from PIL import Image as _GracPILImage, UnidentifiedImageError as _GracInvalidImage
+                with _GracPILImage.open(io.BytesIO(data)) as im:
+                    if (im.format or '').upper() not in ('PNG', 'JPEG') or im.width * im.height > 8_000_000:
+                        raise ValueError('Invalid or oversized image.')
+                    im.load()
+                    im = im.convert('RGBA')
+                    im.thumbnail((1024, 512))
+                    os.makedirs(_GRAC_COMPANY_DATA_DIR, exist_ok=True)
+                    tmp_logo = os.path.join(_GRAC_COMPANY_DATA_DIR, '.grac_cliente_logo_tmp_' + uuid.uuid4().hex + '.png')
+                    try:
+                        im.save(tmp_logo, format='PNG', optimize=True)
+                        os.replace(tmp_logo, _GRAC_COMPANY_LOGO_PATH)
+                    finally:
+                        if os.path.exists(tmp_logo):
+                            os.remove(tmp_logo)
+                logo_path = _GRAC_COMPANY_LOGO_PATH
+            except Exception as exc:
+                flash(('Invalid logo: ' if english else 'Logo inválido: ') + str(exc), 'danger')
+                return redirect(url_for('grac_company_profile_admin'))
+        elif remove_logo:
+            try:
+                os.remove(_GRAC_COMPANY_LOGO_PATH)
+            except FileNotFoundError:
+                pass
+            logo_path = None
+
+        # Compatibilidad con los generadores PDF/Word/Excel existentes.
+        try:
+            cfg = EmpresaConfig.query.filter_by(company_name=company_name).first()
+            if cfg is None:
+                cfg = EmpresaConfig(company_name=company_name)
+                db.session.add(cfg)
+            cfg.logo_filename = _GRAC_COMPANY_LOGO_FILE if logo_path else None
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            app.logger.exception('No se pudo guardar EmpresaConfig')
+            flash('Could not save company details.' if english else
+                  'No se pudieron guardar los datos de la empresa.', 'danger')
+            return redirect(url_for('grac_company_profile_admin'))
+
+        os.makedirs(_GRAC_COMPANY_DATA_DIR, exist_ok=True)
+        tmp_profile = _GRAC_COMPANY_PROFILE_FILE + '.' + uuid.uuid4().hex + '.tmp'
+        try:
+            with open(tmp_profile, 'w', encoding='utf-8') as fd:
+                json.dump({'name': company_name, 'logo': bool(logo_path)}, fd, ensure_ascii=False)
+            os.replace(tmp_profile, _GRAC_COMPANY_PROFILE_FILE)
+        finally:
+            if os.path.exists(tmp_profile):
+                os.remove(tmp_profile)
+        flash('Company details saved for future reports.' if english else
+              'Datos de la empresa guardados para los próximos informes.', 'success')
+        return redirect(url_for('grac_company_profile_admin'))
+
+    form = render_template_string('''
+    <div class="container py-4" style="max-width:1050px">
+      <div class="card border-primary shadow-sm rounded-4 overflow-hidden">
+        <div class="card-header text-white px-4 py-3" style="background:#0b3976">
+          <h3 class="h5 mb-1">{{ 'Load Company Details' if en else 'Cargue datos de la empresa' }}</h3>
+          <div class="small">{{ 'Configure the company name and logo once for GRAC reports.' if en else 'Configure una sola vez el nombre y logo del cliente para los informes de GRAC.' }}</div>
+        </div>
+        <div class="card-body p-4">
+          <form method="post" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="mb-3">
+              <label class="form-label fw-semibold">{{ 'Company name' if en else 'Nombre de la empresa' }}</label>
+              <input type="text" class="form-control" name="company_name" maxlength="255" required value="{{ name }}"
+                     placeholder="{{ 'Client company name' if en else 'Nombre de la empresa cliente' }}">
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">{{ 'Company logo (PNG or JPG, max. 2 MB)' if en else 'Logo de la empresa (PNG o JPG, máximo 2 MB)' }}</label>
+              <input type="file" name="logo" accept=".png,.jpg,.jpeg,image/png,image/jpeg" class="form-control">
+              <div class="form-text">{{ 'The image is optimized before being saved.' if en else 'La imagen se optimiza antes de guardarse.' }}</div>
+            </div>
+            {% if has_logo %}
+            <div class="p-3 border rounded-3 mb-3" style="max-width:440px">
+              <div class="text-muted small mb-2">{{ 'Current logo' if en else 'Logo actual' }}</div>
+              <img src="{{ url_for('grac_company_logo_preview') }}" alt="Logo" style="max-width:100%;max-height:110px;object-fit:contain">
+              <label class="d-flex align-items-center gap-2 small mt-2"><input type="checkbox" name="remove_logo" value="1">{{ 'Remove current logo' if en else 'Quitar logo actual' }}</label>
+            </div>
+            {% endif %}
+            <div class="d-flex gap-2 flex-wrap">
+              <button type="submit" class="btn btn-primary"><i class="bi bi-check2-circle me-1"></i>{{ 'Save Company Details' if en else 'Guardar datos de la empresa' }}</button>
+            </div>
+          </form>
+          <p class="text-muted small mt-4 mb-0">{{ 'The configured name and logo are applied automatically when reports are generated.' if en else 'El nombre y el logo se aplican automáticamente al generar nuevos informes.' }}</p>
+        </div>
+      </div>
+    </div>
+    ''', name=name, has_logo=bool(logo_path), en=english, csrf_token=csrf_token)
+    return render_template_string(BASE, content=form)
+
+
+# ================================================================
+# Marca institucional en PDF de los módulos (sin alterar cálculos).
+# Los informes PDF generales de /reportes/pdf/ YA usan el encabezado
+# corporativo nativo, así que no reciben una portada duplicada.
+# ================================================================
+def _grac_brand_pdf_with_cover(source_bytes, name, logo_path, english=False, filename=''):
+    """Portada institucional con pypdf importado solo cuando se genera PDF."""
+    # Render ya suele incluir PyPDF2; pypdf es opcional y se carga al usar PDF.
+    try:
+        from pypdf import PdfReader, PdfWriter
+    except ImportError:
+        from PyPDF2 import PdfReader, PdfWriter
+    from reportlab.pdfgen import canvas as _grac_pdf_canvas
+    from reportlab.lib.utils import ImageReader as _grac_image_reader
+    from reportlab.lib.styles import ParagraphStyle as _grac_paragraph_style
+    from reportlab.platypus import Paragraph as _grac_paragraph
+    from reportlab.lib.enums import TA_CENTER as _grac_center
+    from reportlab.lib.colors import HexColor as _grac_color
+    import xml.sax.saxutils as _grac_xml
+
+    src = PdfReader(io.BytesIO(source_bytes), strict=False)
+    if not src.pages:
+        return source_bytes
+    first_page = src.pages[0]
+    w = float(first_page.mediabox.width)
+    h = float(first_page.mediabox.height)
+    if w < 200 or h < 200:
+        return source_bytes
+    w = min(w, 1500)
+    h = min(h, 1500)
+    overlay = io.BytesIO()
+    c = _grac_pdf_canvas.Canvas(overlay, pagesize=(w, h), pageCompression=1)
+    c.setFillColor(_grac_color('#FFFFFF'))
+    c.rect(0, 0, w, h, fill=1, stroke=0)
+    c.setFillColor(_grac_color('#0B3976'))
+    c.rect(0, h-25, w, 25, fill=1, stroke=0)
+    c.setFillColor(_grac_color('#0B3976'))
+    c.rect(0, 0, w, 12, fill=1, stroke=0)
+    if logo_path and os.path.isfile(logo_path):
+        try:
+            logo_img = _grac_image_reader(logo_path)
+            iw, ih = logo_img.getSize()
+            ratio = min((w * 0.48) / iw, (h * 0.22) / ih)
+            dw, dh = iw*ratio, ih*ratio
+            c.drawImage(logo_img, (w-dw)/2, h*0.68, width=dw, height=dh, mask='auto')
+        except Exception:
+            pass
+    company_style = _grac_paragraph_style('grac_company_cover', fontName='Helvetica-Bold',
+         fontSize=min(21, w/25), leading=min(27, w/22), alignment=_grac_center,
+         textColor=_grac_color('#102B50'))
+    company = _grac_paragraph(_grac_xml.escape(name), company_style)
+    avail_w = w*0.85
+    _, company_h = company.wrap(avail_w, h*0.20)
+    company.drawOn(c, (w-avail_w)/2, h*0.58-company_h)
+    c.setStrokeColor(_grac_color('#D8E4F2'))
+    c.line(w*0.25, h*0.51, w*0.75, h*0.51)
+    c.setFont('Helvetica-Bold', min(15, w/35))
+    c.setFillColor(_grac_color('#0B3976'))
+    c.drawCentredString(w/2, h*0.45, 'MANAGEMENT SYSTEM REPORT' if english else 'INFORME DEL SISTEMA DE GESTIÓN')
+    c.setFont('Helvetica', min(11, w/45))
+    c.setFillColor(_grac_color('#53657A'))
+    raw_title = (filename or '').replace('_', ' ').replace('-', ' ').strip()
+    if len(raw_title) > 75:
+        raw_title = raw_title[:72] + '...'
+    if raw_title:
+        c.drawCentredString(w/2, h*0.39, raw_title)
+    c.drawCentredString(w/2, h*0.23, datetime_module.datetime.now().strftime('%Y-%m-%d'))
+    c.save()
+    overlay.seek(0)
+    cover = PdfReader(overlay)
+    writer = PdfWriter()
+    writer.add_page(cover.pages[0])
+    for page in src.pages:
+        writer.add_page(page)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+@app.after_request
+def grac_brand_pdf_exports(response):
+    """Marca los PDF generados, incluidos TODOS los accesos desde Reportes.
+
+    La pantalla /reportes/modulo-pdf redirige a generadores ya existentes;
+    el marcador de sesion conserva el contexto solo para ese endpoint.
+    Las evidencias originales no se modifican. En Render el procesador y
+    las imagenes se cargan solo cuando efectivamente se genera un PDF.
+    """
+    try:
+        path = request.path.lower()
+        endpoint = request.endpoint or ''
+        target = session.get('_grac_report_branding_target')
+        from_reports = path.startswith('/reportes/pdf/')
+        report_title = ''
+        if isinstance(target, dict):
+            # Caduca para no aplicar una portada a otra descarga posterior.
+            try:
+                valid = (time.time() - float(target.get('created', 0))) < 300
+            except (ValueError, TypeError):
+                valid = False
+            if not valid:
+                session.pop('_grac_report_branding_target', None)
+            elif endpoint == target.get('endpoint'):
+                session.pop('_grac_report_branding_target', None)
+                from_reports = True
+                report_title = str(target.get('title') or '')[:150]
+
+        if response.status_code != 200 or request.method not in ('GET', 'POST'):
+            return response
+
+        disposition = response.headers.get('Content-Disposition', '')
+        mimetype = (response.mimetype or '').lower()
+        # Unos reportes se entregan como attachment (octet-stream) + nombre .pdf.
+        is_pdf = (mimetype in ('application/pdf', 'application/x-pdf') or
+                  (mimetype in ('application/octet-stream', 'binary/octet-stream')
+                   and (from_reports or bool(re.search(r'\.pdf(?:["\'; ]|$)', disposition, re.I)))))
+        if not is_pdf:
+            return response
+
+        # El archivo de evidencia o documento importado se entrega intacto.
+        if any(part in path for part in (
+            '/static/', '/uploads/', '/adjuntos/', '/evidencias/',
+            '/documentos/', '/attachments/', '/evidence/', '/archivos/descarga/'
+        )):
+            return response
+
+        # Estos dos reportes tienen portada propia con logo/nombre activo.
+        if endpoint in ('pesi_pdf', 'revdir_pdf'):
+            return response
+
+        name, logo_path = _grac_company_brand_info()
+        if not name:
+            return response
+
+        low_memory = os.getenv('GRAC_RENDER_LOW_MEMORY', '0').lower() in ('1', 'true', 'yes')
+        default_max_mb = '8' if low_memory else '24'
+        try:
+            max_mb = max(1, min(64, int(os.getenv('GRAC_REPORT_BRANDING_MAX_PDF_MB', default_max_mb))))
+        except (ValueError, TypeError):
+            max_mb = int(default_max_mb)
+        max_bytes = max_mb * 1024 * 1024
+        raw_length = response.headers.get('Content-Length')
+        content_len = int(raw_length) if raw_length and raw_length.isdecimal() else None
+        if content_len is not None and content_len > max_bytes:
+            app.logger.warning('GRAC: PDF supera %s MiB; se entrega sin reprocesar: %s', max_mb, path)
+            return response
+        if response.is_streamed and content_len is None:
+            app.logger.warning('GRAC: PDF sin longitud disponible; se entrega el flujo original: %s', path)
+            return response
+
+        response.direct_passthrough = False
+        payload = response.get_data()
+        if not payload.startswith(b'%PDF-'):
+            return response
+        if len(payload) > max_bytes:
+            app.logger.warning('GRAC: PDF demasiado grande para personalizar: %s', path)
+            return response
+
+        if not report_title:
+            if path.startswith('/reportes/pdf/'):
+                report_title = str((request.view_args or {}).get('key') or '')
+            else:
+                match = re.search(r'filename\*?=(?:UTF-8\'\')?["\']?([^"\';]+)', disposition, re.I)
+                report_title = ((match.group(1) if match else endpoint) or 'GRAC').rsplit('.', 1)[0]
+        branded = _grac_brand_pdf_with_cover(payload, name, logo_path,
+                                             english=_GRAC_BRANDING_ENGLISH, filename=report_title)
+        if branded == payload:
+            return response
+        response.set_data(branded)
+        response.headers['Content-Length'] = str(len(branded))
+        for header in ('ETag', 'Last-Modified', 'Accept-Ranges', 'Content-MD5'):
+            response.headers.pop(header, None)
+        response.headers['Cache-Control'] = 'private, no-store'
+        response.headers['X-GRAC-Company-Branded'] = '1'
+    except (ImportError, ModuleNotFoundError):
+        app.logger.warning('GRAC: falta pypdf o PyPDF2 para personalizar el PDF.')
+    except Exception:
+        app.logger.exception('GRAC: error al agregar el nombre/logo al PDF.')
+    return response
+
 
 @app.route("/empresa/logo", methods=["GET", "POST"])
 @login_required
@@ -79867,8 +80292,9 @@ def vulnerabilidades_matriz():
     <div class="vulnmx-shell">
 
       <!-- CABECERA -->
-      <div class="plan-hero">
-        <h2 class="plan-title">Registro de Vulnerabilidades</h2>
+      <div class="grac-module-heading">
+        <span class="grac-module-icon" aria-hidden="true"><i class="bi bi-shield-exclamation"></i></span>
+        <h1>Registro de Vulnerabilidades</h1>
       </div>
 
       <!-- BOTONERA SUPERIOR -->
@@ -80106,76 +80532,10 @@ def vulnerabilidades_matriz():
         overflow:visible;
       }
 
-      .plan-hero{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }
 
-      .plan-hero::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }
 
-      .plan-hero::after{
-        content:"🛡️";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-        position:relative;
-        z-index:1;
-        order:-1;
-      }
 
-      .plan-title{
-        position:relative;
-        z-index:1;
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 4px 14px rgba(0,0,0,.45);
-        margin:0 !important;
-        text-align:left;
-        padding:0;
-        transform:none;
-        overflow-wrap:break-word;
-      }
 
-      .plan-title::before{
-        content:"SGSI · Matriz de Vulnerabilidades";
-        display:block;
-        width:fit-content;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }
 
       .volver-center{
         display:flex;
@@ -80480,13 +80840,7 @@ def vulnerabilidades_matriz():
           margin:8px auto 22px auto;
         }
 
-        .plan-hero{
-          min-height:88px;
-        }
 
-        .plan-title{
-          font-size:1.20rem;
-        }
 
         .vulnmx-card-body{
           padding:8px 7px;
@@ -80494,24 +80848,9 @@ def vulnerabilidades_matriz():
       }
 
       @media (max-width:768px){
-        .plan-hero{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
 
-        .plan-hero::after{
-          margin:0;
-        }
 
-        .plan-title{
-          text-align:center;
-        }
 
-        .plan-title::before{
-          margin-left:auto;
-          margin-right:auto;
-        }
 
         .top-actions-wrap{
           flex-direction:column;
@@ -89738,15 +90077,9 @@ def plan_remediacion_matriz():
     html = """
     <div class="remmat-shell">
 
-      <div class="remmat-header-card">
-        <div class="remmat-header-overlay">
-          <div class="remmat-header-text">
-            <h3 class="remmat-title m-0">Plan de Remediación</h3>
-            <div class="remmat-subtitle">
-              Visualización resumida de acciones de remediación para vulnerabilidades identificadas
-            </div>
-          </div>
-        </div>
+      <div class="grac-module-heading">
+        <span class="grac-module-icon" aria-hidden="true"><i class="bi bi-clipboard2-pulse"></i></span>
+        <h1>Plan de Remediación</h1>
       </div>
 
       <div class="remmat-header-actions">
@@ -90000,75 +90333,7 @@ def plan_remediacion_matriz():
         margin:10px auto 24px auto;
       }
 
-      .remmat-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-
-      .remmat-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-      }
-
-      .remmat-header-overlay{
-        display:flex;
-        align-items:center;
-        gap:14px;
-        position:relative;
-        z-index:1;
-      }
-
-      .remmat-header-overlay::before{
-        content:"📋";
-        width:54px;
-        height:54px;
-        border-radius:14px;
-        background:#fff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.4rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-      }
-
-      .remmat-header-text::before{
-        content:"SGSI · Plan de Remediación";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .remmat-title{
-        color:#fff;
-        font-weight:950;
-        font-size:1.32rem;
-        margin:0;
-      }
-
-      .remmat-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-      }
-
+      /* Legacy remediation banner removed from source. */
       .remmat-header-actions{
         display:flex;
         justify-content:center;
@@ -130463,6 +130728,10 @@ def _normalize_company_name(name: str) -> str:
 
 def _resolve_company_name(company_name: str = "") -> str:
     company_name = (company_name or "").strip()
+    if not company_name:
+        profile_name, _ = _grac_company_brand_info()
+        if profile_name:
+            return profile_name
 
     try:
         if company_name:
@@ -130492,6 +130761,10 @@ def _resolve_company_name(company_name: str = "") -> str:
 
 
 def _get_logo_and_company(company_name: str = ""):
+    # La empresa configurada en Administracion prevalece frente a nombres antiguos.
+    active_name, active_logo = _grac_company_brand_info()
+    if active_name:
+        return active_name, active_logo
     resolved_company = _resolve_company_name(company_name)
 
     logo_path = None
@@ -130503,6 +130776,9 @@ def _get_logo_and_company(company_name: str = ""):
     except Exception:
         logo_path = None
 
+    active_name, active_logo = _grac_company_brand_info()
+    if active_name and resolved_company == active_name:
+        logo_path = active_logo
     return resolved_company, logo_path
 
 
@@ -132406,6 +132682,8 @@ def grac_report_module_pdf(report_key):
         abort(403)
     key, title, source, endpoint, param, icon, permission = definition
     if not param:
+        session['_grac_report_branding_target'] = {
+            'endpoint': endpoint, 'title': title, 'created': int(time.time())}
         return redirect(url_for(endpoint))
     try:
         record_id = int(request.args.get('record_id', ''))
@@ -132421,6 +132699,8 @@ def grac_report_module_pdf(report_key):
     except Exception:
         app.logger.exception('No se pudo validar el informe %s', key)
         abort(503)
+    session['_grac_report_branding_target'] = {
+        'endpoint': endpoint, 'title': title, 'created': int(time.time())}
     return redirect(url_for(endpoint, **{param:record_id}))
 
 @app.route("/reportes")
@@ -132432,8 +132712,8 @@ def reportes_home():
         flash("No tiene permiso para acceder al módulo de reportes.", "danger")
         return redirect(url_for('menu'))
 
-    company_input = (request.args.get("company") or "").strip()
-    company = _resolve_company_name(company_input)
+    company = _resolve_company_name("")
+    _, company_logo_path = _grac_company_brand_info()
 
     start_date = (request.args.get("start_date") or "").strip()
     end_date = (request.args.get("end_date") or "").strip()
@@ -132473,52 +132753,15 @@ def reportes_home():
         
       </div>
 
-      <div class="rep-card p-4 mb-3">
-        <div class="rep-section-title">
-          Filtros de generación
-        </div>
-
-        <form method="GET" action="{{ url_for('reportes_home') }}">
-          <div class="row g-3 align-items-end">
-
-            <div class="col-md-4">
-              <label class="form-label fw-semibold">Empresa</label>
-              <input class="form-control"
-                     name="company"
-                     value="{{ company }}"
-                     placeholder="Nombre empresa">
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label fw-semibold">Desde</label>
-              <input type="date"
-                     class="form-control"
-                     name="start_date"
-                     value="{{ start_date }}">
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label fw-semibold">Hasta</label>
-              <input type="date"
-                     class="form-control"
-                     name="end_date"
-                     value="{{ end_date }}">
-            </div>
-
-            <div class="col-md-2 d-flex gap-2">
-              <button class="btn btn-primary rounded-pill px-3 w-100" type="submit">
-                Aplicar
-              </button>
-              <a class="btn btn-outline-secondary rounded-pill px-3 w-100"
-                 href="{{ url_for('reportes_home') }}">
-                Limpiar
-              </a>
-            </div>
-
+      <div class="rep-card p-3 mb-3">
+        <div class="d-flex align-items-center flex-wrap gap-3">
+          {% if company_has_logo %}<img src="{{ url_for('grac_company_logo_preview') }}" alt="Logo" style="max-height:56px;max-width:170px;object-fit:contain">{% endif %}
+          <div class="flex-grow-1">
+            <div class="fw-bold" style="color:#0b4a8f">{{ 'Company configured for reports' if company_english else 'Empresa configurada para los informes' }}</div>
+            <div>{{ company if company else ('No company has been configured yet' if company_english else 'Aún no se han configurado los datos de la empresa') }}</div>
           </div>
-        </form>
+        </div>
       </div>
-
 
       <!-- Reportes PDF propios de cada módulo, sin escaneos de vulnerabilidades. -->
       <div class="rep-card p-4 mb-3" id="pdf-modulos-grac">
@@ -133090,6 +133333,9 @@ def reportes_home():
     excel_only_allowed=REPORT_KEYS_EXCEL_ONLY,
     ir_categorias_reporte=ir_categorias_reporte,
     module_pdf_catalog=module_pdf_catalog,
+    company_has_logo=bool(company_logo_path),
+    company_english=_GRAC_BRANDING_ENGLISH,
+    is_admin=(user.role == "admin"),
     company=company,
     start_date=start_date,
     end_date=end_date,
@@ -133112,7 +133358,7 @@ def reportes_pdf(key):
         flash("Este reporte no está disponible en PDF.", "warning")
         return redirect(url_for("reportes_home"))
 
-    company = (request.args.get("company") or "").strip()
+    company = _resolve_company_name("")
     payload = _get_report_payload(key)
 
     pdf_bytes = _build_pdf(
@@ -133142,7 +133388,7 @@ def reportes_docx(key):
         flash("Este reporte no está disponible en Word.", "warning")
         return redirect(url_for("reportes_home"))
 
-    company = (request.args.get("company") or "").strip()
+    company = _resolve_company_name("")
     payload = _get_report_payload(key)
 
     docx_bytes = _build_docx(
@@ -133180,7 +133426,7 @@ def reportes_excel(key):
     if permiso_inventario and not verificar_permiso_activos(usuario, permiso_inventario):
         abort(403, description='Sin permiso para exportar este inventario.')
 
-    company = (request.args.get("company") or "").strip()
+    company = _resolve_company_name("")
     payload = _get_report_payload(key)
 
     xlsx_bytes = _build_excel(
@@ -169236,15 +169482,9 @@ def listas_restrictivas_home():
     <div class="lr-shell">
 
       <!-- HEADER -->
-      <div class="lr-header-card">
-        <div class="lr-header-overlay">
-          <div class="lr-header-text">
-            <h3 class="lr-title m-0">Módulo de Listas Restrictivas</h3>
-            <div class="lr-subtitle">
-              Consulta consolidada contra listas externas y base local, administración de fuentes y trazabilidad histórica
-            </div>
-          </div>
-        </div>
+      <div class="grac-module-heading">
+        <span class="grac-module-icon" aria-hidden="true"><i class="bi bi-search"></i></span>
+        <h1>Módulo de Listas Restrictivas</h1>
       </div>
 
       <!-- KPIs -->
@@ -169384,58 +169624,9 @@ def listas_restrictivas_home():
         margin:10px auto 24px auto;
       }
 
-      .lr-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
 
-      .lr-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }
 
-      .lr-header-overlay{
-        width:100%;
-        height:auto;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        background:transparent !important;
-        padding:0 !important;
-        position:relative;
-        z-index:1;
-      }
 
-      .lr-header-overlay::before{
-        content:"🚨";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
 
       .lr-header-text,
       .lr-header-overlay > div{
@@ -169458,21 +169649,7 @@ def listas_restrictivas_home():
         color:#ffffff;
       }
 
-      .lr-title{
-        color:#ffffff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
 
-      .lr-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-      }
 
       .lr-kpi-card,
       .lr-action-card,
@@ -169620,13 +169797,7 @@ def listas_restrictivas_home():
           margin:8px auto 22px auto;
         }
 
-        .lr-header-card{
-          min-height:88px;
-        }
 
-        .lr-title{
-          font-size:1.20rem;
-        }
 
         .lr-table-card-body{
           padding:12px;
@@ -169634,15 +169805,7 @@ def listas_restrictivas_home():
       }
 
       @media (max-width:768px){
-        .lr-header-overlay{
-          flex-direction:column;
-          text-align:center;
-          gap:10px;
-        }
 
-        .lr-header-overlay::before{
-          margin:0;
-        }
 
         .lr-header-text::before,
         .lr-header-overlay > div::before{
@@ -187489,7 +187652,7 @@ def _pesi_form_data():
     primera_version = versiones[0] if versiones else {}
 
     return {
-        "entidad": (request.form.get("entidad") or "").strip(),
+        "entidad": _grac_company_report_name(),
         "anio": (request.form.get("anio") or "").strip(),
         "vigencia_inicio": (request.form.get("vigencia_inicio") or "").strip(),
         "vigencia_fin": (request.form.get("vigencia_fin") or "").strip(),
@@ -187677,7 +187840,7 @@ def _pesi_plan_default_dict(user):
 
     return {
         "id": None,
-        "entidad": "",
+        "entidad": _grac_company_report_name(),
         "anio": str(anio_actual),
         "vigencia_inicio": str(anio_actual),
         "vigencia_fin": str(anio_actual + 1),
@@ -188226,6 +188389,9 @@ def pesi_nuevo():
         return redirect(url_for("pesi_index"))
 
     if request.method == "POST":
+        if not _grac_company_report_name():
+            flash('Configure primero el nombre de la empresa en Administración > Cargue datos de la empresa antes de guardar este informe.', 'warning')
+            return redirect(url_for("pesi_nuevo"))
         nuevo_id = _pesi_insertar_desde_form(user)
         flash("PESI creado correctamente.", "success")
         return redirect(url_for("pesi_editar", plan_id=nuevo_id))
@@ -188261,6 +188427,9 @@ def pesi_editar(plan_id):
     plan = _pesi_get_plan(plan_id)
 
     if request.method == "POST":
+        if not _grac_company_report_name():
+            flash('Configure primero el nombre de la empresa en Administración > Cargue datos de la empresa antes de guardar este informe.', 'warning')
+            return redirect(url_for("pesi_editar", plan_id=plan_id))
         _pesi_actualizar_desde_form(plan_id, user)
         flash("PESI actualizado correctamente.", "success")
         return redirect(url_for("pesi_editar", plan_id=plan_id))
@@ -188406,9 +188575,9 @@ def _pesi_render_form(plan, user, modo="editar"):
         </div>
 
         <div class="row g-3 mb-4">
-          <div class="col-md-6">
-            <label class="form-label">Nombre de la entidad</label>
-            <input class="form-control" name="entidad" value="{escape(plan.get('entidad') or '')}" {ro} required>
+          <div class="col-12">
+            <div class="small text-primary fw-semibold mb-1">Empresa configurada en Administración</div>
+            <div class="fw-bold">{escape(_grac_company_report_name(plan.get('entidad') or '') or 'Sin configurar')}</div>
           </div>
 
           <div class="col-md-2">
@@ -188629,6 +188798,8 @@ def pesi_pdf(plan_id):
         return redirect(url_for("menu"))
 
     plan = _pesi_get_plan(plan_id)
+    company_name, company_logo = _grac_company_brand_info()
+    company_name = company_name or plan.get('entidad') or ('(ENTITY NAME)' if _GRAC_BRANDING_ENGLISH else '(NOMBRE DE LA ENTIDAD)')
 
     buffer = BytesIO()
 
@@ -188722,10 +188893,14 @@ def pesi_pdf(plan_id):
     presupuesto = _pesi_json_load(plan.get("presupuesto_json"), presupuesto_default)
 
     # Portada
-    story.append(Spacer(1, 80))
+    story.append(Spacer(1, 38 if company_logo else 80))
+    logo_item = _grac_pdf_company_logo_flowable(company_logo)
+    if logo_item is not None:
+        story.append(logo_item)
+        story.append(Spacer(1, 20))
     story.append(Paragraph("PLAN ESTRATÉGICO DE SEGURIDAD DE LA INFORMACIÓN", title_style))
     story.append(Spacer(1, 30))
-    story.append(Paragraph(xml_escape(plan.get("entidad") or "(NOMBRE DE LA ENTIDAD)"), title_style))
+    story.append(Paragraph(xml_escape(company_name), title_style))
     story.append(Spacer(1, 24))
     story.append(Paragraph(xml_escape(plan.get("anio") or "AÑO"), title_style))
     story.append(PageBreak())
@@ -188858,7 +189033,7 @@ def pesi_pdf(plan_id):
 
     buffer.seek(0)
 
-    filename = f"PESI_{secure_filename(plan.get('entidad') or 'Entidad')}_{plan.get('anio') or datetime.now().year}.pdf"
+    filename = f"PESI_{secure_filename(company_name)}_{plan.get('anio') or datetime.now().year}.pdf"
 
     return send_file(
         buffer,
@@ -189162,7 +189337,7 @@ def _revdir_default_dict(user):
 
     return {
         "id": None,
-        "entidad": "",
+        "entidad": _grac_company_report_name(),
         "anio": anio,
         "periodo": f"Enero - Diciembre {anio}",
         "fecha_informe": datetime.now().strftime("%Y-%m-%d"),
@@ -189199,7 +189374,7 @@ def _revdir_default_dict(user):
 
 def _revdir_form_data():
     return {
-        "entidad": (request.form.get("entidad") or "").strip(),
+        "entidad": _grac_company_report_name(),
         "anio": (request.form.get("anio") or "").strip(),
         "periodo": (request.form.get("periodo") or "").strip(),
         "fecha_informe": (request.form.get("fecha_informe") or "").strip(),
@@ -189848,6 +190023,9 @@ def revdir_nuevo():
         return redirect(url_for("revdir_index"))
 
     if request.method == "POST":
+        if not _grac_company_report_name():
+            flash('Configure primero el nombre de la empresa en Administración > Cargue datos de la empresa antes de guardar este informe.', 'warning')
+            return redirect(url_for("revdir_nuevo"))
         nuevo_id = _revdir_insertar_desde_form(user)
         flash("Informe creado correctamente.", "success")
         return redirect(url_for("revdir_editar", informe_id=nuevo_id))
@@ -189883,6 +190061,9 @@ def revdir_editar(informe_id):
     informe = _revdir_get_plan(informe_id)
 
     if request.method == "POST":
+        if not _grac_company_report_name():
+            flash('Configure primero el nombre de la empresa en Administración > Cargue datos de la empresa antes de guardar este informe.', 'warning')
+            return redirect(url_for("revdir_editar", informe_id=informe_id))
         _revdir_actualizar_desde_form(informe_id, user)
         flash("Informe actualizado correctamente.", "success")
         return redirect(url_for("revdir_editar", informe_id=informe_id))
@@ -190036,9 +190217,9 @@ def _revdir_render_form(informe, user, modo="editar"):
         </div>
 
         <div class="row g-3 mb-4">
-          <div class="col-md-5">
-            <label class="form-label">Entidad</label>
-            <input class="form-control" name="entidad" value="{escape(informe.get('entidad') or '')}" {ro}>
+          <div class="col-12">
+            <div class="small text-primary fw-semibold mb-1">Empresa configurada en Administración</div>
+            <div class="fw-bold">{escape(_grac_company_report_name(informe.get('entidad') or '') or 'Sin configurar')}</div>
           </div>
           <div class="col-md-2">
             <label class="form-label">Año</label>
@@ -190198,6 +190379,8 @@ def revdir_pdf(informe_id):
         return redirect(url_for("menu"))
 
     informe = _revdir_get_plan(informe_id)
+    company_name, company_logo = _grac_company_brand_info()
+    company_name = company_name or informe.get('entidad') or ('(ENTITY NAME)' if _GRAC_BRANDING_ENGLISH else '(NOMBRE DE LA ENTIDAD)')
 
     objetivos = _revdir_json_load(informe.get("objetivos_json"), [])
     riesgos = _revdir_json_load(informe.get("riesgos_json"), [])
@@ -190340,13 +190523,17 @@ def revdir_pdf(informe_id):
     # PORTADA
     # ========================================================
 
-    story.append(Spacer(1, 70))
+    story.append(Spacer(1, 28 if company_logo else 70))
+    logo_item = _grac_pdf_company_logo_flowable(company_logo)
+    if logo_item is not None:
+        story.append(logo_item)
+        story.append(Spacer(1, 16))
     story.append(Paragraph("INFORME DE RESULTADOS", title_style))
     story.append(Paragraph("PARA REVISIÓN POR LA DIRECCIÓN", title_style))
     story.append(Spacer(1, 18))
     story.append(Paragraph("Sistema de Gestión de Seguridad de la Información — SGSI", cover_subtitle_style))
     story.append(Spacer(1, 30))
-    story.append(Paragraph(xml_escape(informe.get("entidad") or "(NOMBRE DE LA ENTIDAD)"), title_style))
+    story.append(Paragraph(xml_escape(company_name), title_style))
     story.append(Spacer(1, 24))
     info_table()
     story.append(PageBreak())
@@ -190464,7 +190651,7 @@ def revdir_pdf(informe_id):
 
     buffer.seek(0)
 
-    filename = f"Informe_Revision_Direccion_{secure_filename(informe.get('entidad') or 'Entidad')}_{informe.get('anio') or datetime.now().year}.pdf"
+    filename = f"Informe_Revision_Direccion_{secure_filename(company_name)}_{informe.get('anio') or datetime.now().year}.pdf"
 
     return send_file(
         buffer,
@@ -190880,6 +191067,17 @@ def bcp_render(title, body_html):
         or "Matriz Informes IA BCP" in (title or "")
     )
 
+    # A specific, single icon for each BCP/DRP section. One icon, never two.
+    bcp_icons = (
+        ("/bcp/metric", "activity"), ("/bcp/bia", "diagram-3"),
+        ("/bcp/drp", "shield-check"), ("/bcp/prueb", "clipboard-check"),
+        ("/bcp/depend", "diagram-2"), ("/bcp/proveed", "truck"),
+        ("/bcp/backup", "database-check"), ("/bcp/sistem", "hdd-network"),
+        ("/bcp/proces", "boxes"), ("/bcp/madurez", "speedometer2"),
+        ("/bcp/ia", "stars"), ("/bcp/riesgo", "exclamation-diamond"),
+    )
+    bcp_icon = next((ic for prefix, ic in bcp_icons if ruta_actual.startswith(prefix)), "life-preserver")
+
     shell_html = """
     <style>
       body{
@@ -190892,83 +191090,12 @@ def bcp_render(title, body_html):
 
       .bcp-wrap{width:96%;max-width:1600px;margin:26px auto 24px auto;}
 
-      .bcp-hero{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:14px;
-      }
-
-      .bcp-hero::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }
-
-      .bcp-hero-left{
-        position:relative;
-        z-index:1;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        gap:14px;
-      }
-
-      .bcp-hero-left::before{
-        content:"🛟";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#fff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-      }
-
-      .bcp-hero-text::before{
-        content:"SGSI · Continuidad del Negocio";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#fff;
-      }
-
-      .bcp-title{
-        color:#fff !important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0 !important;
-      }
-
-      .bcp-subtitle{
-        color:rgba(255,255,255,.95);
-        font-size:.78rem;
-        margin-top:4px;
-        line-height:1.25;
-        font-weight:800;
-      }
-
+      /* Corporate heading: old BCP gradient, watermark and emoji removed. */
+      .bcp-wrap{width:96%;max-width:1600px;margin:4px auto 18px}
+      .bcp-hero{display:flex;align-items:center;padding:0;margin:0 0 10px;min-height:63px;background:#fff;border:0;box-shadow:none;}
+      .bcp-hero-left{display:flex;align-items:center;gap:14px;width:100%}
+      .bcp-hero-text{min-width:0}
+      .bcp-title{font-size:1.65rem;font-weight:850;color:#132238;margin:0;line-height:1.14}
       .bcp-header-actions{
         display:flex;
         justify-content:center;
@@ -191191,7 +191318,6 @@ def bcp_render(title, body_html):
         .bcp-wrap{width:98%;margin:8px auto 22px auto;}
         .bcp-hero{min-height:88px;}
         .bcp-title{font-size:1.20rem;}
-        .bcp-subtitle{font-size:.68rem;}
       }
 
       @media(max-width:768px){
@@ -191207,13 +191333,9 @@ def bcp_render(title, body_html):
 
     <div class="bcp-wrap">
 
-      <div class="bcp-hero">
-        <div class="bcp-hero-left">
-          <div class="bcp-hero-text">
-            <h1 class="bcp-title">Continuidad del Negocio (BCP/DRP)</h1>
-            <div class="bcp-subtitle">{{ title }}</div>
-          </div>
-        </div>
+      <div class="bcp-hero grac-module-heading">
+        <span class="grac-module-icon" aria-hidden="true"><i class="bi bi-{{ bcp_icon }}"></i></span>
+        <h1 class="bcp-title">{{ "Continuidad del Negocio (BCP/DRP)" if title == "Dashboard Ejecutivo BCP" else title }}</h1>
       </div>
 
       <div class="bcp-header-actions">
@@ -191234,7 +191356,8 @@ def bcp_render(title, body_html):
         title=title,
         body_html=Markup(body_html),
         user=user,
-        mostrar_pdf=mostrar_pdf
+        mostrar_pdf=mostrar_pdf,
+        bcp_icon=bcp_icon
     )
 
     return render_template_string(
@@ -198161,7 +198284,18 @@ def pa_sync_all_sources():
 
 
 def pa_render_page(content):
-    return render_template_string(BASE, content=Markup(content))
+    html_page = render_template_string(BASE, content=Markup(content))
+    # Put the shared progress popup at the top of <body> so no legacy/un-styled
+    # intermediate page appears while the browser finishes its CSS layout.
+    # The global after_request hook sees the existing ID and does not duplicate it.
+    if 'id="sgsiProgressOverlay"' not in html_page:
+        inline_loader = SGSI_PROGRESS_GLOBAL + '<script id="grac-pa-first-paint-progress">\n(function(){\n  if(typeof window.showSGSIProgress===\'function\'){\n    window.showSGSIProgress("Cargando Planes de Acción…");\n  }\n  function finish(){if(typeof window.hideSGSIProgress===\'function\')window.hideSGSIProgress();}\n  window.addEventListener(\'load\',function(){requestAnimationFrame(function(){requestAnimationFrame(finish);});},{once:true});\n  // Safety fallback for blocked third-party CSS/scripts.\n  window.addEventListener(\'pageshow\',finish,{once:true});\n})();\n</script>'
+        html_page = re.sub(
+            r'(<body\b[^>]*>)',
+            lambda match: match.group(1) + inline_loader,
+            html_page, count=1, flags=re.I,
+        )
+    return html_page
 
 
 @app.route("/planes_accion")
@@ -198171,9 +198305,9 @@ def planes_accion_dashboard():
     if response:
         return response
 
+    # Synchronize explicitly via 'Actualizar fuentes' POST, not automatically on each GET.
+    # Prevent slow first paint and excessive memory/DB work during module navigation.
     sync_errors = []
-    if pa_can_write(user):
-        _, sync_errors = pa_sync_all_sources()
 
     standard = (request.args.get("standard") or "").strip().upper()
     origin = (request.args.get("origin") or "").strip()
@@ -198237,14 +198371,39 @@ def planes_accion_dashboard():
     ]
 
     html = r'''
+
+    <style>
+      body{background:#f3f7fb;}
+      .pa-shell{width:96%;max-width:1750px;margin:22px auto 30px;}
+      /* Only the module name and its original clipboard icon are shown. */
+      .pa-shell{width:96%;max-width:1750px;margin:4px auto 18px}
+      .pa-hero{display:flex;align-items:center;gap:14px;min-height:64px;padding:0;
+        margin:0 0 12px;border:0;box-shadow:none;background:#fff;color:#132238;}
+      .pa-hero-icon{width:60px;height:60px;min-width:60px;display:flex;
+        align-items:center;justify-content:center;background:#e7f1ff;color:#1460bd;
+        border-radius:12px;border:1px solid #dce9fb;font-size:28px;}
+      .pa-hero h1{font-size:1.65rem!important;font-weight:850!important;color:#132238!important;margin:0!important;}
+      .pa-actions{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 14px;}
+      .pa-btn{display:inline-flex;align-items:center;gap:8px;text-decoration:none;border:none;border-radius:11px;padding:9px 15px;font-size:.82rem;font-weight:900;box-shadow:0 7px 16px rgba(15,23,42,.12);}
+      .pa-btn-primary{background:linear-gradient(135deg,#086df0,#2487ff);color:#fff;}
+      .pa-btn-light{background:#fff;color:#0b4a8f;border:1px solid #cedbea;}
+      .pa-kpi-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:11px;margin-bottom:11px;}
+      .pa-kpi{background:#fff;border:1px solid #dde7f2;border-radius:16px;padding:13px 15px;box-shadow:0 9px 20px rgba(15,23,42,.10);display:flex;flex-direction:column;}
+      .pa-kpi-link{text-decoration:none!important;transition:transform .18s ease,box-shadow .18s ease}.pa-kpi-link:hover{transform:translateY(-2px);box-shadow:0 13px 26px rgba(15,23,42,.16)}
+      .pa-kpi strong{font-size:1.45rem;color:#0b4a8f;line-height:1;}.pa-kpi span{font-size:.72rem;color:#526173;font-weight:850;margin-top:5px}.pa-kpi.danger strong{color:#b42318;}
+      .pa-standard-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin-bottom:13px;}
+      .pa-standard-grid div{background:#eaf3ff;border:1px solid #cfe0f5;border-radius:13px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;gap:8px;}
+      .pa-standard-grid b{color:#0b4a8f;font-size:1.05rem}.pa-standard-grid span{font-size:.69rem;color:#334155;font-weight:850;text-align:right;}
+      .pa-card{background:rgba(255,255,255,.98);border:1px solid #dce6f1;border-radius:18px;padding:14px 16px;box-shadow:0 11px 24px rgba(15,23,42,.12);margin-bottom:14px;}
+      .pa-card label{font-size:.75rem;font-weight:900;color:#334155;margin-bottom:4px}.pa-card .form-control,.pa-card .form-select{min-height:36px;border-radius:10px;font-size:.78rem;border:1px solid #cfdbea;}
+      .pa-table-card{padding:0;overflow:hidden}.pa-table{margin:0;min-width:1500px;font-size:.76rem}.pa-table thead th{background:#eaf3ff;color:#062b55;font-weight:950;text-align:center;white-space:nowrap;padding:9px 7px}.pa-table td{padding:7px;vertical-align:middle;border-color:#e5edf6}.pa-plan-cell{min-width:320px;max-width:470px}.pa-plan-cell strong,.pa-plan-cell small,.pa-plan-cell em{display:block}.pa-plan-cell small{color:#475569;margin-top:3px;white-space:pre-line}.pa-plan-cell em{font-size:.68rem;color:#64748b;margin-top:3px}.pa-origin,.pa-standard{display:inline-block;border-radius:999px;padding:4px 8px;background:#eef4fb;color:#0b4a8f;font-weight:850;white-space:nowrap;}
+      .pa-row-overdue td{background:#fff5f4!important;border-top-color:#f5c2c0!important;border-bottom-color:#f5c2c0!important}.pa-row-overdue:hover td{background:#ffeceb!important}.pa-overdue-note{display:block;color:#9f1c14;font-size:.64rem;font-weight:800;margin-top:4px;white-space:nowrap}
+      @media(max-width:1050px){.pa-kpi-grid{grid-template-columns:repeat(2,1fr)}.pa-standard-grid{grid-template-columns:repeat(2,1fr)}}
+    </style>
     <div class="pa-shell">
-      <section class="pa-hero">
+      <section class="pa-hero grac-module-heading">
         <div class="pa-hero-icon"><i class="bi bi-clipboard2-check"></i></div>
-        <div>
-          <span class="pa-kicker">SGSI · Gestión transversal</span>
-          <h1>Planes de Acción</h1>
-          <p>Consolidación de acciones de ISO 27001, SOC 2, PCI-DSS, NIST CSF 2.0, Cumplimiento Continuo, Gobierno de Firewall y Gestión de Riesgos.</p>
-        </div>
+        <h1>Planes de Acción</h1>
       </section>
 
       {% if sync_errors %}
@@ -198386,31 +198545,6 @@ def planes_accion_dashboard():
       </section>
     </div>
 
-    <style>
-      body{background:#f3f7fb;}
-      .pa-shell{width:96%;max-width:1750px;margin:22px auto 30px;}
-      .pa-hero{display:flex;align-items:center;gap:14px;padding:17px 22px;border-radius:19px;color:#fff;background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);box-shadow:0 14px 30px rgba(15,23,42,.24);margin-bottom:14px;}
-      .pa-hero-icon{width:56px;height:56px;min-width:56px;border-radius:15px;background:#fff;color:#0b4a8f;display:flex;align-items:center;justify-content:center;font-size:1.55rem;box-shadow:0 8px 18px rgba(0,0,0,.2);}
-      .pa-kicker{display:inline-block;padding:3px 10px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.14);border-radius:999px;font-size:.66rem;font-weight:900;}
-      .pa-hero h1{font-size:1.45rem!important;margin:4px 0 2px!important;color:#fff!important;font-weight:950;}
-      .pa-hero p{margin:0;color:rgba(255,255,255,.92);font-size:.82rem;}
-      .pa-actions{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 14px;}
-      .pa-btn{display:inline-flex;align-items:center;gap:8px;text-decoration:none;border:none;border-radius:11px;padding:9px 15px;font-size:.82rem;font-weight:900;box-shadow:0 7px 16px rgba(15,23,42,.12);}
-      .pa-btn-primary{background:linear-gradient(135deg,#086df0,#2487ff);color:#fff;}
-      .pa-btn-light{background:#fff;color:#0b4a8f;border:1px solid #cedbea;}
-      .pa-kpi-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:11px;margin-bottom:11px;}
-      .pa-kpi{background:#fff;border:1px solid #dde7f2;border-radius:16px;padding:13px 15px;box-shadow:0 9px 20px rgba(15,23,42,.10);display:flex;flex-direction:column;}
-      .pa-kpi-link{text-decoration:none!important;transition:transform .18s ease,box-shadow .18s ease}.pa-kpi-link:hover{transform:translateY(-2px);box-shadow:0 13px 26px rgba(15,23,42,.16)}
-      .pa-kpi strong{font-size:1.45rem;color:#0b4a8f;line-height:1;}.pa-kpi span{font-size:.72rem;color:#526173;font-weight:850;margin-top:5px}.pa-kpi.danger strong{color:#b42318;}
-      .pa-standard-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin-bottom:13px;}
-      .pa-standard-grid div{background:#eaf3ff;border:1px solid #cfe0f5;border-radius:13px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;gap:8px;}
-      .pa-standard-grid b{color:#0b4a8f;font-size:1.05rem}.pa-standard-grid span{font-size:.69rem;color:#334155;font-weight:850;text-align:right;}
-      .pa-card{background:rgba(255,255,255,.98);border:1px solid #dce6f1;border-radius:18px;padding:14px 16px;box-shadow:0 11px 24px rgba(15,23,42,.12);margin-bottom:14px;}
-      .pa-card label{font-size:.75rem;font-weight:900;color:#334155;margin-bottom:4px}.pa-card .form-control,.pa-card .form-select{min-height:36px;border-radius:10px;font-size:.78rem;border:1px solid #cfdbea;}
-      .pa-table-card{padding:0;overflow:hidden}.pa-table{margin:0;min-width:1500px;font-size:.76rem}.pa-table thead th{background:#eaf3ff;color:#062b55;font-weight:950;text-align:center;white-space:nowrap;padding:9px 7px}.pa-table td{padding:7px;vertical-align:middle;border-color:#e5edf6}.pa-plan-cell{min-width:320px;max-width:470px}.pa-plan-cell strong,.pa-plan-cell small,.pa-plan-cell em{display:block}.pa-plan-cell small{color:#475569;margin-top:3px;white-space:pre-line}.pa-plan-cell em{font-size:.68rem;color:#64748b;margin-top:3px}.pa-origin,.pa-standard{display:inline-block;border-radius:999px;padding:4px 8px;background:#eef4fb;color:#0b4a8f;font-weight:850;white-space:nowrap;}
-      .pa-row-overdue td{background:#fff5f4!important;border-top-color:#f5c2c0!important;border-bottom-color:#f5c2c0!important}.pa-row-overdue:hover td{background:#ffeceb!important}.pa-overdue-note{display:block;color:#9f1c14;font-size:.64rem;font-weight:800;margin-top:4px;white-space:nowrap}
-      @media(max-width:1050px){.pa-kpi-grid{grid-template-columns:repeat(2,1fr)}.pa-standard-grid{grid-template-columns:repeat(2,1fr)}}
-    </style>
     '''
 
     inner = render_template_string(
@@ -205287,73 +205421,8 @@ def attack_auto_shell(title, body):
     content = render_template_string("""
     <style>
       .as-shell{width:96%;max-width:1650px;margin:10px auto 24px auto}
-      .as-header-card{
-        background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);
-        border-radius:18px;
-        padding:16px 24px;
-        min-height:94px;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        box-shadow:0 12px 24px rgba(15,23,42,.25);
-        position:relative;
-        overflow:hidden;
-        margin-bottom:10px;
-      }
-      .as-header-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 25%),
-          repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 14px);
-        pointer-events:none;
-      }
-      .as-header-overlay{
-        width:100%;
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        text-align:left;
-        position:relative;
-        z-index:1;
-      }
-      .as-header-overlay::before{
-        content:"🎯";
-        width:54px;
-        height:54px;
-        min-width:54px;
-        border-radius:14px;
-        background:#ffffff;
-        color:#0b4a8f;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:1.45rem;
-        box-shadow:0 8px 18px rgba(0,0,0,.25);
-        margin-right:14px;
-      }
-      .as-header-text{max-width:1200px;width:100%;position:relative;z-index:1}
-      .as-header-text::before{
-        content:"SGSI · Gestión de Eventos";
-        display:inline-block;
-        background:rgba(255,255,255,.18);
-        border-radius:999px;
-        padding:3px 10px;
-        font-size:.65rem;
-        font-weight:800;
-        margin-bottom:4px;
-        color:#ffffff;
-      }
-      .as-title{
-        color:#ffffff!important;
-        font-weight:950;
-        font-size:1.32rem;
-        line-height:1.1;
-        text-shadow:0 3px 10px rgba(0,0,0,.35);
-        margin:0!important;
-      }
-      .as-subtitle{color:rgba(255,255,255,.95);font-size:.78rem;margin-top:4px;line-height:1.25}
+      /* Existing cards/forms/tables remain untouched. The old hero is removed. */
+      .as-shell{width:96%;max-width:1650px;margin:4px auto 18px}
       .as-card{border:0;border-radius:18px;box-shadow:0 9px 25px rgba(15,23,42,.10);overflow:hidden}
       .as-kpi{padding:15px;border-radius:15px;background:#fff;border:1px solid #e3edf7;height:100%}
       .as-kpi small{color:#64748b;font-weight:800}.as-kpi strong{display:block;font-size:1.5rem;color:#0b4a6f}
@@ -205407,21 +205476,13 @@ def attack_auto_shell(title, body):
       .as-form .form-control,.as-form .form-select{border-radius:10px;font-size:.82rem}
       @media(max-width:900px){
         .as-shell{width:98%}
-        .as-header-card{min-height:88px;padding:14px 18px}
-        .as-header-overlay{flex-direction:column;text-align:center;gap:8px}
-        .as-header-overlay::before{margin-right:0}
-        .as-title,.as-subtitle{text-align:center}
         .as-actions{min-width:210px}
       }
     </style>
     <div class="as-shell">
-      <div class="as-header-card">
-        <div class="as-header-overlay">
-          <div class="as-header-text">
-            <h3 class="as-title m-0">{{ title }}</h3>
-            <div class="as-subtitle">Correlación automática, trazable y periódica de escenarios de amenaza</div>
-          </div>
-        </div>
+      <div class="grac-module-heading">
+        <span class="grac-module-icon" aria-hidden="true"><i class="bi bi-radar"></i></span>
+        <h1>{{ title }}</h1>
       </div>
       {{ body|safe }}
     </div>
@@ -211726,7 +211787,7 @@ def _grac_install_supplier_portal(_namespace):
 
         def require_admin(write=False):
             user = ns['User'].query.get(session.get('user_id'))
-            if not user or not ns['verificar_permiso'](user, MODULE):
+            if not user or user.role == 'auditor' or not ns['verificar_permiso'](user, MODULE):
                 abort(403)
             if write and user.role == 'auditor':
                 abort(403)
@@ -212583,15 +212644,13 @@ def _ai_inv_store_evidence(con, iid, user):
 _AI_INV_CSS = '''
 <style>
 .aiinv-shell{width:96%;max-width:1750px;margin:12px auto 28px}
-.aiinv-header{background:linear-gradient(135deg,#062b55,#0b4a8f,#1d5fae);border-radius:18px;
- padding:16px 24px;min-height:94px;display:flex;align-items:center;box-shadow:0 12px 24px #0f172a40;
- color:white;position:relative;overflow:hidden;margin-bottom:12px}
-.aiinv-header:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(135deg,#ffffff0d 0px,#ffffff0d 1px,transparent 1px,transparent 14px)}
-.aiinv-icon{width:54px;height:54px;min-width:54px;border-radius:14px;background:white;display:grid;
- place-items:center;color:#0b4a8f;font-size:27px;margin-right:14px;z-index:1;box-shadow:0 8px 18px #0004}
-.aiinv-headtext{position:relative;z-index:1}.aiinv-headtext small{font-size:.68rem;background:#ffffff30;border-radius:30px;padding:4px 12px;font-weight:800}
-.aiinv-headtext h3{font-size:1.32rem;font-weight:950;color:white;margin:8px 0 4px}
-.aiinv-headtext p{font-size:.82rem;color:#fff;margin:0}
+/* Compact title: white background, one CPU icon, no old banner. */
+.aiinv-header{display:flex;align-items:center;gap:14px;background:#fff;border:0;box-shadow:none;
+ padding:3px 0 10px;min-height:64px;margin-bottom:12px;color:#132238;overflow:visible}
+.aiinv-icon{width:60px;height:60px;min-width:60px;border-radius:12px;background:#e7f1ff;
+ display:flex;align-items:center;justify-content:center;color:#1460bd;font-size:28px;box-shadow:none;margin:0}
+.aiinv-headtext{flex:1;min-width:0}
+.aiinv-headtext h3{font-size:1.65rem;color:#132238;font-weight:850;margin:0;line-height:1.14}
 .aiinv-actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 12px}
 .aiinv-panel{background:#fff;border:1px solid #d8e4f2;border-radius:17px;box-shadow:0 10px 22px #102a4b1c;margin-bottom:14px;overflow:hidden}
 .aiinv-panelhead{padding:14px 18px;background:#eff6ff;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
@@ -212618,9 +212677,7 @@ _AI_INV_CSS = '''
 </style>
 '''
 _AI_INV_HEAD = '''<div class="aiinv-header"><div class="aiinv-icon"><i class="bi bi-cpu-fill"></i></div>
-<div class="aiinv-headtext"><small>SGSI · Matrices de Activos · ISO/IEC 42001</small>
-<h3>Inventario de Inteligencia Artificial — Matriz</h3>
-<p>Registro y gobierno del ciclo de vida de los sistemas de inteligencia artificial</p></div></div>'''
+<div class="aiinv-headtext"><h3>Inventario de Inteligencia Artificial — Matriz</h3></div></div>'''
 
 
 def _ai_inv_html(inner, **context):
@@ -213866,7 +213923,7 @@ alert_start_scheduler()
 # ARKYNTECH GRAC — CORPORATIVO WORKSPACE (2026-11-09)
 # Presentación común: no modifica rutas, modelos ni permisos.
 GRAC_WORKSPACE_CSS = '/* ARKYNTECH GRAC — Corporativo Workspace, 2026-11-09 */\n:root{--gw-navy:#062650;--gw-blue:#0866e8;--gw-ink:#132238;--gw-muted:#607086;--gw-line:#d9e2ee;--gw-bg:#f4f7fb;--gw-rail:56px;--gw-nav:250px;--gw-top:68px;--arky-topbar-h:68px!important}\nhtml{scroll-padding-top:88px}\nbody.grac-workspace{margin:0!important;padding:var(--gw-top) 0 0 calc(var(--gw-rail) + var(--gw-nav))!important;background:var(--gw-bg)!important;background-image:none!important;color:var(--gw-ink)!important;font-family:Inter,-apple-system,BlinkMacSystemFont,\'Segoe UI\',Arial,sans-serif!important;font-size:15px;line-height:1.5;--sgsi-text:var(--gw-ink);--sgsi-purple:var(--gw-blue);--sgsi-purple-2:var(--gw-navy);--sgsi-border:var(--gw-line);--sgsi-muted:var(--gw-muted)}\nbody.grac-workspace::before,body.grac-workspace::after{display:none!important}\nbody.grac-workspace>.container{width:100%!important;max-width:none!important;margin:0!important;padding:24px 28px!important}\nbody.grac-workspace .sgsi-topbar{position:fixed!important;inset:0 0 auto!important;height:var(--gw-top)!important;min-height:var(--gw-top)!important;background:var(--gw-navy)!important;border:0!important;box-shadow:none!important;backdrop-filter:none!important;z-index:1030!important}\nbody.grac-workspace .sgsi-topbar-inner{height:var(--gw-top)!important;min-height:var(--gw-top)!important;padding:0 22px!important;gap:18px!important}\nbody.grac-workspace .sgsi-brand{width:auto!important;min-width:235px!important;gap:10px!important;overflow:visible!important;color:white!important}\nbody.grac-workspace .sgsi-logo{height:38px!important;max-width:95px!important;padding:4px!important;background:white;border-radius:5px;filter:none!important}\nbody.grac-workspace .gw-brand-name{font-size:17px;font-weight:750;letter-spacing:.04em;color:white;white-space:nowrap}\nbody.grac-workspace .sgsi-user-link{background:transparent!important;border:0!important;color:white!important;box-shadow:none!important}\nbody.grac-workspace .sgsi-user-name{color:white!important;font-size:14px!important}\nbody.grac-workspace .sgsi-user-photo{width:34px!important;height:34px!important;border:2px solid #ffffff66!important}\nbody.grac-workspace .dropdown-menu{border:1px solid var(--gw-line);border-radius:8px;box-shadow:0 12px 30px #13223820}\nbody.grac-workspace .gw-search{position:relative;max-width:530px;flex:1;margin-left:auto}\nbody.grac-workspace .gw-search input{width:100%;height:38px;border:1px solid #69809e;background:#f1f5fb;border-radius:6px;padding:8px 55px 8px 14px;color:var(--gw-ink);font-size:14px}\nbody.grac-workspace .gw-search kbd{position:absolute;right:10px;top:9px;color:#607086;background:transparent;font-size:12px;pointer-events:none}\nbody.grac-workspace .gw-results{position:absolute;top:45px;left:0;right:0;max-height:380px;overflow:auto;background:white;border:1px solid var(--gw-line);border-radius:8px;box-shadow:0 12px 30px #13223825;padding:6px;z-index:1040}\nbody.grac-workspace .gw-results a{display:block;padding:10px 12px;color:var(--gw-ink);font-size:14px;text-decoration:none;border-radius:5px}\nbody.grac-workspace .gw-results a:hover,body.grac-workspace .gw-results a:focus{background:#e7f0ff;color:#075acb}\nbody.grac-workspace .gw-results p{color:var(--gw-muted);padding:12px;margin:0}\nbody.grac-workspace #gw-rail{position:fixed;left:0;top:var(--gw-top);bottom:0;width:var(--gw-rail);background:var(--gw-navy);display:flex;align-items:center;flex-direction:column;gap:10px;padding:16px 4px;z-index:1025}\nbody.grac-workspace #gw-rail a,body.grac-workspace #gw-rail button{display:grid;place-items:center;width:42px;height:42px;padding:0!important;background:transparent!important;color:#dceaff!important;border:0!important;border-radius:7px!important;font-size:21px;box-shadow:none!important;text-decoration:none}\nbody.grac-workspace #gw-rail a:hover,body.grac-workspace #gw-rail button:hover{background:#204575!important;color:white!important}\nbody.grac-workspace #sgsiGlobalMenu{position:fixed!important;left:var(--gw-rail)!important;top:var(--gw-top)!important;bottom:0!important;width:var(--gw-nav)!important;height:calc(100dvh - var(--gw-top))!important;margin:0!important;padding:0!important;z-index:1020!important;pointer-events:auto!important}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-menu-fixed-shell{width:100%!important;height:100%!important;max-height:none!important;padding:14px 10px!important;background:#fff!important;border:0!important;border-right:1px solid var(--gw-line)!important;border-radius:0!important;box-shadow:none!important;opacity:1!important;pointer-events:auto!important;backdrop-filter:none!important;overflow:hidden!important}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-menu-scroll-only{height:100%!important;max-height:100%!important;overflow-y:auto!important;overflow-x:hidden!important;scrollbar-width:thin!important}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-menu-scroll-only::-webkit-scrollbar{width:5px!important}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-menu-list{display:block!important;gap:0!important;padding:0!important}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-root-item{margin:4px 0!important}\nbody.grac-workspace #sgsiGlobalMenu :is(.sgsi-global-root-toggle,.sgsi-global-panel-control-btn,.sgsi-global-item,.sgsi-global-node-toggle){display:flex!important;align-items:center!important;justify-content:flex-start!important;gap:10px!important;width:100%!important;max-width:none!important;min-width:0!important;height:auto!important;min-height:42px!important;margin:2px 0!important;padding:10px!important;background:transparent!important;background-image:none!important;border:0!important;border-radius:5px!important;box-shadow:none!important;color:#24374e!important;font-size:13px!important;font-weight:500!important;line-height:1.35!important;text-align:left!important;white-space:normal!important;transform:none!important}\nbody.grac-workspace #sgsiGlobalMenu :is(.sgsi-global-root-toggle,.sgsi-global-item,.sgsi-global-node-toggle)>span{display:block!important;flex:1!important;min-width:0!important;color:inherit!important;white-space:normal!important}\nbody.grac-workspace #sgsiGlobalMenu :is(.sgsi-global-root-toggle,.sgsi-global-item,.sgsi-global-node-toggle)>i{color:inherit!important;width:18px!important;flex:0 0 18px!important;font-size:17px!important}\nbody.grac-workspace #sgsiGlobalMenu :is(.sgsi-active,.sgsi-active-tree,.sgsi-center-active){background:#e8f1ff!important;color:#075bd6!important;box-shadow:inset 3px 0 #0866e8!important;font-weight:650!important}\nbody.grac-workspace #sgsiGlobalMenu :is(a,button):hover{background:#f0f5fb!important;color:#075bd6!important}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-panel{display:none!important;background:transparent!important;border:0!important;border-left:1px solid var(--gw-line)!important;border-radius:0!important;margin:4px 0 8px 17px!important;padding:0 0 0 7px!important}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-panel.sgsi-open{display:block!important}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-panel li{list-style:none!important}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-menu-arrow{display:none!important}\nbody.grac-workspace #sgsiLocalMenu{display:none!important}\nbody.grac-workspace .sgsi-layout{display:block!important}\nbody.grac-workspace .gw-nav-title{color:var(--gw-muted);font-size:11px;font-weight:750;letter-spacing:.1em;padding:6px 10px 13px;text-transform:uppercase}\nbody.grac-workspace.gw-nav-closed{padding-left:var(--gw-rail)!important}\nbody.grac-workspace.gw-nav-closed #sgsiGlobalMenu{display:none!important}\nbody.grac-workspace .gw-breadcrumb{display:flex;align-items:center;gap:10px;margin:0 0 18px;color:var(--gw-muted);font-size:12px}\nbody.grac-workspace .gw-breadcrumb a{color:var(--gw-muted);text-decoration:none}\nbody.grac-workspace .gw-breadcrumb span:last-child{color:var(--gw-ink)}\nbody.grac-workspace :is(h1,h2,h3,h4,h5,h6){font-family:inherit;letter-spacing:-.02em;text-shadow:none!important}\nbody.grac-workspace :is(.gw-page-heading){color:var(--gw-ink)!important;font-size:clamp(23px,2.2vw,30px)!important;font-weight:750!important;line-height:1.2!important;margin:0 0 8px!important}\nbody.grac-workspace :is(.gw-surface,.accdet-card,.accdet-file-card,.accesoadd-card,.accesoedit-card,.accesomat-card,.accesomat-filter-card,.accestado-card,.accevi-card,.adg-card,.ai-report-card,.aiana-card,.aidet-card,.aidet-gauge-card,.aidetcat-card,.aiedana-card,.aiedit-card,.aihis-card,.aimad-card,.aipar-card,.airisk-card,.api-card,.areas-card,.as-card,.bcp-card,.bcp-ia-mini-card,.campdet-card,.campform-card,.campmat-card,.campmat-filter-card,.campmat-kpi-card,.campopt-card,.card,.catdet-card,.cc-card,.chatsgsi-card,.com-card,.com-matrix-card,.comdet-card,.ctrlcfg-card,.ctrlcfg-info-card,.ctxexed-card,.ctxext-card,.ctxextd-card,.ctxextmat-card,.ctxint-card,.ctxintd-card,.ctxinted-card,.ctxintmat-card,.cultcfg-card,.cultmet-card,.cultmet-metric-card,.cultmet-summary-card,.datadom-card,.dataform-card,.dataform-radio-card,.datamad-card,.datapar-card,.datares-card,.datstd-card,.divisiones-card,.doccfg-form-card,.doccfg-table-card,.docdet-card,.docdet-file-card,.docmat-card,.docmat-filter-card,.docsadd-form-card,.docsedit-form-card,.dofa-card,.dofaedit-card,.dofalist-search-card,.dofalist-table-card,.dofaview-card,.duenos-card,.evidencia-card,.fwgov-action-card,.fwgov-device-card,.fwgov-kpi-card,.gauge-card,.glass-card,.glpiinv-card,.grac-mobile-user-card,.heat-card,.heat-legend-card,.imp-alert-card,.imp-table-card,.incadd-card,.incedit-card,.incmat-card,.incmat-filter-card,.incmat-topbar-card,.incparam-card,.incview-card,.invdp-card,.invdpd-card,.invdpe-card,.invdpm-card,.invfis-card,.invfisdet-card,.invfisedit-card,.invfismat-card,.invinfo-card,.invinfodet-card,.invinfoedit-card,.invinfomat-card,.invsoft-card,.invsoftdet-card,.invsoftdet-evidence-card,.invsoftedit-card,.invsoftedit-evidence-card,.invsoftmat-card,.ir-card,.iso22301hist-card,.isoform-card,.isoform-radio-card,.issue-card,.jira-card,.jiracfg-card,.logo-card,.logs-card,.lr-action-card,.lr-detail-card,.lr-form-card,.lr-kpi-card,.lr-result-card,.lr-table-card,.madgap-card,.madlvl-card,.madmap-card,.madpar-card,.mejadd-card,.mejdet-card,.mejdet-file-card,.mejedit-card,.mejedit-file-card,.mejevi-card,.mejmat-card,.mejmat-filter-card,.mejmat-topbar-card,.mejmet-card,.mejmet-kpi-card,.metric-card,.miia-card,.minc-card,.mind-card,.mitre-filter-card,.mitre-summary-card,.mitre-tech-card,.nistana-card,.nistdet-card,.nistexec-card,.nistform-card,.nistform-radio-card,.nisthist-card,.nistmad-card,.nistpar-card,.niststd-card,.obj-table-card,.objd-card,.objform-card,.openrouter-card,.pa-card,.pa-edit-card,.pa-form-card,.pa-table-card,.partesedit-card,.partesnew-card,.pcidet-card,.pciexec-card,.pciform-card,.pciform-radio-card,.pcihist-card,.pcimad-card,.pcipar-card,.pcires-card,.perfil-card,.perm-card,.pesi-card,.pi-table-card,.pid-card,.pid-ev-card,.plancapdet-card,.plancapdet-file-card,.plancapedit-card,.plancapmat-card,.plancevi-card,.plancf-card,.plancfdet-card,.plancfedit-card,.plancfmat-card,.plancomp-card,.plancompdet-card,.plancompdet-file-card,.plancompedit-card,.plancompedit-file-card,.plancompevi-card,.plancompmat-card,.plancompmat-filter-card,.plancompmat-topbar-card,.plandis-card,.pra-card,.prob-alert-card,.prob-table-card,.proficha-card,.prophdet-card,.prophist-card,.propia-card,.propreco-card,.propreco-highlight-card,.provdet-card,.provdet-file-card,.provevi-card,.provform-card,.provlist-card,.provmat-card,.provmat-filter-card,.provmat-topbar-card,.provparam-card,.remadd-card,.remdet-card,.remedit-card,.remmat-card,.remmat-filter-card,.rep-card,.rep-report-card,.req-card,.reqadd-card,.reqdet-card,.reqedit-card,.revadd-card,.revdet-card,.revdir-card,.revedit-card,.revmat-card,.revmat-filter-card,.rfcadd-card,.rfcdet-card,.rfcdet-file-card,.rfcedit-card,.rfcedit-file-card,.rfcevi-card,.rfcmat-card,.rfcmat-filter-card,.rfcmat-topbar-card,.rfcsec-card,.riskcfg-card,.riskedit-card,.riskform-card,.riskmet-card,.sast-card,.sast-switch-card,.score-card,.score-main-card,.section-card,.sgsi-chart-card,.sgsi-stat-card,.smtp-card,.soc2hist-card,.soft-card,.ssc-card,.threat-dashboard-card,.tipo-form-card,.tipo-table-card,.tipoedit-form-card,.users-card,.valconf-card,.valcrit-card,.valdisp-card,.valint-card,.vulevi-card,.vulna-card,.vulnadd-card,.vulndet-card,.vulndet-file-card,.vulnedit-card,.vulnmet-card,.vulnmx-card,.vulnpar-card){background:#fff!important;background-image:none!important;color:var(--gw-ink)!important;border:1px solid var(--gw-line)!important;border-radius:8px!important;box-shadow:none!important;backdrop-filter:none!important}\nbody.grac-workspace :is(.gw-heading,.accdet-header-card,.accesoadd-header-card,.accesoedit-header-card,.accesomat-header-card,.accestado-header-card,.adg-hero,.aidet-header-card,.aidetcat-header-card,.api-prop-header-card,.areas-header-card,.as-header-card,.bcp-hero,.campdet-header-card,.campform-header-card,.campmat-header-card,.campopt-header-card,.catdet-header-card,.cc-hero,.chatsgsi-header-card,.com-header-card,.com-matrix-header-card,.comdet-header-card,.ctrlcfg-header-card,.ctxexed-header-card,.ctxext-header-card,.ctxextd-header-card,.ctxextmat-header-card,.ctxint-header-card,.ctxintd-header-card,.ctxinted-header-card,.ctxintmat-header-card,.cultcfg-header-card,.cultmet-header-card,.dashsimple-header,.datadom-header-card,.dataform-header-card,.datamad-header-card,.datapar-header-card,.datares-header-card,.datstd-header-card,.divisiones-header-card,.doccfg-header-card,.docdet-header-card,.docmat-header-card,.docsadd-header-card,.docsedit-header-card,.dofa-header-card,.dofaedit-header-card,.dofalist-header-card,.dofaview-header-card,.duenos-header-card,.glpiinv-header-card,.grac-alert-header-card,.grac-mobile-user-hero,.heat-header-card,.imp-header-card,.incadd-header-card,.incedit-header-card,.incmat-header-card,.incparam-header-card,.incview-header-card,.invdp-header-card,.invdpd-header-card,.invdpe-header-card,.invdpm-header-card,.invfis-header-card,.invfisdet-header-card,.invfisedit-header-card,.invfismat-header-card,.invinfo-header-card,.invinfodet-header-card,.invinfoedit-header-card,.invinfomat-header-card,.invsoft-header-card,.invsoftdet-header-card,.invsoftedit-header-card,.invsoftmat-header-card,.ir-hero,.iso22301hist-header-card,.isoform-header-card,.jira-header-card,.jiracfg-header-card,.logo-header-card,.logs-header-card,.lr-header-card,.madgap-header-card,.madlvl-header-card,.madmap-header-card,.madpar-header-card,.mejadd-header-card,.mejdet-header-card,.mejedit-header-card,.mejmat-header-card,.mejmet-header-card,.miia-header-card,.minc-header-card,.mind-header-card,.mobile-admin-header-card,.nistana-header-card,.nistdet-header-card,.nistexec-header-card,.nistform-header-card,.nisthist-header-card,.nistmad-header-card,.nistpar-header-card,.niststd-header-card,.obj-header-card,.objd-header-card,.objform-header-card,.openrouter-header-card,.pa-edit-hero,.pa-form-hero,.pa-hero,.partesedit-header-card,.partesnew-header-card,.pcidet-header-card,.pciexec-header-card,.pciform-header-card,.pcihist-header-card,.pcimad-header-card,.pcipar-header-card,.pcires-header-card,.perfil-header-card,.perm-header-card,.pesi-header-card,.pi-header-card,.pid-header-card,.plan-hero,.plan-hero-centered,.plancapdet-header-card,.plancapedit-header-card,.plancapmat-header-card,.plancf-header-card,.plancfdet-header-card,.plancfedit-header-card,.plancfmat-header-card,.plancomp-header-card,.plancompdet-header-card,.plancompedit-header-card,.plancompmat-header-card,.plandis-header-card,.pra-hero-card,.prob-header-card,.proficha-header-card,.prop-score-header-card,.prophdet-header-card,.prophist-header-card,.propia-header-card,.propreco-header-card,.provdet-header-card,.provform-header-card,.provlist-header-card,.provmat-header-card,.provparam-header-card,.remadd-header-card,.remdet-header-card,.remedit-header-card,.remmat-header-card,.rep-header-card,.report-hero,.report-hero-centered,.req-header-card,.reqadd-header-card,.reqdet-header-card,.reqedit-header-card,.revadd-header-card,.revdet-header-card,.revdir-header-card,.revedit-header-card,.revmat-header-card,.rfcadd-header-card,.rfcdet-header-card,.rfcedit-header-card,.rfcmat-header-card,.rfcsec-header-card,.risk-hero-card,.riskcfg-header-card,.riskedit-header-card,.riskform-header-card,.riskmet-header-card,.sast-hero,.score-header-card,.smtp-header-card,.soa-hero-card,.soc2hist-header-card,.tipo-header-card,.tipoedit-header-card,.users-header-card,.valconf-header-card,.valcrit-header-card,.valdisp-header-card,.valint-header-card,.vulevi-header-card,.vulna-header-card,.vulnadd-header-card,.vulndet-header-card,.vulnedit-header-card,.vulnmet-header-card,.vulnpar-header-card){background:transparent!important;background-image:none!important;color:var(--gw-ink)!important;border:0!important;border-radius:0!important;box-shadow:none!important;min-height:0!important;padding:4px 0 18px!important;text-align:left!important;justify-content:flex-start!important;overflow:visible!important}\nbody.grac-workspace :is(.gw-heading,.accdet-header-card,.accesoadd-header-card,.accesoedit-header-card,.accesomat-header-card,.accestado-header-card,.adg-hero,.aidet-header-card,.aidetcat-header-card,.api-prop-header-card,.areas-header-card,.as-header-card,.bcp-hero,.campdet-header-card,.campform-header-card,.campmat-header-card,.campopt-header-card,.catdet-header-card,.cc-hero,.chatsgsi-header-card,.com-header-card,.com-matrix-header-card,.comdet-header-card,.ctrlcfg-header-card,.ctxexed-header-card,.ctxext-header-card,.ctxextd-header-card,.ctxextmat-header-card,.ctxint-header-card,.ctxintd-header-card,.ctxinted-header-card,.ctxintmat-header-card,.cultcfg-header-card,.cultmet-header-card,.dashsimple-header,.datadom-header-card,.dataform-header-card,.datamad-header-card,.datapar-header-card,.datares-header-card,.datstd-header-card,.divisiones-header-card,.doccfg-header-card,.docdet-header-card,.docmat-header-card,.docsadd-header-card,.docsedit-header-card,.dofa-header-card,.dofaedit-header-card,.dofalist-header-card,.dofaview-header-card,.duenos-header-card,.glpiinv-header-card,.grac-alert-header-card,.grac-mobile-user-hero,.heat-header-card,.imp-header-card,.incadd-header-card,.incedit-header-card,.incmat-header-card,.incparam-header-card,.incview-header-card,.invdp-header-card,.invdpd-header-card,.invdpe-header-card,.invdpm-header-card,.invfis-header-card,.invfisdet-header-card,.invfisedit-header-card,.invfismat-header-card,.invinfo-header-card,.invinfodet-header-card,.invinfoedit-header-card,.invinfomat-header-card,.invsoft-header-card,.invsoftdet-header-card,.invsoftedit-header-card,.invsoftmat-header-card,.ir-hero,.iso22301hist-header-card,.isoform-header-card,.jira-header-card,.jiracfg-header-card,.logo-header-card,.logs-header-card,.lr-header-card,.madgap-header-card,.madlvl-header-card,.madmap-header-card,.madpar-header-card,.mejadd-header-card,.mejdet-header-card,.mejedit-header-card,.mejmat-header-card,.mejmet-header-card,.miia-header-card,.minc-header-card,.mind-header-card,.mobile-admin-header-card,.nistana-header-card,.nistdet-header-card,.nistexec-header-card,.nistform-header-card,.nisthist-header-card,.nistmad-header-card,.nistpar-header-card,.niststd-header-card,.obj-header-card,.objd-header-card,.objform-header-card,.openrouter-header-card,.pa-edit-hero,.pa-form-hero,.pa-hero,.partesedit-header-card,.partesnew-header-card,.pcidet-header-card,.pciexec-header-card,.pciform-header-card,.pcihist-header-card,.pcimad-header-card,.pcipar-header-card,.pcires-header-card,.perfil-header-card,.perm-header-card,.pesi-header-card,.pi-header-card,.pid-header-card,.plan-hero,.plan-hero-centered,.plancapdet-header-card,.plancapedit-header-card,.plancapmat-header-card,.plancf-header-card,.plancfdet-header-card,.plancfedit-header-card,.plancfmat-header-card,.plancomp-header-card,.plancompdet-header-card,.plancompedit-header-card,.plancompmat-header-card,.plandis-header-card,.pra-hero-card,.prob-header-card,.proficha-header-card,.prop-score-header-card,.prophdet-header-card,.prophist-header-card,.propia-header-card,.propreco-header-card,.provdet-header-card,.provform-header-card,.provlist-header-card,.provmat-header-card,.provparam-header-card,.remadd-header-card,.remdet-header-card,.remedit-header-card,.remmat-header-card,.rep-header-card,.report-hero,.report-hero-centered,.req-header-card,.reqadd-header-card,.reqdet-header-card,.reqedit-header-card,.revadd-header-card,.revdet-header-card,.revdir-header-card,.revedit-header-card,.revmat-header-card,.rfcadd-header-card,.rfcdet-header-card,.rfcedit-header-card,.rfcmat-header-card,.rfcsec-header-card,.risk-hero-card,.riskcfg-header-card,.riskedit-header-card,.riskform-header-card,.riskmet-header-card,.sast-hero,.score-header-card,.smtp-header-card,.soa-hero-card,.soc2hist-header-card,.tipo-header-card,.tipoedit-header-card,.users-header-card,.valconf-header-card,.valcrit-header-card,.valdisp-header-card,.valint-header-card,.vulevi-header-card,.vulna-header-card,.vulnadd-header-card,.vulndet-header-card,.vulnedit-header-card,.vulnmet-header-card,.vulnpar-header-card)::before,body.grac-workspace :is(.gw-heading,.accdet-header-card,.accesoadd-header-card,.accesoedit-header-card,.accesomat-header-card,.accestado-header-card,.adg-hero,.aidet-header-card,.aidetcat-header-card,.api-prop-header-card,.areas-header-card,.as-header-card,.bcp-hero,.campdet-header-card,.campform-header-card,.campmat-header-card,.campopt-header-card,.catdet-header-card,.cc-hero,.chatsgsi-header-card,.com-header-card,.com-matrix-header-card,.comdet-header-card,.ctrlcfg-header-card,.ctxexed-header-card,.ctxext-header-card,.ctxextd-header-card,.ctxextmat-header-card,.ctxint-header-card,.ctxintd-header-card,.ctxinted-header-card,.ctxintmat-header-card,.cultcfg-header-card,.cultmet-header-card,.dashsimple-header,.datadom-header-card,.dataform-header-card,.datamad-header-card,.datapar-header-card,.datares-header-card,.datstd-header-card,.divisiones-header-card,.doccfg-header-card,.docdet-header-card,.docmat-header-card,.docsadd-header-card,.docsedit-header-card,.dofa-header-card,.dofaedit-header-card,.dofalist-header-card,.dofaview-header-card,.duenos-header-card,.glpiinv-header-card,.grac-alert-header-card,.grac-mobile-user-hero,.heat-header-card,.imp-header-card,.incadd-header-card,.incedit-header-card,.incmat-header-card,.incparam-header-card,.incview-header-card,.invdp-header-card,.invdpd-header-card,.invdpe-header-card,.invdpm-header-card,.invfis-header-card,.invfisdet-header-card,.invfisedit-header-card,.invfismat-header-card,.invinfo-header-card,.invinfodet-header-card,.invinfoedit-header-card,.invinfomat-header-card,.invsoft-header-card,.invsoftdet-header-card,.invsoftedit-header-card,.invsoftmat-header-card,.ir-hero,.iso22301hist-header-card,.isoform-header-card,.jira-header-card,.jiracfg-header-card,.logo-header-card,.logs-header-card,.lr-header-card,.madgap-header-card,.madlvl-header-card,.madmap-header-card,.madpar-header-card,.mejadd-header-card,.mejdet-header-card,.mejedit-header-card,.mejmat-header-card,.mejmet-header-card,.miia-header-card,.minc-header-card,.mind-header-card,.mobile-admin-header-card,.nistana-header-card,.nistdet-header-card,.nistexec-header-card,.nistform-header-card,.nisthist-header-card,.nistmad-header-card,.nistpar-header-card,.niststd-header-card,.obj-header-card,.objd-header-card,.objform-header-card,.openrouter-header-card,.pa-edit-hero,.pa-form-hero,.pa-hero,.partesedit-header-card,.partesnew-header-card,.pcidet-header-card,.pciexec-header-card,.pciform-header-card,.pcihist-header-card,.pcimad-header-card,.pcipar-header-card,.pcires-header-card,.perfil-header-card,.perm-header-card,.pesi-header-card,.pi-header-card,.pid-header-card,.plan-hero,.plan-hero-centered,.plancapdet-header-card,.plancapedit-header-card,.plancapmat-header-card,.plancf-header-card,.plancfdet-header-card,.plancfedit-header-card,.plancfmat-header-card,.plancomp-header-card,.plancompdet-header-card,.plancompedit-header-card,.plancompmat-header-card,.plandis-header-card,.pra-hero-card,.prob-header-card,.proficha-header-card,.prop-score-header-card,.prophdet-header-card,.prophist-header-card,.propia-header-card,.propreco-header-card,.provdet-header-card,.provform-header-card,.provlist-header-card,.provmat-header-card,.provparam-header-card,.remadd-header-card,.remdet-header-card,.remedit-header-card,.remmat-header-card,.rep-header-card,.report-hero,.report-hero-centered,.req-header-card,.reqadd-header-card,.reqdet-header-card,.reqedit-header-card,.revadd-header-card,.revdet-header-card,.revdir-header-card,.revedit-header-card,.revmat-header-card,.rfcadd-header-card,.rfcdet-header-card,.rfcedit-header-card,.rfcmat-header-card,.rfcsec-header-card,.risk-hero-card,.riskcfg-header-card,.riskedit-header-card,.riskform-header-card,.riskmet-header-card,.sast-hero,.score-header-card,.smtp-header-card,.soa-hero-card,.soc2hist-header-card,.tipo-header-card,.tipoedit-header-card,.users-header-card,.valconf-header-card,.valcrit-header-card,.valdisp-header-card,.valint-header-card,.vulevi-header-card,.vulna-header-card,.vulnadd-header-card,.vulndet-header-card,.vulnedit-header-card,.vulnmet-header-card,.vulnpar-header-card)::after,body.grac-workspace :is(.gw-heading,.accdet-header-card,.accesoadd-header-card,.accesoedit-header-card,.accesomat-header-card,.accestado-header-card,.adg-hero,.aidet-header-card,.aidetcat-header-card,.api-prop-header-card,.areas-header-card,.as-header-card,.bcp-hero,.campdet-header-card,.campform-header-card,.campmat-header-card,.campopt-header-card,.catdet-header-card,.cc-hero,.chatsgsi-header-card,.com-header-card,.com-matrix-header-card,.comdet-header-card,.ctrlcfg-header-card,.ctxexed-header-card,.ctxext-header-card,.ctxextd-header-card,.ctxextmat-header-card,.ctxint-header-card,.ctxintd-header-card,.ctxinted-header-card,.ctxintmat-header-card,.cultcfg-header-card,.cultmet-header-card,.dashsimple-header,.datadom-header-card,.dataform-header-card,.datamad-header-card,.datapar-header-card,.datares-header-card,.datstd-header-card,.divisiones-header-card,.doccfg-header-card,.docdet-header-card,.docmat-header-card,.docsadd-header-card,.docsedit-header-card,.dofa-header-card,.dofaedit-header-card,.dofalist-header-card,.dofaview-header-card,.duenos-header-card,.glpiinv-header-card,.grac-alert-header-card,.grac-mobile-user-hero,.heat-header-card,.imp-header-card,.incadd-header-card,.incedit-header-card,.incmat-header-card,.incparam-header-card,.incview-header-card,.invdp-header-card,.invdpd-header-card,.invdpe-header-card,.invdpm-header-card,.invfis-header-card,.invfisdet-header-card,.invfisedit-header-card,.invfismat-header-card,.invinfo-header-card,.invinfodet-header-card,.invinfoedit-header-card,.invinfomat-header-card,.invsoft-header-card,.invsoftdet-header-card,.invsoftedit-header-card,.invsoftmat-header-card,.ir-hero,.iso22301hist-header-card,.isoform-header-card,.jira-header-card,.jiracfg-header-card,.logo-header-card,.logs-header-card,.lr-header-card,.madgap-header-card,.madlvl-header-card,.madmap-header-card,.madpar-header-card,.mejadd-header-card,.mejdet-header-card,.mejedit-header-card,.mejmat-header-card,.mejmet-header-card,.miia-header-card,.minc-header-card,.mind-header-card,.mobile-admin-header-card,.nistana-header-card,.nistdet-header-card,.nistexec-header-card,.nistform-header-card,.nisthist-header-card,.nistmad-header-card,.nistpar-header-card,.niststd-header-card,.obj-header-card,.objd-header-card,.objform-header-card,.openrouter-header-card,.pa-edit-hero,.pa-form-hero,.pa-hero,.partesedit-header-card,.partesnew-header-card,.pcidet-header-card,.pciexec-header-card,.pciform-header-card,.pcihist-header-card,.pcimad-header-card,.pcipar-header-card,.pcires-header-card,.perfil-header-card,.perm-header-card,.pesi-header-card,.pi-header-card,.pid-header-card,.plan-hero,.plan-hero-centered,.plancapdet-header-card,.plancapedit-header-card,.plancapmat-header-card,.plancf-header-card,.plancfdet-header-card,.plancfedit-header-card,.plancfmat-header-card,.plancomp-header-card,.plancompdet-header-card,.plancompedit-header-card,.plancompmat-header-card,.plandis-header-card,.pra-hero-card,.prob-header-card,.proficha-header-card,.prop-score-header-card,.prophdet-header-card,.prophist-header-card,.propia-header-card,.propreco-header-card,.provdet-header-card,.provform-header-card,.provlist-header-card,.provmat-header-card,.provparam-header-card,.remadd-header-card,.remdet-header-card,.remedit-header-card,.remmat-header-card,.rep-header-card,.report-hero,.report-hero-centered,.req-header-card,.reqadd-header-card,.reqdet-header-card,.reqedit-header-card,.revadd-header-card,.revdet-header-card,.revdir-header-card,.revedit-header-card,.revmat-header-card,.rfcadd-header-card,.rfcdet-header-card,.rfcedit-header-card,.rfcmat-header-card,.rfcsec-header-card,.risk-hero-card,.riskcfg-header-card,.riskedit-header-card,.riskform-header-card,.riskmet-header-card,.sast-hero,.score-header-card,.smtp-header-card,.soa-hero-card,.soc2hist-header-card,.tipo-header-card,.tipoedit-header-card,.users-header-card,.valconf-header-card,.valcrit-header-card,.valdisp-header-card,.valint-header-card,.vulevi-header-card,.vulna-header-card,.vulnadd-header-card,.vulndet-header-card,.vulnedit-header-card,.vulnmet-header-card,.vulnpar-header-card) [class*=\'header-overlay\']::before,body.grac-workspace :is(.gw-heading,.accdet-header-card,.accesoadd-header-card,.accesoedit-header-card,.accesomat-header-card,.accestado-header-card,.adg-hero,.aidet-header-card,.aidetcat-header-card,.api-prop-header-card,.areas-header-card,.as-header-card,.bcp-hero,.campdet-header-card,.campform-header-card,.campmat-header-card,.campopt-header-card,.catdet-header-card,.cc-hero,.chatsgsi-header-card,.com-header-card,.com-matrix-header-card,.comdet-header-card,.ctrlcfg-header-card,.ctxexed-header-card,.ctxext-header-card,.ctxextd-header-card,.ctxextmat-header-card,.ctxint-header-card,.ctxintd-header-card,.ctxinted-header-card,.ctxintmat-header-card,.cultcfg-header-card,.cultmet-header-card,.dashsimple-header,.datadom-header-card,.dataform-header-card,.datamad-header-card,.datapar-header-card,.datares-header-card,.datstd-header-card,.divisiones-header-card,.doccfg-header-card,.docdet-header-card,.docmat-header-card,.docsadd-header-card,.docsedit-header-card,.dofa-header-card,.dofaedit-header-card,.dofalist-header-card,.dofaview-header-card,.duenos-header-card,.glpiinv-header-card,.grac-alert-header-card,.grac-mobile-user-hero,.heat-header-card,.imp-header-card,.incadd-header-card,.incedit-header-card,.incmat-header-card,.incparam-header-card,.incview-header-card,.invdp-header-card,.invdpd-header-card,.invdpe-header-card,.invdpm-header-card,.invfis-header-card,.invfisdet-header-card,.invfisedit-header-card,.invfismat-header-card,.invinfo-header-card,.invinfodet-header-card,.invinfoedit-header-card,.invinfomat-header-card,.invsoft-header-card,.invsoftdet-header-card,.invsoftedit-header-card,.invsoftmat-header-card,.ir-hero,.iso22301hist-header-card,.isoform-header-card,.jira-header-card,.jiracfg-header-card,.logo-header-card,.logs-header-card,.lr-header-card,.madgap-header-card,.madlvl-header-card,.madmap-header-card,.madpar-header-card,.mejadd-header-card,.mejdet-header-card,.mejedit-header-card,.mejmat-header-card,.mejmet-header-card,.miia-header-card,.minc-header-card,.mind-header-card,.mobile-admin-header-card,.nistana-header-card,.nistdet-header-card,.nistexec-header-card,.nistform-header-card,.nisthist-header-card,.nistmad-header-card,.nistpar-header-card,.niststd-header-card,.obj-header-card,.objd-header-card,.objform-header-card,.openrouter-header-card,.pa-edit-hero,.pa-form-hero,.pa-hero,.partesedit-header-card,.partesnew-header-card,.pcidet-header-card,.pciexec-header-card,.pciform-header-card,.pcihist-header-card,.pcimad-header-card,.pcipar-header-card,.pcires-header-card,.perfil-header-card,.perm-header-card,.pesi-header-card,.pi-header-card,.pid-header-card,.plan-hero,.plan-hero-centered,.plancapdet-header-card,.plancapedit-header-card,.plancapmat-header-card,.plancf-header-card,.plancfdet-header-card,.plancfedit-header-card,.plancfmat-header-card,.plancomp-header-card,.plancompdet-header-card,.plancompedit-header-card,.plancompmat-header-card,.plandis-header-card,.pra-hero-card,.prob-header-card,.proficha-header-card,.prop-score-header-card,.prophdet-header-card,.prophist-header-card,.propia-header-card,.propreco-header-card,.provdet-header-card,.provform-header-card,.provlist-header-card,.provmat-header-card,.provparam-header-card,.remadd-header-card,.remdet-header-card,.remedit-header-card,.remmat-header-card,.rep-header-card,.report-hero,.report-hero-centered,.req-header-card,.reqadd-header-card,.reqdet-header-card,.reqedit-header-card,.revadd-header-card,.revdet-header-card,.revdir-header-card,.revedit-header-card,.revmat-header-card,.rfcadd-header-card,.rfcdet-header-card,.rfcedit-header-card,.rfcmat-header-card,.rfcsec-header-card,.risk-hero-card,.riskcfg-header-card,.riskedit-header-card,.riskform-header-card,.riskmet-header-card,.sast-hero,.score-header-card,.smtp-header-card,.soa-hero-card,.soc2hist-header-card,.tipo-header-card,.tipoedit-header-card,.users-header-card,.valconf-header-card,.valcrit-header-card,.valdisp-header-card,.valint-header-card,.vulevi-header-card,.vulna-header-card,.vulnadd-header-card,.vulndet-header-card,.vulnedit-header-card,.vulnmet-header-card,.vulnpar-header-card) [class*=\'header-text\']::before{display:none!important}\nbody.grac-workspace :is(.gw-heading,.accdet-header-card,.accesoadd-header-card,.accesoedit-header-card,.accesomat-header-card,.accestado-header-card,.adg-hero,.aidet-header-card,.aidetcat-header-card,.api-prop-header-card,.areas-header-card,.as-header-card,.bcp-hero,.campdet-header-card,.campform-header-card,.campmat-header-card,.campopt-header-card,.catdet-header-card,.cc-hero,.chatsgsi-header-card,.com-header-card,.com-matrix-header-card,.comdet-header-card,.ctrlcfg-header-card,.ctxexed-header-card,.ctxext-header-card,.ctxextd-header-card,.ctxextmat-header-card,.ctxint-header-card,.ctxintd-header-card,.ctxinted-header-card,.ctxintmat-header-card,.cultcfg-header-card,.cultmet-header-card,.dashsimple-header,.datadom-header-card,.dataform-header-card,.datamad-header-card,.datapar-header-card,.datares-header-card,.datstd-header-card,.divisiones-header-card,.doccfg-header-card,.docdet-header-card,.docmat-header-card,.docsadd-header-card,.docsedit-header-card,.dofa-header-card,.dofaedit-header-card,.dofalist-header-card,.dofaview-header-card,.duenos-header-card,.glpiinv-header-card,.grac-alert-header-card,.grac-mobile-user-hero,.heat-header-card,.imp-header-card,.incadd-header-card,.incedit-header-card,.incmat-header-card,.incparam-header-card,.incview-header-card,.invdp-header-card,.invdpd-header-card,.invdpe-header-card,.invdpm-header-card,.invfis-header-card,.invfisdet-header-card,.invfisedit-header-card,.invfismat-header-card,.invinfo-header-card,.invinfodet-header-card,.invinfoedit-header-card,.invinfomat-header-card,.invsoft-header-card,.invsoftdet-header-card,.invsoftedit-header-card,.invsoftmat-header-card,.ir-hero,.iso22301hist-header-card,.isoform-header-card,.jira-header-card,.jiracfg-header-card,.logo-header-card,.logs-header-card,.lr-header-card,.madgap-header-card,.madlvl-header-card,.madmap-header-card,.madpar-header-card,.mejadd-header-card,.mejdet-header-card,.mejedit-header-card,.mejmat-header-card,.mejmet-header-card,.miia-header-card,.minc-header-card,.mind-header-card,.mobile-admin-header-card,.nistana-header-card,.nistdet-header-card,.nistexec-header-card,.nistform-header-card,.nisthist-header-card,.nistmad-header-card,.nistpar-header-card,.niststd-header-card,.obj-header-card,.objd-header-card,.objform-header-card,.openrouter-header-card,.pa-edit-hero,.pa-form-hero,.pa-hero,.partesedit-header-card,.partesnew-header-card,.pcidet-header-card,.pciexec-header-card,.pciform-header-card,.pcihist-header-card,.pcimad-header-card,.pcipar-header-card,.pcires-header-card,.perfil-header-card,.perm-header-card,.pesi-header-card,.pi-header-card,.pid-header-card,.plan-hero,.plan-hero-centered,.plancapdet-header-card,.plancapedit-header-card,.plancapmat-header-card,.plancf-header-card,.plancfdet-header-card,.plancfedit-header-card,.plancfmat-header-card,.plancomp-header-card,.plancompdet-header-card,.plancompedit-header-card,.plancompmat-header-card,.plandis-header-card,.pra-hero-card,.prob-header-card,.proficha-header-card,.prop-score-header-card,.prophdet-header-card,.prophist-header-card,.propia-header-card,.propreco-header-card,.provdet-header-card,.provform-header-card,.provlist-header-card,.provmat-header-card,.provparam-header-card,.remadd-header-card,.remdet-header-card,.remedit-header-card,.remmat-header-card,.rep-header-card,.report-hero,.report-hero-centered,.req-header-card,.reqadd-header-card,.reqdet-header-card,.reqedit-header-card,.revadd-header-card,.revdet-header-card,.revdir-header-card,.revedit-header-card,.revmat-header-card,.rfcadd-header-card,.rfcdet-header-card,.rfcedit-header-card,.rfcmat-header-card,.rfcsec-header-card,.risk-hero-card,.riskcfg-header-card,.riskedit-header-card,.riskform-header-card,.riskmet-header-card,.sast-hero,.score-header-card,.smtp-header-card,.soa-hero-card,.soc2hist-header-card,.tipo-header-card,.tipoedit-header-card,.users-header-card,.valconf-header-card,.valcrit-header-card,.valdisp-header-card,.valint-header-card,.vulevi-header-card,.vulna-header-card,.vulnadd-header-card,.vulndet-header-card,.vulnedit-header-card,.vulnmet-header-card,.vulnpar-header-card) :is(h1,h2,h3,h4,[class*=\'-title\']){color:var(--gw-ink)!important;text-shadow:none!important}\nbody.grac-workspace :is(.gw-heading,.accdet-header-card,.accesoadd-header-card,.accesoedit-header-card,.accesomat-header-card,.accestado-header-card,.adg-hero,.aidet-header-card,.aidetcat-header-card,.api-prop-header-card,.areas-header-card,.as-header-card,.bcp-hero,.campdet-header-card,.campform-header-card,.campmat-header-card,.campopt-header-card,.catdet-header-card,.cc-hero,.chatsgsi-header-card,.com-header-card,.com-matrix-header-card,.comdet-header-card,.ctrlcfg-header-card,.ctxexed-header-card,.ctxext-header-card,.ctxextd-header-card,.ctxextmat-header-card,.ctxint-header-card,.ctxintd-header-card,.ctxinted-header-card,.ctxintmat-header-card,.cultcfg-header-card,.cultmet-header-card,.dashsimple-header,.datadom-header-card,.dataform-header-card,.datamad-header-card,.datapar-header-card,.datares-header-card,.datstd-header-card,.divisiones-header-card,.doccfg-header-card,.docdet-header-card,.docmat-header-card,.docsadd-header-card,.docsedit-header-card,.dofa-header-card,.dofaedit-header-card,.dofalist-header-card,.dofaview-header-card,.duenos-header-card,.glpiinv-header-card,.grac-alert-header-card,.grac-mobile-user-hero,.heat-header-card,.imp-header-card,.incadd-header-card,.incedit-header-card,.incmat-header-card,.incparam-header-card,.incview-header-card,.invdp-header-card,.invdpd-header-card,.invdpe-header-card,.invdpm-header-card,.invfis-header-card,.invfisdet-header-card,.invfisedit-header-card,.invfismat-header-card,.invinfo-header-card,.invinfodet-header-card,.invinfoedit-header-card,.invinfomat-header-card,.invsoft-header-card,.invsoftdet-header-card,.invsoftedit-header-card,.invsoftmat-header-card,.ir-hero,.iso22301hist-header-card,.isoform-header-card,.jira-header-card,.jiracfg-header-card,.logo-header-card,.logs-header-card,.lr-header-card,.madgap-header-card,.madlvl-header-card,.madmap-header-card,.madpar-header-card,.mejadd-header-card,.mejdet-header-card,.mejedit-header-card,.mejmat-header-card,.mejmet-header-card,.miia-header-card,.minc-header-card,.mind-header-card,.mobile-admin-header-card,.nistana-header-card,.nistdet-header-card,.nistexec-header-card,.nistform-header-card,.nisthist-header-card,.nistmad-header-card,.nistpar-header-card,.niststd-header-card,.obj-header-card,.objd-header-card,.objform-header-card,.openrouter-header-card,.pa-edit-hero,.pa-form-hero,.pa-hero,.partesedit-header-card,.partesnew-header-card,.pcidet-header-card,.pciexec-header-card,.pciform-header-card,.pcihist-header-card,.pcimad-header-card,.pcipar-header-card,.pcires-header-card,.perfil-header-card,.perm-header-card,.pesi-header-card,.pi-header-card,.pid-header-card,.plan-hero,.plan-hero-centered,.plancapdet-header-card,.plancapedit-header-card,.plancapmat-header-card,.plancf-header-card,.plancfdet-header-card,.plancfedit-header-card,.plancfmat-header-card,.plancomp-header-card,.plancompdet-header-card,.plancompedit-header-card,.plancompmat-header-card,.plandis-header-card,.pra-hero-card,.prob-header-card,.proficha-header-card,.prop-score-header-card,.prophdet-header-card,.prophist-header-card,.propia-header-card,.propreco-header-card,.provdet-header-card,.provform-header-card,.provlist-header-card,.provmat-header-card,.provparam-header-card,.remadd-header-card,.remdet-header-card,.remedit-header-card,.remmat-header-card,.rep-header-card,.report-hero,.report-hero-centered,.req-header-card,.reqadd-header-card,.reqdet-header-card,.reqedit-header-card,.revadd-header-card,.revdet-header-card,.revdir-header-card,.revedit-header-card,.revmat-header-card,.rfcadd-header-card,.rfcdet-header-card,.rfcedit-header-card,.rfcmat-header-card,.rfcsec-header-card,.risk-hero-card,.riskcfg-header-card,.riskedit-header-card,.riskform-header-card,.riskmet-header-card,.sast-hero,.score-header-card,.smtp-header-card,.soa-hero-card,.soc2hist-header-card,.tipo-header-card,.tipoedit-header-card,.users-header-card,.valconf-header-card,.valcrit-header-card,.valdisp-header-card,.valint-header-card,.vulevi-header-card,.vulna-header-card,.vulnadd-header-card,.vulndet-header-card,.vulnedit-header-card,.vulnmet-header-card,.vulnpar-header-card) :is(p,[class*=\'subtitle\'],[class*=\'hero-sub\']){color:var(--gw-muted)!important;opacity:1!important;font-size:14px!important}\nbody.grac-workspace :is(.gw-heading,.accdet-header-card,.accesoadd-header-card,.accesoedit-header-card,.accesomat-header-card,.accestado-header-card,.adg-hero,.aidet-header-card,.aidetcat-header-card,.api-prop-header-card,.areas-header-card,.as-header-card,.bcp-hero,.campdet-header-card,.campform-header-card,.campmat-header-card,.campopt-header-card,.catdet-header-card,.cc-hero,.chatsgsi-header-card,.com-header-card,.com-matrix-header-card,.comdet-header-card,.ctrlcfg-header-card,.ctxexed-header-card,.ctxext-header-card,.ctxextd-header-card,.ctxextmat-header-card,.ctxint-header-card,.ctxintd-header-card,.ctxinted-header-card,.ctxintmat-header-card,.cultcfg-header-card,.cultmet-header-card,.dashsimple-header,.datadom-header-card,.dataform-header-card,.datamad-header-card,.datapar-header-card,.datares-header-card,.datstd-header-card,.divisiones-header-card,.doccfg-header-card,.docdet-header-card,.docmat-header-card,.docsadd-header-card,.docsedit-header-card,.dofa-header-card,.dofaedit-header-card,.dofalist-header-card,.dofaview-header-card,.duenos-header-card,.glpiinv-header-card,.grac-alert-header-card,.grac-mobile-user-hero,.heat-header-card,.imp-header-card,.incadd-header-card,.incedit-header-card,.incmat-header-card,.incparam-header-card,.incview-header-card,.invdp-header-card,.invdpd-header-card,.invdpe-header-card,.invdpm-header-card,.invfis-header-card,.invfisdet-header-card,.invfisedit-header-card,.invfismat-header-card,.invinfo-header-card,.invinfodet-header-card,.invinfoedit-header-card,.invinfomat-header-card,.invsoft-header-card,.invsoftdet-header-card,.invsoftedit-header-card,.invsoftmat-header-card,.ir-hero,.iso22301hist-header-card,.isoform-header-card,.jira-header-card,.jiracfg-header-card,.logo-header-card,.logs-header-card,.lr-header-card,.madgap-header-card,.madlvl-header-card,.madmap-header-card,.madpar-header-card,.mejadd-header-card,.mejdet-header-card,.mejedit-header-card,.mejmat-header-card,.mejmet-header-card,.miia-header-card,.minc-header-card,.mind-header-card,.mobile-admin-header-card,.nistana-header-card,.nistdet-header-card,.nistexec-header-card,.nistform-header-card,.nisthist-header-card,.nistmad-header-card,.nistpar-header-card,.niststd-header-card,.obj-header-card,.objd-header-card,.objform-header-card,.openrouter-header-card,.pa-edit-hero,.pa-form-hero,.pa-hero,.partesedit-header-card,.partesnew-header-card,.pcidet-header-card,.pciexec-header-card,.pciform-header-card,.pcihist-header-card,.pcimad-header-card,.pcipar-header-card,.pcires-header-card,.perfil-header-card,.perm-header-card,.pesi-header-card,.pi-header-card,.pid-header-card,.plan-hero,.plan-hero-centered,.plancapdet-header-card,.plancapedit-header-card,.plancapmat-header-card,.plancf-header-card,.plancfdet-header-card,.plancfedit-header-card,.plancfmat-header-card,.plancomp-header-card,.plancompdet-header-card,.plancompedit-header-card,.plancompmat-header-card,.plandis-header-card,.pra-hero-card,.prob-header-card,.proficha-header-card,.prop-score-header-card,.prophdet-header-card,.prophist-header-card,.propia-header-card,.propreco-header-card,.provdet-header-card,.provform-header-card,.provlist-header-card,.provmat-header-card,.provparam-header-card,.remadd-header-card,.remdet-header-card,.remedit-header-card,.remmat-header-card,.rep-header-card,.report-hero,.report-hero-centered,.req-header-card,.reqadd-header-card,.reqdet-header-card,.reqedit-header-card,.revadd-header-card,.revdet-header-card,.revdir-header-card,.revedit-header-card,.revmat-header-card,.rfcadd-header-card,.rfcdet-header-card,.rfcedit-header-card,.rfcmat-header-card,.rfcsec-header-card,.risk-hero-card,.riskcfg-header-card,.riskedit-header-card,.riskform-header-card,.riskmet-header-card,.sast-hero,.score-header-card,.smtp-header-card,.soa-hero-card,.soc2hist-header-card,.tipo-header-card,.tipoedit-header-card,.users-header-card,.valconf-header-card,.valcrit-header-card,.valdisp-header-card,.valint-header-card,.vulevi-header-card,.vulna-header-card,.vulnadd-header-card,.vulndet-header-card,.vulnedit-header-card,.vulnmet-header-card,.vulnpar-header-card) [class*=\'header-overlay\']{padding:0!important;background:transparent!important;justify-content:flex-start!important}\nbody.grac-workspace :is(.gw-heading,.accdet-header-card,.accesoadd-header-card,.accesoedit-header-card,.accesomat-header-card,.accestado-header-card,.adg-hero,.aidet-header-card,.aidetcat-header-card,.api-prop-header-card,.areas-header-card,.as-header-card,.bcp-hero,.campdet-header-card,.campform-header-card,.campmat-header-card,.campopt-header-card,.catdet-header-card,.cc-hero,.chatsgsi-header-card,.com-header-card,.com-matrix-header-card,.comdet-header-card,.ctrlcfg-header-card,.ctxexed-header-card,.ctxext-header-card,.ctxextd-header-card,.ctxextmat-header-card,.ctxint-header-card,.ctxintd-header-card,.ctxinted-header-card,.ctxintmat-header-card,.cultcfg-header-card,.cultmet-header-card,.dashsimple-header,.datadom-header-card,.dataform-header-card,.datamad-header-card,.datapar-header-card,.datares-header-card,.datstd-header-card,.divisiones-header-card,.doccfg-header-card,.docdet-header-card,.docmat-header-card,.docsadd-header-card,.docsedit-header-card,.dofa-header-card,.dofaedit-header-card,.dofalist-header-card,.dofaview-header-card,.duenos-header-card,.glpiinv-header-card,.grac-alert-header-card,.grac-mobile-user-hero,.heat-header-card,.imp-header-card,.incadd-header-card,.incedit-header-card,.incmat-header-card,.incparam-header-card,.incview-header-card,.invdp-header-card,.invdpd-header-card,.invdpe-header-card,.invdpm-header-card,.invfis-header-card,.invfisdet-header-card,.invfisedit-header-card,.invfismat-header-card,.invinfo-header-card,.invinfodet-header-card,.invinfoedit-header-card,.invinfomat-header-card,.invsoft-header-card,.invsoftdet-header-card,.invsoftedit-header-card,.invsoftmat-header-card,.ir-hero,.iso22301hist-header-card,.isoform-header-card,.jira-header-card,.jiracfg-header-card,.logo-header-card,.logs-header-card,.lr-header-card,.madgap-header-card,.madlvl-header-card,.madmap-header-card,.madpar-header-card,.mejadd-header-card,.mejdet-header-card,.mejedit-header-card,.mejmat-header-card,.mejmet-header-card,.miia-header-card,.minc-header-card,.mind-header-card,.mobile-admin-header-card,.nistana-header-card,.nistdet-header-card,.nistexec-header-card,.nistform-header-card,.nisthist-header-card,.nistmad-header-card,.nistpar-header-card,.niststd-header-card,.obj-header-card,.objd-header-card,.objform-header-card,.openrouter-header-card,.pa-edit-hero,.pa-form-hero,.pa-hero,.partesedit-header-card,.partesnew-header-card,.pcidet-header-card,.pciexec-header-card,.pciform-header-card,.pcihist-header-card,.pcimad-header-card,.pcipar-header-card,.pcires-header-card,.perfil-header-card,.perm-header-card,.pesi-header-card,.pi-header-card,.pid-header-card,.plan-hero,.plan-hero-centered,.plancapdet-header-card,.plancapedit-header-card,.plancapmat-header-card,.plancf-header-card,.plancfdet-header-card,.plancfedit-header-card,.plancfmat-header-card,.plancomp-header-card,.plancompdet-header-card,.plancompedit-header-card,.plancompmat-header-card,.plandis-header-card,.pra-hero-card,.prob-header-card,.proficha-header-card,.prop-score-header-card,.prophdet-header-card,.prophist-header-card,.propia-header-card,.propreco-header-card,.provdet-header-card,.provform-header-card,.provlist-header-card,.provmat-header-card,.provparam-header-card,.remadd-header-card,.remdet-header-card,.remedit-header-card,.remmat-header-card,.rep-header-card,.report-hero,.report-hero-centered,.req-header-card,.reqadd-header-card,.reqdet-header-card,.reqedit-header-card,.revadd-header-card,.revdet-header-card,.revdir-header-card,.revedit-header-card,.revmat-header-card,.rfcadd-header-card,.rfcdet-header-card,.rfcedit-header-card,.rfcmat-header-card,.rfcsec-header-card,.risk-hero-card,.riskcfg-header-card,.riskedit-header-card,.riskform-header-card,.riskmet-header-card,.sast-hero,.score-header-card,.smtp-header-card,.soa-hero-card,.soc2hist-header-card,.tipo-header-card,.tipoedit-header-card,.users-header-card,.valconf-header-card,.valcrit-header-card,.valdisp-header-card,.valint-header-card,.vulevi-header-card,.vulna-header-card,.vulnadd-header-card,.vulndet-header-card,.vulnedit-header-card,.vulnmet-header-card,.vulnpar-header-card) [class*=\'header-badge\']{color:#075acb!important;background:#e8f1ff!important}\nbody.grac-workspace :is(.gw-heading,.accdet-header-card,.accesoadd-header-card,.accesoedit-header-card,.accesomat-header-card,.accestado-header-card,.adg-hero,.aidet-header-card,.aidetcat-header-card,.api-prop-header-card,.areas-header-card,.as-header-card,.bcp-hero,.campdet-header-card,.campform-header-card,.campmat-header-card,.campopt-header-card,.catdet-header-card,.cc-hero,.chatsgsi-header-card,.com-header-card,.com-matrix-header-card,.comdet-header-card,.ctrlcfg-header-card,.ctxexed-header-card,.ctxext-header-card,.ctxextd-header-card,.ctxextmat-header-card,.ctxint-header-card,.ctxintd-header-card,.ctxinted-header-card,.ctxintmat-header-card,.cultcfg-header-card,.cultmet-header-card,.dashsimple-header,.datadom-header-card,.dataform-header-card,.datamad-header-card,.datapar-header-card,.datares-header-card,.datstd-header-card,.divisiones-header-card,.doccfg-header-card,.docdet-header-card,.docmat-header-card,.docsadd-header-card,.docsedit-header-card,.dofa-header-card,.dofaedit-header-card,.dofalist-header-card,.dofaview-header-card,.duenos-header-card,.glpiinv-header-card,.grac-alert-header-card,.grac-mobile-user-hero,.heat-header-card,.imp-header-card,.incadd-header-card,.incedit-header-card,.incmat-header-card,.incparam-header-card,.incview-header-card,.invdp-header-card,.invdpd-header-card,.invdpe-header-card,.invdpm-header-card,.invfis-header-card,.invfisdet-header-card,.invfisedit-header-card,.invfismat-header-card,.invinfo-header-card,.invinfodet-header-card,.invinfoedit-header-card,.invinfomat-header-card,.invsoft-header-card,.invsoftdet-header-card,.invsoftedit-header-card,.invsoftmat-header-card,.ir-hero,.iso22301hist-header-card,.isoform-header-card,.jira-header-card,.jiracfg-header-card,.logo-header-card,.logs-header-card,.lr-header-card,.madgap-header-card,.madlvl-header-card,.madmap-header-card,.madpar-header-card,.mejadd-header-card,.mejdet-header-card,.mejedit-header-card,.mejmat-header-card,.mejmet-header-card,.miia-header-card,.minc-header-card,.mind-header-card,.mobile-admin-header-card,.nistana-header-card,.nistdet-header-card,.nistexec-header-card,.nistform-header-card,.nisthist-header-card,.nistmad-header-card,.nistpar-header-card,.niststd-header-card,.obj-header-card,.objd-header-card,.objform-header-card,.openrouter-header-card,.pa-edit-hero,.pa-form-hero,.pa-hero,.partesedit-header-card,.partesnew-header-card,.pcidet-header-card,.pciexec-header-card,.pciform-header-card,.pcihist-header-card,.pcimad-header-card,.pcipar-header-card,.pcires-header-card,.perfil-header-card,.perm-header-card,.pesi-header-card,.pi-header-card,.pid-header-card,.plan-hero,.plan-hero-centered,.plancapdet-header-card,.plancapedit-header-card,.plancapmat-header-card,.plancf-header-card,.plancfdet-header-card,.plancfedit-header-card,.plancfmat-header-card,.plancomp-header-card,.plancompdet-header-card,.plancompedit-header-card,.plancompmat-header-card,.plandis-header-card,.pra-hero-card,.prob-header-card,.proficha-header-card,.prop-score-header-card,.prophdet-header-card,.prophist-header-card,.propia-header-card,.propreco-header-card,.provdet-header-card,.provform-header-card,.provlist-header-card,.provmat-header-card,.provparam-header-card,.remadd-header-card,.remdet-header-card,.remedit-header-card,.remmat-header-card,.rep-header-card,.report-hero,.report-hero-centered,.req-header-card,.reqadd-header-card,.reqdet-header-card,.reqedit-header-card,.revadd-header-card,.revdet-header-card,.revdir-header-card,.revedit-header-card,.revmat-header-card,.rfcadd-header-card,.rfcdet-header-card,.rfcedit-header-card,.rfcmat-header-card,.rfcsec-header-card,.risk-hero-card,.riskcfg-header-card,.riskedit-header-card,.riskform-header-card,.riskmet-header-card,.sast-hero,.score-header-card,.smtp-header-card,.soa-hero-card,.soc2hist-header-card,.tipo-header-card,.tipoedit-header-card,.users-header-card,.valconf-header-card,.valcrit-header-card,.valdisp-header-card,.valint-header-card,.vulevi-header-card,.vulna-header-card,.vulnadd-header-card,.vulndet-header-card,.vulnedit-header-card,.vulnmet-header-card,.vulnpar-header-card) [class*=\'header-icon\']{background:#e8f1ff!important;color:#075acb!important;border-radius:8px!important;box-shadow:none!important}\nbody.grac-workspace :is(.gw-shell,.accdet-shell,.accesoadd-shell,.accesoedit-shell,.accesomat-shell,.accestado-shell,.accevi-shell,.adg-shell,.aiana-shell,.aidet-shell,.aidetcat-shell,.aiedana-shell,.aiedit-shell,.aihis-shell,.aiinv-shell,.aimad-shell,.aipar-shell,.airisk-shell,.api-prop-shell,.areas-shell,.as-shell,.campdet-shell,.campform-shell,.campmat-shell,.campopt-shell,.catdet-shell,.cc-shell,.chatsgsi-shell,.com-matrix-shell,.com-shell,.comdet-shell,.ctrlcfg-shell,.ctxexed-shell,.ctxext-shell,.ctxextd-shell,.ctxextmat-shell,.ctxint-shell,.ctxintd-shell,.ctxinted-shell,.ctxintmat-shell,.cultcfg-shell,.cultmet-shell,.dashsimple-shell,.datadom-shell,.dataform-shell,.datamad-shell,.datapar-shell,.datares-shell,.datstd-shell,.divisiones-shell,.doccfg-shell,.docdet-shell,.docmat-shell,.docsadd-shell,.docsedit-shell,.dofa-shell,.dofaedit-shell,.dofalist-shell,.dofaview-shell,.duenos-shell,.glpiinv-shell,.grac-mobile-user-shell,.heat-shell,.imp-shell,.incadd-shell,.incedit-shell,.incmat-shell,.incparam-shell,.incview-shell,.invdp-shell,.invdpd-shell,.invdpe-shell,.invdpm-shell,.invfis-shell,.invfisdet-shell,.invfisedit-shell,.invfismat-shell,.invinfo-shell,.invinfodet-shell,.invinfoedit-shell,.invinfomat-shell,.invsoft-shell,.invsoftdet-shell,.invsoftedit-shell,.invsoftmat-shell,.iso22301hist-shell,.isoform-shell,.jira-shell,.jiracfg-shell,.logo-shell,.logs-shell,.lr-shell,.madgap-shell,.madlvl-shell,.madmap-shell,.madpar-shell,.mejadd-shell,.mejdet-shell,.mejedit-shell,.mejevi-shell,.mejmat-shell,.mejmet-shell,.miia-shell,.minc-shell,.mind-shell,.mitre-shell,.mobile-admin-shell,.nistana-shell,.nistdet-shell,.nistexec-shell,.nistform-shell,.nisthist-shell,.nistmad-shell,.nistpar-shell,.niststd-shell,.obj-shell,.objd-shell,.objform-shell,.openrouter-shell,.pa-edit-shell,.pa-form-shell,.pa-shell,.partesedit-shell,.partesnew-shell,.pcidet-shell,.pciexec-shell,.pciform-shell,.pcihist-shell,.pcimad-shell,.pcipar-shell,.pcires-shell,.perfil-shell,.perm-shell,.pesi-shell,.pi-shell,.pid-shell,.plancapdet-shell,.plancapedit-shell,.plancapmat-shell,.plancevi-shell,.plancf-shell,.plancfdet-shell,.plancfedit-shell,.plancfmat-shell,.plancomp-shell,.plancompdet-shell,.plancompedit-shell,.plancompevi-shell,.plancompmat-shell,.plandis-shell,.pra-page-shell,.prob-shell,.proficha-shell,.prop-score-shell,.prophdet-shell,.prophist-shell,.propia-shell,.propreco-shell,.provdet-shell,.provevi-shell,.provform-shell,.provlist-shell,.provmat-shell,.provparam-shell,.rating-shell,.remadd-shell,.remdet-shell,.remedit-shell,.remmat-shell,.rep-shell,.report-shell,.req-shell,.reqadd-shell,.reqdet-shell,.reqedit-shell,.revadd-shell,.revdet-shell,.revdir-shell,.revedit-shell,.revmat-shell,.rfcadd-shell,.rfcdet-shell,.rfcedit-shell,.rfcevi-shell,.rfcmat-shell,.rfcsec-shell,.risk-shell,.riskcfg-shell,.riskedit-shell,.riskform-shell,.riskmet-shell,.sast-shell,.score-new-shell,.score-shell,.smtp-shell,.soa-shell,.soc2hist-shell,.tipo-shell,.tipoedit-shell,.users-shell,.valconf-shell,.valcrit-shell,.valdisp-shell,.valint-shell,.vulevi-shell,.vulna-shell,.vulnadd-shell,.vulndet-shell,.vulnedit-shell,.vulnmet-shell,.vulnmx-shell,.vulnpar-shell){width:100%!important;max-width:none!important;margin:0 0 24px!important}\nbody.grac-workspace :is(.card-header,.modal-header,.accordion-item){border-color:var(--gw-line)!important}\nbody.grac-workspace .card-header{background:#f8fafc!important;color:var(--gw-ink)!important}\n\n\nbody.grac-workspace .btn :is(i,svg,span){color:inherit!important}\nbody.grac-workspace :is(button,a,input,select,textarea):focus-visible{outline:3px solid #6ea9ff!important;outline-offset:3px!important}\nbody.grac-workspace :is(.btn,button,input):disabled{opacity:.5!important;cursor:not-allowed!important}\nbody.grac-workspace :is(.form-control,.form-select,input:not([type]),input[type=\'text\'],input[type=\'email\'],input[type=\'password\'],input[type=\'number\'],input[type=\'date\'],input[type=\'search\'],input[type=\'url\'],textarea,select){border:1px solid #cbd7e5!important;border-radius:6px!important;background-color:white!important;color:var(--gw-ink)!important;font-size:14px!important;box-shadow:none!important;min-height:38px}\nbody.grac-workspace :is(.form-control,.form-select):focus{border-color:#0866e8!important;box-shadow:0 0 0 3px #0866e819!important}\nbody.grac-workspace :is(input,textarea,select):disabled{background-color:#edf1f6!important}\nbody.grac-workspace :is(label,.form-label){font-size:13px;font-weight:600;color:#33465f}\nbody.grac-workspace .table-responsive{border:1px solid var(--gw-line)!important;border-radius:8px!important;background:white!important;box-shadow:none!important}\nbody.grac-workspace table{font-size:13px!important;color:var(--gw-ink);border-color:var(--gw-line)!important}\nbody.grac-workspace table thead th{background:#f0f4fa!important;background-image:none!important;color:#26374f!important;text-shadow:none!important;font-size:12px!important;font-weight:700!important;padding:12px!important;border-bottom:1px solid var(--gw-line)!important;vertical-align:middle!important}\nbody.grac-workspace table td{padding:11px 12px!important;border-color:#e5ebf3!important;vertical-align:middle!important}\nbody.grac-workspace table tbody tr:hover>td:not([style*=\'background\']):not([class*=\'nivel\']):not([class*=\'risk\']){background-color:#eef5ff}\nbody.grac-workspace .gw-detail-action{background:none!important;color:#075bd6!important;border:0!important;padding:3px!important;font-size:12px!important;white-space:nowrap}\nbody.grac-workspace :is(.nav-tabs,.nav-pills){gap:12px;border-bottom:1px solid var(--gw-line)!important;border-radius:0!important;margin-bottom:20px}\nbody.grac-workspace :is(.nav-tabs,.nav-pills) .nav-link{background:transparent!important;color:var(--gw-muted)!important;border:0!important;border-radius:0!important;padding:12px 14px!important;box-shadow:none!important}\nbody.grac-workspace :is(.nav-tabs,.nav-pills) .nav-link.active{color:#075bd6!important;border-bottom:3px solid #0866e8!important;font-weight:700}\nbody.grac-workspace .progress{background:#e8eef6!important;border-radius:5px!important;box-shadow:none!important}\nbody.grac-workspace .sgsi-stat-card{padding:20px!important}\nbody.grac-workspace .sgsi-stat-title{color:var(--gw-muted)!important;font-size:13px!important;font-weight:600!important}\nbody.grac-workspace .sgsi-stat-value{font-size:29px!important;color:var(--gw-ink)!important;line-height:1.2!important}\nbody.grac-workspace .sgsi-stat-icon{background:#e8f1ff!important;color:#0866e8!important;box-shadow:none!important;border-radius:8px!important}\n/* Azul limitado al recuadro del título, sin recolorear estadísticas ni gráficas */\nbody.grac-workspace .sgsi-dashboard-zone .sgsi-chart-card .sgsi-chart-head{background:linear-gradient(135deg,#0866e8,#0751ba)!important;color:#fff!important;border-bottom:1px solid #0751ba!important}\nbody.grac-workspace .sgsi-dashboard-zone .sgsi-chart-head h3{color:#fff!important}\nbody.grac-workspace .sgsi-dashboard-zone .sgsi-chart-head span{background:#fff!important;color:#132238!important;border-radius:999px!important;padding:4px 12px!important}\nbody.grac-workspace .modal{z-index:1055!important}body.grac-workspace .modal-backdrop{z-index:1050!important}\nbody.grac-workspace #gw-detail{position:fixed;top:var(--gw-top);right:0;bottom:0;width:min(420px,100%);padding:22px;background:#fff;border-left:1px solid var(--gw-line);box-shadow:-8px 0 30px #13223815;overflow:auto;z-index:1040}\nbody.grac-workspace #gw-detail[hidden],body.grac-workspace .gw-results[hidden]{display:none!important}\nbody.grac-workspace #gw-detail h2{font-size:20px;padding-right:36px;color:var(--gw-ink)}\nbody.grac-workspace #gw-detail p{font-size:12px;color:var(--gw-muted)}\nbody.grac-workspace #gw-detail dl{margin:20px 0}\nbody.grac-workspace #gw-detail dt{font-size:12px;color:var(--gw-muted);font-weight:600;padding-top:12px}\nbody.grac-workspace #gw-detail dd{font-size:14px;color:var(--gw-ink);border-bottom:1px solid var(--gw-line);padding:4px 0 12px;white-space:pre-wrap;overflow-wrap:anywhere}\nbody.grac-workspace #gw-detail-close{position:absolute;right:16px;top:18px;border:0;background:#eef3f9;color:#24374e;width:32px;height:32px;border-radius:5px;font-size:20px}\n@media(min-width:1500px){body.grac-workspace.gw-detail-open>.container{padding-right:448px!important}}\n@media(max-width:1100px){:root{--gw-nav:225px}body.grac-workspace .sgsi-brand{min-width:195px!important}body.grac-workspace .sgsi-logo{max-width:60px!important}body.grac-workspace>.container{padding:20px!important}}\n@media(max-width:800px){body.grac-workspace{padding-left:var(--gw-rail)!important}body.grac-workspace #sgsiGlobalMenu{display:none!important;box-shadow:8px 0 20px #13223820!important}body.grac-workspace.gw-mobile-nav #sgsiGlobalMenu{display:block!important}body.grac-workspace .sgsi-topbar-inner{gap:10px!important;padding:0 10px!important}body.grac-workspace .sgsi-brand{min-width:0!important}body.grac-workspace .sgsi-logo{display:none!important}body.grac-workspace .gw-brand-name{font-size:13px}body.grac-workspace .sgsi-user-name{display:none!important}body.grac-workspace .gw-search kbd{display:none}body.grac-workspace .gw-search input{padding:8px!important;font-size:12px!important}body.grac-workspace>.container{padding:16px 12px!important}body.grac-workspace #gw-detail{width:calc(100% - var(--gw-rail))}}\n@media print{body.grac-workspace{padding:0!important;background:#fff!important}body.grac-workspace :is(.sgsi-topbar,#gw-rail,#sgsiGlobalMenu,#gw-detail,.gw-breadcrumb,.gw-detail-action){display:none!important}body.grac-workspace>.container{padding:0!important;max-width:none!important}body.grac-workspace .table-responsive{overflow:visible!important}body.grac-workspace table thead{display:table-header-group}}\n@media(prefers-reduced-motion:reduce){body.grac-workspace *{scroll-behavior:auto!important;transition:none!important;animation:none!important}}\nbody.grac-workspace :is(.risk-hero-icon,.soa-hero-icon,.pra-hero-icon,.ir-hero-icon,.adg-hero-icon,.sast-hero-icon,.pa-hero-icon){background:#e8f1ff!important;color:#0866e8!important;box-shadow:none!important;border-radius:8px!important}\nbody.grac-workspace :is(.risk-hero-kicker,.soa-hero-kicker,.pra-hero-kicker,.ir-kicker){color:#607086!important;background:transparent!important}\nbody.grac-workspace :is(.ir-nav-panel,.ir-nav-actions){background:transparent!important;border-radius:0!important;box-shadow:none!important}\nbody.grac-workspace .ir-nav-link{background:transparent!important;color:#607086!important;border:0!important;border-radius:0!important;border-bottom:3px solid transparent!important;box-shadow:none!important}\nbody.grac-workspace .ir-nav-link.active{color:#0866e8!important;border-bottom-color:#0866e8!important}\nbody.grac-workspace>.container :is([class$=\'-panel\'],[class$=\'-box\'],[class$=\'-table-wrap\'],[class$=\'-table-scroll\']){box-shadow:none!important;border-radius:8px!important;border-color:var(--gw-line)!important}\nbody.grac-workspace :is(.risk-menu-panel,.risk-filter-panel,.risk-table-panel,.risk-summary-box){background:#fff!important;border:1px solid var(--gw-line)!important;box-shadow:none!important;border-radius:8px!important}\nbody.grac-workspace .risk-summary-box{padding:18px!important;text-align:left!important}\nbody.grac-workspace .risk-summary-label{font-size:13px!important;color:var(--gw-muted)!important}\nbody.grac-workspace .risk-summary-value{color:var(--gw-ink)!important;font-size:28px!important}\nbody.grac-workspace :is(.risk-top-menu,.risk-filter-actions){justify-content:flex-start!important}\nbody.grac-workspace .risk-hero-badge{display:none!important}\nbody.grac-workspace :is(.gw-heading,.accdet-header-card,.accesoadd-header-card,.accesoedit-header-card,.accesomat-header-card,.accestado-header-card,.adg-hero,.aidet-header-card,.aidetcat-header-card,.api-prop-header-card,.areas-header-card,.as-header-card,.bcp-hero,.campdet-header-card,.campform-header-card,.campmat-header-card,.campopt-header-card,.catdet-header-card,.cc-hero,.chatsgsi-header-card,.com-header-card,.com-matrix-header-card,.comdet-header-card,.ctrlcfg-header-card,.ctxexed-header-card,.ctxext-header-card,.ctxextd-header-card,.ctxextmat-header-card,.ctxint-header-card,.ctxintd-header-card,.ctxinted-header-card,.ctxintmat-header-card,.cultcfg-header-card,.cultmet-header-card,.dashsimple-header,.datadom-header-card,.dataform-header-card,.datamad-header-card,.datapar-header-card,.datares-header-card,.datstd-header-card,.divisiones-header-card,.doccfg-header-card,.docdet-header-card,.docmat-header-card,.docsadd-header-card,.docsedit-header-card,.dofa-header-card,.dofaedit-header-card,.dofalist-header-card,.dofaview-header-card,.duenos-header-card,.glpiinv-header-card,.grac-alert-header-card,.grac-mobile-user-hero,.heat-header-card,.imp-header-card,.incadd-header-card,.incedit-header-card,.incmat-header-card,.incparam-header-card,.incview-header-card,.invdp-header-card,.invdpd-header-card,.invdpe-header-card,.invdpm-header-card,.invfis-header-card,.invfisdet-header-card,.invfisedit-header-card,.invfismat-header-card,.invinfo-header-card,.invinfodet-header-card,.invinfoedit-header-card,.invinfomat-header-card,.invsoft-header-card,.invsoftdet-header-card,.invsoftedit-header-card,.invsoftmat-header-card,.ir-hero,.iso22301hist-header-card,.isoform-header-card,.jira-header-card,.jiracfg-header-card,.logo-header-card,.logs-header-card,.lr-header-card,.madgap-header-card,.madlvl-header-card,.madmap-header-card,.madpar-header-card,.mejadd-header-card,.mejdet-header-card,.mejedit-header-card,.mejmat-header-card,.mejmet-header-card,.miia-header-card,.minc-header-card,.mind-header-card,.mobile-admin-header-card,.nistana-header-card,.nistdet-header-card,.nistexec-header-card,.nistform-header-card,.nisthist-header-card,.nistmad-header-card,.nistpar-header-card,.niststd-header-card,.obj-header-card,.objd-header-card,.objform-header-card,.openrouter-header-card,.pa-edit-hero,.pa-form-hero,.pa-hero,.partesedit-header-card,.partesnew-header-card,.pcidet-header-card,.pciexec-header-card,.pciform-header-card,.pcihist-header-card,.pcimad-header-card,.pcipar-header-card,.pcires-header-card,.perfil-header-card,.perm-header-card,.pesi-header-card,.pi-header-card,.pid-header-card,.plan-hero,.plan-hero-centered,.plancapdet-header-card,.plancapedit-header-card,.plancapmat-header-card,.plancf-header-card,.plancfdet-header-card,.plancfedit-header-card,.plancfmat-header-card,.plancomp-header-card,.plancompdet-header-card,.plancompedit-header-card,.plancompmat-header-card,.plandis-header-card,.pra-hero-card,.prob-header-card,.proficha-header-card,.prop-score-header-card,.prophdet-header-card,.prophist-header-card,.propia-header-card,.propreco-header-card,.provdet-header-card,.provform-header-card,.provlist-header-card,.provmat-header-card,.provparam-header-card,.remadd-header-card,.remdet-header-card,.remedit-header-card,.remmat-header-card,.rep-header-card,.report-hero,.report-hero-centered,.req-header-card,.reqadd-header-card,.reqdet-header-card,.reqedit-header-card,.revadd-header-card,.revdet-header-card,.revdir-header-card,.revedit-header-card,.revmat-header-card,.rfcadd-header-card,.rfcdet-header-card,.rfcedit-header-card,.rfcmat-header-card,.rfcsec-header-card,.risk-hero-card,.riskcfg-header-card,.riskedit-header-card,.riskform-header-card,.riskmet-header-card,.sast-hero,.score-header-card,.smtp-header-card,.soa-hero-card,.soc2hist-header-card,.tipo-header-card,.tipoedit-header-card,.users-header-card,.valconf-header-card,.valcrit-header-card,.valdisp-header-card,.valint-header-card,.vulevi-header-card,.vulna-header-card,.vulnadd-header-card,.vulndet-header-card,.vulnedit-header-card,.vulnmet-header-card,.vulnpar-header-card) [class*=\'kicker\']{color:var(--gw-muted)!important;background:transparent!important}\nbody.grac-workspace :is(.gw-heading,.accdet-header-card,.accesoadd-header-card,.accesoedit-header-card,.accesomat-header-card,.accestado-header-card,.adg-hero,.aidet-header-card,.aidetcat-header-card,.api-prop-header-card,.areas-header-card,.as-header-card,.bcp-hero,.campdet-header-card,.campform-header-card,.campmat-header-card,.campopt-header-card,.catdet-header-card,.cc-hero,.chatsgsi-header-card,.com-header-card,.com-matrix-header-card,.comdet-header-card,.ctrlcfg-header-card,.ctxexed-header-card,.ctxext-header-card,.ctxextd-header-card,.ctxextmat-header-card,.ctxint-header-card,.ctxintd-header-card,.ctxinted-header-card,.ctxintmat-header-card,.cultcfg-header-card,.cultmet-header-card,.dashsimple-header,.datadom-header-card,.dataform-header-card,.datamad-header-card,.datapar-header-card,.datares-header-card,.datstd-header-card,.divisiones-header-card,.doccfg-header-card,.docdet-header-card,.docmat-header-card,.docsadd-header-card,.docsedit-header-card,.dofa-header-card,.dofaedit-header-card,.dofalist-header-card,.dofaview-header-card,.duenos-header-card,.glpiinv-header-card,.grac-alert-header-card,.grac-mobile-user-hero,.heat-header-card,.imp-header-card,.incadd-header-card,.incedit-header-card,.incmat-header-card,.incparam-header-card,.incview-header-card,.invdp-header-card,.invdpd-header-card,.invdpe-header-card,.invdpm-header-card,.invfis-header-card,.invfisdet-header-card,.invfisedit-header-card,.invfismat-header-card,.invinfo-header-card,.invinfodet-header-card,.invinfoedit-header-card,.invinfomat-header-card,.invsoft-header-card,.invsoftdet-header-card,.invsoftedit-header-card,.invsoftmat-header-card,.ir-hero,.iso22301hist-header-card,.isoform-header-card,.jira-header-card,.jiracfg-header-card,.logo-header-card,.logs-header-card,.lr-header-card,.madgap-header-card,.madlvl-header-card,.madmap-header-card,.madpar-header-card,.mejadd-header-card,.mejdet-header-card,.mejedit-header-card,.mejmat-header-card,.mejmet-header-card,.miia-header-card,.minc-header-card,.mind-header-card,.mobile-admin-header-card,.nistana-header-card,.nistdet-header-card,.nistexec-header-card,.nistform-header-card,.nisthist-header-card,.nistmad-header-card,.nistpar-header-card,.niststd-header-card,.obj-header-card,.objd-header-card,.objform-header-card,.openrouter-header-card,.pa-edit-hero,.pa-form-hero,.pa-hero,.partesedit-header-card,.partesnew-header-card,.pcidet-header-card,.pciexec-header-card,.pciform-header-card,.pcihist-header-card,.pcimad-header-card,.pcipar-header-card,.pcires-header-card,.perfil-header-card,.perm-header-card,.pesi-header-card,.pi-header-card,.pid-header-card,.plan-hero,.plan-hero-centered,.plancapdet-header-card,.plancapedit-header-card,.plancapmat-header-card,.plancf-header-card,.plancfdet-header-card,.plancfedit-header-card,.plancfmat-header-card,.plancomp-header-card,.plancompdet-header-card,.plancompedit-header-card,.plancompmat-header-card,.plandis-header-card,.pra-hero-card,.prob-header-card,.proficha-header-card,.prop-score-header-card,.prophdet-header-card,.prophist-header-card,.propia-header-card,.propreco-header-card,.provdet-header-card,.provform-header-card,.provlist-header-card,.provmat-header-card,.provparam-header-card,.remadd-header-card,.remdet-header-card,.remedit-header-card,.remmat-header-card,.rep-header-card,.report-hero,.report-hero-centered,.req-header-card,.reqadd-header-card,.reqdet-header-card,.reqedit-header-card,.revadd-header-card,.revdet-header-card,.revdir-header-card,.revedit-header-card,.revmat-header-card,.rfcadd-header-card,.rfcdet-header-card,.rfcedit-header-card,.rfcmat-header-card,.rfcsec-header-card,.risk-hero-card,.riskcfg-header-card,.riskedit-header-card,.riskform-header-card,.riskmet-header-card,.sast-hero,.score-header-card,.smtp-header-card,.soa-hero-card,.soc2hist-header-card,.tipo-header-card,.tipoedit-header-card,.users-header-card,.valconf-header-card,.valcrit-header-card,.valdisp-header-card,.valint-header-card,.vulevi-header-card,.vulna-header-card,.vulnadd-header-card,.vulndet-header-card,.vulnedit-header-card,.vulnmet-header-card,.vulnpar-header-card) [class*=\'hero-text\']::before{color:var(--gw-muted)!important;background:transparent!important;box-shadow:none!important}\nbody.grac-workspace :is(.gw-heading,.accdet-header-card,.accesoadd-header-card,.accesoedit-header-card,.accesomat-header-card,.accestado-header-card,.adg-hero,.aidet-header-card,.aidetcat-header-card,.api-prop-header-card,.areas-header-card,.as-header-card,.bcp-hero,.campdet-header-card,.campform-header-card,.campmat-header-card,.campopt-header-card,.catdet-header-card,.cc-hero,.chatsgsi-header-card,.com-header-card,.com-matrix-header-card,.comdet-header-card,.ctrlcfg-header-card,.ctxexed-header-card,.ctxext-header-card,.ctxextd-header-card,.ctxextmat-header-card,.ctxint-header-card,.ctxintd-header-card,.ctxinted-header-card,.ctxintmat-header-card,.cultcfg-header-card,.cultmet-header-card,.dashsimple-header,.datadom-header-card,.dataform-header-card,.datamad-header-card,.datapar-header-card,.datares-header-card,.datstd-header-card,.divisiones-header-card,.doccfg-header-card,.docdet-header-card,.docmat-header-card,.docsadd-header-card,.docsedit-header-card,.dofa-header-card,.dofaedit-header-card,.dofalist-header-card,.dofaview-header-card,.duenos-header-card,.glpiinv-header-card,.grac-alert-header-card,.grac-mobile-user-hero,.heat-header-card,.imp-header-card,.incadd-header-card,.incedit-header-card,.incmat-header-card,.incparam-header-card,.incview-header-card,.invdp-header-card,.invdpd-header-card,.invdpe-header-card,.invdpm-header-card,.invfis-header-card,.invfisdet-header-card,.invfisedit-header-card,.invfismat-header-card,.invinfo-header-card,.invinfodet-header-card,.invinfoedit-header-card,.invinfomat-header-card,.invsoft-header-card,.invsoftdet-header-card,.invsoftedit-header-card,.invsoftmat-header-card,.ir-hero,.iso22301hist-header-card,.isoform-header-card,.jira-header-card,.jiracfg-header-card,.logo-header-card,.logs-header-card,.lr-header-card,.madgap-header-card,.madlvl-header-card,.madmap-header-card,.madpar-header-card,.mejadd-header-card,.mejdet-header-card,.mejedit-header-card,.mejmat-header-card,.mejmet-header-card,.miia-header-card,.minc-header-card,.mind-header-card,.mobile-admin-header-card,.nistana-header-card,.nistdet-header-card,.nistexec-header-card,.nistform-header-card,.nisthist-header-card,.nistmad-header-card,.nistpar-header-card,.niststd-header-card,.obj-header-card,.objd-header-card,.objform-header-card,.openrouter-header-card,.pa-edit-hero,.pa-form-hero,.pa-hero,.partesedit-header-card,.partesnew-header-card,.pcidet-header-card,.pciexec-header-card,.pciform-header-card,.pcihist-header-card,.pcimad-header-card,.pcipar-header-card,.pcires-header-card,.perfil-header-card,.perm-header-card,.pesi-header-card,.pi-header-card,.pid-header-card,.plan-hero,.plan-hero-centered,.plancapdet-header-card,.plancapedit-header-card,.plancapmat-header-card,.plancf-header-card,.plancfdet-header-card,.plancfedit-header-card,.plancfmat-header-card,.plancomp-header-card,.plancompdet-header-card,.plancompedit-header-card,.plancompmat-header-card,.plandis-header-card,.pra-hero-card,.prob-header-card,.proficha-header-card,.prop-score-header-card,.prophdet-header-card,.prophist-header-card,.propia-header-card,.propreco-header-card,.provdet-header-card,.provform-header-card,.provlist-header-card,.provmat-header-card,.provparam-header-card,.remadd-header-card,.remdet-header-card,.remedit-header-card,.remmat-header-card,.rep-header-card,.report-hero,.report-hero-centered,.req-header-card,.reqadd-header-card,.reqdet-header-card,.reqedit-header-card,.revadd-header-card,.revdet-header-card,.revdir-header-card,.revedit-header-card,.revmat-header-card,.rfcadd-header-card,.rfcdet-header-card,.rfcedit-header-card,.rfcmat-header-card,.rfcsec-header-card,.risk-hero-card,.riskcfg-header-card,.riskedit-header-card,.riskform-header-card,.riskmet-header-card,.sast-hero,.score-header-card,.smtp-header-card,.soa-hero-card,.soc2hist-header-card,.tipo-header-card,.tipoedit-header-card,.users-header-card,.valconf-header-card,.valcrit-header-card,.valdisp-header-card,.valint-header-card,.vulevi-header-card,.vulna-header-card,.vulnadd-header-card,.vulndet-header-card,.vulnedit-header-card,.vulnmet-header-card,.vulnpar-header-card) [class*=\'hero-left\']::before{color:var(--gw-blue)!important;background:#e8f1ff!important;box-shadow:none!important}\nbody.grac-workspace :is(.gw-heading,.accdet-header-card,.accesoadd-header-card,.accesoedit-header-card,.accesomat-header-card,.accestado-header-card,.adg-hero,.aidet-header-card,.aidetcat-header-card,.api-prop-header-card,.areas-header-card,.as-header-card,.bcp-hero,.campdet-header-card,.campform-header-card,.campmat-header-card,.campopt-header-card,.catdet-header-card,.cc-hero,.chatsgsi-header-card,.com-header-card,.com-matrix-header-card,.comdet-header-card,.ctrlcfg-header-card,.ctxexed-header-card,.ctxext-header-card,.ctxextd-header-card,.ctxextmat-header-card,.ctxint-header-card,.ctxintd-header-card,.ctxinted-header-card,.ctxintmat-header-card,.cultcfg-header-card,.cultmet-header-card,.dashsimple-header,.datadom-header-card,.dataform-header-card,.datamad-header-card,.datapar-header-card,.datares-header-card,.datstd-header-card,.divisiones-header-card,.doccfg-header-card,.docdet-header-card,.docmat-header-card,.docsadd-header-card,.docsedit-header-card,.dofa-header-card,.dofaedit-header-card,.dofalist-header-card,.dofaview-header-card,.duenos-header-card,.glpiinv-header-card,.grac-alert-header-card,.grac-mobile-user-hero,.heat-header-card,.imp-header-card,.incadd-header-card,.incedit-header-card,.incmat-header-card,.incparam-header-card,.incview-header-card,.invdp-header-card,.invdpd-header-card,.invdpe-header-card,.invdpm-header-card,.invfis-header-card,.invfisdet-header-card,.invfisedit-header-card,.invfismat-header-card,.invinfo-header-card,.invinfodet-header-card,.invinfoedit-header-card,.invinfomat-header-card,.invsoft-header-card,.invsoftdet-header-card,.invsoftedit-header-card,.invsoftmat-header-card,.ir-hero,.iso22301hist-header-card,.isoform-header-card,.jira-header-card,.jiracfg-header-card,.logo-header-card,.logs-header-card,.lr-header-card,.madgap-header-card,.madlvl-header-card,.madmap-header-card,.madpar-header-card,.mejadd-header-card,.mejdet-header-card,.mejedit-header-card,.mejmat-header-card,.mejmet-header-card,.miia-header-card,.minc-header-card,.mind-header-card,.mobile-admin-header-card,.nistana-header-card,.nistdet-header-card,.nistexec-header-card,.nistform-header-card,.nisthist-header-card,.nistmad-header-card,.nistpar-header-card,.niststd-header-card,.obj-header-card,.objd-header-card,.objform-header-card,.openrouter-header-card,.pa-edit-hero,.pa-form-hero,.pa-hero,.partesedit-header-card,.partesnew-header-card,.pcidet-header-card,.pciexec-header-card,.pciform-header-card,.pcihist-header-card,.pcimad-header-card,.pcipar-header-card,.pcires-header-card,.perfil-header-card,.perm-header-card,.pesi-header-card,.pi-header-card,.pid-header-card,.plan-hero,.plan-hero-centered,.plancapdet-header-card,.plancapedit-header-card,.plancapmat-header-card,.plancf-header-card,.plancfdet-header-card,.plancfedit-header-card,.plancfmat-header-card,.plancomp-header-card,.plancompdet-header-card,.plancompedit-header-card,.plancompmat-header-card,.plandis-header-card,.pra-hero-card,.prob-header-card,.proficha-header-card,.prop-score-header-card,.prophdet-header-card,.prophist-header-card,.propia-header-card,.propreco-header-card,.provdet-header-card,.provform-header-card,.provlist-header-card,.provmat-header-card,.provparam-header-card,.remadd-header-card,.remdet-header-card,.remedit-header-card,.remmat-header-card,.rep-header-card,.report-hero,.report-hero-centered,.req-header-card,.reqadd-header-card,.reqdet-header-card,.reqedit-header-card,.revadd-header-card,.revdet-header-card,.revdir-header-card,.revedit-header-card,.revmat-header-card,.rfcadd-header-card,.rfcdet-header-card,.rfcedit-header-card,.rfcmat-header-card,.rfcsec-header-card,.risk-hero-card,.riskcfg-header-card,.riskedit-header-card,.riskform-header-card,.riskmet-header-card,.sast-hero,.score-header-card,.smtp-header-card,.soa-hero-card,.soc2hist-header-card,.tipo-header-card,.tipoedit-header-card,.users-header-card,.valconf-header-card,.valcrit-header-card,.valdisp-header-card,.valint-header-card,.vulevi-header-card,.vulna-header-card,.vulnadd-header-card,.vulndet-header-card,.vulnedit-header-card,.vulnmet-header-card,.vulnpar-header-card) [class*=\'hero-overlay\']{background:transparent!important;padding:0!important}\n/* Operaciones de Seguridad · fondo blanco y navegación azul retráctil */\n:root{--gw-bg:#fff;--gw-line:#d6e1ef;--gw-rail:64px;--gw-nav:280px}\nbody.grac-workspace,body.grac-workspace.gw-nav-closed{padding-left:64px!important;background:#fff!important;background-image:none!important}\nbody.grac-workspace>.container{min-height:calc(100dvh - var(--gw-top));background:#fff!important;border-right:5px solid var(--gw-navy);border-bottom:5px solid var(--gw-navy)}\nbody.grac-workspace #gw-rail{display:none!important}\nbody.grac-workspace #sgsiGlobalMenu{left:0!important;width:64px!important;background:var(--gw-navy)!important;display:block!important;transition:width .18s ease!important;overflow:hidden!important;box-shadow:none!important}\nbody.grac-workspace #sgsiGlobalMenu:is(.gw-hover-open,.gw-keyboard-open,.gw-touch-open){width:280px!important;box-shadow:8px 0 20px #06265020!important}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-menu-fixed-shell{width:100%!important;background:var(--gw-navy)!important;border-right:1px solid #315173!important;padding:12px 7px!important;transition:none!important}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-menu-scroll-only{scrollbar-width:none!important}\nbody.grac-workspace #sgsiGlobalMenu:is(.gw-hover-open,.gw-keyboard-open,.gw-touch-open) .sgsi-menu-scroll-only{scrollbar-width:thin!important;scrollbar-color:#557395 #062650!important}\nbody.grac-workspace #sgsiGlobalMenu .gw-nav-title{color:#afc6e4!important;white-space:nowrap!important;padding:9px 12px 14px!important}\nbody.grac-workspace #sgsiGlobalMenu :is(.sgsi-global-root-toggle,.sgsi-global-panel-control-btn,.sgsi-global-item,.sgsi-global-node-toggle){color:#e6effc!important;min-height:44px!important;gap:12px!important;padding:10px 12px!important;background:transparent!important;box-shadow:none!important;border-radius:6px!important}\nbody.grac-workspace #sgsiGlobalMenu :is(.sgsi-global-root-toggle,.sgsi-global-panel-control-btn,.sgsi-global-item,.sgsi-global-node-toggle)>i{color:inherit!important;font-size:19px!important;width:22px!important;flex:0 0 22px!important}\nbody.grac-workspace #sgsiGlobalMenu :is(.sgsi-active,.sgsi-active-tree,.sgsi-center-active){background:#1264cf!important;color:white!important;box-shadow:none!important}\nbody.grac-workspace #sgsiGlobalMenu :is(a,button):hover{color:white!important;background:#244d7d!important}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-panel{border-left-color:#476789!important}\nbody.grac-workspace #sgsiGlobalMenu:not(.gw-hover-open):not(.gw-keyboard-open):not(.gw-touch-open) .gw-nav-title,\nbody.grac-workspace #sgsiGlobalMenu:not(.gw-hover-open):not(.gw-keyboard-open):not(.gw-touch-open) :is(.sgsi-global-root-toggle,.sgsi-global-item,.sgsi-global-node-toggle)>span,\nbody.grac-workspace #sgsiGlobalMenu:not(.gw-hover-open):not(.gw-keyboard-open):not(.gw-touch-open) .sgsi-global-panel.sgsi-open{display:none!important}\nbody.grac-workspace #sgsiGlobalMenu:not(.gw-hover-open):not(.gw-keyboard-open):not(.gw-touch-open) :is(.sgsi-global-root-toggle,.sgsi-global-node-toggle)::after{display:none!important}\nbody.grac-workspace #sgsiGlobalMenu:not(.gw-hover-open):not(.gw-keyboard-open):not(.gw-touch-open) :is(.sgsi-global-root-toggle,.sgsi-global-panel-control-btn){justify-content:center!important;padding:10px 0!important;gap:0!important}\nbody.grac-workspace #sgsiGlobalMenu .gw-touch-toggle{display:none!important}\nbody.grac-workspace #gw-detail{border-left:1px solid #c6d7ec;border-right:5px solid var(--gw-navy);background:#fff}\nbody.grac-workspace :is(.card,.gw-surface){box-shadow:none!important}\n@media (hover:none), (pointer:coarse){\n body.grac-workspace #sgsiGlobalMenu .gw-touch-toggle{display:flex!important;align-items:center!important;justify-content:center!important;background:transparent!important;border:1px solid #476789!important;border-radius:6px!important;color:#fff!important;width:100%!important;min-height:42px!important;margin-bottom:8px!important;font-size:20px!important}\n}\n@media(max-width:800px){\n body.grac-workspace,body.grac-workspace.gw-nav-closed{padding-left:64px!important}\n body.grac-workspace #sgsiGlobalMenu{display:block!important;left:0!important;width:64px!important}\n body.grac-workspace #sgsiGlobalMenu:is(.gw-hover-open,.gw-keyboard-open,.gw-touch-open){width:min(280px,calc(100vw - 36px))!important}\n body.grac-workspace #gw-detail{width:calc(100% - 64px)!important}\n}\n@media print{body.grac-workspace{padding:0!important}body.grac-workspace #sgsiGlobalMenu{display:none!important}body.grac-workspace>.container{border:0!important}}\n/* Controles profesionales uniformes — GRAC */\nbody.grac-workspace .gw-action.gw-action{\n display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:6px!important;\n background:linear-gradient(180deg,#4196ed 0%,#287ed8 55%,#1967c4 100%)!important;\n color:#fff!important;-webkit-text-fill-color:#fff!important;border:1px solid #236ac0!important;\n border-radius:6px!important;padding:7px 12px!important;min-height:32px!important;height:auto!important;max-height:none!important;\n font-family:inherit!important;font-size:12px!important;font-weight:600!important;line-height:1.25!important;\n letter-spacing:0!important;box-shadow:inset 0 1px 0 #ffffff24,0 1px 3px #0f40751a!important;\n text-shadow:none!important;text-decoration:none!important;white-space:normal!important;vertical-align:middle!important;\n width:auto!important;min-width:0!important;max-width:100%!important;transform:none!important;\n transition:background .15s ease,box-shadow .15s ease!important;\n}\nbody.grac-workspace .gw-action.gw-action:hover{background:linear-gradient(180deg,#3289e4,#185db6)!important;border-color:#1758a9!important;box-shadow:0 2px 5px #154e8f26!important}\nbody.grac-workspace .gw-action.gw-action:active{background:#1a62ba!important;box-shadow:inset 0 1px 3px #06265033!important}\nbody.grac-workspace .gw-action.gw-action:focus-visible{outline:3px solid #92bdf7!important;outline-offset:2px!important}\nbody.grac-workspace .gw-action.gw-action:is(:disabled,[aria-disabled="true"]){opacity:.5!important;box-shadow:none!important}\nbody.grac-workspace .gw-action.gw-action :is(i,.bi,span,svg){color:inherit!important;-webkit-text-fill-color:inherit!important;font-size:inherit!important}\nbody.grac-workspace .gw-action.gw-action>i{font-size:13px!important}\nbody.grac-workspace table .gw-action.gw-action{font-size:11.5px!important;min-height:29px!important;padding:6px 10px!important;margin:2px!important}\nbody.grac-workspace :is(.risk-actions-wrap,.invsoftmat-actions){gap:4px!important}\nbody.grac-workspace .gw-stat-number.gw-stat-number{font-size:20px!important;line-height:1.2!important;font-weight:650!important;letter-spacing:-.02em!important}\nbody.grac-workspace .gw-stat-label.gw-stat-label{font-size:11px!important;font-weight:550!important;line-height:1.3!important}\nbody.grac-workspace .gw-stat-box.gw-stat-box{padding:12px 14px!important;min-height:0!important;box-shadow:none!important}\nbody.grac-workspace .gw-total.gw-total{display:inline-flex!important;align-items:center!important;gap:4px!important;background:#edf4fd!important;color:#235c9a!important;-webkit-text-fill-color:#235c9a!important;font-size:11px!important;font-weight:600!important;line-height:1.3!important;min-height:0!important;padding:4px 8px!important;border:1px solid #d5e4f6!important;border-radius:6px!important;box-shadow:none!important}\nbody.grac-workspace .gw-total.gw-total :is(strong,b,span){font-size:inherit!important;color:inherit!important}\nbody.grac-workspace .sgsi-stat-icon{width:32px!important;height:32px!important;font-size:16px!important;flex:0 0 32px!important}\nbody.grac-workspace header.sgsi-topbar .sgsi-user-area{border-left:1px solid #ffffff29!important;padding-left:16px!important;min-width:0!important;gap:0!important}\nbody.grac-workspace header.sgsi-topbar .sgsi-user-area button.sgsi-user-link{\n display:inline-flex!important;align-items:center!important;gap:9px!important;background:transparent!important;background-image:none!important;\n color:#f4f8ff!important;-webkit-text-fill-color:#f4f8ff!important;border:1px solid transparent!important;border-radius:6px!important;\n padding:5px 6px!important;min-height:38px!important;height:auto!important;box-shadow:none!important;\n font-size:13px!important;font-weight:500!important;line-height:1.2!important;transform:none!important;\n}\nbody.grac-workspace header.sgsi-topbar .sgsi-user-area button.sgsi-user-link:hover,\nbody.grac-workspace header.sgsi-topbar .sgsi-user-area button.sgsi-user-link[aria-expanded="true"]{background:#ffffff0d!important;border-color:#ffffff1f!important;box-shadow:none!important}\nbody.grac-workspace header.sgsi-topbar .sgsi-user-area .sgsi-user-photo{width:30px!important;height:30px!important;border:1px solid #b1c9e8!important;box-shadow:none!important}\nbody.grac-workspace header.sgsi-topbar .sgsi-user-area .sgsi-user-name{font-size:12px!important;font-weight:550!important;margin:0!important;color:#f4f8ff!important}\nbody.grac-workspace header.sgsi-topbar .sgsi-user-area .dropdown-toggle::after{font-size:10px!important;margin-left:5px!important}\nbody.grac-workspace header.sgsi-topbar .sgsi-user-area .dropdown-menu{border-radius:7px!important;padding:5px!important;font-size:13px!important;min-width:190px!important}\nbody.grac-workspace header.sgsi-topbar .sgsi-user-area .dropdown-item{padding:8px 10px!important;border-radius:4px!important}\nbody.grac-workspace header.sgsi-topbar .gw-search{max-width:350px!important;min-width:100px!important}\nbody.grac-workspace header.sgsi-topbar .gw-search input{\n height:34px!important;min-height:34px!important;background:#ffffff0c!important;background-image:none!important;\n border:1px solid #ffffff35!important;border-radius:6px!important;box-shadow:none!important;\n color:#ecf3ff!important;font-size:12px!important;font-weight:400!important;padding:7px 12px 7px 33px!important;\n}\nbody.grac-workspace header.sgsi-topbar .gw-search input::placeholder{color:#c3d0e2!important;opacity:1!important}\nbody.grac-workspace header.sgsi-topbar .gw-search input:focus{background:#ffffff12!important;border-color:#769bc7!important;box-shadow:0 0 0 2px #ffffff0c!important;outline:none!important}\nbody.grac-workspace header.sgsi-topbar .gw-search kbd{display:none!important}\nbody.grac-workspace header.sgsi-topbar .gw-search .gw-search-icon{position:absolute;left:11px;top:10px;width:14px;height:14px;color:#b9cbe2;pointer-events:none}\nbody.grac-workspace header.sgsi-topbar .gw-search .gw-results{top:40px!important}\n@media(max-width:800px){\n body.grac-workspace header.sgsi-topbar .sgsi-user-area{padding-left:6px!important}\n body.grac-workspace header.sgsi-topbar .sgsi-user-area button.sgsi-user-link{padding:3px!important;gap:3px!important}\n body.grac-workspace header.sgsi-topbar .sgsi-user-area .sgsi-user-name{display:none!important}\n body.grac-workspace header.sgsi-topbar .gw-search input{padding-left:28px!important;font-size:11px!important}\n body.grac-workspace header.sgsi-topbar .gw-search .gw-search-icon{left:9px}\n}\n'
-GRAC_WORKSPACE_JS = '(function(){\n\'use strict\';\nfunction ready(){\n if(!document.body.classList.contains(\'grac-workspace\') || document.body.dataset.gwReady)return;\n document.body.dataset.gwReady=\'true\';\n var body=document.body, menu=document.getElementById(\'sgsiGlobalMenu\'), top=document.querySelector(\'.sgsi-topbar-inner\');\n var main=document.querySelector(\'body > .container\') || document.querySelector(\'main\');\n var brand=document.querySelector(\'.sgsi-brand\');\n if(brand){var name=document.createElement(\'span\');name.className=\'gw-brand-name\';name.textContent=\'ARKYNTECH | GRAC\';brand.appendChild(name)}\n function label(el){return (el.innerText || el.textContent || \'\').replace(/\\s+/g,\' \').trim()}\n function safeLink(a){try{var u=new URL(a.getAttribute(\'href\'),location.href);return u.origin===location.origin && /^https?:$/.test(u.protocol) && a.getAttribute(\'href\').startsWith(\'/\') && !a.hasAttribute(\'onclick\')}catch(e){return false}}\n var links=menu?Array.from(menu.querySelectorAll(\'a[href]\')).filter(safeLink):[];\n var unique=new Map();links.forEach(function(a){if(!unique.has(a.getAttribute(\'href\')))unique.set(a.getAttribute(\'href\'),a)});links=Array.from(unique.values());\n\n // Un solo menú: iconos en reposo; expansión sobre el contenido, sin desplazarlo.\n var touchToggle=null;\n function expanded(){if(touchToggle)touchToggle.setAttribute(\'aria-expanded\',String(!!menu&&menu.classList.contains(\'gw-touch-open\')))}\n body.classList.remove(\'gw-nav-closed\',\'gw-mobile-nav\',\'grac-menu-pinned\');\n if(menu){\n  menu.addEventListener(\'pointerenter\',function(e){if(e.pointerType!==\'touch\')menu.classList.add(\'gw-hover-open\')});\n  menu.addEventListener(\'pointerleave\',function(e){if(e.pointerType!==\'touch\')menu.classList.remove(\'gw-hover-open\')});\n  menu.addEventListener(\'focusin\',function(e){if(e.target.matches(\':focus-visible\'))menu.classList.add(\'gw-keyboard-open\')});\n  menu.addEventListener(\'focusout\',function(e){if(!menu.contains(e.relatedTarget))menu.classList.remove(\'gw-keyboard-open\')});\n  menu.addEventListener(\'pointerdown\',function(){menu.classList.remove(\'gw-keyboard-open\')});\n  touchToggle=document.createElement(\'button\');touchToggle.type=\'button\';touchToggle.className=\'gw-touch-toggle\';\n  touchToggle.innerHTML=\'<i class="bi bi-list" aria-hidden="true"></i>\';touchToggle.setAttribute(\'aria-label\',\'Mostrar u ocultar nombres del menú\');\n  touchToggle.setAttribute(\'aria-controls\',\'sgsiGlobalMenuScroll\');\n  touchToggle.addEventListener(\'click\',function(){menu.classList.toggle(\'gw-touch-open\');expanded()});\n  var scroll=menu.querySelector(\'.sgsi-menu-scroll-only\');if(scroll)scroll.prepend(touchToggle);\n  expanded();\n  document.addEventListener(\'pointerdown\',function(e){if(!menu.contains(e.target)){menu.classList.remove(\'gw-touch-open\',\'gw-keyboard-open\');expanded()}});\n }\n if(menu){menu.setAttribute(\'aria-label\',\'Módulos de GRAC\');var navTitle=document.createElement(\'div\');navTitle.className=\'gw-nav-title\';navTitle.textContent=\'Espacio corporativo\';var list=menu.querySelector(\'.sgsi-global-menu-list\');if(list)list.prepend(navTitle);\n menu.querySelectorAll(\'[data-target]\').forEach(function(a){a.setAttribute(\'role\',\'button\');a.setAttribute(\'aria-controls\',a.dataset.target);var p=document.getElementById(a.dataset.target);a.setAttribute(\'aria-expanded\',String(!!p&&p.classList.contains(\'sgsi-open\')));a.addEventListener(\'click\',function(){a.setAttribute(\'aria-expanded\',String(!!p&&p.classList.contains(\'sgsi-open\')))});a.addEventListener(\'keydown\',function(e){if(e.key===\' \'){e.preventDefault();a.click()}})});\n menu.querySelectorAll(\'.sgsi-active,.sgsi-center-active\').forEach(function(a){a.setAttribute(\'aria-current\',\'page\')});}\n if(top && links.length){\n  var search=document.createElement(\'div\');search.className=\'gw-search\';search.innerHTML=\'<input type="search" placeholder="Buscar módulo…" aria-label="Buscar módulos disponibles" aria-controls="gw-search-results" aria-expanded="false" autocomplete="off"><kbd>⌘ / Ctrl K</kbd><div class="gw-results" id="gw-search-results" hidden></div>\';\n  var user=top.querySelector(\'.sgsi-user-area\');top.insertBefore(search,user || null);\n  var input=search.querySelector(\'input\'),results=search.querySelector(\'.gw-results\');\n  function norm(s){return s.normalize(\'NFD\').replace(/[\\u0300-\\u036f]/g,\'\').toLowerCase()}\n  function closeSearch(){results.hidden=true;input.setAttribute(\'aria-expanded\',\'false\')}\n  input.addEventListener(\'input\',function(){results.replaceChildren();var q=norm(input.value.trim());if(!q){closeSearch();return}var found=links.filter(function(a){return norm(label(a)).includes(q)}).slice(0,12);found.forEach(function(a){var result=document.createElement(\'a\');result.href=a.getAttribute(\'href\');result.textContent=label(a);results.appendChild(result)});if(!found.length){var p=document.createElement(\'p\');p.textContent=\'No se encontraron módulos disponibles.\';results.appendChild(p)}results.hidden=false;input.setAttribute(\'aria-expanded\',\'true\')});\n  input.addEventListener(\'keydown\',function(e){if(e.key===\'ArrowDown\'){var a=results.querySelector(\'a\');if(a){e.preventDefault();a.focus()}}if(e.key===\'Enter\'){var first=results.querySelector(\'a\');if(first&&!results.hidden){e.preventDefault();first.click()}}if(e.key===\'Escape\')closeSearch()});\n  document.addEventListener(\'click\',function(e){if(!search.contains(e.target))closeSearch()});\n  document.addEventListener(\'keydown\',function(e){if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()===\'k\'){e.preventDefault();input.focus()}});\n }\n function decorate(root){\n  root.querySelectorAll(\'[class]\').forEach(function(el){\n   if(el.closest(\'#sgsiGlobalMenu,.sgsi-topbar,#gw-rail,#gw-detail,.sgsi-progress-card\'))return;\n   var classes=Array.from(el.classList);\n   if(classes.some(function(c){return /-shell$/.test(c)}))el.classList.add(\'gw-shell\');\n   var heading=classes.some(function(c){return /(?:-header-card|-hero-card|-hero)$/.test(c)||c===\'dashsimple-header\'||c===\'plan-hero-centered\'||c===\'report-hero-centered\'});\n   if(heading){el.classList.add(\'gw-heading\');var h=el.querySelector(\'h1,h2,h3\');if(h)h.classList.add(\'gw-page-heading\')}\n   else if(classes.some(function(c){return c===\'card\'||c===\'glass-card\'||/-card$/.test(c)}))el.classList.add(\'gw-surface\');\n  });\n }\n decorate(main || body);\n if(main){var h=main.querySelector(\'.gw-page-heading,h1,h2,h3\');if(document.getElementById(\'sgsiLocalMenu\')&&!main.querySelector(\'h1,h2\')){h=document.createElement(\'h1\');h.textContent=\'Centro de Control\';h.className=\'gw-page-heading\';main.prepend(h)}\n  var crumbs=document.createElement(\'nav\');crumbs.className=\'gw-breadcrumb\';crumbs.setAttribute(\'aria-label\',\'Ubicación\');var home=document.createElement(\'a\');home.href=brand?brand.getAttribute(\'href\'):\'/\';home.textContent=\'GRAC\';crumbs.appendChild(home);var separator=document.createElement(\'span\');separator.textContent=\'/\';crumbs.appendChild(separator);var current=document.createElement(\'span\');current.textContent=h?label(h):document.title;crumbs.appendChild(current);main.prepend(crumbs);\n }\n // Detalle de lectura: solo campos ya presentes en la tabla; no consulta datos adicionales.\n var drawer=document.createElement(\'aside\');drawer.id=\'gw-detail\';drawer.hidden=true;drawer.setAttribute(\'role\',\'region\');drawer.setAttribute(\'aria-labelledby\',\'gw-detail-title\');drawer.innerHTML=\'<button type="button" id="gw-detail-close" aria-label="Cerrar detalle">×</button><h2 id="gw-detail-title" tabindex="-1">Detalle del registro</h2><p>Resumen de los campos visibles en esta tabla. Usa las acciones de la fila para editar el registro.</p><dl></dl>\';body.appendChild(drawer);var opener=null;\n function closeDetail(){drawer.hidden=true;body.classList.remove(\'gw-detail-open\');if(opener&&opener.isConnected)opener.focus()}\n drawer.querySelector(\'button\').addEventListener(\'click\',closeDetail);\n document.addEventListener(\'keydown\',function(e){if(e.key===\'Escape\'){if(!drawer.hidden)closeDetail();if(menu)menu.classList.remove(\'gw-hover-open\',\'gw-keyboard-open\',\'gw-touch-open\');expanded()}});\n function prepareTables(root){root.querySelectorAll(\'table\').forEach(function(table){\n  if(table.dataset.gwDetail||table.closest(\'.modal,#gw-detail\')||!table.tHead||!table.tBodies.length)return;\n  var header=table.tHead.rows[table.tHead.rows.length-1];if(!header||header.cells.length<3)return;\n  var names=Array.from(header.cells).map(label);\n  // No añadir columnas: conserva índices, ordenación y exportación existentes.\n  var idx=names.findIndex(function(s){return /^(acciones|acción|opciones)$/i.test(s)});if(idx<0)return;\n  table.dataset.gwDetail=\'ready\';\n  Array.from(table.tBodies).forEach(function(tb){Array.from(tb.rows).forEach(function(row){\n   if(row.cells.length!==names.length||Array.from(row.cells).some(function(c){return c.colSpan>1||c.rowSpan>1}))return;\n   var cell=row.cells[idx];var b=document.createElement(\'button\');b.type=\'button\';b.className=\'gw-detail-action\';b.textContent=\'Vista rápida\';b.title=\'Consultar campos de esta fila\';\n   b.addEventListener(\'click\',function(e){e.stopPropagation();opener=b;var dl=drawer.querySelector(\'dl\');dl.replaceChildren();Array.from(row.cells).forEach(function(c,i){if(i===idx||!names[i]||!c.getClientRects().length)return;var dt=document.createElement(\'dt\'),dd=document.createElement(\'dd\');dt.textContent=names[i];dd.textContent=label(c)||\'—\';dl.append(dt,dd)});drawer.hidden=false;body.classList.add(\'gw-detail-open\');drawer.querySelector(\'h2\').focus()});cell.appendChild(b);\n  })});\n })}\n if(main)prepareTables(main);\n if(main){var scheduled=false;new MutationObserver(function(mutations){if(scheduled||!mutations.some(function(m){return Array.from(m.addedNodes).some(function(n){return n.nodeType===1&&!n.classList.contains(\'gw-detail-action\')})}))return;scheduled=true;requestAnimationFrame(function(){scheduled=false;decorate(main)})}).observe(main,{childList:true,subtree:true})}\n}\nif(document.readyState===\'loading\')document.addEventListener(\'DOMContentLoaded\',ready);else ready();\n})();\n\n(function(){\n\'use strict\';\nfunction start(){\n if(!document.body.classList.contains(\'grac-workspace\'))return;\n const excluded=\'.sgsi-topbar,#sgsiGlobalMenu,#sgsiLocalMenu,#gw-rail,.nav-tabs,.nav-pills,.pagination,.ir-nav-panel\';\n function apply(root){\n  root.querySelectorAll(\'button,a.btn,a.button,a[class*="-btn"],a[class*="-button"],input[type="submit"],input[type="button"]\').forEach(function(el){\n   if(el.closest(excluded)||el.matches(\'.btn-close,.accordion-button,.nav-link,.navbar-toggler,.gw-touch-toggle,[role="tab"],#gw-detail-close,.close,[data-bs-dismiss]\'))return;\n   el.classList.add(\'gw-action\');\n  });\n  root.querySelectorAll(\'[class]\').forEach(function(el){\n   if(el.closest(excluded)||el.closest(\'form,table\'))return;\n   const classes=Array.from(el.classList);\n   if(classes.some(c=>/(?:kpi|stat|summary|metric)-(?:value|number|score)(?:-sm)?$/.test(c)||c===\'sast-status-value\'||c===\'mejmet-kpi\'))el.classList.add(\'gw-stat-number\');\n   if(classes.some(c=>/(?:kpi|stat|summary|metric)-(?:label|title)$/.test(c)))el.classList.add(\'gw-stat-label\');\n   if(classes.some(c=>/counter-badge$|total-badge$/.test(c)||c===\'aiinv-counter\'))el.classList.add(\'gw-total\');\n   if(classes.some(c=>/^(?:sgsi-stat-card|risk-summary-box|.*-kpi-card|.*-kpi-box|.*-summary-card|mini-stat|metric-box|metric-card)$/.test(c)))el.classList.add(\'gw-stat-box\');\n   if(classes.some(c=>/^(?:cc|pa|ir|as|adg|aiinv|score|bcp|sast|airisk|mejmet)-kpi$/.test(c))){\n    el.classList.add(\'gw-stat-box\');\n    el.querySelectorAll(\'.num,.value,strong,b,h3,h4\').forEach(n=>n.classList.add(\'gw-stat-number\'));\n    el.querySelectorAll(\'.lbl,.label,small\').forEach(n=>n.classList.add(\'gw-stat-label\'));\n   }\n   if(classes.includes(\'kpi\'))el.classList.add(\'gw-stat-number\');\n   if(classes.includes(\'mini-stat\'))el.querySelectorAll(\'b,strong\').forEach(n=>n.classList.add(\'gw-stat-number\'));\n  });\n }\n apply(document.body);\n const search=document.querySelector(\'.gw-search\');\n if(search&&!search.querySelector(\'.gw-search-icon\')){\n  const icon=document.createElementNS(\'http://www.w3.org/2000/svg\',\'svg\');icon.setAttribute(\'viewBox\',\'0 0 24 24\');icon.setAttribute(\'class\',\'gw-search-icon\');icon.setAttribute(\'aria-hidden\',\'true\');\n  icon.innerHTML=\'<circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m16 16 5 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>\';\n  search.appendChild(icon);\n }\n // Elementos añadidos por tablas, modales y consultas AJAX mantienen el mismo acabado.\n let queued=false;\n new MutationObserver(function(changes){\n  if(queued||!changes.some(m=>Array.from(m.addedNodes).some(n=>n.nodeType===1)))return;\n  queued=true;requestAnimationFrame(function(){queued=false;apply(document.body)});\n }).observe(document.body,{childList:true,subtree:true});\n}\nif(document.readyState===\'loading\')document.addEventListener(\'DOMContentLoaded\',start);else start();\n})();\n'
+GRAC_WORKSPACE_JS = '(function(){\n\'use strict\';\nfunction ready(){\n if(!document.body.classList.contains(\'grac-workspace\') || document.body.dataset.gwReady)return;\n document.body.dataset.gwReady=\'true\';\n var body=document.body, menu=document.getElementById(\'sgsiGlobalMenu\'), top=document.querySelector(\'.sgsi-topbar-inner\');\n var main=document.querySelector(\'body > .container\') || document.querySelector(\'main\');\n var brand=document.querySelector(\'.sgsi-brand\');\n if(brand){var name=document.createElement(\'span\');name.className=\'gw-brand-name\';name.textContent=\'ARKYNTECH | GRAC\';brand.appendChild(name)}\n function label(el){return (el.innerText || el.textContent || \'\').replace(/\\s+/g,\' \').trim()}\n function safeLink(a){try{var u=new URL(a.getAttribute(\'href\'),location.href);return u.origin===location.origin && /^https?:$/.test(u.protocol) && a.getAttribute(\'href\').startsWith(\'/\') && !a.hasAttribute(\'onclick\')}catch(e){return false}}\n var links=menu?Array.from(menu.querySelectorAll(\'a[href]\')).filter(safeLink):[];\n var unique=new Map();links.forEach(function(a){if(!unique.has(a.getAttribute(\'href\')))unique.set(a.getAttribute(\'href\'),a)});links=Array.from(unique.values());\n\n // Un solo menú: iconos en reposo; expansión sobre el contenido, sin desplazarlo.\n var touchToggle=null;\n function expanded(){if(touchToggle)touchToggle.setAttribute(\'aria-expanded\',String(!!menu&&menu.classList.contains(\'gw-touch-open\')))}\n body.classList.remove(\'gw-nav-closed\',\'gw-mobile-nav\',\'grac-menu-pinned\');\n if(menu){\n  menu.addEventListener(\'pointerenter\',function(e){if(e.pointerType!==\'touch\')menu.classList.add(\'gw-hover-open\')});\n  menu.addEventListener(\'pointerleave\',function(e){if(e.pointerType!==\'touch\')menu.classList.remove(\'gw-hover-open\')});\n  menu.addEventListener(\'focusin\',function(e){if(e.target.matches(\':focus-visible\'))menu.classList.add(\'gw-keyboard-open\')});\n  menu.addEventListener(\'focusout\',function(e){if(!menu.contains(e.relatedTarget))menu.classList.remove(\'gw-keyboard-open\')});\n  menu.addEventListener(\'pointerdown\',function(){menu.classList.remove(\'gw-keyboard-open\')});\n  touchToggle=document.createElement(\'button\');touchToggle.type=\'button\';touchToggle.className=\'gw-touch-toggle\';\n  touchToggle.innerHTML=\'<i class="bi bi-list" aria-hidden="true"></i>\';touchToggle.setAttribute(\'aria-label\',\'Mostrar u ocultar nombres del menú\');\n  touchToggle.setAttribute(\'aria-controls\',\'sgsiGlobalMenuScroll\');\n  touchToggle.addEventListener(\'click\',function(){menu.classList.toggle(\'gw-touch-open\');expanded()});\n  var scroll=menu.querySelector(\'.sgsi-menu-scroll-only\');if(scroll)scroll.prepend(touchToggle);\n  expanded();\n  document.addEventListener(\'pointerdown\',function(e){if(!menu.contains(e.target)){menu.classList.remove(\'gw-touch-open\',\'gw-keyboard-open\');expanded()}});\n }\n if(menu){menu.setAttribute(\'aria-label\',\'Módulos de GRAC\');var navTitle=document.createElement(\'div\');navTitle.className=\'gw-nav-title\';navTitle.textContent=\'Espacio corporativo\';var list=menu.querySelector(\'.sgsi-global-menu-list\');if(list)list.prepend(navTitle);\n menu.querySelectorAll(\'[data-target]\').forEach(function(a){a.setAttribute(\'role\',\'button\');a.setAttribute(\'aria-controls\',a.dataset.target);var p=document.getElementById(a.dataset.target);a.setAttribute(\'aria-expanded\',String(!!p&&p.classList.contains(\'sgsi-open\')));a.addEventListener(\'click\',function(){a.setAttribute(\'aria-expanded\',String(!!p&&p.classList.contains(\'sgsi-open\')))});a.addEventListener(\'keydown\',function(e){if(e.key===\' \'){e.preventDefault();a.click()}})});\n menu.querySelectorAll(\'.sgsi-active,.sgsi-center-active\').forEach(function(a){a.setAttribute(\'aria-current\',\'page\')});}\n if(top && links.length){\n  var search=document.createElement(\'div\');search.className=\'gw-search\';search.innerHTML=\'<input type="search" placeholder="Buscar módulo…" aria-label="Buscar módulos disponibles" aria-controls="gw-search-results" aria-expanded="false" autocomplete="off"><kbd>⌘ / Ctrl K</kbd><div class="gw-results" id="gw-search-results" hidden></div>\';\n  var user=top.querySelector(\'.sgsi-user-area\');top.insertBefore(search,user || null);\n  var input=search.querySelector(\'input\'),results=search.querySelector(\'.gw-results\');\n  function norm(s){return s.normalize(\'NFD\').replace(/[\\u0300-\\u036f]/g,\'\').toLowerCase()}\n  function closeSearch(){results.hidden=true;input.setAttribute(\'aria-expanded\',\'false\')}\n  input.addEventListener(\'input\',function(){results.replaceChildren();var q=norm(input.value.trim());if(!q){closeSearch();return}var found=links.filter(function(a){return norm(label(a)).includes(q)}).slice(0,12);found.forEach(function(a){var result=document.createElement(\'a\');result.href=a.getAttribute(\'href\');result.textContent=label(a);results.appendChild(result)});if(!found.length){var p=document.createElement(\'p\');p.textContent=\'No se encontraron módulos disponibles.\';results.appendChild(p)}results.hidden=false;input.setAttribute(\'aria-expanded\',\'true\')});\n  input.addEventListener(\'keydown\',function(e){if(e.key===\'ArrowDown\'){var a=results.querySelector(\'a\');if(a){e.preventDefault();a.focus()}}if(e.key===\'Enter\'){var first=results.querySelector(\'a\');if(first&&!results.hidden){e.preventDefault();first.click()}}if(e.key===\'Escape\')closeSearch()});\n  document.addEventListener(\'click\',function(e){if(!search.contains(e.target))closeSearch()});\n  document.addEventListener(\'keydown\',function(e){if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()===\'k\'){e.preventDefault();input.focus()}});\n }\n function decorate(root){\n  root.querySelectorAll(\'[class]\').forEach(function(el){\n   if(el.closest(\'#sgsiGlobalMenu,.sgsi-topbar,#gw-rail,#gw-detail,.sgsi-progress-card\'))return;\n   var classes=Array.from(el.classList);\n   if(classes.some(function(c){return /-shell$/.test(c)}))el.classList.add(\'gw-shell\');\n   var heading=classes.some(function(c){return /(?:-header-card|-hero-card|-hero)$/.test(c)||c===\'dashsimple-header\'||c===\'plan-hero-centered\'||c===\'report-hero-centered\'});\n   if(heading){el.classList.add(\'gw-heading\');var h=el.querySelector(\'h1,h2,h3\');if(h)h.classList.add(\'gw-page-heading\')}\n   else if(classes.some(function(c){return c===\'card\'||c===\'glass-card\'||/-card$/.test(c)}))el.classList.add(\'gw-surface\');\n  });\n }\n decorate(main || body);\n if(main){var h=main.querySelector(\'.gw-page-heading,h1,h2,h3\');if(document.getElementById(\'sgsiLocalMenu\')&&!main.querySelector(\'h1,h2\')){h=document.createElement(\'h1\');h.textContent=\'Centro de Control\';h.className=\'gw-page-heading\';main.prepend(h)}\n }\n // Detalle de lectura: solo campos ya presentes en la tabla; no consulta datos adicionales.\n var drawer=document.createElement(\'aside\');drawer.id=\'gw-detail\';drawer.hidden=true;drawer.setAttribute(\'role\',\'region\');drawer.setAttribute(\'aria-labelledby\',\'gw-detail-title\');drawer.innerHTML=\'<button type="button" id="gw-detail-close" aria-label="Cerrar detalle">×</button><h2 id="gw-detail-title" tabindex="-1">Detalle del registro</h2><p>Resumen de los campos visibles en esta tabla. Usa las acciones de la fila para editar el registro.</p><dl></dl>\';body.appendChild(drawer);var opener=null;\n function closeDetail(){drawer.hidden=true;body.classList.remove(\'gw-detail-open\');if(opener&&opener.isConnected)opener.focus()}\n drawer.querySelector(\'button\').addEventListener(\'click\',closeDetail);\n document.addEventListener(\'keydown\',function(e){if(e.key===\'Escape\'){if(!drawer.hidden)closeDetail();if(menu)menu.classList.remove(\'gw-hover-open\',\'gw-keyboard-open\',\'gw-touch-open\');expanded()}});\n function prepareTables(root){root.querySelectorAll(\'table\').forEach(function(table){\n  if(table.dataset.gwDetail||table.closest(\'.modal,#gw-detail\')||!table.tHead||!table.tBodies.length)return;\n  var header=table.tHead.rows[table.tHead.rows.length-1];if(!header||header.cells.length<3)return;\n  var names=Array.from(header.cells).map(label);\n  // No añadir columnas: conserva índices, ordenación y exportación existentes.\n  var idx=names.findIndex(function(s){return /^(acciones|acción|opciones)$/i.test(s)});if(idx<0)return;\n  table.dataset.gwDetail=\'ready\';\n  Array.from(table.tBodies).forEach(function(tb){Array.from(tb.rows).forEach(function(row){\n   if(row.cells.length!==names.length||Array.from(row.cells).some(function(c){return c.colSpan>1||c.rowSpan>1}))return;\n   var cell=row.cells[idx];var b=document.createElement(\'button\');b.type=\'button\';b.className=\'gw-detail-action\';b.textContent=\'Vista rápida\';b.title=\'Consultar campos de esta fila\';\n   b.addEventListener(\'click\',function(e){e.stopPropagation();opener=b;var dl=drawer.querySelector(\'dl\');dl.replaceChildren();Array.from(row.cells).forEach(function(c,i){if(i===idx||!names[i]||!c.getClientRects().length)return;var dt=document.createElement(\'dt\'),dd=document.createElement(\'dd\');dt.textContent=names[i];dd.textContent=label(c)||\'—\';dl.append(dt,dd)});drawer.hidden=false;body.classList.add(\'gw-detail-open\');drawer.querySelector(\'h2\').focus()});cell.appendChild(b);\n  })});\n })}\n if(main)prepareTables(main);\n if(main){var scheduled=false;new MutationObserver(function(mutations){if(scheduled||!mutations.some(function(m){return Array.from(m.addedNodes).some(function(n){return n.nodeType===1&&!n.classList.contains(\'gw-detail-action\')})}))return;scheduled=true;requestAnimationFrame(function(){scheduled=false;decorate(main)})}).observe(main,{childList:true,subtree:true})}\n}\nif(document.readyState===\'loading\')document.addEventListener(\'DOMContentLoaded\',ready);else ready();\n})();\n\n(function(){\n\'use strict\';\nfunction start(){\n if(!document.body.classList.contains(\'grac-workspace\'))return;\n const excluded=\'.sgsi-topbar,#sgsiGlobalMenu,#sgsiLocalMenu,#gw-rail,.nav-tabs,.nav-pills,.pagination,.ir-nav-panel\';\n function apply(root){\n  root.querySelectorAll(\'button,a.btn,a.button,a[class*="-btn"],a[class*="-button"],input[type="submit"],input[type="button"]\').forEach(function(el){\n   if(el.closest(excluded)||el.matches(\'.btn-close,.accordion-button,.nav-link,.navbar-toggler,.gw-touch-toggle,[role="tab"],#gw-detail-close,.close,[data-bs-dismiss]\'))return;\n   el.classList.add(\'gw-action\');\n  });\n  root.querySelectorAll(\'[class]\').forEach(function(el){\n   if(el.closest(excluded)||el.closest(\'form,table\'))return;\n   const classes=Array.from(el.classList);\n   if(classes.some(c=>/(?:kpi|stat|summary|metric)-(?:value|number|score)(?:-sm)?$/.test(c)||c===\'sast-status-value\'||c===\'mejmet-kpi\'))el.classList.add(\'gw-stat-number\');\n   if(classes.some(c=>/(?:kpi|stat|summary|metric)-(?:label|title)$/.test(c)))el.classList.add(\'gw-stat-label\');\n   if(classes.some(c=>/counter-badge$|total-badge$/.test(c)||c===\'aiinv-counter\'))el.classList.add(\'gw-total\');\n   if(classes.some(c=>/^(?:sgsi-stat-card|risk-summary-box|.*-kpi-card|.*-kpi-box|.*-summary-card|mini-stat|metric-box|metric-card)$/.test(c)))el.classList.add(\'gw-stat-box\');\n   if(classes.some(c=>/^(?:cc|pa|ir|as|adg|aiinv|score|bcp|sast|airisk|mejmet)-kpi$/.test(c))){\n    el.classList.add(\'gw-stat-box\');\n    el.querySelectorAll(\'.num,.value,strong,b,h3,h4\').forEach(n=>n.classList.add(\'gw-stat-number\'));\n    el.querySelectorAll(\'.lbl,.label,small\').forEach(n=>n.classList.add(\'gw-stat-label\'));\n   }\n   if(classes.includes(\'kpi\'))el.classList.add(\'gw-stat-number\');\n   if(classes.includes(\'mini-stat\'))el.querySelectorAll(\'b,strong\').forEach(n=>n.classList.add(\'gw-stat-number\'));\n  });\n }\n apply(document.body);\n const search=document.querySelector(\'.gw-search\');\n if(search&&!search.querySelector(\'.gw-search-icon\')){\n  const icon=document.createElementNS(\'http://www.w3.org/2000/svg\',\'svg\');icon.setAttribute(\'viewBox\',\'0 0 24 24\');icon.setAttribute(\'class\',\'gw-search-icon\');icon.setAttribute(\'aria-hidden\',\'true\');\n  icon.innerHTML=\'<circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m16 16 5 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>\';\n  search.appendChild(icon);\n }\n // Elementos añadidos por tablas, modales y consultas AJAX mantienen el mismo acabado.\n let queued=false;\n new MutationObserver(function(changes){\n  if(queued||!changes.some(m=>Array.from(m.addedNodes).some(n=>n.nodeType===1)))return;\n  queued=true;requestAnimationFrame(function(){queued=false;apply(document.body)});\n }).observe(document.body,{childList:true,subtree:true});\n}\nif(document.readyState===\'loading\')document.addEventListener(\'DOMContentLoaded\',start);else start();\n})();\n'
 
 
 # Corrige la cascada CSS del tema global para las columnas Acciones.
@@ -214001,6 +214058,13 @@ GRAC_WORKSPACE_CSS += '\n/* Unified matrix frames: medium blue perimeter, softer
 GRAC_WORKSPACE_CSS += '\n/* ===============================================================\n   GRAC — OPCIÓN 1 / MENÚ CORPORATIVO COMPACTO (10 NOV 2026)\n   Solo presentación del menú lateral: no cambia enlaces ni permisos.\n   La barra de iconos sigue compacta y se expande por hover/foco.\n   Esta capa va al final del CSS Workspace para ganar precedencia.\n   =============================================================== */\nbody.grac-workspace #sgsiGlobalMenu {\n  --grac-menu-navy: #08274d;\n  --grac-menu-deep: #061f3f;\n  --grac-menu-primary: #1d67be;\n  --grac-menu-hover: #164774;\n  --grac-menu-accent: #55b3ff;\n  background:var(--grac-menu-navy) !important;\n}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-menu-fixed-shell {\n  background:linear-gradient(180deg,var(--grac-menu-navy),var(--grac-menu-deep)) !important;\n  border-right:1px solid #294d77 !important;\n  border-radius:0 !important;\n  box-shadow:none !important;\n}\nbody.grac-workspace #sgsiGlobalMenu:is(.gw-hover-open,.gw-keyboard-open,.gw-touch-open) {\n  width:292px !important;\n  box-shadow:9px 0 28px rgba(3,24,50,.20) !important;\n}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-menu-scroll-only {\n  padding-bottom:14px !important;\n  overscroll-behavior:contain;\n}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-menu-list {\n  display:flex !important;\n  flex-direction:column !important;\n  gap:3px !important;\n}\nbody.grac-workspace #sgsiGlobalMenu .gw-nav-title {\n  color:#a8c9ed !important;\n  font-size:10px !important;\n  font-weight:800 !important;\n  line-height:1.2 !important;\n  letter-spacing:.12em !important;\n  padding:8px 11px 12px !important;\n  border-bottom:1px solid rgba(168,201,237,.16);\n  margin-bottom:5px;\n}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-root-item {\n  margin:2px 0 !important;\n}\nbody.grac-workspace #sgsiGlobalMenu :is(.sgsi-global-root-toggle,.sgsi-global-panel-control-btn) {\n  border:1px solid transparent !important;\n  background:transparent !important;\n  background-image:none !important;\n  box-shadow:none !important;\n  border-radius:9px !important;\n  color:#e1edfc !important;\n  font-size:12.5px !important;\n  font-weight:650 !important;\n  line-height:1.24 !important;\n  letter-spacing:0 !important;\n  min-height:37px !important;\n  padding:7px 10px !important;\n  margin:1px 0 !important;\n  gap:9px !important;\n  text-shadow:none !important;\n  transition:background-color .15s ease, color .15s ease, box-shadow .15s ease !important;\n}\nbody.grac-workspace #sgsiGlobalMenu :is(.sgsi-global-root-toggle,.sgsi-global-panel-control-btn) > i {\n  width:19px !important;\n  flex:0 0 19px !important;\n  color:#c5dbf7 !important;\n  font-size:17px !important;\n}\nbody.grac-workspace #sgsiGlobalMenu :is(.sgsi-global-root-toggle,.sgsi-global-panel-control-btn) > span {\n  color:inherit !important;\n  overflow-wrap:anywhere;\n}\nbody.grac-workspace #sgsiGlobalMenu :is(.sgsi-global-root-toggle,.sgsi-global-panel-control-btn):hover:not(.sgsi-active-tree):not(.sgsi-center-active) {\n  background:#164774 !important;\n  border-color:#285784 !important;\n  color:white !important;\n}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-root-toggle.sgsi-active-tree,\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-panel-control-btn.sgsi-center-active {\n  background:linear-gradient(110deg,#1b62b7,#2578d3) !important;\n  border-color:#3482d8 !important;\n  box-shadow:inset 3px 0 #84c8ff !important;\n  color:#ffffff !important;\n  font-weight:760 !important;\n}\nbody.grac-workspace #sgsiGlobalMenu :is(.sgsi-global-root-toggle.sgsi-active-tree,.sgsi-global-panel-control-btn.sgsi-center-active) > i,\nbody.grac-workspace #sgsiGlobalMenu :is(.sgsi-global-root-toggle.sgsi-active-tree,.sgsi-global-panel-control-btn.sgsi-center-active) > span {\n  color:#ffffff !important;\n}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-panel {\n  background:transparent !important;\n  border:0 !important;\n  border-left:1px solid #375b81 !important;\n  border-radius:0 !important;\n  margin:4px 0 9px 17px !important;\n  padding:1px 0 2px 10px !important;\n  box-shadow:none !important;\n}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-subpanel {\n  margin:3px 0 6px 7px !important;\n  padding-left:9px !important;\n  border-left:1px solid #385a81 !important;\n}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-panel li {\n  margin:1px 0 !important;\n  padding:0 !important;\n}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-panel :is(.sgsi-global-item,.sgsi-global-node-toggle) {\n  position:relative !important;\n  display:flex !important;\n  align-items:center !important;\n  width:100% !important;\n  max-width:100% !important;\n  min-width:0 !important;\n  min-height:33px !important;\n  height:auto !important;\n  padding:6px 8px !important;\n  margin:1px 0 !important;\n  gap:8px !important;\n  background:transparent !important;\n  background-image:none !important;\n  border:1px solid transparent !important;\n  border-radius:7px !important;\n  box-shadow:none !important;\n  color:#cbdcf2 !important;\n  font-size:11.9px !important;\n  font-weight:520 !important;\n  line-height:1.28 !important;\n  text-decoration:none !important;\n  transition:background-color .15s ease,border-color .15s ease !important;\n}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-panel :is(.sgsi-global-item,.sgsi-global-node-toggle) > i {\n  flex:0 0 17px !important;\n  width:17px !important;\n  font-size:14px !important;\n  color:#a9c8eb !important;\n}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-panel :is(.sgsi-global-item,.sgsi-global-node-toggle) > span {\n  flex:1 1 auto !important;\n  min-width:0 !important;\n  white-space:normal !important;\n  overflow-wrap:break-word !important;\n  color:inherit !important;\n}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-panel :is(.sgsi-global-item,.sgsi-global-node-toggle):hover {\n  background:#174775 !important;\n  color:#ffffff !important;\n  border-color:#345b85 !important;\n}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-panel .sgsi-global-node-toggle.sgsi-active-tree {\n  background:#113a66 !important;\n  border-color:#2a5988 !important;\n  color:#eef6ff !important;\n  font-weight:690 !important;\n}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-panel .sgsi-global-item.sgsi-active {\n  background:#174777 !important;\n  border:1px solid #2c649f !important;\n  box-shadow:inset 3px 0 var(--grac-menu-accent) !important;\n  color:#ffffff !important;\n  font-weight:740 !important;\n}\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-panel .sgsi-global-item.sgsi-active > i,\nbody.grac-workspace #sgsiGlobalMenu .sgsi-global-panel .sgsi-global-item.sgsi-active > span {\n  color:#ffffff !important;\n}\nbody.grac-workspace #sgsiGlobalMenu :is(.sgsi-global-root-toggle,.sgsi-global-node-toggle)::after {\n  color:#a9c8eb !important;\n  font-size:12px !important;\n}\nbody.grac-workspace #sgsiGlobalMenu :is(a,button):focus-visible {\n  outline:2px solid #8bcaff !important;\n  outline-offset:1px !important;\n}\n/* Contraído: conservar 64px, íconos centrados y submódulos ocultos. */\nbody.grac-workspace #sgsiGlobalMenu:not(.gw-hover-open):not(.gw-keyboard-open):not(.gw-touch-open) :is(.sgsi-global-root-toggle,.sgsi-global-panel-control-btn) {\n  justify-content:center !important;\n  padding:8px 0 !important;\n  gap:0 !important;\n  min-height:39px !important;\n}\nbody.grac-workspace #sgsiGlobalMenu:not(.gw-hover-open):not(.gw-keyboard-open):not(.gw-touch-open) .sgsi-global-panel.sgsi-open {\n  display:none !important;\n}\n@media(max-width:800px) {\n  body.grac-workspace #sgsiGlobalMenu:is(.gw-hover-open,.gw-keyboard-open,.gw-touch-open) {\n    width:min(292px,calc(100vw - 30px)) !important;\n  }\n}\n@media print {\n  body.grac-workspace #sgsiGlobalMenu {display:none !important;}\n}\n'
 
 
+# Encabezados globales compactos: solo cambia el estilo visual, no las rutas.
+GRAC_WORKSPACE_CSS += '\n/* GRAC - encabezados compactos, un solo titulo principal en pantalla */\nbody.grac-workspace .gw-breadcrumb,\nbody.grac-workspace nav[aria-label="Ubicación"].gw-breadcrumb {\n  display:none !important; margin:0 !important; padding:0 !important;\n}\n/* El contenido empieza casi debajo de la barra superior, sin la fila GRAC / modulo. */\nbody.grac-workspace > .container {\n  padding-top:12px !important;\n  padding-bottom:18px !important;\n}\n/* No se ocultan titulos internos de tablas, formularios o cuadros de resultados. */\nbody.grac-workspace .gw-heading {\n  min-height:0 !important;\n  padding-top:9px !important;\n  padding-bottom:9px !important;\n  margin-top:0 !important;\n  margin-bottom:9px !important;\n}\nbody.grac-workspace .gw-heading .gw-page-heading {\n  margin:0 !important;\n  line-height:1.16 !important;\n  font-weight:850 !important;\n}\n/* Solo se eliminan textos introductorios dentro de la cabecera del modulo. */\nbody.grac-workspace .gw-heading :is(\n  [class$="-subtitle"], [class$="-subtitulo"],\n  .subtitle, .page-subtitle, .module-subtitle, .hero-subtitle,\n  [class$="-kicker"], [class$="-eyebrow"], .module-kicker,\n  p\n) { display:none !important; }\n/* Cabeceras simples sin contenedor gw-heading. */\nbody.grac-workspace > .container > :is(h1,h2,h3).gw-page-heading {\n  margin-top:0 !important; margin-bottom:10px !important;\n  font-weight:850 !important;\n}\n@media(max-width:800px){\n  body.grac-workspace > .container{padding-top:10px !important;}\n}\n'
+
+# GRAC: visual header and icon unification, applied on the client.
+GRAC_WORKSPACE_CSS += '\n/* 12-NOV-2026: definitivo, se envía en HEAD antes de pintar la pantalla. */\nbody.grac-workspace :is(.grac-module-heading,.grac-inline-heading){\n  display:flex!important;align-items:center!important;justify-content:flex-start!important;\n  gap:15px!important;min-height:62px!important;margin:0 0 13px!important;\n  padding:2px 0 7px!important;background:#fff!important;background-image:none!important;\n  border:0!important;border-radius:0!important;box-shadow:none!important;\n  color:#132238!important;position:relative!important;overflow:visible!important;\n}\nbody.grac-workspace :is(.grac-module-heading,.grac-inline-heading) .grac-module-icon{\n  flex:0 0 60px!important;display:inline-flex!important;align-items:center!important;\n  justify-content:center!important;width:60px!important;height:60px!important;\n  border-radius:12px!important;background:#e7f1ff!important;border:1px solid #dce9fb!important;\n  box-shadow:none!important;color:#1460bd!important;line-height:1!important;\n}\nbody.grac-workspace :is(.grac-module-heading,.grac-inline-heading) .grac-module-icon i{\n  display:inline-block!important;font-size:28px!important;color:#1460bd!important;line-height:1!important;\n}\nbody.grac-workspace :is(.grac-module-heading,.grac-inline-heading) :is(h1,h2,h3){\n  margin:0!important;padding:0!important;color:#132238!important;\n  -webkit-text-fill-color:#132238!important;font-weight:850!important;\n  letter-spacing:-.03em!important;line-height:1.14!important;\n  font-size:clamp(23px,2.1vw,30px)!important;text-align:left!important;\n  text-shadow:none!important;background:transparent!important;\n}\nbody.grac-workspace :is(.grac-module-heading,.grac-inline-heading)::before,\nbody.grac-workspace :is(.grac-module-heading,.grac-inline-heading)::after{content:none!important;display:none!important;}\nbody.grac-workspace .grac-module-heading :is(.bcp-subtitle,.as-subtitle,.remmat-subtitle,.lr-subtitle,.pa-kicker,.pa-hero p),\nbody.grac-workspace .grac-alert-header-badge,\nbody.grac-workspace .grac-alert-header-subtitle,\nbody.grac-workspace .mobile-admin-header-badge,\nbody.grac-workspace .mobile-admin-subtitle{display:none!important;}\n/* Existing module icons are preserved; do not paint a second pseudo icon. */\nbody.grac-workspace .bcp-hero-left::before,\nbody.grac-workspace .as-header-overlay::before,\nbody.grac-workspace .remmat-header-overlay::before,\nbody.grac-workspace .lr-header-overlay::before,\nbody.grac-workspace .aiinv-header::before,\nbody.grac-workspace .aiinv-header:before{content:none!important;display:none!important;}\nbody.grac-workspace .aiinv-header{display:flex!important;gap:15px!important;align-items:center!important;\n min-height:65px!important;padding:2px 0 9px!important;margin:0 0 10px!important;\n background:#fff!important;background-image:none!important;box-shadow:none!important;\n border:0!important;border-radius:0!important;color:#132238!important;overflow:visible!important;}\nbody.grac-workspace .aiinv-header .aiinv-icon{width:60px!important;height:60px!important;min-width:60px!important;\n display:flex!important;align-items:center!important;justify-content:center!important;border-radius:12px!important;\n background:#e7f1ff!important;color:#1460bd!important;border:1px solid #dce9fb!important;\n margin:0!important;box-shadow:none!important;font-size:28px!important;}\nbody.grac-workspace .aiinv-header .aiinv-headtext :is(small,p){display:none!important;}\nbody.grac-workspace .aiinv-header .aiinv-headtext h3{margin:0!important;padding:0!important;\n color:#132238!important;-webkit-text-fill-color:#132238!important;\n font-size:clamp(23px,2.1vw,30px)!important;font-weight:850!important;text-shadow:none!important;}\n/* Original Alert Center, Mobile and Governance headers: keep their own icons. */\nbody.grac-workspace .grac-alert-header-card,\nbody.grac-workspace .mobile-admin-header-card{min-height:70px!important;padding-top:4px!important;padding-bottom:8px!important;margin-bottom:12px!important;}\nbody.grac-workspace .grac-alert-header-text .grac-alert-header-title,\nbody.grac-workspace .mobile-admin-title{margin:0!important;font-size:clamp(23px,2.1vw,30px)!important;font-weight:850!important;}\n/* Do not leave a full-screen gradient showing under the new corporate workspace. */\nbody.grac-workspace .pa-shell,\nbody.grac-workspace .as-shell,\nbody.grac-workspace .remmat-shell,\nbody.grac-workspace .bcp-wrap,\nbody.grac-workspace .aiinv-shell{margin-top:3px!important;padding-top:0!important;}\n@media(max-width:650px){\n body.grac-workspace :is(.grac-module-heading,.grac-inline-heading) .grac-module-icon{\n width:46px!important;height:46px!important;flex-basis:46px!important;}\n body.grac-workspace :is(.grac-module-heading,.grac-inline-heading) .grac-module-icon i{font-size:23px!important;}\n body.grac-workspace .aiinv-header .aiinv-icon{width:46px!important;height:46px!important;min-width:46px!important;}\n body.grac-workspace :is(.grac-module-heading,.grac-inline-heading){gap:10px!important;min-height:50px!important;}\n}\n'
+# Eliminado: JS de iconos tardíos/duplicados. Los encabezados se renderizan en origen.
+
 def _grac_apply_corporate_workspace(response):
     """Último acabado visual de páginas HTML internas; omite archivos y APIs."""
     if (response.is_streamed or response.direct_passthrough
@@ -214031,10 +214095,77 @@ def _grac_apply_corporate_workspace(response):
             return re.sub(r'(\bclass\s*=\s*["\'])', r'\1grac-workspace ', tag, count=1, flags=re.I)
         return tag[:-1] + ' class="grac-workspace">'
     page = re.sub(r'<body\b[^>]*>', body_class, page, count=1, flags=re.I)
-    assets = ('<style id="grac-corporate-workspace">' + GRAC_WORKSPACE_CSS
-              + '</style><script id="grac-corporate-workspace-js">'
-              + GRAC_WORKSPACE_JS + '</script>')
-    page = re.sub(r'</body\s*>', lambda m: assets + m.group(0), page, count=1, flags=re.I)
+    # Títulos de módulos sin arte original: iconografía propia, en HTML del servidor.
+    # Nunca se generan en JavaScript tras dibujar la pantalla.
+    _grac_headings_without_icon = {
+        '/reportes': ('file-earmark-bar-graph', r'Reportes del Sistema de Gesti[oó]n|Management System Reports|Reports'),
+        '/admin/configuracion-herramientas-escaneo': ('terminal', r'Herramienta de escaneo|Scan Tool'),
+        '/admin/empresa/datos': ('building', r'Cargue datos de la empresa|Load company data|Company data'),
+        '/cumplimiento_continuo/evidencias': ('file-earmark-check', r'Evidencias.*Cumplimiento|Continuous Compliance.*Evidence|Evidence'),
+        '/evidencias_cumplimiento_continuo': ('file-earmark-check', r'Evidencias.*Cumplimiento|Continuous Compliance.*Evidence|Evidence'),
+    }
+    _grac_title_cfg = _grac_headings_without_icon.get(request.path.rstrip('/'))
+    if _grac_title_cfg and 'grac-inline-heading' not in page:
+        _grac_main = re.search(r'<div\s+class=["\']container\s+py-4["\']\s*>', page, re.I)
+        _grac_pos = _grac_main.end() if _grac_main else 0
+        _grac_title_re = re.compile(r'<h([123])\b([^>]*)>([^<]{4,160})</h\1>', re.I | re.S)
+        for _grac_title_match in _grac_title_re.finditer(page, _grac_pos):
+            if not re.search(_grac_title_cfg[1], _grac_title_match.group(3), re.I):
+                continue
+            _grac_icon = '<span class="grac-module-icon" aria-hidden="true"><i class="bi bi-' + _grac_title_cfg[0] + '"></i></span>'
+            _grac_wrap = '<div class="grac-inline-heading">' + _grac_icon + _grac_title_match.group(0) + '</div>'
+            page = page[:_grac_title_match.start()] + _grac_wrap + page[_grac_title_match.end():]
+            break
+
+    # Títulos de módulos sin arte original: iconografía propia, en HTML del servidor.
+    # Nunca se generan en JavaScript tras dibujar la pantalla.
+    _grac_headings_without_icon = {
+        '/reportes': ('file-earmark-bar-graph', r'Reportes del Sistema de Gesti[oó]n|Management System Reports|Reports'),
+        '/admin/configuracion-herramientas-escaneo': ('terminal', r'Herramienta de escaneo|Scan Tool'),
+        '/admin/empresa/datos': ('building', r'Cargue datos de la empresa|Load company data|Company data'),
+        '/cumplimiento_continuo/evidencias': ('file-earmark-check', r'Evidencias.*Cumplimiento|Continuous Compliance.*Evidence|Evidence'),
+        '/evidencias_cumplimiento_continuo': ('file-earmark-check', r'Evidencias.*Cumplimiento|Continuous Compliance.*Evidence|Evidence'),
+    }
+    _grac_title_cfg = _grac_headings_without_icon.get(request.path.rstrip('/'))
+    if _grac_title_cfg and 'grac-inline-heading' not in page:
+        _grac_main = re.search(r'<div\s+class=["\']container\s+py-4["\']\s*>', page, re.I)
+        _grac_pos = _grac_main.end() if _grac_main else 0
+        _grac_title_re = re.compile(r'<h([123])\b([^>]*)>([^<]{4,160})</h\1>', re.I | re.S)
+        for _grac_title_match in _grac_title_re.finditer(page, _grac_pos):
+            if not re.search(_grac_title_cfg[1], _grac_title_match.group(3), re.I):
+                continue
+            _grac_icon = '<span class="grac-module-icon" aria-hidden="true"><i class="bi bi-' + _grac_title_cfg[0] + '"></i></span>'
+            _grac_wrap = '<div class="grac-inline-heading">' + _grac_icon + _grac_title_match.group(0) + '</div>'
+            page = page[:_grac_title_match.start()] + _grac_wrap + page[_grac_title_match.end():]
+            break
+
+    # Mover estilos incrustados en el contenido al <head>, sin alterar los datos ni las rutas.
+    # Así no se pinta primero el aspecto anterior mientras se procesa una tabla grande.
+    if (request.path.startswith((
+            '/planes_accion', '/plan_remediacion', '/superficie_ataque',
+            '/bcp', '/inventario_ia', '/vulnerabilidades_matriz',
+            '/listas_restrictivas', '/cumplimiento_continuo/evidencias'))
+            and re.search(r'</head\s*>', page, re.I)):
+        match_body = re.search(r'<body\b[^>]*>', page, re.I)
+        if match_body:
+            before, body_fragment = page[:match_body.end()], page[match_body.end():]
+            body_styles = []
+            def _grac_collect_module_style(m):
+                body_styles.append(m.group(0))
+                return ''
+            body_fragment = re.sub(r'<style\b[^>]*>.*?</style\s*>',
+                                   _grac_collect_module_style, body_fragment, flags=re.I | re.S)
+            if body_styles:
+                page = before + body_fragment
+                page = re.sub(r'</head\s*>',
+                              lambda m: ''.join(body_styles) + m.group(0),
+                              page, count=1, flags=re.I)
+    # Importante: el CSS de GRAC va al HEAD, y solamente el JS queda al final del BODY.
+    # No volver a insertar estilos visuales junto a </body> (evita flash del diseño antiguo).
+    main_style = '<style id="grac-corporate-workspace">' + GRAC_WORKSPACE_CSS + '</style>'
+    page = re.sub(r'</head\s*>', lambda m: main_style + m.group(0), page, count=1, flags=re.I)
+    main_script = '<script id="grac-corporate-workspace-js">' + GRAC_WORKSPACE_JS + '</script>'
+    page = re.sub(r'</body\s*>', lambda m: main_script + m.group(0), page, count=1, flags=re.I)
     response.set_data(page)
     return response
 
@@ -214063,9 +214194,6 @@ def _grac_install_memory_monitor():
 
     @app.teardown_request
     def _grac_memory_after_request(_error=None):
-        # No ejecutar GC periódico por sondeos automáticos de Render.
-        if request.path == "/_grac_lowmem/health":
-            return
         _counter[0] += 1
         if _counter[0] % _interval:
             return
