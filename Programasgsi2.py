@@ -439,6 +439,17 @@ def calcular_riesgo(probabilidad_txt, impacto_txt):
 
 
 app = Flask(__name__)
+# ============================================================
+# RENDER: HEALTH CHECK LIGERO, SIN DB / LOGIN / IA.
+# Health Check Path en Render: /_grac_lowmem/health
+# ============================================================
+@app.route("/_grac_lowmem/health", methods=["GET", "HEAD"])
+def _grac_lowmem_health():
+    return "ok", 200, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+    }
+
 # La cookie de autenticación termina con la sesión del navegador.
 app.config["SESSION_PERMANENT"] = False
 
@@ -196052,80 +196063,40 @@ CONT_COMP_CSS = """
     margin:10px auto 24px auto;
   }
 
-  .cc-hero{
-    background:linear-gradient(135deg,rgba(11,58,110,.97),rgba(20,89,166,.95),rgba(44,123,229,.92));
-    border-radius:18px;
-    padding:16px 24px;
-    min-height:94px;
-    display:flex;
-    align-items:center;
-    justify-content:flex-start;
-    box-shadow:0 12px 24px rgba(15,23,42,.24);
-    color:#ffffff;
-    position:relative;
-    overflow:hidden;
-    margin-bottom:18px;
+  /* Corporate module header: one real, route-specific icon; no subtitle or SGSI badge. */
+  .cc-shell{width:96%;max-width:1650px;margin:10px auto 24px;}
+  .cc-hero,body.grac-workspace .cc-hero{
+    display:flex!important;align-items:center!important;justify-content:flex-start!important;
+    gap:15px!important;min-height:68px!important;margin:0 0 14px!important;
+    padding:4px 0 11px!important;background:#fff!important;background-image:none!important;
+    border:0!important;border-radius:0!important;box-shadow:none!important;
+    position:relative!important;overflow:visible!important;color:#132238!important;
   }
-
-  .cc-hero::before{
-    content:"";
-    position:absolute;
-    inset:0;
-    background:
-      radial-gradient(circle at 92% 12%,rgba(255,255,255,.20),transparent 26%),
-      repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0px,rgba(255,255,255,.05) 1px,transparent 1px,transparent 15px);
-    pointer-events:none;
+  .cc-hero::before,.cc-hero::after,
+  body.grac-workspace .cc-hero::before,body.grac-workspace .cc-hero::after,
+  .cc-hero .cc-hero-text::before,body.grac-workspace .cc-hero .cc-hero-text::before{
+    content:none!important;display:none!important;
   }
-
-  .cc-hero::after{
-    content:"🛡️";
-    width:54px;
-    height:54px;
-    min-width:54px;
-    border-radius:14px;
-    background:rgba(255,255,255,.96);
-    color:#0b4a8f;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    font-size:1.55rem;
-    box-shadow:0 8px 18px rgba(0,0,0,.20);
-    margin-right:14px;
-    position:relative;
-    z-index:1;
-    order:-1;
+  .cc-hero .cc-title-icon,body.grac-workspace .cc-hero .cc-title-icon{
+    box-sizing:border-box!important;width:60px!important;height:60px!important;min-width:60px!important;flex:0 0 60px!important;
+    border:1px solid #dce9fa!important;border-radius:14px!important;
+    background:#e7f1ff!important;color:#1262c2!important;
+    display:inline-flex!important;align-items:center!important;justify-content:center!important;
+    font-size:27px!important;box-shadow:none!important;position:static!important;
   }
-
-  .cc-hero h2{
-    color:#ffffff !important;
-    font-weight:950;
-    font-size:1.36rem;
-    line-height:1.08;
-    margin:0;
-    position:relative;
-    z-index:1;
+  .cc-hero .cc-hero-text,body.grac-workspace .cc-hero .cc-hero-text{
+    display:block!important;flex:1!important;min-width:0!important;
+    margin:0!important;padding:0!important;color:#132238!important;
   }
-
-  .cc-hero p{
-    margin:5px 0 0 0;
-    color:rgba(255,255,255,.90);
-    font-size:.82rem;
-    font-weight:600;
-    position:relative;
-    z-index:1;
+  .cc-hero .cc-hero-text h2,body.grac-workspace .cc-hero .cc-hero-text h2{
+    margin:0!important;padding:0!important;color:#132238!important;
+    -webkit-text-fill-color:#132238!important;font-size:1.7rem!important;
+    font-weight:850!important;line-height:1.16!important;text-shadow:none!important;
   }
-
-  .cc-hero .cc-hero-text::before{
-    content:"SGSI · Cumplimiento Continuo";
-    display:inline-block;
-    background:rgba(255,255,255,.18);
-    border:1px solid rgba(255,255,255,.30);
-    border-radius:999px;
-    padding:3px 10px;
-    font-size:.66rem;
-    font-weight:800;
-    letter-spacing:.35px;
-    margin-bottom:4px;
+  .cc-hero .cc-hero-text p,body.grac-workspace .cc-hero .cc-hero-text p{display:none!important;}
+  @media(max-width:680px){
+    .cc-hero .cc-title-icon{width:46px!important;height:46px!important;min-width:46px!important;flex-basis:46px!important;font-size:22px!important;}
+    .cc-hero .cc-hero-text h2{font-size:1.24rem!important;}
   }
 
   .cc-nav,
@@ -196325,6 +196296,34 @@ def cont_comp_render(
     title="Cumplimiento Continuo",
     subtitle="Monitoreo continuo de controles con Wazuh."
 ):
+    # The icon is selected on the server so it is present on the first paint.
+    # No document-ready JavaScript or delayed visual replacements are needed.
+    _cc_path = (request.path or '').lower()
+    if '/firewall/' in _cc_path or _cc_path.endswith('/firewall'):
+        if '/configuracion' in _cc_path:
+            _cc_icon = 'bi-sliders'
+        elif '/historial' in _cc_path:
+            _cc_icon = 'bi-clock-history'
+        elif '/inventario' in _cc_path:
+            _cc_icon = 'bi-list-check'
+        elif '/registrados' in _cc_path:
+            _cc_icon = 'bi-hdd-network'
+        else:
+            _cc_icon = 'bi-shield-exclamation'
+    elif '/evidencias' in _cc_path or active == 'evidences':
+        _cc_icon = 'bi-file-earmark-check'
+    elif '/planes' in _cc_path or active == 'plans':
+        _cc_icon = 'bi-clipboard-check'
+    elif '/sincronizacion' in _cc_path or active == 'sync':
+        _cc_icon = 'bi-arrow-repeat'
+    elif '/wazuh' in _cc_path or active == 'wazuh':
+        _cc_icon = 'bi-hdd-network'
+    elif '/estandar/' in _cc_path:
+        _cc_icon = {'iso27001':'bi-shield-check','nist':'bi-diagram-3',
+                    'pci':'bi-credit-card','soc2':'bi-patch-check',
+                    'iso22301':'bi-life-preserver'}.get(str(active).lower(), 'bi-clipboard-data')
+    else:
+        _cc_icon = 'bi-shield-check'
     shell = f"""
     {CONT_COMP_CSS}
 
@@ -196365,10 +196364,8 @@ def cont_comp_render(
 
     <div class="cc-shell">
       <div class="cc-hero">
-        <div class="cc-hero-text">
-          <h2>{title}</h2>
-          <p>{subtitle}</p>
-        </div>
+        <span class="cc-title-icon" aria-hidden="true"><i class="bi {_cc_icon}"></i></span>
+        <div class="cc-hero-text"><h2>{title}</h2></div>
       </div>
 
       {content}
@@ -214105,7 +214102,7 @@ def _grac_apply_corporate_workspace(response):
         '/evidencias_cumplimiento_continuo': ('file-earmark-check', r'Evidencias.*Cumplimiento|Continuous Compliance.*Evidence|Evidence'),
     }
     _grac_title_cfg = _grac_headings_without_icon.get(request.path.rstrip('/'))
-    if _grac_title_cfg and 'grac-inline-heading' not in page:
+    if _grac_title_cfg and 'grac-inline-heading' not in page and 'cc-title-icon' not in page:
         _grac_main = re.search(r'<div\s+class=["\']container\s+py-4["\']\s*>', page, re.I)
         _grac_pos = _grac_main.end() if _grac_main else 0
         _grac_title_re = re.compile(r'<h([123])\b([^>]*)>([^<]{4,160})</h\1>', re.I | re.S)
@@ -214127,7 +214124,7 @@ def _grac_apply_corporate_workspace(response):
         '/evidencias_cumplimiento_continuo': ('file-earmark-check', r'Evidencias.*Cumplimiento|Continuous Compliance.*Evidence|Evidence'),
     }
     _grac_title_cfg = _grac_headings_without_icon.get(request.path.rstrip('/'))
-    if _grac_title_cfg and 'grac-inline-heading' not in page:
+    if _grac_title_cfg and 'grac-inline-heading' not in page and 'cc-title-icon' not in page:
         _grac_main = re.search(r'<div\s+class=["\']container\s+py-4["\']\s*>', page, re.I)
         _grac_pos = _grac_main.end() if _grac_main else 0
         _grac_title_re = re.compile(r'<h([123])\b([^>]*)>([^<]{4,160})</h\1>', re.I | re.S)
