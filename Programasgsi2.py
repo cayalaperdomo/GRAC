@@ -1,3 +1,24 @@
+# GRAC 2026-11-23: SAST IA por Middleware, error en popup, proveedor neutral.
+# 2026-11-23: Escaneadores propios (11 integraciones), reutiliza monitoreo y remediacion.
+# GRAC 2026-11-23: tipografia normal en tarjetas de analisis ejecutivo ISO 42001, conserva saltos de linea.
+# FIX 2026-11-23: Campanas IA JSON robusto y llamadas exclusivas a Middleware; reintento para cinco opciones.
+# GRAC FIX 2026-11-23: metricas AI via middleware; popup, menu Planes, RFI/RFP neutro.
+# GRAC DOFA: IA middleware JSON robusto, 2200 tokens y reintento de formato.
+# GRAC 2026-11-23: toda IA desde Middleware ai/default, sin respaldo directo ni credenciales en GRAC.
+# ARKYNTECH-GRAC: Wazuh exclusively through Middleware xdr/wazuh; no local fallback.
+# CORRECCION 2026-11-23: evitar sombreado de value() por int en sincronizacion Samba/AD.
+# GRAC 2026-11-23: AD y Samba sin botones Probar; sincronizador LDAP robusto y umbrales MW.
+# Correccion Samba 2026-11-22: sincronizacion usa proveedor samba del perfil Middleware, no el proveedor antiguo de GRAC.
+# GRAC 2026-11-22: Samba sincroniza con la conexion LDAP del Middleware y Base DN de su perfil.
+# GRAC 2026-11-22: JIRA EXCLUSIVO MIDDLEWARE; sin caer a configuracion local antigua IT/cayalaperdomo.
+# GRAC: Jira reparar URL desde middleware; 2026-11-22
+# GRAC Jira Cloud 404: separar URL incorrecta, autenticacion y proyecto; 2026-11-22
+# GRAC: Jira lista usuarios asignables con diagnostico y creacion sin responsable; 2026-11-22
+# GRAC 2026-11-22: Kali sin timeout de herramientas y con cancelacion en middleware, ZAP preflight en middleware.
+# GRAC FIX: DIAGNOSTICO COMPLETO DE ZAP Y VALIDACION INICIAL DE SSH KALI
+# GRAC: ZAP Y KALI CON CONTROL EXCLUSIVO DEL MIDDLEWARE - 2026-11-21
+# GRAC GLPI MIDDLEWARE: TOLERANCIA DETALLES OPCIONALES 2026-11-21
+# GRAC MIDDLEWARE BUILD: 2026-11-20
 #madurez_bp = Blueprint# soa_iso27001_app.py
 # Aplicación Flask autocontenida: Declaración de Aplicabilidad ISO 27001:2022 (todo en un archivo)
 # Requisitos: pip install flask flask_sqlalchemy
@@ -271,7 +292,7 @@ def get_openrouter_client():
         raise RuntimeError("No existe OPENROUTER_API_KEY configurada en Administración.")
 
     client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
+        base_url=_grac_mw_openrouter_url(),
         api_key=api_key,
         default_headers={
             "HTTP-Referer": "http://localhost",
@@ -307,7 +328,7 @@ def ai_text_general(prompt: str, system_prompt: str | None = None, temperature: 
             full_prompt = f"{system_prompt}\n\n{prompt}"
 
         try:
-            resp = requests.post(
+            resp = _grac_mw_http_post(
                 f"{base_url}/api/generate",
                 json={
                     "model": model,
@@ -8887,6 +8908,7 @@ def jira_is_enabled():
 
 
 def jira_auth():
+    if _grac_mw_enabled("jira"):return None
     return HTTPBasicAuth(JIRA_EMAIL, JIRA_API_TOKEN)
 
 
@@ -8990,7 +9012,7 @@ def jira_consultar_issue(issue_key: str):
         raise RuntimeError("Jira no está configurado correctamente.")
 
     url = f"{JIRA_BASE_URL.rstrip('/')}/rest/api/3/issue/{issue_key}"
-    resp = requests.get(
+    resp = _grac_mw_http_get(
         url,
         headers=jira_headers(),
         auth=jira_auth(),
@@ -9684,7 +9706,7 @@ def chat_ai(prompt: str, model: str = None) -> str:
         if not ollama_model:
             raise RuntimeError("No existe OLLAMA_MODEL configurado en Administración.")
 
-        resp = requests.post(
+        resp = _grac_mw_http_post(
             f"{base_url}/api/generate",
             json={
                 "model": ollama_model,
@@ -15743,6 +15765,8 @@ BASE = """
 </head>
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<style>.swal2-popup.grac-flash-message .swal2-deny,
+.swal2-popup.grac-flash-message .swal2-cancel{display:none!important}</style>
 
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}
@@ -15771,6 +15795,13 @@ BASE = """
             ) | tojson }},
             confirmButtonText: "Aceptar",
             confirmButtonColor: "#0b4a8f",
+            showConfirmButton: true,
+            showDenyButton: false,
+            showCancelButton: false,
+            customClass: {popup: 'grac-flash-message'},
+            didOpen: function(popup) {
+              popup.querySelectorAll('.swal2-deny, .swal2-cancel').forEach(function(el){el.remove();});
+            },
             backdrop: true,
             allowOutsideClick: false
           });
@@ -16298,85 +16329,46 @@ MENU_SECTIONS = [
 # Este bloque reorganiza exclusivamente las entradas del menú.
 # ================================================================
 def _grac_organizar_conexiones_herramientas():
+    """Único punto de configuración de proveedores: Middleware de Integraciones GRAC.
+
+    Las rutas históricas se conservan para compatibilidad, pero se retiran del
+    menú administrativo. Los módulos funcionales de GRAC no se modifican.
+    """
     admin_seccion = next((sec for sec in MENU_SECTIONS
-                          if sec.get("title") in ("Administración", "Administration")), None)
+                          if sec.get('title') in ('Administración','Administration')), None)
     if admin_seccion is None:
         return
-    items_admin = admin_seccion.get("items", [])
-    escaneo_href = "/admin/configuracion-herramientas-escaneo"
-
-    # Eliminar exclusivamente la entrada de escaneo situada a nivel raíz.
-    # La ruta y la vista original siguen disponibles en su nueva posición.
-    items_admin[:] = [item for item in items_admin
-                      if item.get("href") != escaneo_href]
-    if any(item.get("_grac_connection_group") for item in items_admin):
-        return
-
-    english = admin_seccion.get("title") == "Administration"
-    grupo = {
-        "label": ("Tool Connection Configuration" if english else "Configuración de conexiones de herramientas"),
-        "href": "#", "icon": "bi-hdd-network", "btn": "btn-primary",
-        "admin_only": True, "_grac_connection_group": True,
-        "children": [
-            {
-                "label": "Continuous Compliance" if english else "Cumplimiento continuo",
-                "href": "#", "icon": "bi-shield-lock", "btn": "btn-primary",
-                "admin_only": True,
-                "children": [
-                    {
-                        "label": "Firewall", "href": "/cumplimiento_continuo/firewall/configuracion",
-                        "icon": "bi-bricks", "btn": "btn-primary", "admin_only": True,
-                    },
-                    {
-                        "label": "Active Directory" if english else "Directorio activo",
-                        "href": "#", "icon": "bi-person-lock", "btn": "btn-primary",
-                        "admin_only": True,
-                        "children": [
-                            {
-                                "label": "Samba",
-                                "href": "/cumplimiento_continuo/active_directory/configuracion?platform=SAMBA",
-                                "icon": "bi-diagram-3", "btn": "btn-primary",
-                                "admin_only": True, "_grac_connector_platform": "SAMBA",
-                            },
-                            {
-                                "label": "Windows",
-                                "href": "/cumplimiento_continuo/active_directory/configuracion?platform=WINDOWS",
-                                "icon": "bi-windows", "btn": "btn-primary",
-                                "admin_only": True, "_grac_connector_platform": "WINDOWS",
-                            },
-                        ],
-                    },
-                ],
-            },
-            {
-                "label": "XDR Configuration" if english else "Configuración XDR",
-                "href": "#", "icon": "bi-shield-lock-fill", "btn": "btn-primary",
-                "admin_only": True,
-                "children": [
-                    {
-                        "label": "Wazuh",
-                        "href": "/admin/conexiones/xdr/wazuh",
-                        "icon": "bi-hdd-network", "btn": "btn-primary",
-                        "admin_only": True,
-                    },
-                ],
-            },
-            {
-                "label": "Scan Tools" if english else "Herramienta de escaneo",
-                "href": escaneo_href, "icon": "bi-shield-lock-fill",
-                "btn": "btn-primary", "admin_only": True,
-            },
-            {
-                "label": "Jira Configuration" if english else "Configuración Jira",
-                "href": "/admin/conexiones/jira",
-                "icon": "bi-kanban", "btn": "btn-primary", "admin_only": True,
-            },
-        ],
+    items_admin = admin_seccion.get('items', [])
+    # Configuraciones directas heredadas: no deben ofrecerse en Administración.
+    legacy_hrefs = {
+        '/admin/configuracion-herramientas-escaneo',
+        '/admin/openrouter_key',
+        '/admin/conexiones/jira',
+        '/admin/conexiones/xdr/wazuh',
+        '/cumplimiento_continuo/firewall/configuracion',
+        '/cumplimiento_continuo/active_directory/configuracion',
     }
-    # Mismo lugar que ocupaba la configuración de escaneo.
-    insercion = next((i + 1 for i, item in enumerate(items_admin)
-                      if item.get("href") == "/admin/portal_proveedores_conexion"), 0)
-    items_admin.insert(insercion, grupo)
+    items_admin[:] = [item for item in items_admin if item.get('href') not in legacy_hrefs]
+    english = admin_seccion.get('title') == 'Administration'
+    only_item = {
+        'label': 'GRAC Integration Middleware' if english else 'Middleware de Integraciones GRAC',
+        'href': '/admin/conexiones/middleware', 'icon': 'bi-diagram-3',
+        'btn': 'btn-primary', 'admin_only': True,
+    }
+    existing = next((i for i in items_admin if i.get('_grac_connection_group')), None)
+    if existing:
+        existing['children'] = [only_item]
+        existing['label'] = 'Tool Connection Configuration' if english else 'Configuración de conexiones de herramientas'
+        return
+    grupo = {
+        'label': 'Tool Connection Configuration' if english else 'Configuración de conexiones de herramientas',
+        'href': '#', 'icon': 'bi-hdd-network', 'btn': 'btn-primary',
+        'admin_only': True, '_grac_connection_group': True,
+        'children': [only_item],
+    }
+    index = next((j+1 for j, item in enumerate(items_admin)
+                  if item.get('href') == '/admin/portal_proveedores_conexion'), 0)
+    items_admin.insert(index, grupo)
 
 _grac_organizar_conexiones_herramientas()
 
@@ -17239,6 +17231,9 @@ def _sgsi_build_global_menu_html():
             # Centro de Reportes: mantener la opción activa incluso con filtros.
             if (current_path == '/reportes' or current_path.startswith('/reportes/')) and href == '/reportes':
                 return 10000
+            # Mantener Planes de Acción seleccionado en detalle, edición y registro.
+            if (current_path == '/planes_accion' or current_path.startswith('/planes_accion/')) and href == '/planes_accion':
+                return 20000
             rules = MENU_ACTIVE_RULES.get(label, {})
             exact = bool(rules.get("exact", False))
 
@@ -21816,7 +21811,7 @@ def _smtp_letsencrypt_y_chain():
 
         certificates = []
         for expected in _SMTP_LETSENCRYPT_Y_CHAIN_CERTS:
-            response = requests.get(
+            response = _grac_mw_http_get(
                 expected["url"],
                 timeout=10,
                 allow_redirects=False,
@@ -23351,7 +23346,7 @@ def get_ollama_models(base_url: str | None = None) -> list[str]:
 
     try:
         url_base = (base_url or get_ollama_base_url() or "http://localhost:11434").strip().rstrip("/")
-        resp = requests.get(f"{url_base}/api/tags", timeout=8)
+        resp = _grac_mw_http_get(f"{url_base}/api/tags", timeout=8)
         resp.raise_for_status()
 
         data = resp.json() or {}
@@ -23376,6 +23371,8 @@ def get_ollama_models(base_url: str | None = None) -> list[str]:
 @app.route("/admin/openrouter_key", methods=["GET", "POST"])
 @login_required
 def admin_openrouter_key():
+    if _grac_mw_enabled('ai'):
+        return redirect(url_for('grac_middleware_admin'))
     user = User.query.get(session.get("user_id"))
     if not user or user.role != "admin":
         flash("No tiene permiso para configurar los proveedores de IA.", "danger")
@@ -41025,139 +41022,203 @@ def _dofa_ai_clean(value, limit=9000):
 
 
 def _dofa_ai_normalize_strategy(value):
-    if isinstance(value, list):
+    """Convierte texto/listas de estrategias en un texto editable de DOFA."""
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
         items = []
         for item in value:
-            item_text = _dofa_ai_clean(item, 1800)
-            if item_text:
-                items.append(item_text if item_text.startswith(("-", "•")) else f"- {item_text}")
-        return "\n".join(items).strip()
-
+            part = _dofa_ai_normalize_strategy(item)
+            if not part:
+                continue
+            for line in part.splitlines():
+                line = line.strip()
+                if line:
+                    items.append(line if re.match(r"^(?:[-•*]|\d+[.)])\s+", line) else "- " + line)
+        return "\n".join(items)[:6500].strip()
     if isinstance(value, dict):
-        items = []
-        for item in value.values():
-            item_text = _dofa_ai_clean(item, 1800)
-            if item_text:
-                items.append(item_text if item_text.startswith(("-", "•")) else f"- {item_text}")
-        return "\n".join(items).strip()
+        # Algunos modelos usan objetos {descripcion: ..., accion: ...} por estrategia.
+        for field in ('texto', 'text', 'descripcion', 'description', 'estrategia', 'strategy', 'accion', 'action'):
+            if value.get(field):
+                return _dofa_ai_normalize_strategy(value[field])
+        return _dofa_ai_normalize_strategy(list(value.values()))
+    if not isinstance(value, str):
+        return ""
+    clean = _dofa_ai_clean(value, 6500)
+    clean = re.sub(r"^\s*(?:estrategias?\s*)?(?:FO|FA|DO|DA)\s*[:\-–—]\s*", "", clean, flags=re.I)
+    return clean.strip()
 
-    text_value = _dofa_ai_clean(value, 5000)
-    text_value = re.sub(r"^\s*(?:ESTRATEGIAS?\s*)?(?:FO|FA|DO|DA)\s*[:\-]\s*", "", text_value, flags=re.I)
-    return text_value.strip()
+
+def _dofa_ai_json_obj(raw_text):
+    """Extrae el primer objeto JSON completo, incluso dentro de Markdown."""
+    decoder = json.JSONDecoder()
+    for match in list(re.finditer(r'\{', raw_text))[:16]:
+        try:
+            obj, _ = decoder.raw_decode(raw_text[match.start():])
+        except (ValueError, TypeError):
+            continue
+        if isinstance(obj, dict):
+            return obj
+    return None
 
 
 def _dofa_ai_extract_result(raw_text):
-    raw_text = _dofa_ai_clean(raw_text, 20000)
+    """Acepta JSON, JSON anidado y secciones FO/FA/DO/DA en Markdown.
+
+    Rechaza las respuestas incompletas: nunca inventa estrategias ausentes.
+    """
+    raw_text = _dofa_ai_clean(raw_text, 45000)
     if not raw_text:
-        raise ValueError("La IA no devolvió contenido.")
+        raise ValueError('La IA no devolvió contenido para las estrategias DOFA.')
+    data = _dofa_ai_json_obj(raw_text)
+    results = {}
 
-    cleaned = re.sub(r"^```(?:json)?\s*", "", raw_text, flags=re.I)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
-
-    data = None
-    start = cleaned.find("{")
-    end = cleaned.rfind("}")
-    if start >= 0 and end > start:
-        try:
-            data = json.loads(cleaned[start:end + 1])
-        except Exception:
-            data = None
-
-    if not isinstance(data, dict):
-        # Respaldo para modelos que respondan con secciones FO / FA / DO / DA.
-        section_pattern = re.compile(
-            r"(?ims)^\s*(?:#{1,6}\s*)?(FO|FA|DO|DA)\s*(?:\([^)]*\))?\s*[:\-]\s*(.*?)(?=^\s*(?:#{1,6}\s*)?(?:FO|FA|DO|DA)\s*(?:\([^)]*\))?\s*[:\-]|\Z)"
-        )
-        sections = {}
-        for match in section_pattern.finditer(cleaned):
-            sections[match.group(1).lower()] = match.group(2).strip()
-        if len(sections) == 4:
-            data = sections
-
-    if not isinstance(data, dict):
-        raise ValueError("La IA no devolvió las cuatro estrategias en un formato válido.")
-
-    aliases = {
-        "estrategias_fo": ("estrategias_fo", "estrategia_fo", "fo", "FO"),
-        "estrategias_fa": ("estrategias_fa", "estrategia_fa", "fa", "FA"),
-        "estrategias_do": ("estrategias_do", "estrategia_do", "do", "DO"),
-        "estrategias_da": ("estrategias_da", "estrategia_da", "da", "DA"),
-    }
-
-    result = {}
-    for target, possible_keys in aliases.items():
-        value = None
-        for key in possible_keys:
-            if key in data:
-                value = data.get(key)
+    def key_kind(name):
+        plain = ''.join(ch for ch in str(name).lower() if ch.isalnum())
+        for prefix in ('estrategias', 'estrategia', 'strategies', 'strategy'):
+            if plain.startswith(prefix):
+                plain = plain[len(prefix):]
                 break
-        normalized = _dofa_ai_normalize_strategy(value)
-        if not normalized:
-            raise ValueError(f"La IA no generó contenido para {target.replace('estrategias_', '').upper()}.")
-        result[target] = normalized
+        if plain in ('fo','fa','do','da'):
+            return plain
+        return None
 
-    return result
+    if isinstance(data, dict):
+        for wrapper in ('estrategias', 'strategies', 'result', 'resultado', 'data', 'matriz'):
+            inner = data.get(wrapper)
+            if isinstance(inner, dict):
+                data = inner
+                break
+        for name, val in data.items():
+            kind = key_kind(name)
+            if kind:
+                norm = _dofa_ai_normalize_strategy(val)
+                if norm:
+                    results[kind] = norm
+
+    if len(results) != 4:
+        # Encabezados frecuentes: ## Estrategias FO, **FA:**, DO (Debilidades-Oportunidades):
+        heading = re.compile(
+            r'(?im)^\s*(?:#{1,6}\s*)?(?:\*{1,2}\s*)?'
+            r'(?:estrategias?\s+)?(FO|FA|DO|DA)\b'
+            r'(?:\s*\([^\n)]{0,100}\))?\s*(?:\*{1,2})?'
+            r'\s*(?::|：|[-–—](?!\s*\d)|(?=\s*$))\s*(?:\*{1,2})?\s*(.*)$'
+        )
+        matches = list(heading.finditer(raw_text))
+        for i, match in enumerate(matches):
+            kind = match.group(1).lower()
+            stop = matches[i + 1].start() if i + 1 < len(matches) else len(raw_text)
+            content = (match.group(2) + '\n' + raw_text[match.end():stop]).strip()
+            content = re.sub(r'\s*```\s*$', '', content).strip()
+            normalized = _dofa_ai_normalize_strategy(content)
+            if normalized and kind not in results:
+                results[kind] = normalized
+
+    missing = [key.upper() for key in ('fo','fa','do','da') if not results.get(key)]
+    if missing:
+        raise ValueError('La respuesta de la IA no contiene estrategias completas para: ' + ', '.join(missing) + '.')
+    return {'estrategias_' + key: results[key] for key in ('fo','fa','do','da')}
+
+
+def _dofa_ai_response_text(response):
+    """Unifica respuestas Ollama / OpenAI / OpenRouter / Claude del Middleware."""
+    if isinstance(response, str):
+        return response
+    if not isinstance(response, dict):
+        raise ValueError('Middleware AI devolvió una estructura inesperada.')
+    if isinstance(response.get('response'), str):
+        return response['response']
+    message = response.get('message')
+    if isinstance(message, dict) and isinstance(message.get('content'), str):
+        return message['content']
+    choices = response.get('choices')
+    if isinstance(choices, list) and choices:
+        choice = choices[0]
+        if isinstance(choice, dict):
+            msg = choice.get('message') or {}
+            content = msg.get('content') if isinstance(msg, dict) else ''
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                return '\n'.join(x.get('text','') for x in content if isinstance(x,dict))
+    if any(k in response for k in ('estrategias_fo','fo','FO','estrategias')):
+        return json.dumps(response, ensure_ascii=False)
+    raise ValueError('Middleware AI no devolvió texto con las estrategias DOFA.')
 
 
 def _dofa_generate_strategies_with_ai(fortalezas, oportunidades, debilidades, amenazas):
+    """Genera DOFA solo por Middleware ai/default, con JSON y un reintento seguro."""
     quadrants = {
-        "fortalezas": _dofa_ai_clean(fortalezas),
-        "oportunidades": _dofa_ai_clean(oportunidades),
-        "debilidades": _dofa_ai_clean(debilidades),
-        "amenazas": _dofa_ai_clean(amenazas),
+        'fortalezas': _dofa_ai_clean(fortalezas),
+        'oportunidades': _dofa_ai_clean(oportunidades),
+        'debilidades': _dofa_ai_clean(debilidades),
+        'amenazas': _dofa_ai_clean(amenazas),
     }
-
-    missing_labels = {
-        "fortalezas": "Fortalezas",
-        "oportunidades": "Oportunidades",
-        "debilidades": "Debilidades",
-        "amenazas": "Amenazas",
-    }
-    missing = [missing_labels[key] for key, value in quadrants.items() if not value]
+    missing = [key.title() for key, text in quadrants.items() if not text]
     if missing:
-        raise ValueError(
-            "Complete los cuatro cuadrantes antes de generar estrategias con IA. "
-            "Falta información en: " + ", ".join(missing) + "."
-        )
+        raise ValueError('Complete los cuatro cuadrantes antes de generar estrategias con IA. Falta: ' + ', '.join(missing) + '.')
 
-    expected_format = {
-        "estrategias_fo": "- Estrategia 1\n- Estrategia 2",
-        "estrategias_fa": "- Estrategia 1\n- Estrategia 2",
-        "estrategias_do": "- Estrategia 1\n- Estrategia 2",
-        "estrategias_da": "- Estrategia 1\n- Estrategia 2",
-    }
-
-    prompt = f"""
-Genere estrategias cruzadas para una matriz DOFA de una organización, utilizando únicamente
-la información proporcionada. No invente capacidades, tecnologías, contratos, certificaciones,
-presupuestos, incidentes ni condiciones que no estén presentes en los cuadrantes.
-
-Criterios:
-- FO: utilizar fortalezas para aprovechar oportunidades.
-- FA: utilizar fortalezas para reducir o afrontar amenazas.
-- DO: superar debilidades aprovechando oportunidades.
-- DA: reducir debilidades y evitar o mitigar amenazas.
-- Genere exactamente dos estrategias concretas y accionables por cada cuadrante.
-- Cada estrategia debe indicar una acción organizacional clara.
-- Responda en español.
-- No agregue explicaciones, encabezados ni texto fuera del JSON.
-- Devuelva exclusivamente un objeto JSON válido con estas cuatro claves:
-{json.dumps(expected_format, ensure_ascii=False, indent=2)}
-
-MATRIZ DOFA:
-{json.dumps(quadrants, ensure_ascii=False, indent=2)}
-""".strip()
-
-    raw_result = ai_text_general(
-        prompt=prompt,
-        system_prompt=(
-            "Eres un consultor senior en planeación estratégica, gestión de riesgos y seguridad "
-            "de la información. Genera estrategias DOFA realistas y responde solo JSON válido."
-        ),
-        temperature=0.2,
-        max_tokens=350,
+    # Es necesario presupuesto de tokens para ocho estrategias y el cierre del JSON.
+    # El antiguo ai_text_general() recorta a 350 tokens y truncaba la salida.
+    prompt = (
+        'Genera una matriz DOFA cruzada, usando EXCLUSIVAMENTE los datos de entrada. '
+        'Sin inventar capacidades, certificaciones ni proyectos. '
+        'FO: fortalezas y oportunidades; FA: fortalezas y amenazas; '
+        'DO: debilidades y oportunidades; DA: debilidades y amenazas. '
+        'Incluye exactamente DOS estrategias accionables, breves y diferentes para CADA tipo. '
+        'Devuelve un SOLO objeto JSON válido sin Markdown ni texto adicional. '
+        'Sus cuatro claves exactas deben ser estrategias_fo, estrategias_fa, estrategias_do, estrategias_da; '
+        'cada valor debe ser una lista de dos cadenas en español. '
+        'Ejemplo de FORMA, no de contenido: '
+        '{"estrategias_fo":["Acción FO 1", "Acción FO 2"], '
+        '"estrategias_fa":["Acción FA 1", "Acción FA 2"], '
+        '"estrategias_do":["Acción DO 1", "Acción DO 2"], '
+        '"estrategias_da":["Acción DA 1", "Acción DA 2"]}. '
+        'DOFA a analizar:\n' + json.dumps(quadrants, ensure_ascii=False, indent=2)
     )
-    return _dofa_ai_extract_result(raw_result)
+    system = ('Eres un consultor senior en planeación estratégica y seguridad de la información. '
+              'Responde con JSON UTF-8 completo y cuatro tipos de estrategias FO, FA, DO y DA.')
+
+    def request_middleware(message, structured):
+        params = {
+            'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': message}],
+            'max_tokens': 2200, 'temperature': 0.1, 'options': {'temperature': 0.1, 'num_predict': 2200},
+        }
+        if structured:
+            params['format'] = 'json'
+        # Solo /v1/execute; no llama a Ollama ni a API cloud directamente.
+        output = _grac_mw_execute('ai', 'generate', params)
+        return _dofa_ai_response_text(output)
+
+    try:
+        raw_result = request_middleware(prompt, structured=True)
+    except RuntimeError as exc:
+        # Algunos modelos cloud no admiten response_format=json_object.
+        # En ese caso se puede generar texto, SIEMPRE a través de Middleware.
+        detail = str(exc).lower()
+        if not any(x in detail for x in ('response_format', 'unsupported', 'format', 'http 400', 'httperror')):
+            raise
+        raw_result = request_middleware(prompt, structured=False)
+
+    try:
+        return _dofa_ai_extract_result(raw_result)
+    except ValueError as first_error:
+        # Una única segunda generación para modelos que entregan JSON cortado o cabeceras.
+        # No se usa un resultado parcial para sobrescribir estrategias actuales.
+        retry = (
+            'La respuesta anterior no pasó la validación de las cuatro estrategias. '
+            'Regenera las estrategias desde la matriz siguiente. SOLO JSON completo; '
+            'sin Markdown, sin comentarios, dos textos breves por clave, '
+            'usa exactamente estrategias_fo, estrategias_fa, estrategias_do, estrategias_da.\n'
+            + json.dumps(quadrants, ensure_ascii=False)
+        )
+        try:
+            result = _dofa_ai_extract_result(request_middleware(retry, structured=False))
+            return result
+        except ValueError as exc:
+            raise ValueError('La IA respondió, pero no completó las cuatro estrategias FO/FA/DO/DA. '
+                             'Revise el modelo configurado en Middleware ai/default o pruebe nuevamente. '
+                             'Detalle: ' + str(exc)) from first_error
 
 
 @app.route('/dofa/generar_estrategias_ia', methods=['POST'])
@@ -41206,8 +41267,8 @@ def dofa_generar_estrategias_ia():
         return jsonify(
             ok=False,
             message=(
-                "No fue posible generar las estrategias con IA. Verifique la configuración "
-                "de OpenRouter u Ollama e inténtelo nuevamente."
+                "No fue posible generar las estrategias mediante el Middleware de IA. "
+                "Verifique que el perfil ai/default esté habilitado y el modelo responda."
             ),
         ), 500
 
@@ -55784,12 +55845,53 @@ def _glpi_normalize_base_url(base_url):
 
 
 def _glpi_invfis_config_activa():
-    return (
-        GLPIInventarioFisicoConfig.query
-        .filter_by(activo=True)
-        .order_by(GLPIInventarioFisicoConfig.id.desc())
-        .first()
+    """Configuración exclusivamente en middleware; no se consultan credenciales locales."""
+    if not _grac_mw_enabled('inventory'):
+        raise RuntimeError('Active Inventory/GLPI en Administración → Middleware de Integraciones GRAC. No se permite configuración GLPI local.')
+    if _grac_mw_provider('inventory') != 'glpi':
+        raise RuntimeError('El Inventario Físico actual requiere el proveedor GLPI en Middleware. Para otros inventarios configure su adaptador en Middleware.')
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        nombre='GLPI gestionado por Middleware', base_url='Middleware (inventory / '+_grac_mw_profile('inventory')+')',
+        activo=True, verificar_ssl=True, timeout=80,
+        ultimo_sync=None, ultimo_estado=None, ultimo_mensaje=None,
     )
+
+
+def _grac_glpi_status_update(estado, mensaje):
+    """Persistir solo resultado de sincronización, jamás URL/tokens locales."""
+    try:
+        from sqlalchemy import text as _mw_sqltext
+        from datetime import datetime as _mw_datetime
+        with db.engine.begin() as conn:
+            conn.execute(_mw_sqltext("CREATE TABLE IF NOT EXISTS grac_mw_glpi_sync_status (registro INTEGER PRIMARY KEY, fecha TEXT, estado TEXT, mensaje TEXT)"))
+            conn.execute(_mw_sqltext("INSERT OR REPLACE INTO grac_mw_glpi_sync_status (registro, fecha, estado, mensaje) VALUES (1,:fecha,:estado,:mensaje)"),
+                {'fecha': _mw_datetime.utcnow().isoformat(), 'estado':str(estado)[:40], 'mensaje':str(mensaje)[:2000]})
+    except Exception:
+        app.logger.exception('No fue posible registrar estado de GLPI via Middleware')
+
+
+def _grac_glpi_status_view():
+    from types import SimpleNamespace
+    if not _grac_mw_enabled('inventory'):
+        return SimpleNamespace(base_url='Middleware no activado en Administración',ultimo_sync=None,
+                               ultimo_estado='SIN CONFIGURAR',ultimo_mensaje='Active Inventory / GLPI en Middleware de Integraciones GRAC.')
+    profile = _grac_mw_profile('inventory')
+    result = SimpleNamespace(base_url='Middleware · GLPI · '+profile,
+                             ultimo_sync=None, ultimo_estado='Configurado',
+                             ultimo_mensaje='El origen y los tokens se gestionan exclusivamente en Middleware.')
+    try:
+        from sqlalchemy import text as _mw_sqltext
+        with db.engine.begin() as conn:
+            conn.execute(_mw_sqltext("CREATE TABLE IF NOT EXISTS grac_mw_glpi_sync_status (registro INTEGER PRIMARY KEY, fecha TEXT, estado TEXT, mensaje TEXT)"))
+            row=conn.execute(_mw_sqltext('SELECT fecha,estado,mensaje FROM grac_mw_glpi_sync_status WHERE registro=1')).first()
+        if row:
+            result.ultimo_sync=row[0]
+            result.ultimo_estado=row[1]
+            result.ultimo_mensaje=row[2]
+    except Exception:
+        app.logger.exception('No fue posible consultar estado de sincronización GLPI')
+    return result
 
 
 def _glpi_invfis_headers(cfg, session_token=None):
@@ -55809,51 +55911,14 @@ def _glpi_invfis_headers(cfg, session_token=None):
 
 
 def _glpi_invfis_init_session(cfg):
-    """
-    Inicia sesión en GLPI usando user_token + app_token.
-    """
-    base_url = _glpi_normalize_base_url(cfg.base_url)
-    user_token = _glpi_invfis_decrypt(cfg.user_token)
-
-    if not base_url or not user_token:
-        raise Exception("Debe configurar la URL base de GLPI y el User Token.")
-
-    headers = _glpi_invfis_headers(cfg)
-    headers["Authorization"] = "user_token " + user_token
-
-    url = base_url + "/initSession"
-    res = requests.get(
-        url,
-        headers=headers,
-        timeout=cfg.timeout or 30,
-        verify=bool(cfg.verificar_ssl),
-    )
-
-    if res.status_code not in (200, 201):
-        raise Exception(f"GLPI initSession falló: HTTP {res.status_code} - {res.text[:500]}")
-
-    data = res.json()
-    token = data.get("session_token")
-    if not token:
-        raise Exception("GLPI no devolvió session_token.")
-
-    return token
+    """Valida la sesión con la configuración almacenada SOLO en el middleware."""
+    _grac_mw_execute('inventory', 'test')
+    return 'managed-by-grac-middleware'
 
 
 def _glpi_invfis_kill_session(cfg, session_token):
-    try:
-        base_url = _glpi_normalize_base_url(cfg.base_url)
-        if not base_url or not session_token:
-            return
-
-        requests.get(
-            base_url + "/killSession",
-            headers=_glpi_invfis_headers(cfg, session_token),
-            timeout=10,
-            verify=bool(cfg.verificar_ssl),
-        )
-    except Exception:
-        pass
+    """El middleware gestiona/cachea las sesiones GLPI. GRAC nunca recibe tokens."""
+    return None
 
 
 def _glpi_get_value(obj, *keys, default=""):
@@ -55879,88 +55944,53 @@ def _glpi_pick_dropdown_name(obj, key):
 
 
 def _glpi_invfis_fetch_computers(cfg, session_token, range_start=0, range_end=999):
-    """
-    Consulta computadores de GLPI.
-    """
-    base_url = _glpi_normalize_base_url(cfg.base_url)
-
-    params = {
-        "expand_dropdowns": "true",
-        "range": f"{range_start}-{range_end}",
-    }
-
-    res = requests.get(
-        base_url + "/Computer",
-        headers=_glpi_invfis_headers(cfg, session_token),
-        params=params,
-        timeout=cfg.timeout or 30,
-        verify=bool(cfg.verificar_ssl),
-    )
-
-    if res.status_code not in (200, 206):
-        raise Exception(f"Consulta de computadores GLPI falló: HTTP {res.status_code} - {res.text[:500]}")
-
-    data = res.json()
-    if isinstance(data, dict) and "data" in data:
-        return data.get("data") or []
-    if isinstance(data, list):
-        return data
-    return []
+    """Lista de equipos obtenida exclusivamente mediante /v1/execute del middleware."""
+    result = _grac_mw_execute('inventory', 'get', {
+        'path': '/Computer',
+        'query': {'expand_dropdowns': 'true', 'range': f'{range_start}-{range_end}'}
+    })
+    if isinstance(result, list):
+        return [item for item in result if isinstance(item, dict)]
+    if isinstance(result, dict):
+        rows = result.get('data', result.get('rows', []))
+        return [item for item in rows if isinstance(item, dict)] if isinstance(rows, list) else []
+    raise RuntimeError('GLPI: formato no válido al listar los computadores desde Middleware')
 
 
 def _glpi_invfis_fetch_computer_detail(cfg, session_token, computer_id):
-    """
-    Consulta el detalle de un computador GLPI para traer campos que muchas veces
-    no vienen completos en la consulta masiva /Computer.
-    """
-    computer_id = _glpi_clean_text(computer_id)
-    if not computer_id:
+    """Detalle complementario: ante fallos se conserva la ficha recibida del listado."""
+    computer_id = str(computer_id or '').strip()
+    if not computer_id.isdigit():
         return {}
-
-    base_url = _glpi_normalize_base_url(cfg.base_url)
-    params = {
-        "expand_dropdowns": "true",
-        "with_devices": "true",
-        "get_hateoas": "false",
-    }
-
-    res = requests.get(
-        base_url + f"/Computer/{computer_id}",
-        headers=_glpi_invfis_headers(cfg, session_token),
-        params=params,
-        timeout=cfg.timeout or 30,
-        verify=bool(cfg.verificar_ssl),
-    )
-
-    if res.status_code not in (200, 206):
+    try:
+        result = _grac_mw_execute('inventory', 'get', {
+            'path': '/Computer/' + computer_id,
+            'query': {'expand_dropdowns': 'true', 'with_devices': 'true', 'get_hateoas': 'false'}
+        })
+        return result if isinstance(result, dict) else {}
+    except Exception as exc:
+        app.logger.warning('GLPI: detalle del computador %s no disponible por Middleware: %s', computer_id, exc)
         return {}
-
-    data = res.json()
-    return data if isinstance(data, dict) else {}
 
 
 _GLPI_INVFIS_ITEM_CACHE = _GracBoundedCache(512) if _GRAC_LOW_MEMORY else {}
 
 
 def _glpi_invfis_api_get(cfg, session_token, path, params=None):
+    """Consulta complementaria de solo lectura; no descarta equipos por rutas opcionales.
+
+    La lista principal /Computer debe propagar errores. Los detalles auxiliares
+    pueden no existir o estar deshabilitados según la versión GLPI.
     """
-    GET genérico contra API REST GLPI.
-    Devuelve dict/list o {} si no responde correctamente.
-    """
+    if not isinstance(path, str) or not path.startswith('/'):
+        return {}
     try:
-        base_url = _glpi_normalize_base_url(cfg.base_url)
-        res = requests.get(
-            base_url + path,
-            headers=_glpi_invfis_headers(cfg, session_token),
-            params=params or {"expand_dropdowns": "true", "get_hateoas": "false"},
-            timeout=cfg.timeout or 30,
-            verify=bool(cfg.verificar_ssl),
-        )
-        if res.status_code not in (200, 206):
-            return {}
-        data = res.json()
-        return data
-    except Exception:
+        return _grac_mw_execute('inventory', 'get', {
+            'path': path,
+            'query': params if params is not None else {'expand_dropdowns': 'true', 'get_hateoas': 'false'}
+        })
+    except Exception as exc:
+        app.logger.warning('GLPI: consulta complementaria %s no disponible por Middleware: %s', path, exc)
         return {}
 
 
@@ -56051,25 +56081,24 @@ def _glpi_invfis_fetch_operating_system_relation(cfg, session_token, computer_id
 
 
 def _glpi_invfis_merge_os_relation_into_computer(computer, os_relation):
-    """
-    Mezcla el registro Item_OperatingSystem en el dict Computer sin perder campos
-    del equipo. Además crea llaves alias para que el mapeo GRAC lea exactamente:
-      procesador      <- arquitectura
-      tipo_sistema    <- nombre del SO
-      version_so      <- kernel
-      edicion_so      <- edición
-    """
+    """Fusiona atributos del SO sin reemplazar el ID/nombre/serial del computador."""
     merged = dict(computer or {})
-
-    if not isinstance(os_relation, dict) or not os_relation:
+    if not isinstance(os_relation, dict):
         return merged
-
-    for k, v in os_relation.items():
-        if v not in (None, "", "None", "null"):
-            merged[k] = v
-
+    protected = {'id', 'name', 'completename', 'serial', 'otherserial', 'uuid',
+                 'groups_id', 'groups_id_tech', 'group_id', 'manufacturers_id',
+                 'computermodels_id', 'locations_id', 'entities_id', 'users_id'}
+    for key, value in os_relation.items():
+        if key in protected or value in (None, '', 'None', 'null'):
+            continue
+        # Los atributos propios de SO tienen prioridad sobre los valores vacíos de Computer.
+        if key.startswith(('operatingsystem', 'os_')) or key in ('kernel', 'edition', 'architecture'):
+            merged[key] = value
+        elif key not in merged:
+            merged[key] = value
+    if os_relation.get('name') and not merged.get('operatingsystems_id'):
+        merged.setdefault('operating_system', os_relation['name'])
     return merged
-
 
 def _glpi_invfis_extract_id(value):
     """
@@ -56406,48 +56435,41 @@ def _glpi_invfis_fetch_group_relation(cfg, session_token, computer_id):
 
 
 def _glpi_invfis_merge_group_relation_into_computer(computer, group_relation):
-    """
-    Mezcla la relación Group_Item al dict Computer y crea aliases.
-    """
+    """Incorpora el grupo real sin sobrescribir atributos del computador GLPI."""
     merged = dict(computer or {})
-
-    if not isinstance(group_relation, dict) or not group_relation:
+    if not isinstance(group_relation, dict):
         return merged
-
-    for k, v in group_relation.items():
-        if v not in (None, "", "None", "null"):
-            merged[k] = v
-
-    # Normaliza aliases comunes hacia groups_id_tech.
-    for key in ("groups_id", "groups_id_tech", "group_id", "group", "name", "completename"):
-        val = group_relation.get(key)
-        if val not in (None, "", "None", "null") and not merged.get("groups_id_tech"):
-            merged["groups_id_tech"] = val
-            break
-
+    raw = (group_relation.get('groups_id_tech') or group_relation.get('groups_id')
+           or group_relation.get('group_id') or group_relation.get('groups_id_user'))
+    if not raw and group_relation.get('itemtype') == 'Group':
+        raw = group_relation.get('id')
+    if not raw:
+        raw = group_relation.get('name') or group_relation.get('completename')
+    if raw and not merged.get('groups_id_tech'):
+        merged['groups_id_tech'] = raw
     return merged
 
-
-
 def _glpi_invfis_resolver_nombre_grupo_glpi(cfg=None, session_token=None, computer=None):
-    raw_group = ""
-
-    if isinstance(computer, dict):
-        raw_group = (
-            computer.get("groups_id_tech")
-            or computer.get("groups_id")
-            or computer.get("group_id")
-            or ""
-        )
-
-    group_id = str(raw_group).strip()
-
-    mapa_grupos = {
-        "1": "Seguridad",
-        "3": "Ventas",
-    }
-
-    return mapa_grupos.get(group_id, ""), group_id
+    """Obtiene el área de un grupo GLPI real, no de un identificador supuesto."""
+    computer = computer if isinstance(computer, dict) else {}
+    raw = (computer.get('groups_id_tech') or computer.get('groups_id')
+           or computer.get('group_id') or computer.get('grupo_a_cargo') or '')
+    if isinstance(raw, dict):
+        nombre = str(raw.get('name') or raw.get('completename') or '').strip()
+        if nombre:
+            return nombre, str(raw.get('id') or '')
+        raw = raw.get('id') or ''
+    group_id = str(raw).strip()
+    if not group_id or group_id in ('0','None','null'):
+        return '', group_id
+    if not group_id.isdigit():
+        return group_id, ''
+    # Solo consulta; el nombre del grupo se determina en GLPI vía middleware.
+    nombre = _glpi_invfis_resolve_item_name(cfg, session_token, 'Group', group_id)
+    if nombre:
+        return nombre, group_id
+    # IDs históricos del laboratorio: se conservan solo si el proveedor no devolvió nombre.
+    return {'1': 'Seguridad', '3': 'Ventas'}.get(group_id, ''), group_id
 
 
 def _glpi_invfis_crear_area_segura(nombre_area):
@@ -56513,16 +56535,11 @@ def _glpi_invfis_crear_area_segura(nombre_area):
 
 
 def _glpi_invfis_resolver_area_obligatoria(cfg=None, session_token=None, computer=None):
-    grupo_texto, group_id = _glpi_invfis_resolver_nombre_grupo_glpi(
-        cfg,
-        session_token,
-        computer
-    )
-
-    if not grupo_texto:
-        return None
-
-    return _glpi_invfis_crear_area_segura(grupo_texto)
+    """Asigna área GLPI; si falta, usa marcador explícito PENDIENTE para no perder el activo."""
+    nombre, _ = _glpi_invfis_resolver_nombre_grupo_glpi(cfg, session_token, computer)
+    if not nombre:
+        nombre = 'Pendiente de clasificación (GLPI)'
+    return _glpi_invfis_crear_area_segura(nombre)
 
 
 def _glpi_invfis_numero_neutro(value=None):
@@ -56814,17 +56831,10 @@ def glpi_invfis_sincronizar():
                 omitidos += 1
                 errores.append(f"Equipo GLPI {comp.get('id', 'N/D')}: {str(e)}")
 
-        try:
-            cfg = _glpi_invfis_config_activa()
-            cfg.ultimo_sync = datetime.utcnow()
-            cfg.ultimo_estado = "OK" if not errores else "OK_CON_OMITIDOS"
-            cfg.ultimo_mensaje = f"Creados: {creados}, Actualizados: {actualizados}, Omitidos: {omitidos}"
-            if errores:
-                cfg.ultimo_mensaje += " | " + " || ".join(errores[:5])
-            db.session.add(cfg)
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
+        mensaje = f"Creados: {creados}, Actualizados: {actualizados}, Omitidos: {omitidos}"
+        if errores:
+            mensaje += " | " + " || ".join(errores[:5])
+        _grac_glpi_status_update("OK" if not errores else "OK_CON_OMITIDOS", mensaje)
 
         return {
             "creados": creados,
@@ -56835,16 +56845,7 @@ def glpi_invfis_sincronizar():
 
     except Exception as e:
         db.session.rollback()
-        try:
-            cfg = _glpi_invfis_config_activa()
-            if cfg:
-                cfg.ultimo_sync = datetime.utcnow()
-                cfg.ultimo_estado = "ERROR"
-                cfg.ultimo_mensaje = str(e)
-                db.session.add(cfg)
-                db.session.commit()
-        except Exception:
-            db.session.rollback()
+        _grac_glpi_status_update("ERROR", str(e))
         raise
 
     finally:
@@ -56857,6 +56858,11 @@ def glpi_invfis_sincronizar():
 @app.route('/inventario_fisico/glpi/config', methods=['GET', 'POST'])
 @login_required
 def inventario_fisico_glpi_config():
+    flash('La configuración de GLPI ahora se administra exclusivamente en Middleware de Integraciones GRAC.', 'info')
+    return redirect(url_for('grac_middleware_admin'))
+    if _grac_mw_enabled('inventory'):
+        notice='<div class="container py-4"><h3>GLPI - Middleware</h3><p>Las credenciales de inventario físico se administran en Middleware. Seleccione el proveedor GLPI en Administración y configure el perfil allí.</p><a class="btn btn-primary" href="/admin/conexiones/middleware">Configurar Middleware</a></div>'
+        return render_template_string(BASE,content=Markup(notice))
     user = User.query.get(session.get('user_id'))
 
     if user.role == 'auditor' or (
@@ -58545,7 +58551,7 @@ def inventario_fisico():
         .all()
     )
 
-    cfg_glpi = _glpi_invfis_config_activa()
+    cfg_glpi = _grac_glpi_status_view()
 
     matriz_items = []
 
@@ -58596,11 +58602,6 @@ def inventario_fisico():
             ➕ Agregar Activo
           </a>
 
-          <a href="{{ url_for('inventario_fisico_glpi_config') }}"
-             class="btn rounded-pill px-4 fw-bold invfismat-btn-config-glpi">
-            ⚙️ Configurar GLPI
-          </a>
-
           <form method="post"
                 action="{{ url_for('inventario_fisico_glpi_sync') }}"
                 class="d-inline"
@@ -58634,7 +58635,7 @@ def inventario_fisico():
         </div>
       {% else %}
         <div class="invfismat-glpi-status">
-          <b>GLPI:</b> no configurado. Use el botón <b>Configurar GLPI</b>.
+          <b>GLPI:</b> Active el perfil Inventory / GLPI en Administración → Middleware de Integraciones GRAC.
         </div>
       {% endif %}
 
@@ -78360,110 +78361,18 @@ def parse_txt_findings_generic(file_path: str, fuente: str):
     return findings
 
 def ejecutar_zap(run_id, cfg, target: str, run_dir: str):
-    out_html = scan_output_file(run_dir, "zap_scan", "html")
-    out_json = scan_output_file(run_dir, "zap_scan", "json")
-    out_txt = scan_output_file(run_dir, "zap_scan", "txt")
-
-    os.makedirs(run_dir, exist_ok=True)
-
-    docker_image = "ghcr.io/zaproxy/zaproxy:stable"
-
-    if cfg.modo == "local":
-        cmd = [
-            "bash",
-            "-lc",
-            (
-                f"rm -f {shlex.quote(out_html)} {shlex.quote(out_json)} {shlex.quote(out_txt)}; "
-                f"echo '[OWASP_ZAP] Ejecutando escaneo NORMAL con Docker ZAP' > {shlex.quote(out_txt)}; "
-
-                f"docker run --rm "
-                f"-v {shlex.quote(run_dir)}:/zap/wrk/:rw "
-                f"{docker_image} "
-                f"zap-baseline.py "
-                f"-t {shlex.quote(target)} "
-                f"-J zap_scan.json "
-                f"-r zap_scan.html "
-                f"-I "
-                f">> {shlex.quote(out_txt)} 2>&1; "
-
-                f"if [ ! -f {shlex.quote(out_html)} ]; then "
-                f"echo '<html><body><h2>OWASP ZAP no generó reporte HTML</h2><pre>' > {shlex.quote(out_html)}; "
-                f"cat {shlex.quote(out_txt)} >> {shlex.quote(out_html)} 2>/dev/null; "
-                f"echo '</pre></body></html>' >> {shlex.quote(out_html)}; "
-                f"fi; "
-
-                f"ls -lh {shlex.quote(out_html)} {shlex.quote(out_json)} {shlex.quote(out_txt)} 2>&1"
-            )
-        ]
-
-        res = ejecutar_comando_scan(run_id, cfg, cmd)
-
-        return {
-            "returncode": res.get("returncode", 0),
-            "stdout": res.get("stdout") or "",
-            "stderr": res.get("stderr") or ""
-        }
-
-    remote_base = (cfg.ruta_base_remota or "/tmp").rstrip("/")
-    remote_dir = f"{remote_base}/zap_normal_scan_{run_id}"
-    remote_html = f"{remote_dir}/zap_scan.html"
-    remote_json = f"{remote_dir}/zap_scan.json"
-    remote_txt = f"{remote_dir}/zap_scan.txt"
-
-    remote_cmd = (
-        f"mkdir -p {shlex.quote(remote_dir)}; "
-        f"rm -f {shlex.quote(remote_html)} {shlex.quote(remote_json)} {shlex.quote(remote_txt)}; "
-
-        f"echo '[OWASP_ZAP] Ejecutando escaneo NORMAL con Docker ZAP remoto' > {shlex.quote(remote_txt)}; "
-        f"echo '[OWASP_ZAP] Target: {shlex.quote(target)}' >> {shlex.quote(remote_txt)}; "
-        f"docker images | grep zaproxy >> {shlex.quote(remote_txt)} 2>&1 || true; "
-
-        f"docker run --rm "
-        f"-v {shlex.quote(remote_dir)}:/zap/wrk/:rw "
-        f"{docker_image} "
-        f"zap-baseline.py "
-        f"-t {shlex.quote(target)} "
-        f"-J zap_scan.json "
-        f"-r zap_scan.html "
-        f"-I "
-        f">> {shlex.quote(remote_txt)} 2>&1; "
-
-        f"if [ ! -f {shlex.quote(remote_html)} ]; then "
-        f"echo '<html><body><h2>OWASP ZAP no generó reporte HTML</h2><pre>' > {shlex.quote(remote_html)}; "
-        f"cat {shlex.quote(remote_txt)} >> {shlex.quote(remote_html)} 2>/dev/null; "
-        f"echo '</pre></body></html>' >> {shlex.quote(remote_html)}; "
-        f"fi; "
-
-        f"ls -lh {shlex.quote(remote_html)} {shlex.quote(remote_json)} {shlex.quote(remote_txt)} 2>&1"
-    )
-
-    res = ejecutar_comando_scan(
-        run_id,
-        cfg,
-        ["bash", "-lc", "echo OWASP ZAP normal remoto"],
-        remote_cmd=remote_cmd
-    )
-
-    scp_from_remote(cfg, remote_txt, out_txt)
-    scp_from_remote(cfg, remote_json, out_json)
-    pull_html = scp_from_remote(cfg, remote_html, out_html)
-
-    if pull_html["returncode"] != 0:
-        return {
-            "returncode": 1,
-            "stdout": res.get("stdout") or "",
-            "stderr": (
-                "No se pudo traer reporte HTML de OWASP ZAP normal. "
-                f"Detalle SCP: {pull_html.get('stderr') or ''}\n\n"
-                f"Salida remota:\n{res.get('stdout') or ''}\n{res.get('stderr') or ''}"
-            )
-        }
-
-    return {
-        "returncode": res.get("returncode", 0),
-        "stdout": res.get("stdout") or "",
-        "stderr": res.get("stderr") or ""
-    }
+    """Compatibilidad: OWASP ZAP siempre se ejecuta en middleware."""
+    result=_grac_mw_execute('scanner_zap','baseline',{'target':target})
+    import os as _mz_os
+    _mz_os.makedirs(run_dir,exist_ok=True)
+    with open(scan_output_file(run_dir,'zap_scan','json'),'wb') as fp:
+        fp.write(_grac_mw_b64.b64decode(result['report']))
+    with open(scan_output_file(run_dir,'zap_scan','html'),'wb') as fp:
+        fp.write(_grac_mw_b64.b64decode(result.get('html') or ''))
+    with open(scan_output_file(run_dir,'zap_scan','txt'),'w',encoding='utf-8') as fp:
+        fp.write(str(result.get('log') or ''))
+    return {'returncode':result.get('returncode',0),'stdout':str(result.get('log') or ''),
+            'stderr':'','cmd':'OWASP ZAP Middleware'}
 
 
 def parse_zap_findings(run_dir: str):
@@ -78989,6 +78898,10 @@ def ejecutar_full_scan(run_id: int, crear_vulns=True, crear_planes=True):
     log_path = scan_output_file(run_dir, "scan_log", "txt")
 
     try:
+        # Cada motor usa exclusivamente Middleware y el mismo registro de resultados.
+        if run.scanner_mode == 'propia':
+            return _grac_mw_own_full_scan(run,run_dir,crear_vulns,crear_planes)
+        return _grac_mw_kali_full_scan(run,run_dir,crear_vulns,crear_planes)
         cfg = _scan_cfg()
 
         faltantes = validar_herramientas_scan(cfg)
@@ -80356,7 +80269,7 @@ def vulnerabilidades_matriz():
             </button>
           {% endif %}
 
-          <!-- Escaneo: Kali y ZAP con Nuevo escaneo/Reportes; configuración centralizada en Administración -->
+          <!-- Escaneo: Kali, ZAP y herramientas propias, con acceso separado a reportes. -->
           <div class="kali-dropdown-wrap grac-scans-menu">
             <button type="button"
                     class="btn btn-primary kali-main-btn rounded-pill px-4 fw-semibold"
@@ -80376,7 +80289,7 @@ def vulnerabilidades_matriz():
                   {% else %}
                     <span class="kali-menu-item kali-menu-item-disabled">Nuevo escaneo · Solo lectura</span>
                   {% endif %}
-                  <a href="{{ url_for('vuln_scan_runs') }}" class="kali-menu-item">Reportes de escaneo</a>
+                  <a href="{{ url_for('vuln_scan_runs', scanner_type='kali') }}" class="kali-menu-item">Reportes de escaneo</a>
                 </div>
               </details>
               <details class="grac-scans-tool">
@@ -80388,6 +80301,17 @@ def vulnerabilidades_matriz():
                     <span class="kali-menu-item kali-menu-item-disabled">Nuevo escaneo · Solo lectura</span>
                   {% endif %}
                   <a href="{{ url_for('vuln_zap_runs') }}" class="kali-menu-item">Reportes de escaneo</a>
+                </div>
+              </details>
+              <details class="grac-scans-tool">
+                <summary><i class="bi bi-shield-check me-2"></i>Herramienta propia</summary>
+                <div class="grac-scans-links">
+                  {% if not read_only %}
+                    <a href="{{ url_for('vuln_scan_new', scanner_type='own') }}" class="kali-menu-item">Nuevo escaneo</a>
+                  {% else %}
+                    <span class="kali-menu-item kali-menu-item-disabled">Nuevo escaneo · Solo lectura</span>
+                  {% endif %}
+                  <a href="{{ url_for('vuln_scan_runs', scanner_type='own') }}" class="kali-menu-item">Reportes de escaneo</a>
                 </div>
               </details>
             </div>
@@ -82920,30 +82844,8 @@ def _admin_scanner_settings_user():
 @login_required
 def admin_configuracion_herramientas_escaneo():
     _admin_scanner_settings_user()
-    body = """
-    <div class="glass-card p-4 mt-2">
-      <h5 class="section-title"><i class="bi bi-shield-lock me-2"></i>Herramienta de escaneo</h5>
-      <p class="text-muted mb-3">Solo el administrador puede consultar y cambiar los parámetros de conexión y ejecución. Los usuarios autorizados al módulo de vulnerabilidades pueden seguir realizando escaneos y consultando sus reportes, sin acceso a esta configuración.</p>
-      <div class="row g-3">
-        <div class="col-lg-6">
-          <div class="card h-100 p-3">
-            <div class="d-flex align-items-center gap-2 mb-2"><i class="bi bi-terminal fs-4 text-primary"></i><h5 class="m-0">Kali Linux</h5></div>
-            <p class="text-muted flex-grow-1">Modo local o SSH, host remoto, puerto, usuario, credenciales y rutas de Nmap, Nikto, Nuclei, WhatWeb y testssl.</p>
-            <a class="btn btn-primary" href="{{ url_for('vuln_scan_config') }}"><i class="bi bi-gear-fill me-1"></i> Configurar Kali Linux</a>
-          </div>
-        </div>
-        <div class="col-lg-6">
-          <div class="card h-100 p-3">
-            <div class="d-flex align-items-center gap-2 mb-2"><i class="bi bi-globe2 fs-4 text-primary"></i><h5 class="m-0">OWASP ZAP</h5></div>
-            <p class="text-muted flex-grow-1">Modo Docker local o importación JSON, imagen, límites de tiempo y hosts autorizados para escanear.</p>
-            <a class="btn btn-primary" href="{{ url_for('vuln_zap_config') }}"><i class="bi bi-gear-fill me-1"></i> Configurar OWASP ZAP</a>
-          </div>
-        </div>
-      </div>
-    </div>
-    """
-    # Procesar url_for antes de insertar el HTML en la plantilla del modulo.
-    return vuln_scan_shell('Herramienta de escaneo', render_template_string(body))
+    flash('OWASP ZAP y Kali Linux se configuran únicamente en Middleware de Integraciones GRAC.', 'info')
+    return redirect(url_for('grac_middleware_admin'))
 
 
 # ==========================
@@ -82952,139 +82854,9 @@ def admin_configuracion_herramientas_escaneo():
 @app.route('/vulnerabilidades/scan/config', methods=['GET', 'POST'])
 @login_required
 def vuln_scan_config():
-    _admin_scanner_settings_user()  # Seguridad en el servidor, también para POST/URL directa.
-    cfg = _scan_cfg()
-
-    if request.method == 'POST':
-        cfg.modo = (request.form.get('modo') or 'local').strip()
-        cfg.host = (request.form.get('host') or '').strip() or None
-        cfg.puerto_ssh = request.form.get('puerto_ssh', type=int) or 22
-        cfg.usuario_ssh = (request.form.get('usuario_ssh') or '').strip() or None
-        cfg.password_ssh = (request.form.get('password_ssh') or '').strip() or None
-        cfg.ruta_base_remota = (request.form.get('ruta_base_remota') or '').strip() or None
-
-        cfg.ruta_nmap = (request.form.get('ruta_nmap') or '/usr/bin/nmap').strip()
-        cfg.ruta_nikto = (request.form.get('ruta_nikto') or '/usr/bin/nikto').strip()
-        cfg.ruta_nuclei = (request.form.get('ruta_nuclei') or '/usr/bin/nuclei').strip()
-        cfg.ruta_whatweb = (request.form.get('ruta_whatweb') or '/usr/bin/whatweb').strip()
-        cfg.ruta_testssl = (request.form.get('ruta_testssl') or '/usr/bin/testssl').strip()
-
-        cfg.updated_at = datetime.utcnow()
-
-        db.session.commit()
-        flash("Configuración de Kali Linux guardada correctamente.", "success")
-        return redirect(url_for('vuln_scan_config'))
-
-    body = """
-    <div class="glass-card p-4 mt-2">
-      <div class="section-title">⚙️ Configuración de Kali Linux · Solo administrador</div>
-
-      <form method="post">
-        <div class="row g-3">
-
-          <div class="col-md-4">
-            <label class="form-label">Modo de Integración</label>
-            <select name="modo" class="form-select">
-              <option value="local" {% if cfg.modo == 'local' %}selected{% endif %}>
-                Local
-              </option>
-              <option value="remoto" {% if cfg.modo == 'remoto' %}selected{% endif %}>
-                Remoto (otra IP por SSH)
-              </option>
-            </select>
-          </div>
-
-          <div class="col-md-4">
-            <label class="form-label">Host Kali Remoto</label>
-            <input name="host"
-                   class="form-control"
-                   value="{{ cfg.host or '' }}"
-                   placeholder="192.168.1.50">
-          </div>
-
-          <div class="col-md-4">
-            <label class="form-label">Puerto SSH</label>
-            <input name="puerto_ssh"
-                   type="number"
-                   class="form-control"
-                   value="{{ cfg.puerto_ssh or 22 }}">
-          </div>
-
-          <div class="col-md-4">
-            <label class="form-label">Usuario SSH</label>
-            <input name="usuario_ssh"
-                   class="form-control"
-                   value="{{ cfg.usuario_ssh or '' }}">
-          </div>
-
-          <div class="col-md-4">
-            <label class="form-label">Password SSH</label>
-            <input name="password_ssh"
-                   type="password"
-                   class="form-control"
-                   value="{{ cfg.password_ssh or '' }}">
-          </div>
-
-          <div class="col-md-4">
-            <label class="form-label">Ruta Base Remota</label>
-            <input name="ruta_base_remota"
-                   class="form-control"
-                   value="{{ cfg.ruta_base_remota or '/tmp' }}">
-          </div>
-
-          <div class="col-md-3">
-            <label class="form-label">Ruta Nmap</label>
-            <input name="ruta_nmap"
-                   class="form-control"
-                   value="{{ cfg.ruta_nmap or '/usr/bin/nmap' }}">
-          </div>
-
-          <div class="col-md-3">
-            <label class="form-label">Ruta Nikto</label>
-            <input name="ruta_nikto"
-                   class="form-control"
-                   value="{{ cfg.ruta_nikto or '/usr/bin/nikto' }}">
-          </div>
-
-          <div class="col-md-3">
-            <label class="form-label">Ruta Nuclei</label>
-            <input name="ruta_nuclei"
-                   class="form-control"
-                   value="{{ cfg.ruta_nuclei or '/usr/bin/nuclei' }}">
-          </div>
-
-          <div class="col-md-3">
-            <label class="form-label">Ruta WhatWeb</label>
-            <input name="ruta_whatweb"
-                   class="form-control"
-                   value="{{ cfg.ruta_whatweb or '/usr/bin/whatweb' }}">
-          </div>
-
-          <div class="col-md-3">
-            <label class="form-label">Ruta testssl</label>
-            <input name="ruta_testssl"
-                   class="form-control"
-                   value="{{ cfg.ruta_testssl or '/usr/bin/testssl' }}">
-          </div>
-
-          <div class="col-12">
-            <div class="toolbar-actions justify-content-center mt-2">
-              <button class="btn btn-primary rounded-pill px-4">
-                Guardar Configuración
-              </button>
-
-            </div>
-          </div>
-
-        </div>
-      </form>
-    </div>
-    """
-
-    return vuln_scan_shell(
-        "Configuración de Kali Linux",
-        render_template_string(body, cfg=cfg)
-    )
+    _admin_scanner_settings_user()
+    flash('La configuración de Kali Linux/SSH se administra exclusivamente en Middleware.', 'info')
+    return redirect(url_for('grac_middleware_admin'))
 
 
 # ==========================
@@ -83103,13 +82875,26 @@ def vuln_scan_new():
         flash("No tiene permiso para ejecutar escaneos.", "danger")
         return redirect(url_for('vulnerabilidades_matriz'))
 
-    cfg = _scan_cfg()
+    from types import SimpleNamespace
+    cfg = SimpleNamespace(modo="remoto",host="Middleware de Integraciones GRAC")  # Sin SSH local.
+
+    selected_scanner = (request.args.get('scanner_type') or 'kali').strip().lower()
+    if selected_scanner not in ('kali', 'own'):
+        selected_scanner = 'kali'
 
     if request.method == 'POST':
         target = (request.form.get('target') or '').strip()
         responsable = (request.form.get('responsable') or '').strip()
         crear_vulns = bool(request.form.get('crear_vulns'))
         crear_planes = bool(request.form.get('crear_planes'))
+        scanner_type = selected_scanner  # Ruta ya indica Kali o herramienta propia; el formulario no lo vuelve a seleccionar.
+        if scanner_type == 'zap':
+            return redirect(url_for('vuln_zap_new'))
+        if scanner_type not in ('kali','own'):
+            flash('Seleccione un motor de escaneo válido.', 'danger')
+            return redirect(url_for('vuln_scan_new', scanner_type=scanner_type))
+        own_provider = None
+        own_profile = None
 
         # ==========================
         # Herramientas seleccionadas
@@ -83132,17 +82917,38 @@ def vuln_scan_new():
         if not herramientas:
             herramientas = ["nmap"]
 
-        if not target_valido(target):
+
+        if request.form.get('confirmar_alcance') != '1':
+            flash('Debe confirmar que dispone de autorización para analizar el objetivo indicado.', 'danger')
+            return redirect(url_for('vuln_scan_new', scanner_type=scanner_type))
+
+        if scanner_type == 'kali' and not target_valido(target):
             flash("Debe ingresar una URL o IP válida.", "danger")
-            return redirect(url_for('vuln_scan_new'))
+            return redirect(url_for('vuln_scan_new', scanner_type=scanner_type))
+        if scanner_type == 'own' and (not target or len(target)>500 or any(ord(c)<33 for c in target)):
+            flash('Ingrese un objetivo o identificador válido para la herramienta propia.', 'danger')
+            return redirect(url_for('vuln_scan_new', scanner_type=scanner_type))
+
+        try:
+            if scanner_type == 'own':
+                # El proveedor/perfil SOLO se determina consultando la configuración
+                # habilitada en el Middleware. No confiar en un campo del navegador.
+                own_provider, own_profile = _grac_mw_resolve_own_profile(target)
+                herramientas = ['own:'+own_provider+'@'+own_profile]
+            else:
+                normalized = target if target.startswith(('http://','https://')) else 'https://'+target
+                _grac_mw_execute('scanner_kali','authorize',{'target':normalized})
+        except Exception as exc:
+            flash('El Middleware no autorizó el objetivo: '+str(exc)[:350], 'danger')
+            return redirect(url_for('vuln_scan_new', scanner_type=scanner_type))
 
         target_type = detectar_tipo_objetivo(target)
 
         run = VulnerabilityScanRun(
-            target=normalizar_target_para_scan(target) if target_type == "url" else target,
+            target=(target if scanner_type == 'own' else (normalizar_target_para_scan(target) if target_type == 'url' else target)),
             target_type=target_type,
             scan_mode='full',
-            scanner_mode=cfg.modo,
+            scanner_mode=('propia' if scanner_type == 'own' else 'remoto'),
             estado='ejecutando',
             fecha_inicio=datetime.utcnow(),
             fecha_fin=None,
@@ -83174,11 +82980,11 @@ def vuln_scan_new():
     <div class="glass-card p-4 mt-2">
       <div class="section-title">🛰️ Nuevo Análisis Automático</div>
 
-      <form method="post">
+      <form method="post" action="{{ url_for('vuln_scan_new', scanner_type=selected_scanner) }}">
         <div class="row g-3">
 
           <div class="col-md-8">
-            <label class="form-label">Objetivo a escanear (URL o IP)</label>
+            <label class="form-label">Objetivo (URL, IP, imagen o proyecto)</label>
             <input name="target"
                    class="form-control"
                    placeholder="https://midominio.com o 192.168.1.10"
@@ -83193,18 +82999,19 @@ def vuln_scan_new():
           </div>
 
           <div class="col-md-4">
-            <label class="form-label">Modo configurado</label>
-            <input class="form-control" value="{{ cfg.modo }}" readonly>
+            <label class="form-label">Conexión</label>
+            <input class="form-control" value="Middleware GRAC" readonly>
           </div>
-
-          <div class="col-md-8">
-            <label class="form-label">Motor Kali actual</label>
-            <input class="form-control"
-                   value="{% if cfg.modo == 'local' %}Localhost{% else %}{{ cfg.host or 'No configurado' }}{% endif %}"
-                   readonly>
-          </div>
-
+          {% if selected_scanner == 'own' %}
           <div class="col-12">
+            <div class="form-text">
+              GRAC utiliza automáticamente el único perfil activo de escaneadores propios configurado en Middleware.
+              Si hay varios perfiles activos, debe dejar uno solo habilitado para evitar seleccionar una herramienta diferente sin autorización.
+            </div>
+          </div>
+          {% endif %}
+          {% if selected_scanner == 'kali' %}
+          <div class="col-12" id="kali_tools">
             <div class="glass-card p-3 mb-2 mt-2">
               <div class="section-title">
                 🛠️ Herramientas de Escaneo
@@ -83283,6 +83090,9 @@ def vuln_scan_new():
                 </div>
             </div>
           </div>
+          </div>
+
+          {% endif %}  {# Las herramientas locales solo aparecen al ingresar por Kali Linux. #}
 
           <div class="col-md-6">
             <div class="form-check mt-4">
@@ -83311,6 +83121,14 @@ def vuln_scan_new():
           </div>
 
           <div class="col-12 mt-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="confirmar_alcance"
+                     id="confirmar_alcance" value="1" required>
+              <label class="form-check-label" for="confirmar_alcance">Confirmo que tengo autorización para realizar el escaneo sobre el objetivo indicado.</label>
+            </div>
+          </div>
+
+          <div class="col-12 mt-3">
             <div class="toolbar-actions justify-content-center">
               <button class="btn btn-primary rounded-pill px-4">
                 Ejecutar Escaneo
@@ -83327,12 +83145,14 @@ def vuln_scan_new():
       </form>
     </div>
 
+    {% if selected_scanner == 'kali' %}
     <div class="glass-card p-3 mt-3">
       <div class="small text-muted">
         <b>Herramientas disponibles:</b>
         Nmap, Nikto, Nuclei, WhatWeb y testssl (Kali Linux).
       </div>
     </div>
+    {% endif %}
     """
 
     return vuln_scan_shell(
@@ -83340,7 +83160,9 @@ def vuln_scan_new():
         render_template_string(
             body,
             cfg=cfg,
-            current_user=current_user
+            current_user=current_user,
+            own_scanners=_GRAC_OWN_SCANNERS,
+            selected_scanner=selected_scanner
         )
     )
 
@@ -83469,6 +83291,10 @@ def vuln_scan_monitor(run_id):
 
     <script>
       const RUN_ID = {{ run.id }};
+      // Los nombres, rutas y evidencias devueltos por los proveedores son datos no confiables.
+      const escapeVulnText = (value) => String(value == null ? '' : value)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
       async function refreshScanStatus() {
         try {
@@ -83493,11 +83319,11 @@ def vuln_scan_monitor(run_id):
             tbody.innerHTML += `
               <tr>
                 <td class="text-center fw-bold">${idx + 1}</td>
-                <td class="text-center">${f.fuente || '—'}</td>
-                <td class="small">${f.titulo || '—'}</td>
+                <td class="text-center">${escapeVulnText(f.fuente || '—')}</td>
+                <td class="small">${escapeVulnText(f.titulo || '—')}</td>
                 <td class="text-center">${f.severidad_badge_html || '—'}</td>
-                <td class="text-center">${f.puerto || '—'}</td>
-                <td class="small">${f.servicio || '—'}</td>
+                <td class="text-center">${escapeVulnText(f.puerto || '—')}</td>
+                <td class="small">${escapeVulnText(f.servicio || '—')}</td>
               </tr>
             `;
           });
@@ -83600,6 +83426,20 @@ def vuln_scan_stop(run_id):
     run.current_stage = "Solicitud de detención enviada"
     db.session.commit()
 
+    # La herramienta de Kali corre en el middleware: cancelar allí el proceso
+    # identificado por esta corrida y este perfil; nunca matar otro escaneo.
+    if (run.current_tool or '').lower() in ('nmap','nikto','nuclei','whatweb','testssl'):
+        try:
+            _grac_mw_execute('scanner_kali','cancel_tool',{'scan_id':str(run.id)})
+        except Exception as exc:
+            app.logger.warning('No se pudo notificar cancelacion al middleware Kali: %s',exc)
+
+    if (run.current_tool or '').lower() in ('owasp zap','zap'):
+        try:
+            _grac_mw_execute('scanner_zap','cancel_scan',{'scan_id':'vuln:'+str(run.id)})
+        except Exception as exc:
+            app.logger.warning('No se pudo notificar cancelacion al middleware ZAP: %s',exc)
+
     # Intentar matar el proceso activo local (si existe)
     try:
         if run.active_pid:
@@ -83627,7 +83467,14 @@ def vuln_scan_runs():
         flash("No tiene permiso para acceder a los reportes de escaneo.", "danger")
         return redirect(url_for('menu'))
 
-    items = VulnerabilityScanRun.query.filter(VulnerabilityScanRun.scanner_mode != "zap").order_by(VulnerabilityScanRun.id.desc()).all()
+    # Keep own-scanner reports separate without altering older scan history.
+    scan_kind = (request.args.get('scanner_type') or '').strip().lower()
+    runs_query = VulnerabilityScanRun.query.filter(VulnerabilityScanRun.scanner_mode != 'zap')
+    if scan_kind == 'own':
+        runs_query = runs_query.filter(VulnerabilityScanRun.scanner_mode == 'propia')
+    elif scan_kind == 'kali':
+        runs_query = runs_query.filter(VulnerabilityScanRun.scanner_mode != 'propia')
+    items = runs_query.order_by(VulnerabilityScanRun.id.desc()).all()
 
     body = """
     <style>
@@ -83688,7 +83535,7 @@ def vuln_scan_runs():
 
     <div class="toolbar-actions justify-content-end mb-3">
       {% if user.role != 'auditor' %}
-        <a href="{{ url_for('vuln_scan_new') }}" class="btn btn-primary rounded-pill px-4" onclick="showLoader()">
+        <a href="{{ url_for('vuln_scan_new', scanner_type='own' if scan_kind=='own' else 'kali') }}" class="btn btn-primary rounded-pill px-4" onclick="showLoader()">
           ➕ Nuevo Escaneo
         </a>
       {% endif %}
@@ -83696,7 +83543,7 @@ def vuln_scan_runs():
 
     <div class="soft-table-wrap">
       <div class="p-3 pb-0">
-        <div class="section-title mb-2">Matriz de Reportes de Escaneo</div>
+        <div class="section-title mb-2">{{ 'Reportes de escaneadores propios' if scan_kind=='own' else 'Matriz de Reportes de Escaneo' }}</div>
       </div>
 
       <div class="table-responsive px-3 pb-3">
@@ -83789,7 +83636,8 @@ def vuln_scan_runs():
             body,
             items=items,
             user=user,
-            badge_estado_scan_html=badge_estado_scan_html
+            badge_estado_scan_html=badge_estado_scan_html,
+            scan_kind=scan_kind
         )
     )
 
@@ -84261,70 +84109,28 @@ def _zap_docker_binary():
 
 
 def _zap_scorecard_docker_preflight(target):
-    """Explain the precise ZAP blocker; keep target allowlist and public-IP protections."""
+    """El middleware es la única autoridad para hosts, DNS y alcance de escaneo."""
     from urllib.parse import urlsplit
-
-    if os.getenv('RENDER'):
-        raise ValueError(RENDER_ERROR)
-
-    cfg = _zap_standalone_cfg()
-    if not _zap_allowed_host(target, cfg):
-        parsed = urlsplit(target)
-        host = (parsed.hostname or '').lower().rstrip('.')
-        allowed = [x.strip().lower().rstrip('.') for x in
-                   (cfg.hosts_autorizados or '').replace(';', ',').split(',') if x.strip()]
-        if not allowed:
-            raise ValueError(NO_HOSTS_ERROR)
-        match = any(host == entry or (entry.startswith('*.') and
-                    host.endswith(entry[1:]) and host != entry[2:]) for entry in allowed)
-        if not match:
-            raise ValueError(HOST_DENIED_ERROR.format(host=host))
-        raise ValueError(DNS_OR_PRIVATE_ERROR.format(host=host))
-
-    docker = _zap_docker_binary()
-    if not docker:
-        raise ValueError(DOCKER_MISSING_ERROR)
+    p=urlsplit(str(target or '').strip())
+    if p.scheme not in ('http','https') or not p.hostname or p.username or p.password or p.fragment or len(str(target))>500:
+        raise ValueError('Objetivo OWASP ZAP inválido (solo URL HTTP/HTTPS).')
     try:
-        result = subprocess.run(
-            [docker, 'info', '--format', '{{.ServerVersion}}'],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            timeout=8, check=False, text=True,
-        )
-    except subprocess.TimeoutExpired:
-        raise ValueError(DOCKER_TIMEOUT_ERROR)
-    except (OSError, subprocess.SubprocessError):
-        raise ValueError(DOCKER_UNAVAILABLE_ERROR)
-    if result.returncode != 0:
-        raise ValueError(DOCKER_UNAVAILABLE_ERROR)
-    return docker
+        _grac_mw_execute('scanner_zap','authorize',{'target':target})
+    except Exception as exc:
+        raise ValueError('OWASP ZAP (alcance del Middleware): '+str(exc)[:460]) from exc
+    return 'middleware'
 
 
-def _zap_allowed_host(target, cfg):
-    # Límite a objetivos expresamente autorizados; evitar SSRF privada.
-    from urllib.parse import urlsplit
-    parsed = urlsplit((target or '').strip())
-    if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
-        return False
-    if parsed.fragment or len(target) > 500:
-        return False
+def _zap_allowed_host(target, cfg=None):
+    """Compatibilidad: el Middleware es el único que autoriza el objetivo.
+
+    El objeto local cfg NO participa en la autorización del escaneo.
+    """
     try:
-        import ipaddress as _ip
-        host = parsed.hostname.rstrip('.').lower()
-        allowed = [x.strip().lower().rstrip('.') for x in (cfg.hosts_autorizados or '').replace(';', ',').split(',') if x.strip()]
-        if not allowed or not any(host == name or (name.startswith('*.') and host.endswith(name[1:]) and host != name[2:]) for name in allowed):
-            return False
-        try:
-            ips = [_ip.ip_address(host)]
-        except ValueError:
-            import socket as _socket
-            ips = [_ip.ip_address(item[4][0]) for item in _socket.getaddrinfo(host, None, type=_socket.SOCK_STREAM)]
-        if not ips:
-            return False
-        if any(not ip.is_global for ip in ips) and os.getenv('GRAC_ZAP_ALLOW_PRIVATE_TARGETS', '0') != '1':
-            return False
-    except (OSError, ValueError):
+        _grac_mw_execute('scanner_zap','authorize',{'target':target})
+        return True
+    except Exception:
         return False
-    return True
 
 
 def _zap_json_clean(value, limit=5000):
@@ -84437,52 +84243,32 @@ def _zap_complete_run(run_id, findings, report_bytes, mode, crear_vulns, crear_p
 
 
 def _zap_docker_worker(app_obj, run_id, create_vulns, create_plans):
+    """ZAP se ejecuta solo en el middleware; jamás se lanza Docker desde GRAC."""
     with app_obj.app_context():
-        run = VulnerabilityScanRun.query.get(run_id)
-        if not run:
-            return
         try:
-            cfg = _zap_standalone_cfg()
-            target = run.target
-            if not _zap_allowed_host(target, cfg):
-                raise ValueError('El objetivo no pertenece a los hosts autorizados en Configuración OWASP ZAP.')
-            run_dir = scan_run_dir(run.id, run.target)
-            log_path = scan_output_file(run_dir, 'zap_docker', 'log')
-            command = [
-                _zap_docker_binary() or 'docker', 'run', '--rm', '--memory', '1536m',
-                '-v', f'{os.path.abspath(run_dir)}:/zap/wrk/:rw',
-                cfg.imagen_docker or 'ghcr.io/zaproxy/zaproxy:stable',
-                'zap-baseline.py', '-t', target,
-                '-m', str(max(1, min(5, int(cfg.spider_minutos or 1)))),
-                '-T', str(max(1, min(15, int(cfg.espera_minutos or 5)))),
-                '-J', 'zap_report.json', '-r', 'zap_report.html'
-            ]
-            scan_set_progress(run_id, pct=15, stage='OWASP ZAP Baseline en Docker', tool='OWASP ZAP')
-            with open(log_path, 'wb') as output:
-                proc = subprocess.run(command, stdout=output, stderr=subprocess.STDOUT,
-                                      timeout=max(5, min(45, int(cfg.timeout_minutos or 15))) * 60, check=False)
-            with open(log_path, 'rb') as f:
-                tail = f.read(30000).decode('utf-8', 'replace')
-            # ZAP Baseline: códigos 1 y 2 representan hallazgos, no un fallo del motor.
-            report_path = scan_output_file(run_dir, 'zap_report', 'json')
-            if proc.returncode not in (0, 1, 2) or not os.path.isfile(report_path):
-                raise RuntimeError('OWASP ZAP no produjo un informe válido. ' + tail[-1600:])
-            with open(report_path, 'rb') as f:
-                data, findings = _zap_read_report(f.read(6 * 1024 * 1024 + 1))
-            with open(report_path, 'rb') as f:
-                report_bytes = f.read(6 * 1024 * 1024 + 1)
-            _zap_complete_run(run_id, findings, report_bytes, 'docker', create_vulns, create_plans, tail)
+            run=VulnerabilityScanRun.query.get(run_id)
+            if not run:return
+            scan_set_progress(run_id,pct=20,stage='OWASP ZAP a través del Middleware',tool='OWASP ZAP')
+            result=_grac_mw_execute('scanner_zap','baseline',{'target':run.target,'scan_id':'vuln:'+str(run_id)})
+            current=VulnerabilityScanRun.query.get(run_id)
+            if not current or current.cancel_requested or current.estado in ('detenido','cancelado'):
+                return
+            report_bytes=_grac_mw_b64.b64decode(result['report'])
+            _,findings=_zap_read_report(report_bytes)
+            _zap_complete_run(run_id,findings,report_bytes,'middleware',create_vulns,create_plans,result.get('log',''))
         except Exception as exc:
             db.session.rollback()
-            run = VulnerabilityScanRun.query.get(run_id)
+            run=VulnerabilityScanRun.query.get(run_id)
             if run:
-                run.estado = 'error'
-                run.current_stage = 'Error OWASP ZAP'
-                run.error_detalle = str(exc)[:3000]
-                run.salida_consola = str(exc)[:2000]
-                run.fecha_fin = datetime.utcnow()
+                if run.cancel_requested or run.estado in ('detenido','cancelado'):
+                    return
+                run.estado='error'
+                run.current_stage=('Error OWASP ZAP Middleware: '+str(exc).replace('\n',' '))[:98]
+                run.error_detalle=str(exc)[:3000]
+                run.salida_consola=str(exc)[:2000]
+                run.fecha_fin=datetime.utcnow()
                 db.session.commit()
-            app.logger.exception('Error ZAP independiente: %s', exc)
+            app.logger.exception('Error ZAP Middleware: %s',exc)
 
 
 def _scorecard_prepare_zap(domain):
@@ -84554,59 +84340,18 @@ def _zap_form_run(target, responsible, user, mode):
 @app.route('/vulnerabilidades/zap/config', methods=['GET', 'POST'])
 @login_required
 def vuln_zap_config():
-    _admin_scanner_settings_user()  # Solo administrador, GET y POST.
-    cfg = _zap_standalone_cfg()
-    is_render = bool(os.getenv('RENDER'))
-    if request.method == 'POST':
-        cfg.modo = 'importacion' if is_render else (request.form.get('modo') if request.form.get('modo') in ('docker','importacion') else 'docker')
-        # Para minimizar la superficie de ataque se utiliza la imagen estable oficial.
-        cfg.imagen_docker = 'ghcr.io/zaproxy/zaproxy:stable'
-        cfg.spider_minutos = max(1, min(5, request.form.get('spider_minutos', type=int) or 1))
-        cfg.espera_minutos = max(1, min(15, request.form.get('espera_minutos', type=int) or 5))
-        cfg.timeout_minutos = max(5, min(45, request.form.get('timeout_minutos', type=int) or 15))
-        hosts = (request.form.get('hosts_autorizados') or '').strip()
-        hosts_list = [h.strip().lower() for h in hosts.replace('\n', ',').split(',') if h.strip()]
-        if len(hosts_list) > 50 or any(not re.fullmatch(r'(?:\*\.)?[a-zA-Z0-9.-]{1,253}', h) for h in hosts_list):
-            flash('Ingrese hasta 50 dominios autorizados válidos, separados por comas.', 'danger')
-            return redirect(url_for('vuln_zap_config'))
-        cfg.hosts_autorizados = ','.join(hosts_list)
-        db.session.commit()
-        flash('Configuración de OWASP ZAP guardada.', 'success')
-        return redirect(url_for('vuln_zap_config'))
-    body = '''
-    <div class="glass-card p-4 mt-2">
-      <h5 class="section-title">Configuración de OWASP ZAP · Solo administrador</h5>
-      <p class="text-muted">ZAP se ejecuta con Docker Desktop en el equipo que aloja GRAC. No requiere Kali Linux ni credenciales SSH.</p>
-      {% if is_render %}<div class="alert alert-info">Render: modo importación JSON. No se ejecutan contenedores ZAP dentro del Web Service.</div>{% endif %}
-      <form method="post" class="row g-3">
-        <div class="col-md-4"><label class="form-label">Modo predeterminado</label>
-          <select class="form-select" name="modo" {% if is_render %}disabled{% endif %}>
-            <option value="docker" {% if cfg.modo=='docker' %}selected{% endif %}>Docker local</option>
-            <option value="importacion" {% if cfg.modo=='importacion' %}selected{% endif %}>Importar JSON ZAP</option>
-          </select>
-        </div>
-        <div class="col-md-8"><label class="form-label">Imagen oficial</label><input class="form-control" readonly value="ghcr.io/zaproxy/zaproxy:stable"></div>
-        <div class="col-md-4"><label class="form-label">Tiempo del spider (minutos)</label><input class="form-control" name="spider_minutos" type="number" min="1" max="5" value="{{ cfg.spider_minutos }}"></div>
-        <div class="col-md-4"><label class="form-label">Espera pasiva (minutos)</label><input class="form-control" name="espera_minutos" type="number" min="1" max="15" value="{{ cfg.espera_minutos }}"></div>
-        <div class="col-md-4"><label class="form-label">Límite total (minutos)</label><input class="form-control" name="timeout_minutos" type="number" min="5" max="45" value="{{ cfg.timeout_minutos }}"></div>
-        <div class="col-12"><label class="form-label">Hosts autorizados para escaneo Docker (separados por comas)</label>
-          <textarea name="hosts_autorizados" class="form-control" rows="2" placeholder="www.empresa.com, *.empresa.com">{{ cfg.hosts_autorizados or '' }}</textarea>
-          <div class="form-text">Obligatorio para iniciar escaneos. No se permiten IP privadas salvo configuración explícita GRAC_ZAP_ALLOW_PRIVATE_TARGETS=1.</div>
-        </div>
-        <div class="col-12 d-flex justify-content-center gap-2 flex-wrap">
-          <button class="btn btn-primary" type="submit">Guardar configuración</button>
-        </div>
-      </form>
-    </div>'''
-    return vuln_scan_shell('OWASP ZAP — Configuración', render_template_string(body, cfg=cfg, is_render=is_render))
+    _admin_scanner_settings_user()
+    flash('Los parámetros y hosts autorizados de OWASP ZAP se administran exclusivamente en Middleware.', 'info')
+    return redirect(url_for('grac_middleware_admin'))
 
 
 @app.route('/vulnerabilidades/zap/new', methods=['GET', 'POST'])
 @login_required
 def vuln_zap_new():
     user = _zap_standalone_user(write=True)
-    cfg = _zap_standalone_cfg()
-    is_render = bool(os.getenv('RENDER'))
+    from types import SimpleNamespace
+    cfg = SimpleNamespace(modo='docker')  # Sin configuración local.
+    is_render = False  # Docker se ejecuta en Middleware, incluso en Render.
     if request.method == 'POST':
         mode = (request.form.get('modo') or cfg.modo or 'importacion').strip()
         target = (request.form.get('target') or '').strip()
@@ -84625,7 +84370,7 @@ def vuln_zap_new():
         if mode == 'docker':
             try:
                 _zap_scorecard_docker_preflight(target)
-            except ValueError as exc:
+            except (ValueError, RuntimeError) as exc:
                 flash(str(exc), 'danger')
                 return redirect(url_for('vuln_zap_new'))
             run = _zap_form_run(target, responsible, user, mode)
@@ -84661,11 +84406,11 @@ def vuln_zap_new():
     body = '''
     <div class="glass-card p-4 mt-2">
       <h5 class="section-title">Nuevo escaneo — OWASP ZAP</h5>
-      <p class="text-muted">Escaneo Baseline pasivo sin Kali Linux. En Render importe el JSON ejecutado en un equipo externo.</p>
+      <p class="text-muted">Escaneo Baseline pasivo sin Kali Linux. Los escaneos se ejecutan mediante Middleware; también puede importar JSON.</p>
       <form method="post" enctype="multipart/form-data" class="row g-3">
         <div class="col-md-4"><label class="form-label">Método</label>
           <select name="modo" id="gracZapMethod" class="form-select" onchange="gracZapToggle()">
-            {% if not is_render %}<option value="docker" {% if cfg.modo=='docker' %}selected{% endif %}>Escanear con Docker</option>{% endif %}
+            {% if not is_render %}<option value="docker" {% if cfg.modo=='docker' %}selected{% endif %}>Escanear mediante Middleware</option>{% endif %}
             <option value="importacion" {% if cfg.modo=='importacion' or is_render %}selected{% endif %}>Importar reporte JSON</option>
           </select>
         </div>
@@ -89262,6 +89007,11 @@ def get_jira_config() -> JiraConfig:
     return cfg
 
 def jira_get_runtime_config():
+    if _grac_mw_enabled('jira'):
+        _meta=_grac_mw_execute('jira','metadata')
+        return {'base_url':_grac_mw_base()+'/v1/compat/jira','email':'middleware','token':'',
+                'project_key':_meta.get('project_key','SGSI'),'issue_type':_meta.get('issue_type','Task'),
+                'jira_site_url':_meta.get('base_url','')}
     cfg = get_jira_config()
 
     if not cfg.enabled:
@@ -89289,43 +89039,102 @@ def jira_headers():
     }
 
 def jira_auth():
+    if _grac_mw_enabled("jira"):return None
     cfg = jira_get_runtime_config()
     return HTTPBasicAuth(cfg["email"], cfg["token"])
 
 def jira_buscar_usuarios_asignables(query_text=""):
-    """
-    Consulta los usuarios que Jira permite asignar al proyecto configurado.
-
-    IMPORTANTE:
-    - Si query_text está vacío, Jira devuelve todos los usuarios asignables.
-    - maxResults evita que la lista quede limitada al valor pequeño por defecto.
-    """
+    """Devuelve exclusivamente cuentas asignables al proyecto configurado."""
     cfg = jira_get_runtime_config()
-
     url = f"{cfg['base_url']}/rest/api/3/user/assignable/search"
-    params = {
-        "project": cfg["project_key"],
-        "query": (query_text or "").strip(),
-        "startAt": 0,
-        "maxResults": 1000
-    }
-
-    resp = requests.get(
-        url,
-        headers=jira_headers(),
-        auth=jira_auth(),
-        params=params,
-        timeout=25
-    )
-
+    params = {"project": cfg["project_key"], "startAt": 0, "maxResults": 1000}
+    # Una cadena query vacia puede variar entre versiones Jira Cloud: omitirla.
+    if (query_text or "").strip():
+        params["query"] = str(query_text).strip()[:100]
+    resp = _grac_mw_http_get(url, headers=jira_headers(), auth=jira_auth(),
+                             params=params, timeout=40)
     if resp.status_code >= 300:
-        raise RuntimeError(f"Error buscando usuarios Jira: {resp.status_code} - {resp.text}")
-
-    data = resp.json() or []
+        raise RuntimeError("Jira HTTP %s al consultar usuarios asignables en proyecto %s: %s" % (
+            resp.status_code, cfg["project_key"], (resp.text or "")[:600]))
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        raise RuntimeError("Jira no devolvio JSON al consultar asignables") from exc
     if not isinstance(data, list):
-        raise RuntimeError("Jira respondió con un formato inesperado al consultar usuarios asignables.")
-
+        raise RuntimeError("Jira devolvio formato inesperado para usuarios asignables")
     return data
+
+
+def _jira_diagnostico_asignables(error_inicial=""):
+    """Distingue caida/URL inexistente, permisos y errores de proyecto sin falsos diagnósticos."""
+    try:
+        cfg=jira_get_runtime_config()
+        project=cfg.get('project_key') or '(sin configurar)'
+        site=(cfg.get('jira_site_url') or cfg.get('base_url') or '(sin configurar)').rstrip('/')
+        info={}
+        if _grac_mw_enabled('jira'):
+            info=_grac_mw_execute('jira','diagnose_users') or {}
+        else:
+            base=cfg['base_url']
+            auth=jira_auth()
+            info={'connected':False,'project_visible':None,'auth_status':None,
+                  'project_status':None,'browse_projects':None,'assign_issues':None,
+                  'site_unavailable':False,'available_projects':[]}
+            me=_grac_mw_http_get(base+'/rest/api/3/myself',auth=auth,timeout=18)
+            info['auth_status']=me.status_code
+            if me.status_code==404 and 'site temporarily unavailable' in (me.text or '').lower():
+                info['site_unavailable']=True
+                info['site_error']='Jira devolvio 404 Site temporarily unavailable en /myself.'
+            elif me.ok:
+                info['connected']=bool((me.json() or {}).get('accountId'))
+                if info['connected']:
+                    pr=_grac_mw_http_get(base+'/rest/api/3/project/'+__import__('urllib.parse',fromlist=['quote']).quote(project,safe=''),
+                                         auth=auth,timeout=18)
+                    info['project_status']=pr.status_code
+                    if pr.status_code==404 and 'site temporarily unavailable' in (pr.text or '').lower():
+                        info['site_unavailable']=True
+                        info['site_error']='Jira devolvio 404 Site temporarily unavailable al consultar el proyecto.'
+                    else:
+                        info['project_visible']=bool(pr.ok)
+                        if pr.ok:
+                            perms=_grac_mw_http_get(base+'/rest/api/3/mypermissions',
+                                       params={'projectKey':project,'permissions':'BROWSE_PROJECTS,ASSIGN_ISSUES'},
+                                       auth=auth,timeout=18)
+                            if perms.ok:
+                                pdata=perms.json().get('permissions',{})
+                                info['browse_projects']=(pdata.get('BROWSE_PROJECTS') or {}).get('havePermission')
+                                info['assign_issues']=(pdata.get('ASSIGN_ISSUES') or {}).get('havePermission')
+        hints=['Proyecto configurado: %s. Sitio Jira: %s.' % (project, site)]
+        if _grac_mw_enabled('jira'):
+            hints.append('Perfil Middleware utilizado por GRAC: %s.' % _grac_mw_profile('jira'))
+        if info.get('site_unavailable'):
+            hints.append('Atlassian devolvio HTTP 404 Site temporarily unavailable. Esto NO demuestra un token incorrecto ni falta de Browse Projects. Compruebe la URL vigente de Jira Cloud en el navegador; si se renombro el sitio, actualice la URL en Middleware.')
+            if error_inicial:
+                hints.append('Respuesta original: '+str(error_inicial)[:330])
+            return ' '.join(hints)
+        auth_status=info.get('auth_status')
+        if auth_status in (401,403):
+            hints.append('Autenticacion o acceso rechazado por Jira (HTTP %s). Revise el correo y token del perfil de Middleware.' % auth_status)
+        elif not info.get('connected'):
+            hints.append('No se pudo confirmar la identidad en Jira (/myself). Estado HTTP: %s.' % (auth_status if auth_status is not None else 'sin respuesta'))
+            if info.get('diagnostic_error'):hints.append(str(info['diagnostic_error'])[:250])
+        elif info.get('project_visible') is False:
+            hints.append('La cuenta pudo autenticarse, pero el proyecto %s no aparece o no es visible (HTTP %s). Confirme la clave del proyecto en Jira y revise Browse Projects.' % (project,info.get('project_status','?')))
+            names=info.get('available_projects') or []
+            if names:hints.append('Claves de proyectos visibles: '+', '.join(str(v) for v in names[:15])+'.')
+        elif info.get('project_visible'):
+            if info.get('browse_projects') is False:
+                hints.append('Falta permiso Browse Projects.')
+            if info.get('assign_issues') is False:
+                hints.append('Falta permiso Assign Issues para la cuenta de integracion.')
+            if info.get('browse_projects') is not False and info.get('assign_issues') is not False:
+                hints.append('La cuenta y el proyecto responden. Compruebe usuarios con permiso Assignable User o la respuesta de la API.')
+        if error_inicial:hints.append('Error de consulta: '+str(error_inicial)[:400])
+        hints.append('No se debe intentar crear tickets hasta que Jira responda correctamente; Sin asignar solo evita seleccionar un responsable.')
+        return ' '.join(hints)
+    except Exception as exc:
+        msg='No fue posible diagnosticar la conexion Jira: '+str(exc)[:400]
+        return ('Error al consultar usuarios: '+str(error_inicial)[:400]+'; ' if error_inicial else '')+msg
 
 
 def jira_normalizar_usuario_asignable(usuario):
@@ -89366,53 +89175,34 @@ def jira_resolver_nombre_usuario(account_id: str, query_text: str = "") -> str:
     return ""
 
 
-def cargar_usuarios_jira_para_formulario(query_text: str = ""):
-    """
-    Carga TODOS los usuarios asignables de Jira para los formularios.
-
-    Antes se enviaba el responsable SGSI como filtro. Cuando el responsable era,
-    por ejemplo, "Administrador", Jira devolvía cero coincidencias y el selector
-    aparecía vacío. Ahora se consulta siempre la lista completa y, cuando existe
-    un texto de búsqueda, sus coincidencias se muestran primero sin ocultar a los
-    demás usuarios asignables.
-    """
+def cargar_usuarios_jira_para_formulario(query_text: str = "", with_diagnostics: bool = False):
+    """Lista de asignables y, opcionalmente, diagnostico visible para el formulario."""
+    error = ''
+    lista = []
     try:
-        query_limpia = (query_text or "").strip()
-        usuarios_combinados = []
-
-        # Coincidencias sugeridas primero (si se recibió un responsable/nombre).
-        if query_limpia:
+        query = (query_text or '').strip()
+        combinados = []
+        if query:
             try:
-                usuarios_combinados.extend(
-                    jira_buscar_usuarios_asignables(query_limpia)
-                )
+                combinados.extend(jira_buscar_usuarios_asignables(query))
             except Exception as e:
-                print("ADVERTENCIA: No fue posible filtrar usuarios Jira:", e)
-
-        # Siempre cargar la lista completa para que el selector nunca quede vacío
-        # solamente porque el responsable SGSI no coincide con un usuario Jira.
-        usuarios_combinados.extend(
-            jira_buscar_usuarios_asignables("")
-        )
-
-        usuarios_normalizados = []
-        account_ids_vistos = set()
-
-        for usuario in usuarios_combinados:
-            normalizado = jira_normalizar_usuario_asignable(usuario)
-            account_id = (normalizado.get("accountId") or "").strip()
-
-            if not account_id or account_id in account_ids_vistos:
+                print('Jira: no se pudo consultar la sugerencia: ', e)
+        combinados.extend(jira_buscar_usuarios_asignables(''))
+        vistos = set()
+        for original in combinados:
+            if not isinstance(original, dict) or original.get('active') is False:
                 continue
-
-            account_ids_vistos.add(account_id)
-            usuarios_normalizados.append(normalizado)
-
-        return usuarios_normalizados
-
-    except Exception as e:
-        print("ADVERTENCIA: No fue posible cargar usuarios Jira:", e)
-        return []
+            normal = jira_normalizar_usuario_asignable(original)
+            account = (normal.get('accountId') or '').strip()
+            if account and account not in vistos:
+                vistos.add(account)
+                lista.append(normal)
+    except Exception as exc:
+        error = str(exc)
+        print('ADVERTENCIA: No fue posible cargar usuarios Jira:', exc)
+    if with_diagnostics:
+        return lista, (_jira_diagnostico_asignables(error) if not lista else '')
+    return lista
 
 
 def asignar_usuario_jira_a_plan(plan, account_id: str, assignee_name: str = ""):
@@ -89477,7 +89267,7 @@ def jira_crear_issue_plan(plan_id: int):
 
     url = f"{cfg['base_url']}/rest/api/3/issue"
 
-    resp = requests.post(
+    resp = _grac_mw_http_post(
         url,
         headers=jira_headers(),
         auth=jira_auth(),
@@ -89494,7 +89284,7 @@ def jira_crear_issue_plan(plan_id: int):
     data = resp.json()
     issue_key = data.get("key")
     issue_id = data.get("id")
-    issue_url = f"{cfg['base_url']}/browse/{issue_key}" if issue_key else None
+    issue_url = (data.get('browse_url') or f"{cfg['base_url']}/browse/{issue_key}") if issue_key else None
 
     plan.jira_issue_key = issue_key
     plan.jira_issue_id = issue_id
@@ -89549,7 +89339,7 @@ def jira_actualizar_issue_plan(plan_id: int):
 
     url = f"{cfg['base_url']}/rest/api/3/issue/{plan.jira_issue_key}"
 
-    resp = requests.put(
+    resp = _grac_mw_http_put(
         url,
         headers=jira_headers(),
         auth=jira_auth(),
@@ -89574,7 +89364,7 @@ def jira_sync_plan(plan_id: int):
 
     url = f"{cfg['base_url']}/rest/api/3/issue/{plan.jira_issue_key}"
 
-    resp = requests.get(
+    resp = _grac_mw_http_get(
         url,
         headers=jira_headers(),
         auth=jira_auth(),
@@ -91795,8 +91585,20 @@ def plan_remediacion_jira(id):
         jira_account_id = (request.form.get('jira_account_id') or '').strip()
 
         if not jira_account_id:
-            flash("Debe seleccionar el usuario Jira asignado para esta remediación.", "danger")
+            flash("Seleccione un usuario Jira o la opcion Sin asignar.", "danger")
             return redirect(url_for('plan_remediacion_jira', id=id))
+        if jira_account_id == '__UNASSIGNED__':
+            jira_account_id = ''
+            jira_assignee_name = ''
+        else:
+            try:
+                asignables = jira_buscar_usuarios_asignables()
+                if not any(str(u.get('accountId')) == jira_account_id for u in asignables if isinstance(u,dict)):
+                    flash('El usuario seleccionado ya no es asignable en el proyecto Jira configurado.', 'danger')
+                    return redirect(url_for('plan_remediacion_jira', id=id))
+            except Exception as exc:
+                flash('No se pudo validar la asignacion en Jira: '+str(exc)[:350], 'danger')
+                return redirect(url_for('plan_remediacion_jira', id=id))
 
         try:
             asignar_usuario_jira_a_plan(
@@ -91822,7 +91624,7 @@ def plan_remediacion_jira(id):
     # GET: mostrar TODOS los usuarios asignables del proyecto Jira.
     # No se filtra por responsable SGSI porque dicho texto puede no existir en Jira
     # (por ejemplo, "Administrador") y dejaría el selector vacío.
-    usuarios_jira = cargar_usuarios_jira_para_formulario()
+    usuarios_jira, jira_diagnostico = cargar_usuarios_jira_para_formulario(with_diagnostics=True)
 
     html = """
     <div class="jira-shell">
@@ -91869,12 +91671,19 @@ def plan_remediacion_jira(id):
 
               <div class="col-md-12">
                 <label class="form-label">Asignar este ticket Jira a</label>
+                {% if jira_diagnostico %}
+                <div class="alert alert-warning" role="alert">
+                  <strong>Diagnostico de usuarios Jira:</strong> {{ jira_diagnostico }}
+                  {% if usuario_admin %}<div style="margin-top:9px"><a class="btn btn-outline-primary btn-sm" href="/admin/conexiones/middleware">Abrir middleware para reparar URL de Jira</a></div>{% endif %}
+                </div>
+                {% endif %}
                 <select name="jira_account_id"
                         id="jira_account_id"
                         class="form-select"
                         required
                         onchange="actualizarNombreJira(this)">
                   <option value="">-- Seleccione usuario Jira asignable --</option>
+                  <option value="__UNASSIGNED__">Sin asignar - crear ticket sin responsable Jira</option>
                   {% for u in usuarios_jira %}
                     <option value="{{ u.accountId }}"
                             data-name="{{ u.displayName }}"
@@ -91889,6 +91698,7 @@ def plan_remediacion_jira(id):
                        value="{{ plan.jira_assignee_name or '' }}">
                 <small class="text-muted">
                   La asignación queda guardada solo para este punto de remediación.
+                  <a href="{{ url_for('plan_remediacion_jira', id=plan.id) }}" class="ms-2">Volver a consultar usuarios Jira</a>
                 </small>
               </div>
 
@@ -92205,7 +92015,7 @@ def plan_remediacion_jira(id):
       }
     </style>
     """
-    inner = render_template_string(html, plan=plan, vuln=vuln, usuarios_jira=usuarios_jira)
+    inner = render_template_string(html, plan=plan, vuln=vuln, usuarios_jira=usuarios_jira, jira_diagnostico=jira_diagnostico, usuario_admin=(user.role == 'admin'))
     return render_template_string(BASE, content=Markup(inner))
 
 
@@ -92235,6 +92045,9 @@ def plan_remediacion_jira_sync(id):
 @app.route('/admin/conexiones/jira', methods=['GET', 'POST'])
 @login_required
 def jira_config_view():
+    if _grac_mw_enabled('jira'):
+        html='<div class="container py-4"><h3>Jira - Middleware</h3><p>La configuración técnica y el token Jira se gestionan en el Middleware. La integración conserva los planes y los tickets en GRAC.</p><a class="btn btn-primary" href="/admin/conexiones/middleware">Configurar Middleware</a></div>'
+        return render_template_string(BASE,content=Markup(html))
     user = User.query.get(session.get('user_id'))
 
     if user.role == 'auditor':
@@ -92811,32 +92624,75 @@ def camp_conc_parse_json(value, default=None):
 
 
 def camp_conc_extract_json(text):
-    """
-    Limpia respuestas de IA con fences ```json y extrae JSON válido.
-    """
-    text = (text or "").strip()
-    if not text:
-        raise ValueError("La IA no devolvió contenido.")
+    """Recupera un documento JSON de IA sin capturar bloques ajenos con regex voraces.
 
-    text = re.sub(r"^```(?:json)?", "", text.strip(), flags=re.IGNORECASE).strip()
-    text = re.sub(r"```$", "", text.strip()).strip()
+    Admite fences Markdown, explicaciones antes/después, un objeto con la clave
+    `opciones`/`options` y cinco objetos JSON consecutivos, siempre que cada uno
+    esté completo. No corrige ni inventa valores truncados.
+    """
+    if isinstance(text, (dict, list)):
+        return text
+    raw = str(text or "").strip().lstrip("\ufeff")
+    if not raw:
+        raise ValueError("La IA no devolvió contenido JSON.")
+
+    decoder = json.JSONDecoder()
+
+    def unwrap(obj):
+        if isinstance(obj, dict):
+            for key in ("opciones", "options", "campanas", "campañas", "campaigns", "resultados", "results"):
+                inner = obj.get(key)
+                if isinstance(inner, list) and inner:
+                    return inner
+        return obj
 
     try:
-        return json.loads(text)
-    except Exception:
+        return unwrap(json.loads(raw))
+    except json.JSONDecodeError:
         pass
 
-    # Intento: arreglo JSON dentro del texto.
-    m = re.search(r"(\[[\s\S]*\])", text)
-    if m:
-        return json.loads(m.group(1))
+    # raw_decode detecta el final REAL del objeto, sin asumir que el último
+    # corchete o llave del mensaje pertenece al primero.
+    candidates = []
+    for pos, char in enumerate(raw):
+        if char not in "{[":
+            continue
+        try:
+            obj, consumed = decoder.raw_decode(raw[pos:])
+        except (json.JSONDecodeError, ValueError):
+            continue
+        candidates.append((pos, pos + consumed, unwrap(obj)))
 
-    # Intento: objeto JSON dentro del texto.
-    m = re.search(r"(\{[\s\S]*\})", text)
-    if m:
-        return json.loads(m.group(1))
+    if not candidates:
+        raise ValueError("La IA devolvió JSON incompleto o no interpretable.")
 
-    raise ValueError("No fue posible interpretar la respuesta de IA como JSON válido.")
+    # Un array de opciones completo tiene prioridad sobre cualquier objeto
+    # interno, y lo mismo sucede con el plan de campaña de cinco apartados.
+    for _, _, obj in candidates:
+        if (isinstance(obj, list) and obj and
+                all(isinstance(x, dict) for x in obj) and
+                any('titulo' in x or 'title' in x for x in obj)):
+            return obj
+    detail_keys = {"temario_detallado", "plan_de_accion", "como_abordarlo",
+                   "pasos_a_seguir", "evaluacion_efectividad"}
+    for _, _, obj in candidates:
+        if isinstance(obj, dict) and detail_keys.issubset(obj):
+            return obj
+
+    # Algunos modelos entregan {opcion1}{opcion2}... sin los corchetes [ ].
+    # Seleccionamos únicamente objetos que tengan identidad de campaña y
+    # evitamos recolectar duplicados a partir de posiciones anidadas.
+    items, used_ranges = [], []
+    for start, end, obj in sorted(candidates, key=lambda it: (it[0], -(it[1]-it[0]))):
+        if not isinstance(obj, dict) or not (obj.get('titulo') or obj.get('title')):
+            continue
+        if any(a <= start and end <= b for a, b in used_ranges):
+            continue
+        items.append(obj)
+        used_ranges.append((start, end))
+    if items:
+        return items
+    return candidates[0][2]
 
 
 def camp_conc_call_ai(system_prompt, user_prompt, max_tokens=1200):
@@ -93099,121 +92955,35 @@ def camp_conc_area_division_js(divisiones_por_area, area_id="target_area", divis
 
 
 def campania_ai_text(prompt: str, system_prompt: str = "", max_tokens: int = 900) -> str:
-    """
-    Llamada IA optimizada para Campañas de Concientización.
-
-    Corrige el error:
-    HTTPConnectionPool(host='localhost', port=11434): Read timed out. (read timeout=300)
-
-    Motivo:
-    El helper global ai_text_general() usa timeout 300 para Ollama y puede no alcanzar
-    cuando se pide una campaña completa en JSON.
-
-    Esta función:
-    - Usa timeout 600 para Ollama.
-    - Limita num_predict para evitar respuestas demasiado largas que bloqueen el modelo.
-    - Mantiene OpenRouter usando ai_text_general().
-    - Devuelve errores claros, sin mostrar "Acceso denegado" cuando realmente es timeout.
-    """
-    provider = "openrouter"
-    try:
-        if "get_ai_provider" in globals():
-            provider = (get_ai_provider() or "openrouter").strip().lower()
-    except Exception:
-        provider = "openrouter"
-
-    if provider == "ollama":
-        if "requests" not in globals():
-            raise RuntimeError("Falta importar requests. Agrega: import requests")
-
-        base_url = "http://localhost:11434"
-        model = "llama3.1"
-
-        try:
-            if "get_ollama_base_url" in globals():
-                base_url = (get_ollama_base_url() or base_url).strip().rstrip("/")
-            if "get_ollama_model" in globals():
-                model = (get_ollama_model() or model).strip()
-        except Exception:
-            pass
-
-        if not base_url:
-            raise RuntimeError("No hay URL de Ollama configurada.")
-        if not model:
-            raise RuntimeError("No hay modelo de Ollama configurado.")
-
-        full_prompt = (prompt or "").strip()
-        if system_prompt:
-            full_prompt = (system_prompt or "").strip() + "\n\n" + full_prompt
-
-        # Controla la longitud. Si num_predict es muy alto, Ollama se queda procesando
-        # y Flask termina mostrando timeout.
-        try:
-            requested_predict = int(max_tokens or 900)
-        except Exception:
-            requested_predict = 900
-
-        num_predict = max(500, min(requested_predict, 1600))
-
-        try:
-            resp = requests.post(
-                f"{base_url}/api/generate",
-                json={
-                    "model": model,
-                    "prompt": full_prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.12,
-                        "num_predict": num_predict,
-                        "top_p": 0.85,
-                        "num_ctx": 4096
-                    }
-                },
-                timeout=600
-            )
-            resp.raise_for_status()
-
-            data = resp.json() or {}
-            texto = (data.get("response") or "").strip()
-
-            if not texto:
-                raise RuntimeError("Ollama respondió sin contenido.")
-
-            if "limpiar_texto_ia_global" in globals():
-                return limpiar_texto_ia_global(texto)
-
-            return texto.strip()
-
-        except requests.exceptions.ReadTimeout:
-            raise RuntimeError(
-                "Ollama tardó demasiado generando la campaña. "
-                "Se recomienda usar un modelo más liviano, reducir el tamaño del prompt "
-                "o cambiar temporalmente el proveedor IA a OpenRouter."
-            )
-        except requests.exceptions.ConnectionError:
-            raise RuntimeError(
-                "No fue posible conectar con Ollama. Verifica que Ollama esté encendido "
-                "y que la URL configurada sea correcta."
-            )
-        finally:
-            try:
-                if "liberar_memoria_ollama_seguro" in globals():
-                    liberar_memoria_ollama_seguro()
-            except Exception:
-                pass
-
-    if "ai_text_general" not in globals():
-        raise RuntimeError(
-            "No existe ai_text_general() en Programasgsi2.py. "
-            "Debes pegar este módulo después de las funciones globales de IA."
-        )
-
-    return ai_text_general(
-        prompt=prompt,
-        system_prompt=system_prompt,
-        temperature=0.2,
-        max_tokens=max_tokens
-    )
+    """IA de campañas vía ai/<perfil> del middleware, sin proveedor local alternativo."""
+    if '_grac_mw_execute' not in globals():
+        raise RuntimeError('No se encontró el cliente del Middleware de IA en GRAC.')
+    response = _grac_mw_execute('ai', 'generate', {
+        'system': str(system_prompt or ''),
+        'prompt': str(prompt or ''),
+        'max_tokens': min(4096, max(256, int(max_tokens or 900))),
+        'temperature': 0.15,
+        'options': {'temperature': 0.15, 'top_p': 0.9}
+    })
+    if not isinstance(response, dict):
+        raise RuntimeError('El Middleware de IA devolvió una respuesta inesperada.')
+    answer = response.get('response')  # Ollama /api/generate
+    if not answer:
+        message = response.get('message') or {}
+        if isinstance(message, dict):
+            answer = message.get('content')
+    if not answer:
+        choices = response.get('choices') or []
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            message = choices[0].get('message') or {}
+            if isinstance(message, dict):
+                answer = message.get('content')  # OpenAI / OpenRouter / Claude
+    if isinstance(answer, list):
+        answer = ''.join(str(part.get('text') or '') if isinstance(part, dict) else str(part)
+                         for part in answer)
+    if not isinstance(answer, str) or not answer.strip():
+        raise RuntimeError('El Middleware de IA no devolvió contenido para la campaña.')
+    return answer.strip()
 
 
 # ============================================================
@@ -93369,35 +93139,48 @@ El resultado debe ser muy detallado, profesional, práctico y listo para ejecuta
 
 
 def camp_conc_generate_options(session_date, participants, target_area, exclude_id=None):
-    raw = camp_conc_call_ai(
-        camp_conc_build_system_prompt_options(),
-        camp_conc_build_user_prompt_options(session_date, participants, target_area, exclude_id=exclude_id),
-        max_tokens=1600
-    )
-    data = camp_conc_extract_json(raw)
-
-    if not isinstance(data, list):
-        raise ValueError("La IA no devolvió una lista de opciones.")
-
-    cleaned = []
-    for item in data[:5]:
-        if not isinstance(item, dict):
-            continue
-        cleaned.append({
-            "titulo": str(item.get("titulo") or "").strip(),
-            "categoria_tema": str(item.get("categoria_tema") or "").strip(),
-            "objetivo": str(item.get("objetivo") or "").strip(),
-            "justificacion": str(item.get("justificacion") or "").strip(),
-            "formato": str(item.get("formato") or "").strip(),
-            "duracion_sugerida": str(item.get("duracion_sugerida") or "").strip(),
-            "nivel_publico": str(item.get("nivel_publico") or "").strip(),
-        })
-
-    if len(cleaned) == 0:
-        raise ValueError("La IA no generó opciones válidas.")
-
-    return cleaned
-
+    """Genera exactamente cinco opciones; reintenta únicamente respuestas mal formadas."""
+    system_prompt = camp_conc_build_system_prompt_options()
+    user_prompt = camp_conc_build_user_prompt_options(
+        session_date, participants, target_area, exclude_id=exclude_id)
+    last_error = None
+    for attempt in range(2):
+        prompt = user_prompt
+        if attempt:
+            prompt += ("\n\nIMPORTANTE: La respuesta anterior no fue válida. "
+                       "Devuelve SOLO un arreglo JSON de exactamente cinco objetos, "
+                       "con siete campos: titulo, categoria_tema, objetivo, "
+                       "justificacion, formato, duracion_sugerida y nivel_publico. "
+                       "No escribas comentarios, numeración ni bloques adicionales. "
+                       "Cada campo debe ser breve y concreto.")
+        # Fallos de conexión se propagan sin reintentos de generación engañosos.
+        raw = camp_conc_call_ai(system_prompt, prompt, max_tokens=2400)
+        try:
+            data = camp_conc_extract_json(raw)
+            if not isinstance(data, list):
+                raise ValueError('La IA no entregó un arreglo JSON de opciones.')
+            cleaned = []
+            seen = set()
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                obj = {key: str(item.get(key) or '').strip() for key in (
+                    'titulo', 'categoria_tema', 'objetivo', 'justificacion',
+                    'formato', 'duracion_sugerida', 'nivel_publico')}
+                title_key = obj['titulo'].casefold()
+                if not title_key or not obj['objetivo'] or title_key in seen:
+                    continue
+                seen.add(title_key)
+                cleaned.append(obj)
+                if len(cleaned) == 5:
+                    break
+            if len(cleaned) != 5:
+                raise ValueError('La IA entregó %s de las 5 opciones requeridas.' % len(cleaned))
+            return cleaned
+        except ValueError as exc:
+            last_error = exc
+    raise ValueError('No fue posible obtener las cinco campañas completas desde el Middleware de IA. '
+                     + str(last_error or 'JSON inválido'))
 
 
 def camp_conc_build_fallback_detail(row, option, error_msg=""):
@@ -102636,7 +102419,7 @@ def _ai_json_proponentes(prompt: str,
         full_prompt = f"{system_prompt}\n\n{prompt}".strip()
 
         try:
-            resp = requests.post(
+            resp = _grac_mw_http_post(
                 f"{base_url}/api/generate",
                 json={
                     "model": model,
@@ -102675,7 +102458,7 @@ def _ai_json_proponentes(prompt: str,
         raise RuntimeError("No hay OPENROUTER_API_KEY configurada en Administración.")
 
     client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
+        base_url=_grac_mw_openrouter_url(),
         api_key=api_key
     )
 
@@ -111342,87 +111125,46 @@ def ai_text_metricas(prompt: str,
                      temperature: float = 0.3,
                      max_tokens: int = 500,
                      openrouter_model: str = "openai/gpt-4.1-mini") -> str:
+    """Consulta métricas únicamente a través del perfil ai del Middleware.
+
+    Preserva la firma histórica; proveedor y modelo reales se eligen desde
+    la conexión cifrada configurada en el Middleware.
     """
-    Helper único para métricas.
-    Usa el proveedor configurado en Administración:
-    - openrouter
-    - ollama
-    """
-    provider = (get_ai_provider() or "openrouter").strip().lower()
-    print("DEBUG IA METRICAS - provider activo:", provider)
+    messages = [
+        {'role': 'system', 'content': str(system_prompt or '')},
+        {'role': 'user', 'content': str(prompt or '')},
+    ]
+    try:
+        result = _grac_mw_execute('ai', 'chat', {
+            'messages': messages,
+            'temperature': float(temperature),
+            'max_tokens': max(64, min(int(max_tokens or 500), 4096)),
+        })
+    except Exception as exc:
+        raise RuntimeError('Error de conexión con el Middleware de IA: ' + str(exc)[:450]) from exc
+    if not isinstance(result, dict):
+        raise RuntimeError('El Middleware de IA devolvió una respuesta inválida (no es JSON).')
+    answer = result.get('response') or result.get('output') or ''
+    if isinstance(answer, dict):
+        answer = answer.get('content') or ''
+    if not answer:
+        msg = result.get('message') or {}
+        if isinstance(msg, dict):
+            answer = msg.get('content') or ''
+        elif isinstance(msg, str):
+            answer = msg
+    if not answer and isinstance(result.get('choices'), list) and result['choices']:
+        first = result['choices'][0]
+        if isinstance(first, dict):
+            msg = first.get('message') or {}
+            answer = (msg.get('content') or '') if isinstance(msg, dict) else str(msg)
+    if isinstance(answer, list):
+        answer = ''.join((c.get('text') or '') if isinstance(c, dict) else str(c) for c in answer)
+    answer = str(answer or '').strip()
+    if not answer:
+        raise RuntimeError('El Middleware de IA no devolvió contenido.')
+    return answer
 
-    # =========================
-    # OLLAMA
-    # =========================
-    if provider == "ollama":
-        base_url = (get_ollama_base_url() or "http://localhost:11434").strip().rstrip("/")
-        model = (get_ollama_model() or "llama3.1").strip()
-
-        if not base_url:
-            raise RuntimeError("No hay OLLAMA_BASE_URL configurada en Administración.")
-        if not model:
-            raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
-
-        full_prompt = f"{system_prompt}\n\n{prompt}".strip()
-
-        resp = requests.post(
-            f"{base_url}/api/generate",
-            json={
-                "model": model,
-                "prompt": full_prompt,
-                "stream": False,
-                "options": {
-                    "temperature": temperature
-                }
-            },
-            timeout=300
-        )
-        resp.raise_for_status()
-
-        payload = resp.json() or {}
-        print("DEBUG IA METRICAS - OLLAMA RESPONSE JSON:", str(payload)[:1500])
-
-        texto = (payload.get("response") or "").strip()
-        if not texto:
-            texto = (payload.get("message") or "").strip()
-
-        if not texto:
-            raise RuntimeError(f"Ollama respondió sin contenido. Payload: {str(payload)[:500]}")
-
-        return texto
-
-    # =========================
-    # OPENROUTER
-    # =========================
-    api_key = (get_openrouter_api_key() or "").strip()
-    if not api_key:
-        raise RuntimeError("No hay OPENROUTER_API_KEY configurada en Administración.")
-
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://openrouter.ai/api/v1"
-    )
-
-    resp = client.chat.completions.create(
-        model=openrouter_model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=temperature,
-        max_tokens=max_tokens
-    )
-
-    texto = (
-        resp.choices[0].message.content.strip()
-        if resp and resp.choices and resp.choices[0].message.content
-        else ""
-    )
-
-    if not texto:
-        raise RuntimeError("OpenRouter respondió sin contenido.")
-
-    return texto
 
 @app.route("/metricas/riesgos/tendencia/ai", methods=["POST"])
 @login_required
@@ -112169,7 +111911,7 @@ Instrucciones:
         return texto or "No fue posible generar un análisis automático para este incidente."
 
     except Exception as e:
-        return f"No fue posible generar el análisis automático del incidente. Detalle técnico: {str(e)}"
+        raise RuntimeError('Error de conexión con el Middleware de IA: ' + str(e)) from e
 
 # =========================
 # Matriz Métricas de Incidentes (simplificada)
@@ -114349,7 +114091,8 @@ def metricas_vulnerabilidades():
             session['analisis_vuln_manual_map'] = analisis_vuln_manual_map
             
         except Exception as e:
-            print("Error al generar análisis IA métricas de vulnerabilidades:", e)
+            app.logger.warning("Métricas de vulnerabilidades: fallo de IA en Middleware: %s", str(e)[:500])
+            flash("Error de conexión con el Middleware de IA: " + str(e)[:480], "danger")
             analisis_ia = None
 
     analisis_vuln_manual_map = session.get('analisis_vuln_manual_map', {})
@@ -122171,7 +121914,7 @@ def get_openai_client():
         raise RuntimeError("No hay OPENROUTER_API_KEY configurada. Ve a Administración → OpenRouter API Key.")
 
     client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
+        base_url=_grac_mw_openrouter_url(),
         api_key=api_key,
         default_headers={
             "HTTP-Referer": "https://sgsi.local",
@@ -122238,7 +121981,7 @@ def ai_json_iso(prompt: str,
 
         full_prompt = f"{system_prompt}\n\n{prompt}".strip()
 
-        resp = requests.post(
+        resp = _grac_mw_http_post(
             f"{base_url}/api/generate",
             json={
                 "model": model,
@@ -122315,7 +122058,7 @@ def ai_json_iso_generic(prompt: str,
 
         full_prompt = f"{system_prompt}\n\n{prompt}".strip()
 
-        resp = requests.post(
+        resp = _grac_mw_http_post(
             f"{base_url}/api/generate",
             json={
                 "model": model,
@@ -123166,7 +122909,7 @@ Devuelve SOLO JSON válido con esta estructura exacta:
         if not model:
             raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
 
-        resp = requests.post(
+        resp = _grac_mw_http_post(
             f"{base_url}/api/generate",
             json={
                 "model": model,
@@ -123198,7 +122941,7 @@ Devuelve SOLO JSON válido con esta estructura exacta:
             raise RuntimeError("No hay OPENROUTER_API_KEY configurada en Administración.")
 
         client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
+            base_url=_grac_mw_openrouter_url(),
             api_key=api_key,
             default_headers={
                 "HTTP-Referer": "https://sgsi.local",
@@ -134754,7 +134497,7 @@ def _nist_ai_text_openrouter(prompt: str, max_tokens: int = 1400) -> str:
         raise RuntimeError("No hay OpenRouter API Key configurada. Ve a Administración → OpenRouter API Key.")
 
     client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
+        base_url=_grac_mw_openrouter_url(),
         api_key=api_key
     )
 
@@ -134808,7 +134551,7 @@ def _ai_text(prompt: str, max_tokens: int = 900) -> str:
         if not model:
             raise RuntimeError("No hay OLLAMA_MODEL configurado en Administración.")
 
-        resp = requests.post(
+        resp = _grac_mw_http_post(
             f"{base_url}/api/generate",
             json={
                 "model": model,
@@ -134837,7 +134580,7 @@ def _ai_text(prompt: str, max_tokens: int = 900) -> str:
         raise RuntimeError("No hay OpenRouter API Key configurada. Ve a Administración → OpenRouter API Key.")
 
     client = OpenAI(
-        base_url=OPENROUTER_BASE_URL,
+        base_url=_grac_mw_openrouter_url(),
         api_key=api_key
     )
 
@@ -140449,7 +140192,7 @@ def _gdpr_ai_text_openrouter(prompt: str, max_tokens: int = 1200) -> str:
         raise RuntimeError("No hay OpenRouter API Key configurada. Ve a Administración → OpenRouter API Key.")
 
     client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
+        base_url=_grac_mw_openrouter_url(),
         api_key=api_key
     )
 
@@ -147133,7 +146876,7 @@ def _ai_text(prompt: str, max_tokens: int = 900) -> str:
         }
 
 
-        resp = requests.post(
+        resp = _grac_mw_http_post(
             f"{base_url}/api/generate",
             json=payload,
             timeout=300
@@ -147164,7 +146907,7 @@ def _ai_text(prompt: str, max_tokens: int = 900) -> str:
         raise RuntimeError("No hay OpenRouter API Key configurada. Ve a Administración → OpenRouter API Key.")
 
     client = OpenAI(
-        base_url=OPENROUTER_BASE_URL,
+        base_url=_grac_mw_openrouter_url(),
         api_key=api_key
     )
 
@@ -153436,7 +153179,7 @@ def _soc2_ai_text(prompt: str, max_tokens: int = 900) -> str:
             raise RuntimeError("No hay OLLAMA_MODEL configurado.")
 
         try:
-            resp = requests.post(
+            resp = _grac_mw_http_post(
                 f"{base_url}/api/generate",
                 json={
                     "model": model,
@@ -158774,7 +158517,7 @@ def _iso22301_ai_text(prompt: str, max_tokens: int = 900) -> str:
             raise RuntimeError("No hay OLLAMA_MODEL configurado.")
 
         try:
-            resp = requests.post(
+            resp = _grac_mw_http_post(
                 f"{base_url}/api/generate",
                 json={
                     "model": model,
@@ -167206,7 +166949,7 @@ def analisis_categoria(run_id, cap, cat_code):
         <div class="card h-100">
           <div class="card-body">
             <h6 class="fw-bold text-primary">Estado actual</h6>
-            <pre class="small mb-0" style="white-space:pre-wrap;">{escape(estado_actual or "No generado.")}</pre>
+            <div class="mb-0" style="white-space:pre-wrap; overflow-wrap:anywhere; font-family:inherit; font-size:1rem; line-height:1.65; color:inherit;">{escape(estado_actual or "No generado.")}</div>
           </div>
         </div>
       </div>
@@ -167215,7 +166958,7 @@ def analisis_categoria(run_id, cap, cat_code):
         <div class="card h-100">
           <div class="card-body">
             <h6 class="fw-bold text-primary">Estado requerido</h6>
-            <pre class="small mb-0" style="white-space:pre-wrap;">{escape(estado_requerido or "No generado.")}</pre>
+            <div class="mb-0" style="white-space:pre-wrap; overflow-wrap:anywhere; font-family:inherit; font-size:1rem; line-height:1.65; color:inherit;">{escape(estado_requerido or "No generado.")}</div>
           </div>
         </div>
       </div>
@@ -167224,7 +166967,7 @@ def analisis_categoria(run_id, cap, cat_code):
         <div class="card h-100">
           <div class="card-body">
             <h6 class="fw-bold text-primary">Plan de acción</h6>
-            <pre class="small mb-0" style="white-space:pre-wrap;">{escape(plan_accion or "No generado.")}</pre>
+            <div class="mb-0" style="white-space:pre-wrap; overflow-wrap:anywhere; font-family:inherit; font-size:1rem; line-height:1.65; color:inherit;">{escape(plan_accion or "No generado.")}</div>
           </div>
         </div>
       </div>
@@ -169154,7 +168897,7 @@ def _clasificar_resultado_lista(score, documento_match=False):
 
 def _http_json_or_none(url, timeout=25, headers=None):
     try:
-        r = requests.get(url, timeout=timeout, headers=headers or {})
+        r = _grac_mw_http_get(url, timeout=timeout, headers=headers or {})
         if r.status_code == 200:
             try:
                 return r.json()
@@ -169257,7 +169000,7 @@ def consultar_listas_externas(nombre, tipo_documento=None, numero_documento=None
         tipo = fuente_cfg["tipo"]
 
         try:
-            r = requests.get(url, timeout=30)
+            r = _grac_mw_http_get(url, timeout=30)
             if r.status_code != 200:
                 continue
 
@@ -172900,6 +172643,15 @@ def scorecard_tool_path(cfg, tool):
 
 
 def scorecard_run_command(cfg, cmd_list, timeout=180):
+    if _grac_mw_enabled('scanner_kali'):
+        cmd=[str(x) for x in cmd_list]
+        tool=_grac_mw_os.path.basename(cmd[0]).lower() if cmd else ''
+        target=next((a for a in reversed(cmd[1:]) if a.startswith(('https://','http://'))),None)
+        if not target:
+            target=next((a for a in reversed(cmd[1:]) if '.' in a and not a.startswith('-')),None)
+        if not target:raise RuntimeError('Kali Middleware requiere un objetivo explícito')
+        if '://' not in target:target='https://'+target
+        return _grac_mw_execute('scanner_kali','run_tool',{'tool':tool,'target':target})
     """
     Ejecuta comando local o remoto usando la configuración de Kali existente.
     No usa tablas ni pantallas de vulnerabilidades.
@@ -173000,67 +172752,20 @@ def scorecard_severity_from_text(texto):
 
 
 def ejecutar_scorecard_zap_baseline(run_id, dominio):
-    run_dir = scorecard_run_dir(run_id, dominio)
-
-    out_html = os.path.join(run_dir, "zap_scan.html")
-    out_json = os.path.join(run_dir, "zap_scan.json")
-    out_txt = os.path.join(run_dir, "zap_scan.txt")
-
-    url = target_url_scorecard(dominio)
-
-    docker_image = "ghcr.io/zaproxy/zaproxy:stable"
-
-    cmd = [
-        "bash",
-        "-lc",
-        (
-            f"rm -f {shlex.quote(out_html)} {shlex.quote(out_json)} {shlex.quote(out_txt)}; "
-
-            f"echo '[OWASP_ZAP] BASELINE iniciado' > {shlex.quote(out_txt)}; "
-
-            f"docker run --rm "
-            f"-v {shlex.quote(run_dir)}:/zap/wrk/:rw "
-            f"{docker_image} "
-            f"zap-baseline.py "
-            f"-t {shlex.quote(url)} "
-            f"-J zap_scan.json "
-            f"-r zap_scan.html "
-            f"-I "
-            f">> {shlex.quote(out_txt)} 2>&1; "
-
-            f"ls -lh {shlex.quote(out_html)} {shlex.quote(out_json)} {shlex.quote(out_txt)} 2>&1"
-        )
-    ]
-
-    start = time.time()
-
-    proc = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=900
-    )
-
-    duracion = round(time.time() - start, 2)
-
-    salida = (proc.stdout or "") + "\n" + (proc.stderr or "")
-
-    guardar_scorecard_output(
-        run_id,
-        "OWASP ZAP",
-        " ".join(cmd),
-        out_html,
-        proc.returncode,
-        duracion
-    )
-
-    return {
-        "exit_code": proc.returncode,
-        "output": salida,
-        "html": out_html,
-        "json": out_json,
-        "txt": out_txt
-    }
+    """Obtiene el Baseline de ZAP exclusivamente del Middleware."""
+    run_dir=scorecard_run_dir(run_id,dominio)
+    target=target_url_scorecard(dominio)
+    result=_grac_mw_execute('scanner_zap','baseline',{'target':target})
+    json_bytes=_grac_mw_b64.b64decode(result['report'])
+    _grac_mw_os.makedirs(run_dir,exist_ok=True)
+    jpath=_grac_mw_os.path.join(run_dir,'zap_scan.json')
+    hpath=_grac_mw_os.path.join(run_dir,'zap_scan.html')
+    tpath=_grac_mw_os.path.join(run_dir,'zap_scan.txt')
+    with open(jpath,'wb') as out:out.write(json_bytes)
+    with open(hpath,'wb') as out:out.write(_grac_mw_b64.b64decode(result.get('html','')) or b'<html><body>Middleware JSON disponible</body></html>')
+    with open(tpath,'w',encoding='utf-8') as out:out.write(str(result.get('log','')))
+    guardar_scorecard_output(run_id,'OWASP ZAP','Middleware',hpath,result.get('returncode',0),0)
+    return {'exit_code':result.get('returncode',0),'output':result.get('log',''),'html':hpath,'json':jpath,'txt':tpath}
 
 
 def parse_scorecard_zap_findings(run_id, dominio):
@@ -173238,7 +172943,8 @@ def parse_scorecard_zap_findings(run_id, dominio):
 
 
 def ejecutar_scorecard_kali_independiente(run_id, dominio):
-    cfg = _scan_cfg()
+    from types import SimpleNamespace
+    cfg=SimpleNamespace(modo="remoto")  # Middleware decide la conexión real.
     run_dir = scorecard_run_dir(run_id, dominio)
     url = target_url_scorecard(dominio)
     ip = resolver_ip_scorecard(dominio)
@@ -173957,7 +173663,7 @@ def consultar_incidentes_osint_scorecard(proveedor_nombre, dominio):
         query = " OR ".join(terminos[:10])
 
         if query:
-            resp = requests.get(
+            resp = _grac_mw_http_get(
                 "https://api.gdeltproject.org/api/v2/doc/doc",
                 params={
                     "query": query,
@@ -174122,7 +173828,7 @@ def consultar_leakcheck_hibrido_scorecard(proveedor_nombre, dominio):
             api = LeakCheckAPI_v2(api_key=api_key)
             data = api.lookup(query=dominio_base, query_type="domain", limit=100)
         else:
-            resp = requests.get(
+            resp = _grac_mw_http_get(
                 f"https://leakcheck.io/api/v2/query/{dominio_base}",
                 params={"type": "domain", "limit": 100},
                 headers={"Accept": "application/json", "X-API-Key": api_key},
@@ -174234,7 +173940,7 @@ def consultar_hibp_hibrido_scorecard(proveedor_nombre, dominio):
             "Accept": "application/json"
         }
 
-        resp = requests.get(
+        resp = _grac_mw_http_get(
             f"https://haveibeenpwned.com/api/v3/breacheddomain/{dominio_base}",
             params={"truncateResponse": "false"},
             headers=headers,
@@ -174360,7 +174066,7 @@ def grac_internetdb_hallazgos(ip, dominio, idioma="es"):
         return []
 
     try:
-        respuesta = requests.get(
+        respuesta = _grac_mw_http_get(
             "https://internetdb.shodan.io/" + str(objetivo),
             timeout=(4, 9),
             headers={"Accept": "application/json", "User-Agent": "GRAC-TPRM/1.0"},
@@ -174465,7 +174171,7 @@ def grac_tprm_exposicion_adicional(ip, dominio, get_api_key, idioma="es"):
             endpoint = f"https://app.netlas.io/api/host/{objetivo}/"
             encabezados = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
         try:
-            resp = requests.get(endpoint, headers=encabezados,
+            resp = _grac_mw_http_get(endpoint, headers=encabezados,
                                 timeout=(4, 9), allow_redirects=False)
             if resp.status_code == 404:
                 # Distinguir ficha inexistente de URL de API incorrecta.
@@ -174728,7 +174434,7 @@ def consultar_shodan_hibrido_scorecard(ip, dominio):
         return hallazgos
 
     try:
-        resp = requests.get(
+        resp = _grac_mw_http_get(
             f"https://api.shodan.io/shodan/host/{ip}",
             params={"key": api_key},
             timeout=25
@@ -174895,7 +174601,7 @@ def consultar_hacker_chatter_gdelt_scorecard(proveedor_nombre, dominio):
         if not query:
             return []
 
-        resp = requests.get(
+        resp = _grac_mw_http_get(
             "https://api.gdeltproject.org/api/v2/doc/doc",
             params={"query": query, "mode": "ArtList", "format": "json", "maxrecords": 30, "sort": "HybridRel"},
             timeout=20
@@ -175134,7 +174840,7 @@ def consultar_certificados_ct_scorecard(dominio):
     respuesta = None
     for intento in range(2):
         try:
-            respuesta = requests.get("https://crt.sh/", params=params, timeout=(5, 12), stream=True)
+            respuesta = _grac_mw_http_get("https://crt.sh/", params=params, timeout=(5, 12), stream=True)
         except requests.exceptions.RequestException as exc:
             if intento == 0:
                 continue
@@ -175250,7 +174956,7 @@ def consultar_github_exposure_scorecard(proveedor_nombre, dominio):
         vistos = set()
 
         for q in queries[:7]:
-            resp = requests.get(
+            resp = _grac_mw_http_get(
                 "https://api.github.com/search/code",
                 params={"q": q, "per_page": 5},
                 headers={"Accept": "application/vnd.github+json"},
@@ -179582,7 +179288,7 @@ def consultar_hibp_domain_scorecard(dominio):
     try:
         url = f"https://haveibeenpwned.com/api/v3/breachedDomain/{dominio}"
         headers = {"hibp-api-key": api_key, "user-agent": "GRAC-Scorecard-SGSI"}
-        resp = requests.get(url, headers=headers, timeout=20)
+        resp = _grac_mw_http_get(url, headers=headers, timeout=20)
         if resp.status_code in (401, 403, 429):
             return [scorecard_api_error_item(fuente, f"HTTP {resp.status_code}: acceso/permiso/cuota no disponible")]
         if resp.status_code == 404:
@@ -179651,7 +179357,7 @@ def consultar_darkweb_gdelt_osint_scorecard(proveedor_nombre, dominio):
         if not query:
             return []
 
-        resp = requests.get(
+        resp = _grac_mw_http_get(
             "https://api.gdeltproject.org/api/v2/doc/doc",
             params={
                 "query": query,
@@ -181038,7 +180744,7 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
         if api_key_leakcheck:
             dominio_base = obtener_dominio_base(dominio)
 
-            resp = requests.get(
+            resp = _grac_mw_http_get(
                 f"https://leakcheck.io/api/v2/query/{dominio_base}",
                 params={"type": "domain", "limit": 100},
                 headers={"Accept": "application/json", "X-API-Key": api_key_leakcheck},
@@ -181106,7 +180812,7 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
                 "Accept": "application/json"
             }
 
-            resp = requests.get(
+            resp = _grac_mw_http_get(
                 f"https://haveibeenpwned.com/api/v3/breacheddomain/{dominio_base}",
                 params={"truncateResponse": "false"},
                 headers=headers,
@@ -181169,7 +180875,7 @@ def evaluar_hacker_chatter_proponentes_scorecard(run_id, proponente_nombre, domi
         api_key_shodan = scorecard_proponentes_get_api_key("shodan")
 
         if api_key_shodan and ip:
-            resp = requests.get(
+            resp = _grac_mw_http_get(
                 f"https://api.shodan.io/shodan/host/{ip}",
                 params={"key": api_key_shodan},
                 timeout=25
@@ -181731,6 +181437,10 @@ def ejecutar_full_scan_scorecard_proponentes_sin_whatweb(run_id, scorecard_run_i
     log_path = scan_output_file(run_dir, "scan_log", "txt")
 
     try:
+        # Todas las herramientas se ejecutan en middleware, también desde TPRM.
+        result=_grac_mw_kali_full_scan(run,run_dir,crear_vulns,crear_planes,exclude_tools={'whatweb','zap'})
+        scorecard_proponentes_sync_from_vuln_run(scorecard_run_id,run.id)
+        return result
         cfg = _scan_cfg()
 
         faltantes = validar_herramientas_scan(cfg)
@@ -185449,7 +185159,7 @@ def proponentes_scorecard_scan_nuevo():
               <label id="zap-report" hidden class="mt-2">JSON (6 MB)<input type="file" name="informe_json" accept=".json" class="form-control"></label>
               <div id="zap-auth" hidden class="mt-2"><label><input type="checkbox" name="zap_autorizado"> Tengo autorización para evaluar este objetivo.</label></div></fieldset>
               <small class="text-muted">Ejecute escaneos únicamente sobre objetivos autorizados por el tercero.</small>
-              <div class="form-text">El escaneo Docker se ejecuta en el servidor GRAC, no en el navegador. Configure el dominio exacto en OWASP ZAP → Hosts autorizados y mantenga Docker Desktop iniciado.</div>
+              <div class="form-text">El escaneo Docker se ejecuta en el servidor GRAC, no en el navegador. Los hosts autorizados y Docker se gestionan exclusivamente en el Middleware de Integraciones GRAC.</div>
             </div>
 
             <div class="col-12 d-flex justify-content-between mt-3">
@@ -194986,61 +194696,36 @@ def cont_comp_get_config():
     return cfg
 
 
-def cont_comp_wazuh_headers(cfg):
-    if cfg.token:
-        return {"Authorization": f"Bearer {cfg.token}"}
-    return {}
-
-
 def cont_comp_wazuh_authenticate(cfg):
-    api_url = (cfg.api_url or "").rstrip("/")
-    if not api_url:
-        raise RuntimeError("URL API Wazuh no configurada.")
+    """Valida Wazuh exclusivamente desde el perfil xdr/wazuh del Middleware.
 
-    resp = requests.get(
-        f"{api_url}/security/user/authenticate",
-        auth=(cfg.username or "", cfg.password or ""),
-        verify=bool(cfg.verify_ssl),
-        timeout=20
-    )
-    resp.raise_for_status()
-    data = resp.json() or {}
-    token = data.get("data", {}).get("token") or data.get("token")
-    if not token:
-        raise RuntimeError(f"Wazuh no devolvió token. Respuesta: {str(data)[:500]}")
-    cfg.token = token
-    cfg.last_status = "Online"
-    cfg.last_message = "Conexión exitosa."
-    cfg.last_test_at = cont_comp_now()
-    db.session.commit()
-    return token
+    No utiliza credenciales ni URL Wazuh guardadas anteriormente en GRAC.
+    """
+    provider = _grac_mw_provider('xdr')
+    profile = _grac_mw_profile('xdr')
+    if provider != 'wazuh':
+        raise RuntimeError('Wazuh debe seleccionar proveedor wazuh en Administración > Middleware (xdr, perfil '+profile+'). Actualmente: '+provider)
+    result = _grac_mw_execute('xdr', 'test')
+    if not isinstance(result, dict) or result.get('connected') is not True:
+        raise RuntimeError('Middleware xdr/wazuh (perfil '+profile+') no confirmó la conexión: '+str(result)[:400])
+    if cfg is not None:
+        cfg.last_status = 'Online'
+        cfg.last_message = 'Middleware xdr/wazuh · perfil '+profile+' · autenticación verificada.'
+        cfg.last_test_at = cont_comp_now()
+        db.session.commit()
+    return 'managed-by-grac-middleware'
 
 
 def cont_comp_wazuh_get(cfg, path, params=None):
-    api_url = (cfg.api_url or "").rstrip("/")
-    if not cfg.token:
-        cont_comp_wazuh_authenticate(cfg)
-
-    resp = requests.get(
-        f"{api_url}{path}",
-        headers=cont_comp_wazuh_headers(cfg),
-        params=params or {},
-        verify=bool(cfg.verify_ssl),
-        timeout=40
-    )
-
-    if resp.status_code == 401:
-        cont_comp_wazuh_authenticate(cfg)
-        resp = requests.get(
-            f"{api_url}{path}",
-            headers=cont_comp_wazuh_headers(cfg),
-            params=params or {},
-            verify=bool(cfg.verify_ssl),
-            timeout=40
-        )
-
-    resp.raise_for_status()
-    return resp.json() or {}
+    """Todas las lecturas Wazuh pasan por Middleware; nunca hay fallback directo."""
+    provider = _grac_mw_provider('xdr')
+    profile = _grac_mw_profile('xdr')
+    if provider != 'wazuh':
+        raise RuntimeError('Wazuh requiere proveedor wazuh en xdr/'+profile+'; seleccionado: '+provider)
+    data = _grac_mw_execute('xdr', 'get', {'path':path, 'query':params or {}})
+    if not isinstance(data, dict):
+        raise RuntimeError('Middleware xdr/wazuh devolvió datos no válidos para '+path+' (tipo '+type(data).__name__+')')
+    return data
 
 
 def cont_comp_extract_items(data):
@@ -197329,6 +197014,9 @@ def cont_comp_full_sync():
     db.session.commit()
 
     try:
+        # Asegurar identidad y conexión reales ANTES de reutilizar cualquier dato
+        # histórico de GRAC. Un Wazuh local antiguo NO sirve como respaldo.
+        cont_comp_wazuh_authenticate(cfg)
         agents = cont_comp_sync_agents(cfg)
         vulns = cont_comp_sync_vulnerabilities(cfg)
         alerts = cont_comp_sync_alerts(cfg)
@@ -197339,7 +197027,8 @@ def cont_comp_full_sync():
         cont_comp_generate_evidences_and_actions()
 
         log.status = "Exitoso"
-        log.message = "Sincronización finalizada correctamente."
+        log.message = ("Sincronización Wazuh realizada exclusivamente mediante Middleware "
+                       "xdr/wazuh, perfil " + _grac_mw_profile('xdr') + ".")
         log.finished_at = cont_comp_now()
         log.agents_count = agents
         log.vulnerabilities_count = vulns
@@ -197358,8 +197047,12 @@ def cont_comp_full_sync():
     except Exception as e:
         traceback.print_exc()
         log.status = "Error"
-        log.message = str(e)
+        log.message = ("Wazuh no pudo sincronizarse mediante Middleware xdr/" +
+                       _grac_mw_profile('xdr') + ": " + str(e))[:2500]
         log.finished_at = cont_comp_now()
+        cfg.last_status = 'Offline'
+        cfg.last_message = 'Middleware xdr/wazuh: '+str(e)[:1800]
+        cfg.last_test_at = cont_comp_now()
         db.session.commit()
         raise
 
@@ -198740,8 +198433,9 @@ def cont_comp_dashboard():
         <div class="col-md-4">
           <div class="p-3 border rounded-4 h-100 bg-white">
             <div class="fw-bold text-primary mb-2"><i class="bi bi-broadcast"></i> Herramienta XDR (Wazuh)</div>
-            <p class="mb-1"><strong>Estado:</strong> {{ cfg.last_status if cfg else "No configurado" }}</p>
-            <p class="mb-1"><strong>Último mensaje:</strong> {{ cfg.last_message if cfg else "—" }}</p>
+            <p class="mb-1"><strong>Fuente:</strong> Middleware xdr / wazuh (sin conexión directa).</p>
+            <p class="mb-1"><strong>Estado:</strong> {{ cfg.last_status if cfg and cfg.last_message and cfg.last_message.startswith('Middleware ') else "Pendiente de verificar por Middleware" }}</p>
+            <p class="mb-1"><strong>Último mensaje:</strong> {{ cfg.last_message if cfg and cfg.last_message and cfg.last_message.startswith('Middleware ') else "Ejecute una sincronización para comprobar el perfil xdr/wazuh." }}</p>
             <p class="mb-0"><strong>Última sincronización:</strong> {{ last_sync.finished_at if last_sync else "Sin sincronización" }}</p>
           </div>
         </div>
@@ -198792,82 +198486,30 @@ def cont_comp_dashboard():
 @app.route("/cumplimiento_continuo/wazuh", methods=["GET", "POST"])
 @login_required
 def cont_comp_wazuh_config():
-    user, resp = cont_comp_require_write()
+    """Wazuh solo se configura en Middleware. Se prohíbe editar credenciales locales."""
+    user, resp = cont_comp_require_read()
     if resp:
         return resp
-
-    # Compatibilidad para enlaces antiguos: la configuración se administra en XDR.
-    if request.method == "GET" and request.path.rstrip("/") != "/admin/conexiones/xdr/wazuh":
-        return redirect("/admin/conexiones/xdr/wazuh")
-
-    cfg = cont_comp_get_config()
-
-    if request.method == "POST":
-        cfg.api_url = (request.form.get("api_url") or "").strip().rstrip("/")
-        cfg.username = (request.form.get("username") or "").strip()
-        new_password = request.form.get("password") or ""
-        if new_password.strip():
-            cfg.password = new_password.strip()
-            cfg.token = None
-        cfg.verify_ssl = bool(request.form.get("verify_ssl"))
-        db.session.commit()
-
-        if request.form.get("action") == "test":
-            try:
-                cont_comp_wazuh_authenticate(cfg)
-                flash("Conexión Wazuh validada correctamente.", "success")
-            except Exception as e:
-                cfg.last_status = "Offline"
-                cfg.last_message = str(e)
-                cfg.last_test_at = cont_comp_now()
-                db.session.commit()
-                flash(f"No fue posible conectar con Wazuh: {e}", "danger")
-        else:
-            flash("Configuración Wazuh guardada.", "success")
-
-        return redirect("/admin/conexiones/xdr/wazuh")
-
-    content = render_template_string("""
-    <div class="cc-card">
-      <h5 class="cc-section-title">Conexión Wazuh API</h5>
-      <form method="POST" class="cc-form">
-        <div class="row g-3">
-          <div class="col-md-6">
-            <label>URL API</label>
-            <input class="form-control" name="api_url" value="{{ cfg.api_url }}" placeholder="https://localhost:55000">
-          </div>
-          <div class="col-md-3">
-            <label>Usuario</label>
-            <input class="form-control" name="username" value="{{ cfg.username }}" placeholder="wazuh-wui">
-          </div>
-          <div class="col-md-3">
-            <label>Contraseña / Token</label>
-            <input class="form-control" name="password" type="password" placeholder="Dejar vacío para conservar">
-          </div>
-          <div class="col-md-12">
-            <div class="form-check mt-2">
-              <input class="form-check-input" type="checkbox" name="verify_ssl" id="verify_ssl" {% if cfg.verify_ssl %}checked{% endif %}>
-              <label class="form-check-label" for="verify_ssl">Verificar certificado SSL</label>
-            </div>
-            <small class="cc-muted">Para laboratorio Docker local normalmente se deja desactivado.</small>
-          </div>
-        </div>
-        <div class="mt-4 d-flex gap-2 flex-wrap">
-          <button class="btn btn-primary" name="action" value="save">Guardar</button>
-          <button class="btn btn-success" name="action" value="test">Validar conexión</button>
-        </div>
-      </form>
-    </div>
-
-    <div class="cc-card">
-      <h5 class="cc-section-title">Estado</h5>
-      <p><strong>Estado:</strong> {{ cfg.last_status or "Sin validar" }}</p>
-      <p><strong>Mensaje:</strong> {{ cfg.last_message or "—" }}</p>
-      <p><strong>Última prueba:</strong> {{ cfg.last_test_at or "—" }}</p>
-    </div>
-    """, cfg=cfg)
-
-    return cont_comp_render(content, "wazuh", "Configuración XDR — Wazuh", "Configure la API REST de Wazuh para extraer agentes, alertas, vulnerabilidades, FIM, SCA y MITRE.")
+    if request.method != 'GET':
+        abort(405)
+    provider = _grac_mw_provider('xdr')
+    profile = _grac_mw_profile('xdr')
+    body = render_template_string('''
+      <div class="cc-card">
+        <h4>Wazuh XDR — Middleware</h4>
+        <p>La sincronización de agentes, vulnerabilidades, alertas y SCA se efectúa
+        exclusivamente a través del servicio <strong>xdr</strong> del Middleware.
+        GRAC no utiliza URL, usuarios, contraseñas ni tokens Wazuh locales.</p>
+        <p><strong>Proveedor seleccionado:</strong> {{ provider }}<br>
+           <strong>Perfil:</strong> {{ profile }}</p>
+        {% if provider != 'wazuh' %}
+          <p class="text-danger">Seleccione el proveedor wazuh en Administración antes de sincronizar.</p>
+        {% endif %}
+        <a class="btn btn-primary" href="/admin/conexiones/middleware">Abrir configuración Middleware</a>
+      </div>
+    ''', provider=provider, profile=profile)
+    return cont_comp_render(body, 'wazuh', 'Configuración XDR — Middleware',
+                            'Conexión Wazuh exclusiva mediante Middleware GRAC')
 
 
 @app.route("/cumplimiento_continuo/sincronizacion", methods=["GET", "POST"])
@@ -198890,6 +198532,8 @@ def cont_comp_sync_view():
     content = render_template_string("""
     <div class="cc-card">
       <h5 class="cc-section-title">Sincronizar datos desde Wazuh</h5>
+      <p class="cc-muted"><strong>Origen obligatorio: Middleware · servicio xdr · proveedor wazuh.</strong>
+      Se verifica la conexión antes de sincronizar. Si falla el perfil, no se usará ninguna conexión Wazuh antigua.</p>
       <p class="cc-muted">Extrae agentes, vulnerabilidades, alertas, SCA y eventos MITRE/FIM disponibles. Luego recalcula el cumplimiento y genera evidencias y planes de acción.</p>
       <form method="POST">
         <button class="btn btn-warning" data-progress-text="Sincronizando datos desde Wazuh...">
@@ -200766,24 +200410,11 @@ def fwgov_api_credentials(device):
 
 
 def fwgov_api_get(device, endpoint, params=None):
-    if (device.vendor or "").strip().lower() != FIREWALL_GOV_VENDOR_OPNSENSE.lower():
-        raise RuntimeError(f"El conector para {device.vendor} todavía no está implementado.")
-
-    api_key, api_secret = fwgov_api_credentials(device)
-    url = fwgov_clean_url(device.base_url) + endpoint
-    response = requests.get(
-        url,
-        auth=HTTPBasicAuth(api_key, api_secret),
-        params=params or {},
-        verify=bool(device.verify_ssl),
-        timeout=fwgov_safe_int(device.timeout_seconds, 30, 5, 120),
-        headers={"Accept": "application/json"},
-    )
-    response.raise_for_status()
-    try:
-        return response.json() or {}, url
-    except ValueError as exc:
-        raise RuntimeError("La API respondió, pero el contenido no es JSON válido.") from exc
+    """Conector exclusivo hacia Middleware. Ninguna API Key o URL local se utiliza."""
+    if not _grac_mw_enabled('firewall'):
+        raise RuntimeError('Active Firewall en Administración → Middleware de Integraciones GRAC antes de sincronizar.')
+    data = _grac_mw_execute('firewall','get',{'endpoint': endpoint,'query': params or {}})
+    return data, _grac_mw_base()+'/v1/execute'
 
 
 def fwgov_fetch_opnsense_rules(device, only_test=False):
@@ -201454,16 +201085,37 @@ FIREWALL_GOV_EXTRA_CSS = """
 
 
 def fwgov_page_selection(allow_new=False):
-    """Obtiene los firewalls y conserva el dispositivo seleccionado entre pantallas."""
-    devices = FirewallGovDevice.query.order_by(FirewallGovDevice.name.asc()).all()
-    selected_device_id = request.args.get("device_id", type=int)
-    new_mode = bool(allow_new and request.args.get("new") == "1")
-    selected_device = FirewallGovDevice.query.get(selected_device_id) if selected_device_id else None
-
-    if not selected_device and devices and not new_mode:
-        selected_device = devices[0]
-
-    return devices, selected_device, new_mode
+    """Identidad del firewall proviene de Administración; resultados viven en GRAC."""
+    if not _grac_mw_enabled('firewall'):
+        return [], None, False
+    profile=_grac_mw_profile('firewall')
+    provider=_grac_mw_provider('firewall')
+    marker='middleware://firewall/'+provider+'/'+profile
+    devices=FirewallGovDevice.query.order_by(FirewallGovDevice.id.asc()).all()
+    selected=next((d for d in devices if d.base_url==marker),None)
+    # Una consulta de solo lectura no debe crear dispositivos ni modificar registros.
+    if not cont_comp_can_write(cont_comp_current_user()):
+        return ([selected] if selected else []), selected, False
+    if selected is None:
+        # Conservar registros y hallazgos previamente sincronizados si existe equipo histórico.
+        selected=devices[0] if devices else FirewallGovDevice()
+    dirty=False
+    if selected.name != 'Firewall · '+provider+' · '+profile:
+        selected.name='Firewall · '+provider+' · '+profile; dirty=True
+    if selected.vendor != provider:
+        selected.vendor=provider;dirty=True
+    if selected.base_url != marker:
+        selected.base_url=marker;dirty=True
+    # Ni credenciales ni filtros locales afectan la obtención de reglas.
+    for field, value in (('api_key_encrypted',None),('api_secret_encrypted',None),
+                         ('search_phrase',''),('category_filter',''),('enabled',True)):
+        if getattr(selected,field,None)!=value:
+            setattr(selected,field,value);dirty=True
+    if selected.id is None:
+        db.session.add(selected);dirty=True
+    if dirty:
+        db.session.commit()
+    return [selected], selected, False
 
 
 def fwgov_main_actions(selected_device=None):
@@ -201633,6 +201285,16 @@ def cumplimiento_continuo_firewall():
             </select>
           </div>
           <noscript><button class="btn btn-sm btn-outline-primary">Aplicar</button></noscript>
+        </form>
+        {% endif %}
+        {% if not read_only %}
+        <form method="post" action="{{ url_for('fwgov_sync_middleware_main') }}"
+              class="d-inline-flex align-items-end"
+              onsubmit="return confirm('¿Sincronizar reglas y analizar hallazgos mediante Middleware?');">
+          <button type="submit" class="btn btn-primary"
+                  data-progress-text="Sincronizando reglas desde Middleware...">
+            <i class="bi bi-arrow-repeat"></i> Sincronizar Firewall
+          </button>
         </form>
         {% endif %}
       </div>
@@ -201885,7 +201547,7 @@ def fwgov_firewalls_registered():
           <div class="cc-muted">Conectores registrados para inventariar reglas y ejecutar evaluaciones de gobierno.</div>
         </div>
         {% if not read_only %}
-        <a class="btn btn-primary" href="{{ url_for('fwgov_connector_config', new=1) }}"><i class="bi bi-plus-circle"></i> Registrar firewall</a>
+        <a class="btn btn-primary" href="{{ url_for('grac_middleware_admin') }}"><i class="bi bi-diagram-3"></i> Administrar middleware</a>
         {% endif %}
       </div>
 
@@ -201905,7 +201567,7 @@ def fwgov_firewalls_registered():
             <div class="fwgov-small"><strong>Última sincronización:</strong> {{ d.last_sync_at or 'Sin sincronización' }}</div>
             {% if d.last_message %}<div class="fwgov-small mt-2">{{ d.last_message }}</div>{% endif %}
             <div class="d-flex flex-wrap gap-2 mt-3">
-              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('fwgov_connector_config', device_id=d.id) }}">Configurar</a>
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('grac_middleware_admin') }}">Middleware</a>
               {% if not read_only %}
               <form method="post" action="{{ url_for('fwgov_test_device_route', device_id=d.id) }}">
                 <button class="btn btn-sm btn-outline-success" data-progress-text="Probando conexión con el firewall...">Probar</button>
@@ -201943,6 +201605,8 @@ def fwgov_firewalls_registered():
 @app.route("/cumplimiento_continuo/firewall/configuracion")
 @login_required
 def fwgov_connector_config():
+    flash('Configure URL, autenticación y proveedor solo en Middleware de Integraciones GRAC.', 'info')
+    return redirect(url_for('grac_middleware_admin'))
     """Pantalla exclusiva para crear o editar la configuración del conector."""
     user, resp = cont_comp_require_read()
     if resp:
@@ -202247,6 +201911,8 @@ def fwgov_sync_history():
 @app.route("/cumplimiento_continuo/firewall/dispositivo/guardar", methods=["POST"])
 @login_required
 def fwgov_save_device():
+    flash('La configuración local del firewall está deshabilitada; utilice Middleware de Integraciones GRAC.', 'warning')
+    return redirect(url_for('grac_middleware_admin'))
     user, resp = cont_comp_require_write()
     if resp:
         return resp
@@ -202263,7 +201929,7 @@ def fwgov_save_device():
         if not device.name:
             raise ValueError("Debe indicar un nombre para el firewall.")
         device.vendor = (request.form.get("vendor") or FIREWALL_GOV_VENDOR_OPNSENSE).strip()
-        device.base_url = fwgov_clean_url(request.form.get("base_url"))
+        device.base_url = ("https://middleware.grac.invalid" if _grac_mw_enabled('firewall') else fwgov_clean_url(request.form.get("base_url")))
         device.timeout_seconds = fwgov_safe_int(request.form.get("timeout_seconds"), 30, 5, 120)
         device.search_phrase = (request.form.get("search_phrase") or "").strip()
         device.category_filter = (request.form.get("category_filter") or "").strip()
@@ -202272,12 +201938,13 @@ def fwgov_save_device():
 
         api_key = (request.form.get("api_key") or "").strip()
         api_secret = (request.form.get("api_secret") or "").strip()
-        if api_key:
-            device.api_key_encrypted = fwgov_encrypt(api_key)
-        if api_secret:
-            device.api_secret_encrypted = fwgov_encrypt(api_secret)
+        if not _grac_mw_enabled('firewall'):
+            if api_key:
+                device.api_key_encrypted = fwgov_encrypt(api_key)
+            if api_secret:
+                device.api_secret_encrypted = fwgov_encrypt(api_secret)
 
-        if creating and (not device.api_key_encrypted or not device.api_secret_encrypted):
+        if creating and not _grac_mw_enabled('firewall') and (not device.api_key_encrypted or not device.api_secret_encrypted):
             raise ValueError("Para registrar un firewall nuevo debe ingresar API key y API secret.")
 
         db.session.commit()
@@ -202305,6 +201972,29 @@ def fwgov_test_device_route(device_id):
     return redirect(url_for("fwgov_firewalls_registered", device_id=device.id))
 
 
+@app.route("/cumplimiento_continuo/firewall/sincronizar_middleware", methods=["POST"])
+@login_required
+def fwgov_sync_middleware_main():
+    """Sincroniza el perfil seleccionado de Middleware sin exigir conector local previo."""
+    user, denied = cont_comp_require_write()
+    if denied:
+        return denied
+    try:
+        devices, device, _ = fwgov_page_selection()
+        if device is None or device.id is None:
+            raise RuntimeError('No se resolvió el perfil de firewall del middleware. Revise Administración → Middleware de Integraciones GRAC.')
+        result = fwgov_sync_device(device, fwgov_current_username(user))
+        registrar_log(fwgov_current_username(user),
+            f"Firewall sincronizado via Middleware: {result['rules']} reglas y {result['findings']} hallazgos.")
+        flash(f"Sincronización mediante Middleware completada: {result['rules']} reglas y {result['findings']} hallazgos.", 'success')
+        return redirect(url_for('cumplimiento_continuo_firewall', device_id=device.id))
+    except Exception as exc:
+        db.session.rollback()
+        app.logger.exception('Falló sincronización de firewall vía middleware')
+        flash('No fue posible sincronizar el firewall mediante Middleware: '+str(exc)[:320],'danger')
+        return redirect(url_for('cumplimiento_continuo_firewall'))
+
+
 @app.route("/cumplimiento_continuo/firewall/dispositivo/<int:device_id>/sincronizar", methods=["POST"])
 @login_required
 def fwgov_sync_device_route(device_id):
@@ -202315,7 +202005,7 @@ def fwgov_sync_device_route(device_id):
     device = FirewallGovDevice.query.get_or_404(device_id)
     if not device.enabled:
         flash("El conector está deshabilitado. Habilítelo antes de sincronizar.", "warning")
-        return redirect(url_for("fwgov_firewalls_registered", device_id=device.id))
+        return redirect(url_for("cumplimiento_continuo_firewall", device_id=device.id))
 
     try:
         result = fwgov_sync_device(device, fwgov_current_username(user))
@@ -202331,7 +202021,7 @@ def fwgov_sync_device_route(device_id):
         registrar_log(fwgov_current_username(user), f"Error sincronizando Gobierno de Firewall ({device.name}): {exc}")
         flash(f"No fue posible sincronizar el firewall: {exc}", "danger")
 
-    return redirect(url_for("fwgov_firewalls_registered", device_id=device.id))
+    return redirect(url_for("cumplimiento_continuo_firewall", device_id=device.id))
 
 
 @app.route("/cumplimiento_continuo/firewall/hallazgo/<int:finding_id>/actualizar", methods=["POST"])
@@ -202511,6 +202201,31 @@ SAST_AI_FINDINGS_MAX_TOKENS = max(256, min(6000, int(os.getenv("SAST_AI_FINDINGS
 _sast_ollama_lock = threading.Lock()
 
 _sast_history_lock = threading.Lock()
+
+# Registro de análisis SAST en curso. Requerido por /pruebas_sast/start y el monitor.
+# Se conserva en memoria del proceso GRAC; no guarda contraseñas ni credenciales.
+SAST_JOBS = {}
+# Limita la ejecución concurrente para proteger la memoria del equipo y el modelo IA.
+_sast_job_sem = threading.BoundedSemaphore(1)
+
+
+def _sast_json_guard(fn):
+    """La API de inicio SAST devuelve siempre JSON ante excepciones inesperadas."""
+    from functools import wraps
+
+    @wraps(fn)
+    def guarded(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            app.logger.exception('SAST: error no controlado al iniciar el análisis')
+            message = ('Unable to start the SAST analysis. Check the GRAC server logs.'
+                       if SAST_ENGLISH_UI else
+                       'No fue posible iniciar el análisis SAST. Revise los registros del servidor GRAC.')
+            return jsonify({'ok': False, 'error': message}), 500
+
+    return guarded
+
 
 
 def sast_safe_int(value, default=0):
@@ -202713,6 +202428,31 @@ def sast_discover_scan_history_from_reports(existing_ids=None):
     return discovered
 
 
+def sast_reconcile_history_record_cvss(record):
+    """Normaliza la fila del historial desde su JSON, sin modificar el original."""
+    if not isinstance(record, dict):
+        return record
+    json_name = sast_safe_filename(record.get('json_name') or '')
+    if not json_name or not json_name.endswith('.json'):
+        return record
+    json_path = os.path.join(SAST_REPORT_DIR, json_name)
+    try:
+        with open(json_path, 'r', encoding='utf-8') as fh:
+            analysis = json.load(fh)
+        if not isinstance(analysis, dict):
+            return record
+        analysis = sast_reconcile_cvss_risk(analysis)
+        ex = analysis.get('executive_summary') or {}
+        counts = sast_counts_from_analysis(analysis)
+        result = dict(record)
+        result['overall_risk_level'] = ex.get('overall_risk_level', 'N/A')
+        result['overall_risk_score'] = ex.get('overall_risk_score', 'N/A')
+        result.update(counts)
+        return result
+    except (OSError, ValueError, TypeError):
+        return record
+
+
 def sast_get_scan_history():
     with _sast_history_lock:
         records = sast_load_history_file_records()
@@ -202724,7 +202464,7 @@ def sast_get_scan_history():
             sast_write_history_file_records(records)
         else:
             records.sort(key=sast_record_sort_key, reverse=True)
-        return records
+        return [sast_reconcile_history_record_cvss(r) for r in records]
 
 
 def sast_get_scan_history_record(report_id):
@@ -202786,34 +202526,38 @@ def sast_require_access(write=False, config=False):
 
 
 def sast_ai_config():
-    """Read the single provider and model configured in Administration > AI Configuration."""
-    provider = (get_ai_provider() or "openrouter").strip().lower()
-    if provider == "ollama":
-        model = (get_ollama_model() or "").strip()
-        base_url = (get_ollama_base_url() or "").strip().rstrip("/")
-        ok = bool(model and base_url)
-        msg = ("Configuración de Administración registrada; la conexión se verificará al analizar."
-               if ok else "Configure la URL y el modelo Ollama en Administración → Configuración de Inteligencia Artificial.")
-        if SAST_ENGLISH_UI:
-            msg = ("Administration settings loaded; connectivity is checked when analysis starts."
-                   if ok else "Set the Ollama URL and model in Administration → AI Configuration.")
-    elif provider == "openrouter":
-        model = (os.getenv("OPENROUTER_MODEL") or OPENROUTER_MODEL or "deepseek/deepseek-chat").strip()
-        base_url = "https://openrouter.ai/api/v1"
-        ok = bool(model and get_openrouter_api_key())
-        msg = ("Configuración de OpenRouter disponible en Administración."
-               if ok else "Configure una API Key de OpenRouter en Administración → Configuración de Inteligencia Artificial.")
-        if SAST_ENGLISH_UI:
-            msg = ("OpenRouter credentials are available from Administration."
-                   if ok else "Configure an OpenRouter API key in Administration → AI Configuration.")
-    else:
-        model = ""
-        base_url = ""
-        ok = False
-        msg = ("Proveedor IA no admitido. Revise Administración → Configuración de Inteligencia Artificial."
-               if not SAST_ENGLISH_UI else "Unsupported AI provider. Check Administration → AI Configuration.")
-    return {"provider": provider, "model": model, "base_url": base_url,
-            "ok": ok, "message": msg, "external": provider == "openrouter"}
+    """Estado seguro de la conexión SAST: proveedor y modelo se gestionan en Middleware.
+
+    Nunca consulte proveedores/credenciales heredados de GRAC al renderizar la pantalla.
+    La verificación de conectividad/modelo se realiza al ejecutar el análisis.
+    """
+    is_en = bool(SAST_ENGLISH_UI)
+    try:
+        _grac_mw_base()        # Comprueba una URL válida y accesible según las reglas locales.
+        _grac_mw_api_key()     # Valida la clave compartida sin exponer su valor.
+    except Exception as exc:
+        # Oculta detalles internos al usuario; deja solamente la clase del error en logs.
+        try:
+            app.logger.warning('SAST: configuración de Middleware IA no disponible (%s)', type(exc).__name__)
+        except Exception:
+            pass
+        message = (
+            "AI is not configured through GRAC Middleware. Set the Middleware URL "
+            "and shared key in Administration → Middleware Integrations."
+            if is_en else
+            "La IA no está configurada mediante el Middleware GRAC. "
+            "Configure la URL y la clave compartida en Administración → Middleware de Integraciones."
+        )
+        return {"provider":"middleware", "model":"", "base_url":"",
+                "ok":False, "message":message, "external":False}
+    message = (
+        "Middleware connection settings are saved. The configured AI service is checked when analysis starts."
+        if is_en else
+        "Los datos de conexión con el Middleware están registrados. "
+        "El servicio de IA se verificará al iniciar el análisis."
+    )
+    return {"provider":"middleware", "model":"", "base_url":"",
+            "ok":True, "message":message, "external":False}
 
 
 def sast_strip_json_fences(raw):
@@ -202833,83 +202577,62 @@ def sast_strip_json_fences(raw):
 
 
 def sast_call_configured_ai_json(prompt, model=None, provider=None, max_tokens=1200, temperature=0.2, timeout=None):
-    """Request SAST JSON via the active GRAC AI configuration (OpenRouter or Ollama)."""
-    settings = sast_ai_config()
-    provider = (provider or settings["provider"]).strip().lower()
-    model = (model or settings["model"]).strip()
-    if provider not in ("ollama", "openrouter") or not model:
-        raise RuntimeError("Configure the AI provider and model in Administration." if SAST_ENGLISH_UI
-                           else "Configure el proveedor y modelo de IA en Administración.")
-    max_tokens = max(128, min(int(max_tokens), 6000))
-    timeout = max(30, min(int(timeout or SAST_AI_TIMEOUT), 900))
+    """Analiza mediante ai del Middleware; GRAC no elige proveedor ni conserva su clave.
+
+    model/provider se conservan solo como parámetros de compatibilidad con el SAST histórico.
+    """
+    cfg = sast_ai_config()
+    if not cfg["ok"]:
+        raise RuntimeError(cfg["message"])
+    max_tokens = max(128, min(int(max_tokens or 1200), 6000))
     temperature = 0.2 if temperature is None else float(temperature)
-    system_message = ("Return ONLY one valid JSON object. No markdown, comments, or additional text. "
-                      "Do not invent verified vulnerabilities without code evidence."
-                      if SAST_ENGLISH_UI else
-                      "Responde SOLO con un objeto JSON válido, sin markdown ni texto adicional. "
-                      "No inventes vulnerabilidades verificadas si no hay evidencia en el código.")
-
-    if provider == "ollama":
-        base_url = (get_ollama_base_url() or "").rstrip("/")
-        if not base_url:
-            raise RuntimeError("Ollama URL missing from Administration." if SAST_ENGLISH_UI
-                               else "Falta configurar la URL de Ollama en Administración.")
-        url = base_url + "/api/chat"
-        headers = {}
-        payload = {
-            "model": model, "stream": False, "format": "json",
-            "messages": [{"role": "system", "content": system_message},
-                         {"role": "user", "content": prompt}],
-            "options": {"temperature": temperature, "num_predict": max_tokens},
-        }
-    else:
-        api_key = get_openrouter_api_key()
-        if not api_key:
-            raise RuntimeError("OpenRouter API key missing from Administration." if SAST_ENGLISH_UI
-                               else "Falta configurar la API Key de OpenRouter en Administración.")
-        url = "https://openrouter.ai/api/v1/chat/completions"
-        headers = {"Authorization": "Bearer " + api_key, "Content-Type": "application/json"}
-        payload = {
-            "model": model, "stream": False,
-            "messages": [{"role": "system", "content": system_message},
-                         {"role": "user", "content": prompt}],
-            "temperature": temperature, "max_tokens": max_tokens,
-        }
-
+    system_message = (
+        "Return ONLY one valid JSON object, without markdown or additional text. "
+        "Do not invent verified vulnerabilities without source-code evidence."
+        if SAST_ENGLISH_UI else
+        "Responde SOLO con un objeto JSON válido, sin markdown ni texto adicional. "
+        "No inventes vulnerabilidades verificadas sin evidencia en el código fuente."
+    )
     try:
-        with requests.post(url, headers=headers, json=payload, timeout=(10, timeout)) as response:
-            if response.status_code in (401, 403):
-                raise RuntimeError("AI provider rejected the credentials. Verify Administration settings."
-                                   if SAST_ENGLISH_UI else
-                                   "El proveedor de IA rechazó las credenciales; revise Administración.")
-            if response.status_code == 402:
-                raise RuntimeError("Insufficient OpenRouter credits." if SAST_ENGLISH_UI
-                                   else "OpenRouter informa créditos insuficientes.")
-            if response.status_code == 429:
-                raise RuntimeError("AI provider rate limit reached." if SAST_ENGLISH_UI
-                                   else "El proveedor de IA alcanzó el límite de solicitudes.")
-            if response.status_code >= 400:
-                raise RuntimeError(f"{provider} HTTP {response.status_code}: {response.text[:250]}")
-            data = response.json() or {}
-    except requests.exceptions.Timeout as exc:
-        raise RuntimeError(f"Timeout calling {provider} ({timeout}s)." if SAST_ENGLISH_UI
-                           else f"Tiempo de espera agotado consultando {provider} ({timeout}s).") from exc
-    except requests.exceptions.RequestException as exc:
-        raise RuntimeError(f"AI provider connection error ({provider}): {exc}" if SAST_ENGLISH_UI
-                           else f"Error de conexión con el proveedor de IA ({provider}): {exc}") from exc
+        result = _grac_mw_execute('ai', 'chat', {
+            'messages': [
+                {'role':'system', 'content':system_message},
+                {'role':'user', 'content':str(prompt or '')},
+            ],
+            'temperature': temperature,
+            'max_tokens': max_tokens,
+        })
+    except Exception as exc:
+        label = ("AI Middleware connection error" if SAST_ENGLISH_UI
+                 else "Error de conexión con el Middleware de IA")
+        raise RuntimeError(label + ': ' + str(exc)[:500]) from exc
 
-    if provider == "ollama":
-        content = ((data.get("message") or {}).get("content") or data.get("response") or "")
+    if isinstance(result, str):
+        content = result
+    elif isinstance(result, dict):
+        content = result.get('response') or result.get('output') or ''
+        if not content:
+            content = result.get('message') or ''
+        if isinstance(content, dict):
+            content = content.get('content') or content.get('text') or ''
+        if not content and isinstance(result.get('choices'), list) and result['choices']:
+            choice = result['choices'][0]
+            if isinstance(choice, dict):
+                content = choice.get('message') or choice.get('text') or ''
+                if isinstance(content, dict):
+                    content = content.get('content') or ''
     else:
-        choices = data.get("choices") or []
-        message = (choices[0].get("message") or {}) if choices else {}
-        content = message.get("content") or ""
+        raise RuntimeError("AI Middleware returned an invalid response." if SAST_ENGLISH_UI
+                           else "El Middleware de IA devolvió una respuesta inválida.")
     if isinstance(content, list):
-        content = "\n".join(item.get("text", "") for item in content if isinstance(item, dict))
-    content = str(content).strip()
+        content = '\n'.join(
+            (part.get('text') or part.get('content') or '') if isinstance(part, dict) else str(part)
+            for part in content
+        )
+    content = str(content or '').strip()
     if not content:
-        raise RuntimeError("AI provider returned an empty SAST response." if SAST_ENGLISH_UI
-                           else "El proveedor de IA devolvió una respuesta SAST vacía.")
+        raise RuntimeError("AI Middleware returned an empty SAST analysis." if SAST_ENGLISH_UI
+                           else "El Middleware de IA no devolvió contenido para el análisis SAST.")
     return sast_strip_json_fences(content)
 
 
@@ -203144,6 +202867,147 @@ CÓDIGO:
 """.strip()
 
 
+
+# -----------------------------------------------------------------------------
+# SAST 2026-11-24: reconciliación trazable de severidad y riesgo técnico con CVSS
+# El número CVSS lo propone la IA. NO se valida un vector CVSS en este módulo.
+# No confundir riesgo técnico máximo de hallazgos con riesgo empresarial.
+# -----------------------------------------------------------------------------
+def sast_cvss_numeric_score(raw):
+    """Devuelve un score CVSS de una cifra decimal o None si no es verificable."""
+    from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+    if isinstance(raw, bool) or raw is None:
+        return None
+    if isinstance(raw, str):
+        value = raw.strip().replace(',', '.')
+        if not re.fullmatch(r'(?:0|[1-9][0-9]?)(?:\.[0-9]+)?', value):
+            return None
+    elif isinstance(raw, (float, int)):
+        value = str(raw)
+    else:
+        return None
+    try:
+        number = Decimal(value)
+        if not number.is_finite() or not (Decimal('0') <= number <= Decimal('10')):
+            return None
+        return float(number.quantize(Decimal('0.1'), rounding=ROUND_HALF_UP))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def sast_cvss_severity(score):
+    """Bandas cualitativas CVSS 3.x/4.x (no inferir severidad desde texto IA)."""
+    if score is None:
+        return 'No evaluado'
+    if score == 0:
+        return 'Ninguno'
+    if score < 4.0:
+        return 'Bajo'
+    if score < 7.0:
+        return 'Medio'
+    if score < 9.0:
+        return 'Alto'
+    return 'Crítico'
+
+
+def sast_reconcile_cvss_risk(analysis):
+    """Armoniza CVSS, severidad, métricas y riesgo técnico del informe.
+
+    Es idempotente, conserva la descripción ejecutiva original de la IA para
+    auditoría y NO inventa un CVSS cuando la IA no entrega un número válido.
+    """
+    if not isinstance(analysis, dict):
+        return analysis
+    findings = analysis.get('findings')
+    if not isinstance(findings, list):
+        findings = []
+    valid_scores = []
+    unscored = 0
+    by_severity = {'Crítico': 0, 'Alto': 0, 'Medio': 0, 'Bajo': 0,
+                   'Ninguno': 0, 'No evaluado': 0}
+    by_category = {}
+    top_cwe = []
+    for item in findings:
+        if not isinstance(item, dict):
+            continue
+        cvss = sast_cvss_numeric_score(item.get('cvss_score'))
+        severity = sast_cvss_severity(cvss)
+        if item.get('severity') != severity and 'ai_severity_original' not in item:
+            item['ai_severity_original'] = item.get('severity')
+        item['severity'] = severity
+        if cvss is None:
+            unscored += 1
+            item['cvss_score'] = 'N/D'
+        else:
+            item['cvss_score'] = cvss
+            valid_scores.append(cvss)
+        by_severity[severity] += 1
+        category = (item.get('category') or 'Other')
+        category = str(category).strip() or 'Other'
+        by_category[category] = by_category.get(category, 0) + 1
+        cwe = str(item.get('cwe') or '').strip()
+        if cwe and cwe.upper() != 'N/A':
+            top_cwe.append(cwe)
+
+    metrics = analysis.get('metrics')
+    if not isinstance(metrics, dict):
+        metrics = {}
+        analysis['metrics'] = metrics
+    metrics['total_findings'] = len(findings)
+    metrics['by_severity'] = by_severity
+    metrics['by_category'] = by_category
+    metrics['top_cwe'] = list(dict.fromkeys(top_cwe))[:10]
+    metrics['cvss_valid_findings'] = len(valid_scores)
+    metrics['cvss_unscored_findings'] = unscored
+
+    ex = analysis.get('executive_summary')
+    if not isinstance(ex, dict):
+        ex = {}
+        analysis['executive_summary'] = ex
+    if 'ai_overall_risk_original' not in ex:
+        ex['ai_overall_risk_original'] = {
+            'level': ex.get('overall_risk_level'),
+            'score': ex.get('overall_risk_score'),
+        }
+    if 'ai_management_overview_original' not in ex:
+        ex['ai_management_overview_original'] = ex.get('management_overview')
+
+    top = max(valid_scores) if valid_scores else None
+    if not findings:
+        level = 'Sin hallazgos'
+        score100 = 0
+        overview = ('No se identificaron hallazgos SAST en el código analizado. '
+                    'Esto no garantiza que el código esté libre de vulnerabilidades.')
+    elif unscored:
+        level = 'No evaluado'
+        score100 = 'N/D'
+        overview = (f'Se identificaron {len(findings)} hallazgo(s), pero '
+                    f'{unscored} carecen de un puntaje CVSS válido. '
+                    'No se establece una valoración técnica global hasta revisarlos.')
+    else:
+        level = sast_cvss_severity(top)
+        score100 = int(round(top * 10))
+        overview = (f'Se identificaron {len(findings)} hallazgo(s). '
+                    f'La severidad técnica máxima es {level} (CVSS {top:.1f}/10) '
+                    f'y el indicador de riesgo técnico SAST es {score100}/100. '
+                    'Se utiliza el hallazgo con mayor CVSS; no es una evaluación '
+                    'integral del riesgo empresarial.')
+        largest = next((item for item in findings if isinstance(item, dict)
+                        and item.get('cvss_score') == top), None)
+        if largest and largest.get('title'):
+            overview += ' Hallazgo de referencia: ' + str(largest['title'])[:150].strip() + '.'
+    ex['overall_risk_level'] = level
+    ex['overall_risk_score'] = score100
+    ex['cvss_max_score'] = top if top is not None else 'N/D'
+    ex['risk_calculation_method'] = (
+        'Indicador técnico basado en el CVSS máximo de los hallazgos; '
+        'puntuación sobre 100 = CVSS máximo × 10. La IA propone el CVSS, '
+        'sin comprobación del vector CVSS. No representa riesgo empresarial.'
+    )
+    ex['management_overview'] = overview
+    return analysis
+
+
 def sast_analyze_code_with_ai(code_text, artifact_type, language, filename, model=None, provider=None):
     safe_code = sast_trim_code_for_ai(code_text)
 
@@ -203211,7 +203075,7 @@ def sast_analyze_code_with_ai(code_text, artifact_type, language, filename, mode
     final["metrics"]["by_category"] = by_cat
     final["metrics"]["top_cwe"] = list(dict.fromkeys(top_cwe))[:10]
 
-    return final
+    return sast_reconcile_cvss_risk(final)
 
 
 def sast_bool_form(value):
@@ -203460,6 +203324,7 @@ def sast_register_findings_in_sgsi(analysis, meta, payload):
         "requested_ai_remediation": use_ai_remediation,
         "vulnerabilities_created": 0,
         "remediation_plans_created": 0,
+        "skipped_no_valid_cvss": 0,
         "vulnerability_ids": [],
         "plan_ids": [],
         "error": "",
@@ -203483,6 +203348,12 @@ def sast_register_findings_in_sgsi(analysis, meta, payload):
     try:
         for idx, finding in enumerate(findings, start=1):
             if not isinstance(finding, dict):
+                continue
+            # No registrar automáticamente prioridad Media para CVSS 0/ausente.
+            # Los hallazgos siguen visibles en el informe y requieren evaluación.
+            _cvss_value = sast_cvss_numeric_score(finding.get('cvss_score'))
+            if _cvss_value is None or _cvss_value == 0:
+                summary['skipped_no_valid_cvss'] = summary.get('skipped_no_valid_cvss', 0) + 1
                 continue
 
             codigo = f"SAST-{report_id}-{idx:03d}"[:50]
@@ -203589,6 +203460,7 @@ def sast_register_findings_in_sgsi(analysis, meta, payload):
 
 
 def sast_build_pdf(report_path, analysis, meta):
+    analysis = sast_reconcile_cvss_risk(analysis)
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="SAST_H1", fontSize=16, leading=19, spaceAfter=10))
     styles.add(ParagraphStyle(name="SAST_H2", fontSize=13, leading=16, spaceAfter=8))
@@ -203620,7 +203492,9 @@ def sast_build_pdf(report_path, analysis, meta):
     ex = analysis.get("executive_summary", {}) or {}
     story.append(Paragraph("1. Resumen Ejecutivo", styles["SAST_H2"]))
     story.append(Paragraph(f"<b>Nivel de riesgo general:</b> {sast_escape_pdf(ex.get('overall_risk_level','N/A'))}", styles["SAST_Body"]))
-    story.append(Paragraph(f"<b>Puntaje global:</b> {sast_escape_pdf(ex.get('overall_risk_score','N/A'))}/100", styles["SAST_Body"]))
+    story.append(Paragraph(f"<b>Indicador técnico SAST:</b> {sast_escape_pdf(ex.get('overall_risk_score','N/D'))}" +
+                           ("/100" if isinstance(ex.get('overall_risk_score'), (int, float)) else ""), styles["SAST_Body"]))
+    story.append(Paragraph(f"<b>Método:</b> {sast_escape_pdf(ex.get('risk_calculation_method', ''))}", styles["SAST_Small"]))
 
     if ex.get("management_overview"):
         story.append(Paragraph(f"<b>Visión para dirección:</b> {sast_escape_pdf(ex.get('management_overview'))}", styles["SAST_Body"]))
@@ -203781,7 +203655,7 @@ def sast_run_analysis_job(job_id, payload):
                     "provider": provider,
                 }
 
-                sast_job_update(job_id, 20, f"Ejecutando análisis SAST con {provider.upper()} ({model})…")
+                sast_job_update(job_id, 20, "Ejecutando análisis SAST mediante Middleware GRAC…")
 
                 analysis = sast_analyze_code_with_ai(code_text, artifact_type, language, filename, model=model, provider=provider)
                 if not isinstance(analysis, dict):
@@ -203874,9 +203748,9 @@ SAST_INDEX_HTML = """
   <div class="grac-module-heading sast-page-heading" style="display:flex!important;align-items:center!important;justify-content:flex-start!important;text-align:left!important;width:100%!important;margin:6px 0 18px!important;">
     <span class="grac-module-icon" aria-hidden="true"><i class="bi bi-code-slash"></i></span>
     <div style="text-align:left!important;">
-      <h2 class="sast-title" style="text-align:left!important;margin:0!important;transform:none!important;">Pruebas SAST con IA Local</h2>
+      <h2 class="sast-title" style="text-align:left!important;margin:0!important;transform:none!important;">Pruebas SAST con IA</h2>
       <div class="sast-subtitle">
-        Revisión de código fuente con el proveedor de IA activo en GRAC, orientada a OWASP, CERT Secure Coding y SANS Top 25.
+        Revisión de código fuente mediante IA del Middleware GRAC, orientada a OWASP, CERT Secure Coding y SANS Top 25.
       </div>
     </div>
   </div>
@@ -203893,14 +203767,12 @@ SAST_INDEX_HTML = """
     <div class="sast-card-body">
 
       <div class="sast-status-grid mb-3">
-        <div class="sast-status-box"><div class="sast-status-label">Proveedor IA activo (Administración)</div>
-          <div class="sast-status-value">{{ cfg.provider|upper }}</div></div>
-        <div class="sast-status-box"><div class="sast-status-label">Modelo configurado</div>
-          <div class="sast-status-value">{{ cfg.model or 'No configurado' }}</div></div>
-        <div class="sast-status-box"><div class="sast-status-label">Estado de configuración</div>
-          <div class="sast-status-value {{ 'text-success' if cfg.ok else 'text-danger' }}">{{ cfg.message }}</div></div>
+        <div class="sast-status-box"><div class="sast-status-label">Conexión de IA</div>
+          <div class="sast-status-value">Middleware GRAC</div></div>
+        <div class="sast-status-box"><div class="sast-status-label">Configuración de conexión</div>
+          <div class="sast-status-value {% if cfg.ok %}text-success{% else %}text-danger{% endif %}">{{ 'Registrada' if cfg.ok else 'Pendiente de configurar' }}</div></div>
       </div>
-      {% if cfg.external %}<p class="sast-help">OpenRouter es un servicio externo: el código fuente proporcionado para el análisis se enviará al proveedor de IA configurado.</p>{% endif %}
+      <p class="sast-help">El proveedor y el modelo de IA se administran exclusivamente en el Middleware. La conectividad se verifica al iniciar el análisis.</p>
 
       {% if read_only %}
         <div class="alert alert-warning rounded-4">
@@ -204344,6 +204216,20 @@ SAST_INDEX_HTML = """
 </style>
 
 <script>
+  function sastShowFailure(message){
+    const detail = String(message || "Ocurrió un error al iniciar el análisis SAST.");
+    if(window.Swal && typeof window.Swal.fire === 'function'){
+      window.Swal.fire({
+        title: "Error", text: detail, icon: 'error',
+        confirmButtonText: "Aceptar", confirmButtonColor: '#0b4a8f',
+        showConfirmButton: true, showDenyButton: false, showCancelButton: false,
+        allowOutsideClick: false, customClass: {popup: 'grac-flash-message'}
+      });
+    }else{
+      window.alert(detail);
+    }
+  }
+
   function sastShowPane(kind){
     const filePane = document.getElementById("sastFilePane");
     const pastePane = document.getElementById("sastPastePane");
@@ -204427,8 +204313,11 @@ SAST_INDEX_HTML = """
         window.location.href = "{{ url_for('sast_track', job_id='__JOB__') }}".replace("__JOB__", data.job_id);
 
       }catch(err){
-        if(progressText) progressText.textContent = "Error: " + (err.message || err);
+        const detail = (err && err.message) ? err.message : "Ocurrió un error al iniciar el análisis SAST.";
+        if(progressText) progressText.textContent = "Error: " + detail;
+        if(progressBar) progressBar.style.width = "0%";
         if(submitBtn) submitBtn.disabled = false;
+        sastShowFailure(detail);
       }
     });
   }
@@ -204471,6 +204360,18 @@ SAST_TRACK_HTML = """
   const bar = document.getElementById("sastTrackBar");
   const msg = document.getElementById("sastTrackMsg");
 
+  function sastTrackFailure(message){
+    const detail = String(message || "Ocurrió un error al iniciar el análisis SAST.");
+    if(window.Swal && typeof window.Swal.fire === 'function'){
+      window.Swal.fire({title: "Error", text: detail, icon: 'error',
+        confirmButtonText: "Aceptar", confirmButtonColor: '#0b4a8f',
+        showConfirmButton: true, showDenyButton: false, showCancelButton: false,
+        allowOutsideClick: false, customClass: {popup: 'grac-flash-message'}});
+    }else{
+      window.alert(detail);
+    }
+  }
+
   const es = new EventSource("{{ url_for('sast_progress', job_id=job_id) }}");
 
   es.onmessage = function(evt){
@@ -204482,6 +204383,7 @@ SAST_TRACK_HTML = """
     if(p.status === "error"){
       es.close();
       if(msg) msg.textContent = "Error: " + (p.error || "desconocido");
+      sastTrackFailure(p.error || "Ocurrió un error al iniciar el análisis SAST.");
     }
 
     if(p.done && p.status === "done"){
@@ -204493,6 +204395,7 @@ SAST_TRACK_HTML = """
   es.onerror = function(){
     es.close();
     if(msg) msg.textContent = "Error recibiendo progreso del servidor.";
+    sastTrackFailure("Error recibiendo progreso del servidor.");
   };
 </script>
 """
@@ -204580,14 +204483,14 @@ SAST_RESULT_HTML = """
       <div class="row g-3">
         <div class="col-md-4">
           <div class="sast-kpi">
-            <div class="sast-kpi-label">Riesgo general</div>
+            <div class="sast-kpi-label">Riesgo técnico SAST</div>
             <div class="sast-kpi-value">{{ ex.get('overall_risk_level', 'N/A') }}</div>
           </div>
         </div>
         <div class="col-md-4">
           <div class="sast-kpi">
             <div class="sast-kpi-label">Puntaje</div>
-            <div class="sast-kpi-value">{{ ex.get('overall_risk_score', 'N/A') }}/100</div>
+            <div class="sast-kpi-value">{{ ex.get('overall_risk_score', 'N/D') }}{% if ex.get('overall_risk_score') is number %}/100{% endif %}</div>
           </div>
         </div>
         <div class="col-md-4">
@@ -204598,6 +204501,7 @@ SAST_RESULT_HTML = """
         </div>
         <div class="col-12">
           <div class="sast-summary">{{ ex.get('management_overview', 'Sin resumen ejecutivo.') }}</div>
+          <p class="text-muted small mt-2 mb-0">{{ ex.get('risk_calculation_method', '') }}</p>
         </div>
       </div>
     </div>
@@ -204884,6 +204788,8 @@ def sast_index():
         return resp
 
     cfg = sast_ai_config()
+    if not cfg["ok"]:
+        flash(cfg["message"], "danger")  # Popup GRAC: solo Aceptar; nunca muestra traceback.
 
     inner = render_template_string(
         SAST_INDEX_HTML,
@@ -204955,6 +204861,7 @@ def sast_report_detail(report_id):
             analysis = json.load(f)
         if not isinstance(analysis, dict):
             analysis = {}
+        analysis = sast_reconcile_cvss_risk(analysis)
     except Exception as e:
         flash(f"No fue posible abrir el JSON del informe SAST: {e}", "danger")
         return redirect(url_for("sast_reports"))
@@ -205056,7 +204963,7 @@ def sast_config():
     user, resp, read_only = sast_require_access(write=True, config=True)
     if resp:
         return resp
-    return redirect(url_for("admin_openrouter_key"))
+    return redirect(url_for("grac_middleware_admin"))
 
 
 @app.route("/pruebas_sast/models", methods=["GET"])
@@ -205072,6 +204979,7 @@ def sast_models():
 
 @app.route("/pruebas_sast/start", methods=["POST"])
 @login_required
+@_sast_json_guard
 def sast_start():
     user, resp, read_only = sast_require_access(write=True)
     if resp:
@@ -205259,6 +205167,8 @@ def sast_result(job_id):
         return redirect(url_for("sast_index"))
 
     res = job["result"]
+    if isinstance(res.get('analysis'), dict):
+        sast_reconcile_cvss_risk(res['analysis'])
     inner = render_template_string(
         SAST_RESULT_HTML,
         analysis=(res.get("analysis") or {}),
@@ -205282,6 +205192,27 @@ def sast_download_pdf(name):
         flash("PDF SAST no encontrado.", "warning")
         return redirect(url_for("sast_index"))
 
+    # Si existe el JSON fuente, construir una copia descargable coherente con CVSS.
+    # No se sobrescribe el PDF histórico original almacenado en el servidor.
+    pdf_name = os.path.basename(path)
+    if pdf_name.startswith('Informe_SAST_') and pdf_name.endswith('.pdf'):
+        report_id = pdf_name[len('Informe_SAST_'):-len('.pdf')]
+        json_path = os.path.join(SAST_REPORT_DIR, 'analysis_' + report_id + '.json')
+        if os.path.isfile(json_path):
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    analysis = json.load(f)
+                if isinstance(analysis, dict):
+                    meta = analysis.get('sast_meta') or {}
+                    buffer = io.BytesIO()
+                    sast_build_pdf(buffer, sast_reconcile_cvss_risk(analysis), meta)
+                    buffer.seek(0)
+                    return send_file(buffer, as_attachment=True, download_name=pdf_name,
+                                     mimetype='application/pdf')
+            except Exception:
+                app.logger.exception('No se pudo reconstruir el PDF SAST con CVSS')
+                flash('No fue posible actualizar la calificación CVSS del PDF histórico.', 'warning')
+                return redirect(url_for('sast_reports'))
     return send_file(path, as_attachment=True, download_name=os.path.basename(path), mimetype="application/pdf")
 
 
@@ -205297,6 +205228,16 @@ def sast_download_json(name):
         flash("JSON SAST no encontrado.", "warning")
         return redirect(url_for("sast_index"))
 
+    try:
+        with open(path, 'r', encoding='utf-8') as fp:
+            stored = json.load(fp)
+        if isinstance(stored, dict):
+            normalized = sast_reconcile_cvss_risk(stored)
+            content = json.dumps(normalized, ensure_ascii=False, indent=2).encode('utf-8')
+            return send_file(io.BytesIO(content), as_attachment=True,
+                             download_name=os.path.basename(path), mimetype='application/json')
+    except (OSError, ValueError, TypeError):
+        pass
     return send_file(path, as_attachment=True, download_name=os.path.basename(path), mimetype="application/json")
 
 
@@ -208210,7 +208151,22 @@ def register_ad_governance(
                 "Falta la dependencia ldap3. Instálela con: python3 -m pip install ldap3"
             ) from exc
 
+    def adgov_uses_middleware(connector_or_platform):
+        # Samba siempre reutiliza la conexion LDAP del Middleware validada
+        # en Administracion. Windows AD conserva el comportamiento previo,
+        # salvo que se haya habilitado explicitamente directory en GRAC.
+        try:
+            platform_value = (connector_or_platform['platform']
+                              if not isinstance(connector_or_platform, str)
+                              else connector_or_platform)
+        except (KeyError, TypeError):
+            platform_value = AD_PLATFORM_SAMBA
+        return (normalize_platform(platform_value) == AD_PLATFORM_SAMBA
+                or _grac_mw_enabled('directory'))
+
     def ldap_connection(connector):
+        if adgov_uses_middleware(connector):
+            return _GracMWLDAPProxy(connector), {'BASE':'BASE','SUBTREE':'SUBTREE'}
         ldap = require_ldap3()
         host = normalize_ldap_host(connector["host"])
         validate_ldap_host(host)
@@ -208302,9 +208258,10 @@ def register_ad_governance(
             return None
 
     def entry_attributes(entry):
-        if isinstance(entry, dict):
-            return entry.get("attributes") or {}
-        return {}
+        if not isinstance(entry, dict):
+            return {}
+        attrs=entry.get('attributes') or {}
+        return attrs if isinstance(attrs,dict) else {}
 
     def is_service_account(sam, dn, description):
         joined = " ".join([sam or "", dn or "", description or ""]).lower()
@@ -208453,10 +208410,11 @@ def register_ad_governance(
         try:
             host = normalize_ldap_host(connector["host"])
             validate_ldap_host(host)
-            try:
-                socket.getaddrinfo(host, int(connector["port"]))
-            except socket.gaierror as exc:
-                return False, ldap_resolution_message(connector, exc)
+            if not adgov_uses_middleware(connector):
+                try:
+                    socket.getaddrinfo(host, int(connector["port"]))
+                except socket.gaierror as exc:
+                    return False, ldap_resolution_message(connector, exc)
             connection, ldap = ldap_connection(connector)
             ok = connection.search(
                 search_base=connector["base_dn"],
@@ -208467,7 +208425,9 @@ def register_ad_governance(
             if not ok and connection.result.get("result") not in (0,):
                 raise RuntimeError(connection.result.get("message") or "No se pudo consultar el Base DN.")
             elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-            return True, f"Conexión y autenticación LDAP correctas ({elapsed:.2f} s)."
+            return True, (f"Conexión y consulta LDAP correctas ({elapsed:.2f} s). "
+                          + (f"Fuente: Middleware, perfil {_grac_mw_profile('directory')}."
+                             if adgov_uses_middleware(connector) else "Fuente: conector local de GRAC."))
         except Exception as exc:
             return False, str(exc)
         finally:
@@ -208492,6 +208452,21 @@ def register_ad_governance(
         connection = None
         try:
             connection, ldap = ldap_connection(connector)
+            # Los umbrales configurados en Middleware gobiernan la evaluación
+            # cuando Samba usa ese perfil; si el middleware antiguo no ofrece
+            # settings, se conservan los umbrales locales sin bloquear inventario.
+            effective_connector = dict(connector)
+            if adgov_uses_middleware(connector):
+                try:
+                    platform_name=normalize_platform(connector['platform'])
+                    mw_provider='samba' if platform_name==AD_PLATFORM_SAMBA else None
+                    mw_settings=_grac_mw_execute('directory','settings',{},provider_override=mw_provider)
+                    if isinstance(mw_settings,dict):
+                        for threshold in ('inactive_days','password_age_days'):
+                            threshold_value=int(mw_settings.get(threshold) or 0)
+                            if 1<=threshold_value<=3650:effective_connector[threshold]=threshold_value
+                except Exception:
+                    pass  # Retrocompatibilidad con middleware anterior.
             user_attributes = [
                 "objectGUID", "distinguishedName", "sAMAccountName", "userPrincipalName",
                 "displayName", "givenName", "sn", "mail", "department", "title",
@@ -208618,7 +208593,7 @@ def register_ad_governance(
                 }
                 raw_users.append(item)
 
-            findings = build_findings(connector, raw_users)
+            findings = build_findings(effective_connector, raw_users)
             seen_at = now_iso()
             with db_conn() as sql:
                 sql.execute("BEGIN")
@@ -209051,7 +209026,6 @@ def register_ad_governance(
                       </select>
                     </form>
                     {% if can_write and selected %}
-                      <form method="post" action="{{ url_for('adgov.test', connector_id=selected.id) }}"><button class="adg-btn adg-btn-outline"><i class="bi bi-plug"></i> Probar</button></form>
                       <form method="post" action="{{ url_for('adgov.sync', connector_id=selected.id) }}"><button class="adg-btn adg-btn-primary"><i class="bi bi-arrow-repeat"></i> Sincronizar</button></form>
                     {% endif %}
                   </div>
@@ -209155,7 +209129,6 @@ def register_ad_governance(
                 <tbody>{% for c in connectors %}<tr><td>{{ c.name }}</td><td>{{ platform_label(c.platform) }}</td><td>{{ 'LDAPS' if c.use_ssl else 'LDAP' }}://{{ c.host }}:{{ c.port }}</td><td class="adg-code">{{ c.base_dn }}</td><td>{{ c.last_status }}</td><td>{{ c.last_sync_at or '—' }}</td>
                   <td><div class="adg-actions-vertical">
                     <a class="adg-btn adg-btn-outline" href="{{ url_for('adgov.config',connector_id=c.id,platform=platform) }}">Editar</a>
-                    <form method="post" action="{{ url_for('adgov.test',connector_id=c.id) }}"><button class="adg-btn adg-btn-outline">Probar conexión</button></form>
                     <form method="post" action="{{ url_for('adgov.sync',connector_id=c.id) }}"><button class="adg-btn adg-btn-primary">Sincronizar ahora</button></form>
                     <form method="post" action="{{ url_for('adgov.delete_connector',connector_id=c.id) }}" onsubmit="return confirm('¿Eliminar el conector y todo su inventario AD?');"><button class="adg-btn adg-btn-danger">Eliminar</button></form>
                   </div></td></tr>{% else %}<tr><td colspan="7" class="text-center text-muted py-4">Sin conectores registrados.</td></tr>{% endfor %}</tbody>
@@ -209192,9 +209165,11 @@ def register_ad_governance(
             encrypted = encrypt_secret(password) if password else (
                 existing["bind_password_encrypted"] if existing else None
             )
+            if adgov_uses_middleware(platform):
+                encrypted=existing["bind_password_encrypted"] if existing else None
             # Guardar la configuración no depende de que el DNS o la red estén disponibles.
-            # La resolución y autenticación se validan en "Probar conexión".
-            if not encrypted:
+            # Authentication and connectivity are checked during synchronization.
+            if not encrypted and not adgov_uses_middleware(platform):
                 raise ValueError("Debe ingresar la contraseña del usuario de enlace LDAP.")
             now = now_iso()
             values_tuple = (
@@ -209300,7 +209275,9 @@ def register_ad_governance(
             )
         except Exception as exc:
             audit(f"Error sincronizando Active Directory {connector['name']}: {exc}", current_user())
-            flash(f"No fue posible sincronizar Active Directory: {exc}", "danger")
+            flash((f"No fue posible sincronizar Active Directory: {exc}. "
+                       + (f"Fuente: Middleware, perfil {_grac_mw_profile('directory')}."
+                          if adgov_uses_middleware(connector) else "Fuente: conexion LDAP local de GRAC.")), "danger")
         return redirect(url_for("adgov.dashboard", connector_id=connector_id, platform=connector["platform"]))
 
     @bp.route("/usuarios")
@@ -211858,7 +211835,7 @@ def pra_ai_direct(prompt):
     """One synchronous provider call. No worker, queue or automatic retries."""
     import requests as _pra_requests
     provider = (get_ai_provider() or 'openrouter').strip().lower()
-    read_timeout = 300 if provider == 'ollama' and pra_local_access() else 55
+    read_timeout = 620  # La IA remota del Middleware puede tardar hasta 600 segundos.
     system = 'Responde únicamente JSON válido completo. Sé conciso: exactamente un riesgo; máximo 8 palabras por campo y resumen de 8 palabras. No incluyas razonamiento fuera del JSON.'
     if provider == 'ollama':
         base = (get_ollama_base_url() or '').rstrip('/')
@@ -211872,11 +211849,11 @@ def pra_ai_direct(prompt):
         key = get_openrouter_api_key()
         if not key:
             raise ValueError('Falta configurar la API Key de OpenRouter en Administración → Configuración de Inteligencia Artificial.')
-        url = 'https://openrouter.ai/api/v1/chat/completions'
+        url = _grac_mw_openrouter_chat_url()
         headers = {'Authorization':'Bearer '+key}
         payload = {'model':os.environ.get('OPENROUTER_MODEL') or OPENROUTER_MODEL or 'deepseek/deepseek-chat', 'messages':[{'role':'system','content':system},{'role':'user','content':prompt}], 'temperature':0.2, 'max_tokens':600, 'stream':False}
     try:
-        with _pra_requests.post(url, headers=headers, json=payload, timeout=(5,read_timeout)) as response:
+        with _grac_mw_http_post(url, headers=headers, json=payload, timeout=(5,read_timeout)) as response:
             status = response.status_code
             if status in (401,403):
                 raise ValueError('El proveedor rechazó el acceso. Revisa la API Key y los permisos del modelo configurado.')
@@ -216542,56 +216519,19 @@ def _grac_tprm_zap_fail(scorecard_id, message):
 
 
 def _grac_tprm_zap_docker_worker(app_obj, scorecard_id):
-    """Run baseline in a TPRM-only workspace; no vulnerability registry records."""
+    """ZAP de TPRM solo en middleware, sin credenciales ni Docker en GRAC."""
     with app_obj.app_context():
         try:
-            scan = _grac_tprm_zap_get(scorecard_id)
-            if not scan or scan['estado'] != 'ejecutando':
-                return
-            _grac_tprm_zap_progress_update(scorecard_id, 10, 'Validando dominio autorizado')
-            cfg = _zap_standalone_cfg()
-            target = scan['target']
-            if not _zap_allowed_host(target, cfg):
-                raise ValueError('El objetivo no se encuentra entre los hosts autorizados de OWASP ZAP.')
-            _grac_tprm_zap_progress_update(scorecard_id, 15, 'Verificando Docker')
-            docker = _zap_docker_binary()
-            if not docker:
-                raise RuntimeError('Docker Desktop no está disponible en el equipo de GRAC.')
-            if os.getenv('RENDER'):
-                raise RuntimeError('En Render se requiere importación de informe JSON ZAP.')
-            _grac_tprm_zap_progress_update(scorecard_id, 20, 'Creando entorno aislado')
-            work_root = os.path.join(BASE_DIR, 'instance')
-            os.makedirs(work_root, exist_ok=True)
-            with tempfile.TemporaryDirectory(prefix='grac_tprm_zap_', dir=work_root) as private_dir:
-                work_dir = os.path.join(private_dir, 'reports')
-                os.mkdir(work_dir)
-                os.chmod(work_dir, 0o777)
-                command = [
-                    docker, 'run', '--rm', '--memory', '1536m',
-                    '-v', f'{os.path.abspath(work_dir)}:/zap/wrk/:rw',
-                    'ghcr.io/zaproxy/zaproxy:stable', 'zap-baseline.py', '-t', target,
-                    '-m', str(max(1, min(5, int(cfg.spider_minutos or 1)))),
-                    '-T', str(max(1, min(15, int(cfg.espera_minutos or 5)))),
-                    '-J', 'zap_report.json'
-                ]
-                _grac_tprm_zap_progress_update(scorecard_id, 30, 'Ejecutando OWASP ZAP en Docker')
-                proc = subprocess.run(
-                    command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    timeout=max(5, min(45, int(cfg.timeout_minutos or 15))) * 60,
-                    check=False)
-                path = os.path.join(work_dir, 'zap_report.json')
-                if proc.returncode not in (0, 1, 2) or not os.path.isfile(path):
-                    log = proc.stdout.decode('utf-8', 'replace')[-1200:]
-                    raise RuntimeError('ZAP no generó un informe válido. ' + log)
-                _grac_tprm_zap_progress_update(scorecard_id, 85, 'Leyendo informe JSON')
-                with open(path, 'rb') as fp:
-                    report = fp.read(6*1024*1024+1)
-                _grac_tprm_zap_progress_update(scorecard_id, 95, 'Validando hallazgos')
-                _, findings = _zap_read_report(report)
-                _grac_tprm_zap_finish(scorecard_id, report, findings)
+            scan=_grac_tprm_zap_get(scorecard_id)
+            if not scan or scan['estado']!='ejecutando':return
+            _grac_tprm_zap_progress_update(scorecard_id,20,'Escaneando con Middleware')
+            result=_grac_mw_execute('scanner_zap','baseline',{'target':scan['target']})
+            raw=_grac_mw_b64.b64decode(result['report'])
+            _,findings=_zap_read_report(raw)
+            _grac_tprm_zap_finish(scorecard_id,raw,findings)
         except Exception as exc:
-            app.logger.exception('OWASP ZAP TPRM scorecard %s: %s', scorecard_id, exc)
-            _grac_tprm_zap_fail(scorecard_id, str(exc))
+            app.logger.exception('Error ZAP TPRM Middleware: %s',exc)
+            _grac_tprm_zap_fail(scorecard_id,str(exc)[:1200])
 
 
 def _grac_tprm_zap_refresh_scorecard(scorecard_id):
@@ -217751,12 +217691,12 @@ def _fc_ai_generate(questions,kb,grac,progress_cb=None):
         max_output=320 if len(subset)==1 else 560
         for attempt in range(1,4):
             if progress_cb:
-                part=('Ollama' if provider=='ollama' else 'OpenRouter')
+                part=('AI' if _FC_EN else 'IA')
                 label=('question' if len(subset)==1 else 'batch') if _FC_EN else ('pregunta' if len(subset)==1 else 'lote')
                 progress_cb(f'{part}: {label} ({len(subset)}) · '+('attempt' if _FC_EN else 'intento')+f' {attempt}/3')
             try:
                 if provider=='ollama':
-                    response=_fc_http.post(config['base_url'].rstrip('/')+'/api/generate',json={
+                    response=_grac_mw_http_post(config['base_url'].rstrip('/')+'/api/generate',json={
                         'model':config['model'],'system':system,'prompt':prompt,
                         'stream':False,'format':'json','keep_alive':'10m',
                         'options':{'temperature':0,'num_predict':max_output}},timeout=(15,600))
@@ -218023,6 +217963,674 @@ def fc_ai_job_status(fid):
 # ============================================================================
 # END: GRAC CUSTOMER FORMS
 # ============================================================================
+
+# ================================================================
+# GRAC Integration Middleware Bridge v1
+# - Provider and middleware activation remain in Administration GRAC.
+# - Secrets and connections to external systems reside in Middleware.
+# - Fail CLOSED when enabled (no direct provider fallback).
+# ================================================================
+import base64 as _grac_mw_b64
+import hashlib as _grac_mw_hashlib
+import hmac as _grac_mw_hmac
+import json as _grac_mw_json
+import os as _grac_mw_os
+import secrets as _grac_mw_secrets
+import time as _grac_mw_time
+from urllib.parse import urlsplit as _grac_mw_urlsplit
+import requests as _grac_mw_requests
+
+_GRAC_MW_PROVIDERS = {'firewall': ['opnsense',
+              'fortinet_fortigate',
+              'palo_alto_panorama',
+              'checkpoint_quantum',
+              'cisco_fmc',
+              'juniper_srx'],
+ 'xdr': ['wazuh',
+         'microsoft_defender_xdr',
+         'sentinelone_singularity',
+         'palo_alto_cortex_xdr',
+         'sophos_central',
+         'trend_vision_one',
+         'cisco_xdr',
+         'trellix_helix'],
+ 'inventory': ['glpi',
+               'ocs_inventory_ng',
+               'snipe_it',
+               'lansweeper',
+               'microsoft_intune',
+               'netbox'],
+ 'directory': ['active_directory',
+               'samba',
+               'ldap',
+               'okta',
+               'google_workspace',
+               'cyberark_identity'],
+ 'iam': ['ldap',
+         'active_directory',
+         'samba',
+         'okta',
+         'google_workspace',
+         'cyberark_identity'],
+ 'ai': ['ollama', 'openrouter', 'openai', 'anthropic_claude'],
+ 'scanner_zap': ['owasp_zap'],
+ 'scanner_kali': ['kali_linux'],
+ 'scanner_own': ['qualys_vmdr','tenable_vm','rapid7_insightvm','qualys_was','burp_dast','invicti_acunetix','sonarqube','fortify','veracode','snyk','trivy'],
+ 'jira': ['atlassian_jira']}
+_GRAC_MW_LABELS = {'opnsense': 'OPNsense / OPNsense Firewall',
+ 'fortinet_fortigate': 'Fortinet FortiGate / FortiOS',
+ 'palo_alto_panorama': 'Palo Alto Networks NGFW / Panorama',
+ 'checkpoint_quantum': 'Check Point Quantum / Management',
+ 'cisco_fmc': 'Cisco Secure Firewall / FMC',
+ 'juniper_srx': 'Juniper SRX',
+ 'wazuh': 'Wazuh (actual)',
+ 'microsoft_defender_xdr': 'Microsoft Defender XDR',
+ 'sentinelone_singularity': 'SentinelOne Singularity',
+ 'palo_alto_cortex_xdr': 'Palo Alto Cortex XDR',
+ 'sophos_central': 'Sophos XDR / Sophos Central',
+ 'trend_vision_one': 'Trend Micro Vision One',
+ 'cisco_xdr': 'Cisco XDR',
+ 'trellix_helix': 'Trellix XDR / Helix',
+ 'glpi': 'GLPI (actual)',
+ 'ocs_inventory_ng': 'OCS Inventory NG',
+ 'snipe_it': 'Snipe-IT',
+ 'lansweeper': 'Lansweeper',
+ 'microsoft_intune': 'Microsoft Intune',
+ 'netbox': 'NetBox',
+ 'active_directory': 'Microsoft Active Directory (LDAPS)',
+ 'samba': 'Samba AD (LDAPS)',
+ 'ldap': 'LDAP / IAM genérico (LDAPS)',
+ 'okta': 'Okta (API de identidades)',
+ 'google_workspace': 'Google Workspace (Admin SDK API)',
+ 'cyberark_identity': 'CyberArk Identity (SCIM API)',
+ 'ollama': 'Ollama local/remoto',
+ 'openrouter': 'OpenRouter API',
+ 'openai': 'OpenAI API',
+ 'anthropic_claude': 'Anthropic Claude API',
+ 'owasp_zap': 'OWASP ZAP',
+ 'kali_linux': 'Kali Linux',
+ 'atlassian_jira': 'Atlassian Jira'}
+
+def _grac_mw_setting(service, suffix, default=''):
+    return (get_system_secret('GRAC_MW_'+service.upper()+'_'+suffix) or default).strip()
+
+def _grac_mw_enabled(service):
+    # GLPI/inventory and firewall are exclusively middleware-managed.
+    # Their visibility and synchronization must not depend on a legacy local
+    # enable flag. The selected provider/profile remain controlled in Admin.
+    if service in ('firewall', 'inventory', 'xdr', 'ai', 'scanner_zap', 'scanner_kali', 'jira'):
+        return True
+    return _grac_mw_setting(service,'ENABLED') == '1'
+
+def _grac_mw_provider(service):
+    default={'xdr':'wazuh','firewall':'opnsense','inventory':'glpi','directory':'samba',
+             'iam':'ldap','ai':'ollama',
+             'scanner_zap':'owasp_zap','scanner_kali':'kali_linux',
+             'scanner_own':'qualys_vmdr','jira':'atlassian_jira'}[service]
+    selected=_grac_mw_setting(service,'PROVIDER',default).lower()
+    if service=='ai':
+        # Identificador de compatibilidad únicamente: el middleware selecciona el
+        # proveedor verdadero mediante el perfil ai/<profile> guardado allí.
+        return selected if selected in _GRAC_MW_PROVIDERS['ai'] else 'ollama'
+    if selected not in _GRAC_MW_PROVIDERS[service]:
+        raise RuntimeError('Proveedor middleware inválido en Administración: '+service)
+    return selected
+
+def _grac_mw_profile(service):
+    return _grac_mw_setting(service,'PROFILE','default') or 'default'
+
+def _grac_mw_admin_csrf():
+    return session.setdefault('grac_mw_csrf',_grac_mw_secrets.token_urlsafe(24))
+
+def _grac_mw_check_csrf():
+    supplied=request.form.get('grac_mw_csrf','')
+    expected=session.get('grac_mw_csrf','')
+    if not supplied or not expected or not _grac_mw_hmac.compare_digest(supplied,expected):
+        abort(403)
+
+def _grac_mw_api_key():
+    # Primero entorno (Render); en instalaciones locales, secreto cifrado de GRAC.
+    key=(_grac_mw_os.getenv('GRAC_MIDDLEWARE_KEY') or get_system_secret('GRAC_MIDDLEWARE_KEY') or '').strip()
+    if len(key)<32:
+        raise RuntimeError('Configure la clave compartida GRAC_MIDDLEWARE_KEY en Administración; cópiela desde el .env del middleware creado con --setup.')
+    return key
+
+def _grac_mw_base():
+    raw=(_grac_mw_os.getenv('GRAC_MIDDLEWARE_URL') or get_system_secret('GRAC_MIDDLEWARE_URL') or '').strip().rstrip('/')
+    # Valor inicial seguro cuando GRAC y middleware corren en este mismo equipo.
+    # Para Render / un GRAC remoto nunca se asume que 127.0.0.1 sea el Mac del cliente.
+    if not raw:
+        try:
+            local_host=_grac_mw_urlsplit(request.host_url).hostname
+        except RuntimeError:
+            local_host=None
+        if local_host in ('127.0.0.1','localhost','::1'):
+            raw='http://127.0.0.1:5055'
+    p=_grac_mw_urlsplit(raw)
+    if p.scheme not in ('http','https') or not p.hostname or p.username or p.password or p.query or p.fragment:
+        raise RuntimeError('Configure y guarde la URL del middleware en Administración. Ejemplo local: http://127.0.0.1:5055')
+    if p.scheme!='https' and p.hostname not in ('127.0.0.1','localhost','::1'):
+        raise RuntimeError('El middleware remoto debe utilizar HTTPS y ser accesible desde GRAC.')
+    return raw
+
+def _grac_mw_headers(service):
+    headers={'Authorization':'Bearer '+_grac_mw_api_key(),'X-GRAC-Provider':_grac_mw_provider(service),
+             'X-GRAC-Profile':_grac_mw_profile(service)}
+    if _grac_mw_os.getenv('CF_ACCESS_CLIENT_ID') and _grac_mw_os.getenv('CF_ACCESS_CLIENT_SECRET'):
+        headers['CF-Access-Client-Id']=_grac_mw_os.getenv('CF_ACCESS_CLIENT_ID')
+        headers['CF-Access-Client-Secret']=_grac_mw_os.getenv('CF_ACCESS_CLIENT_SECRET')
+    return headers
+
+_GRAC_OWN_SCANNERS = {'qualys_vmdr': 'Qualys VMDR', 'tenable_vm': 'Tenable Vulnerability Management', 'rapid7_insightvm': 'Rapid7 InsightVM / Nexpose', 'qualys_was': 'Qualys WAS', 'burp_dast': 'Burp Suite DAST', 'invicti_acunetix': 'Acunetix / Invicti', 'sonarqube': 'SonarQube', 'fortify': 'Fortify SSC', 'veracode': 'Veracode', 'snyk': 'Snyk', 'trivy': 'Trivy'}
+
+def _grac_mw_execute(service, operation='test', params=None, profile=None, provider_override=None):
+    """Canal único GRAC -> middleware. Nunca intenta una conexión directa de respaldo."""
+    # Se permite fijar samba solo para las consultas LDAP de Samba.
+    # Windows AD, otros servicios y el resto de llamadas conservan la
+    # selección normal hecha en Administración de GRAC.
+    if provider_override is not None and not (
+        (service == 'directory' and provider_override == 'samba') or
+        (service == 'scanner_own' and provider_override in _GRAC_OWN_SCANNERS)
+    ):
+        raise ValueError('Proveedor no permitido para el servicio de Middleware')
+    chosen_provider = provider_override or _grac_mw_provider(service)
+    headers = _grac_mw_headers(service)
+    headers['X-GRAC-Provider'] = chosen_provider
+    payload = {'service': service, 'provider': chosen_provider,
+               'profile': profile or _grac_mw_profile(service),
+               'operation': operation, 'params': params or {}}
+    # Sin tiempo maximo de lectura SOLAMENTE para ejecutar herramientas Kali.
+    # Las operaciones de prueba, autorizacion y cancelacion siguen acotadas.
+    timeout = {'ai': 620}.get(service, 80)
+    if service == 'directory' and operation == 'search':
+        timeout = 600  # Sincronizacion LDAP puede incluir paginacion de miles de usuarios.
+    if ((service == 'scanner_kali' and operation == 'run_tool')
+            or (service == 'scanner_zap' and operation == 'baseline')):
+        timeout = None
+    res = _grac_mw_requests.post(_grac_mw_base()+'/v1/execute', json=payload,
+                                 headers=headers, timeout=(8, timeout))
+    # Leer PRIMERO el mensaje JSON; raise_for_status antes de json oculta el error real.
+    try:
+        parsed = res.json()
+    except ValueError:
+        res.raise_for_status()
+        raise RuntimeError('Middleware devolvió una respuesta que no es JSON')
+    if not res.ok or (isinstance(parsed, dict) and not parsed.get('ok', False)):
+        detail = parsed.get('error') if isinstance(parsed, dict) else ''
+        if not detail:
+            detail = 'Middleware HTTP %s' % res.status_code
+        raise RuntimeError(str(detail)[:6000 if service in ('scanner_zap','scanner_kali') else 500])
+    return parsed.get('data') if isinstance(parsed, dict) else parsed
+
+def _grac_mw_resolve_own_profile(target):
+    """Discover the one enabled profile at Middleware, without duplicating settings in GRAC.
+
+    The existing middleware intentionally has no public endpoint listing enabled
+    profiles; a side-effect-free 'validate' is used for each known profile ID.
+    No scanner execution or external API fetch occurs during discovery.
+    """
+    found = {}
+    problems = []
+    for provider in _GRAC_OWN_SCANNERS:
+        # Current middleware convention: profile ID matches the provider ID.
+        # Also accept a single legacy 'default' profile configured there.
+        for profile in (provider, 'default'):
+            try:
+                _grac_mw_execute('scanner_own', 'validate', {'target': target},
+                                 profile=profile, provider_override=provider)
+                found[provider] = profile
+                break
+            except Exception as exc:
+                message = str(exc)
+                if ('Perfil de scanner_own/' in message and 'sin configurar' in message) or (
+                        'Proveedor distinto en scanner_own/' in message):
+                    continue  # Not an enabled profile for this provider.
+                if any(word in message.lower() for word in
+                       ('connection refused', 'failed to establish', 'connecttimeout',
+                        'readtimeout', 'no se pudo establecer', 'connectionerror')):
+                    raise RuntimeError('No fue posible conectar con Middleware: ' + message[:250]) from exc
+                problems.append((_GRAC_OWN_SCANNERS[provider], message[:200]))
+                break
+    if len(found) > 1:
+        names = ', '.join(_GRAC_OWN_SCANNERS[p] for p in found)
+        raise RuntimeError('Hay varios escaneadores propios habilitados en Middleware: ' + names +
+                           '. Para ejecutar sin un selector duplicado, deje un único perfil activo en Middleware.')
+    if problems:
+        details = '; '.join(name + ': ' + msg for name, msg in problems[:3])
+        raise RuntimeError('Revise la configuración del escaneador propio en Middleware: ' + details)
+    if len(found) == 1:
+        return next(iter(found.items()))  # (provider, profile)
+    raise RuntimeError('No hay un perfil de escaneador propio habilitado en Middleware. ' +
+                       'Configure uno en la categoría Escaneadores propios y utilice el ID del proveedor o default como perfil.')
+
+
+def _grac_mw_ai_ollama_url():
+    return _grac_mw_base()+'/v1/compat/ollama'
+
+def _grac_mw_openrouter_url():
+    return _grac_mw_base()+'/v1/compat/openai'
+
+def _grac_mw_openrouter_chat_url():
+    return _grac_mw_openrouter_url().rstrip('/')+'/chat/completions'
+
+def _grac_mw_ai_route(url):
+    """Reencamina llamadas HTTP heredadas de IA al middleware, sin fuga de API keys.
+
+    Incluye módulos que todavía construyen una URL antigua de Ollama/OpenRouter.
+    La elección real del proveedor/modelo sigue estando en ai/<perfil> del MW.
+    """
+    raw=str(url or '')
+    path=_grac_mw_urlsplit(raw).path.rstrip('/').lower()
+    # Si ya apunta a una ruta de compatibilidad, conservarla.
+    if path.startswith('/v1/compat/'):
+        # Una URL que simule ser Middleware en otro host NUNCA debe recibir la clave.
+        if not raw.startswith(_grac_mw_base().rstrip('/')+'/v1/compat/'):
+            raise RuntimeError('IA: la ruta de compatibilidad no coincide con el Middleware configurado')
+        return raw
+    if path.endswith('/api/generate'):
+        return _grac_mw_base()+'/v1/compat/ollama/api/generate'
+    if path.endswith('/api/chat'):
+        return _grac_mw_base()+'/v1/compat/ollama/api/chat'
+    if path.endswith('/api/tags'):
+        return _grac_mw_base()+'/v1/compat/ollama/api/tags'
+    if path.endswith('/chat/completions'):
+        return _grac_mw_base()+'/v1/compat/openai/chat/completions'
+    return raw
+
+def _grac_mw_http_post(url,*args,**kwargs):
+    url=_grac_mw_ai_route(url)
+    raw=str(url)
+    if raw.startswith(_grac_mw_base().rstrip('/')+'/v1/compat/openai/') or raw.startswith(_grac_mw_base().rstrip('/')+'/v1/compat/ollama/'):
+        kwargs['headers']={**(kwargs.get('headers') or {}),**_grac_mw_headers('ai')}
+        kwargs.pop('auth',None)
+    if raw.startswith(_grac_mw_base().rstrip('/')+'/v1/compat/jira/'):
+        kwargs['headers']={**(kwargs.get('headers') or {}),**_grac_mw_headers('jira')}
+        kwargs.pop('auth',None)
+    return _grac_mw_requests.post(url,*args,**kwargs)
+
+def _grac_mw_http_put(url,*args,**kwargs):
+    if _grac_mw_enabled('jira') and str(url).startswith(_grac_mw_base()+'/v1/compat/jira/'):
+        kwargs['headers']={**kwargs.get('headers',{}),**_grac_mw_headers('jira')}
+        kwargs.pop('auth',None)
+    return _grac_mw_requests.put(url,*args,**kwargs)
+
+def _grac_mw_http_get(url,*args,**kwargs):
+    url=_grac_mw_ai_route(url)
+    raw=str(url)
+    if raw.startswith(_grac_mw_base().rstrip('/')+'/v1/compat/openai/') or raw.startswith(_grac_mw_base().rstrip('/')+'/v1/compat/ollama/'):
+        kwargs['headers']={**(kwargs.get('headers') or {}),**_grac_mw_headers('ai')}
+        kwargs.pop('auth',None)
+    if raw.startswith(_grac_mw_base().rstrip('/')+'/v1/compat/jira/'):
+        kwargs['headers']={**(kwargs.get('headers') or {}),**_grac_mw_headers('jira')}
+        kwargs.pop('auth',None)
+    return _grac_mw_requests.get(url,*args,**kwargs)
+
+_grac_mw_original_ollama_url = get_ollama_base_url
+_grac_mw_original_openrouter_key = get_openrouter_api_key
+
+def get_ollama_base_url():
+    return _grac_mw_ai_ollama_url()
+
+def get_openrouter_api_key():
+    return _grac_mw_api_key()
+
+def _grac_mw_catalog():
+    """La lista se sirve desde Middleware para añadir proveedores sin editar GRAC.
+
+    Si está desconectado, se conserva el catálogo incluido en esta entrega.
+    """
+    provider_map={svc:list(vals) for svc,vals in _GRAC_MW_PROVIDERS.items()}
+    label_map=dict(_GRAC_MW_LABELS)
+    try:
+        resp=_grac_mw_requests.get(_grac_mw_base()+'/v1/providers',
+            headers={'Authorization':'Bearer '+_grac_mw_api_key()},timeout=(3,5))
+        resp.raise_for_status()
+        payload=resp.json() or {}
+        raw=payload.get('providers') or {}
+        for svc in provider_map:
+            options=raw.get(svc)
+            if isinstance(options,list) and options and len(options)<=80:
+                safe=[str(v) for v in options if isinstance(v,str) and __import__('re').fullmatch(r'[a-z][a-z0-9_]{0,70}',v)]
+                if safe:provider_map[svc]=safe
+        for key,val in (payload.get('labels') or {}).items():
+            if isinstance(key,str) and isinstance(val,str) and len(val)<100:
+                label_map[key]=val
+    except Exception:
+        pass
+    # Retiene la selección almacenada si Middleware está temporalmente sin conexión.
+    for svc in provider_map:
+        selected=_grac_mw_setting(svc,'PROVIDER','')
+        if selected and selected not in provider_map[svc] and __import__('re').fullmatch(r'[a-z][a-z0-9_]{0,70}',selected):
+            provider_map[svc].append(selected)
+    return provider_map,label_map
+
+@app.route('/admin/conexiones/middleware', methods=['GET', 'POST'])
+@login_required
+def grac_middleware_admin():
+    # Canal GRAC/Middleware: URL y autenticacion solamente.
+
+    # La consola del middleware es responsable de proveedores y perfiles.
+    # Los ajustes GRAC_MW_<SERVICIO>_... existentes se conservan.
+    current = User.query.get(session.get('user_id'))
+    if not current or current.role != 'admin':
+        return abort(403)
+
+    if request.method == 'POST':
+        _grac_mw_check_csrf()
+        new_url = (request.form.get('middleware_url') or '').strip()
+        if new_url:
+            p = _grac_mw_urlsplit(new_url)
+            if (not p.hostname or p.scheme not in ('http', 'https') or p.username
+                    or p.password or p.query or p.fragment
+                    or (p.scheme != 'https' and p.hostname not in ('localhost', '127.0.0.1', '::1'))):
+                flash('URL inválida: use HTTPS, o http://127.0.0.1:5055 solo en este equipo.', 'danger')
+                return redirect(request.path)
+        new_key = (request.form.get('middleware_key') or '').strip()
+        if new_key and (len(new_key) < 32 or len(new_key) > 512 or any(c.isspace() for c in new_key)):
+            flash('La clave del middleware debe tener entre 32 y 512 caracteres y no incluir espacios.', 'danger')
+            return redirect(request.path)
+
+        # No se tocan proveedores, perfiles ni interruptores de servicios.
+        if new_url:
+            set_system_secret('GRAC_MIDDLEWARE_URL', new_url.rstrip('/'))
+        if new_key:
+            set_system_secret('GRAC_MIDDLEWARE_KEY', new_key)
+        flash('Conexión de Middleware guardada. Puede probarla o abrir su consola para administrar las integraciones.', 'success')
+        return redirect(request.path)
+
+    try:
+        base = _grac_mw_base()
+    except Exception:
+        base = ''
+    key_configured = bool(_grac_mw_os.getenv('GRAC_MIDDLEWARE_KEY') or get_system_secret('GRAC_MIDDLEWARE_KEY'))
+    page = '''<div class="container py-4"><h2>Middleware de Integraciones GRAC</h2>
+    <p>La selección de proveedores, los perfiles, las herramientas y las credenciales se administran exclusivamente en la consola del Middleware. GRAC solo configura su canal de conexión.</p>
+    <div class="card p-3 mb-3"><h4>Conexión y autenticación GRAC ↔ Middleware</h4>
+    <p>Configure la URL y la clave compartida. Los ajustes existentes de cada integración se conservan sin cambios.</p>
+    <form method="POST"><input type="hidden" name="grac_mw_csrf" value="{{csrf}}">
+    <label class="form-label">URL del Middleware</label>
+    <input class="form-control mb-2" type="url" name="middleware_url" value="{{ base }}" placeholder="http://127.0.0.1:5055" autocomplete="url">
+    <p class="small text-muted">En el mismo equipo use http://127.0.0.1:5055. En Render configure una URL HTTPS accesible desde GRAC y el navegador para el SSO.</p>
+    <label class="form-label">Clave compartida GRAC_MIDDLEWARE_KEY {% if key_configured %}<span class="text-success">· configurada</span>{% else %}<span class="text-danger">· pendiente</span>{% endif %}</label>
+    <input class="form-control mb-2" type="password" name="middleware_key" value="" autocomplete="new-password" placeholder="Dejar vacío para conservar la clave existente">
+    <p class="small text-muted">La clave compartida es distinta de las contraseñas de las herramientas. Mantenga las credenciales de cada proveedor en la consola del Middleware.</p>
+    <button class="btn btn-primary mt-2" type="submit">Guardar conexión</button></form></div>
+    <div class="card p-3"><h4>Verificar conexión con Middleware</h4>
+    <p>Compruebe la conexión entre GRAC y el Middleware. Los proveedores y perfiles se administran desde la consola del Middleware.</p>
+    <form method="POST" action="{{url_for('grac_middleware_test')}}" class="mt-2" data-no-progress="true"><input type="hidden" name="grac_mw_csrf" value="{{csrf}}"><button class="btn btn-outline-primary" type="submit">Probar conexión GRAC ↔ Middleware</button></form></div></div>'''
+    return render_template_string(BASE, content=Markup(render_template_string(
+        page, base=base, key_configured=key_configured, csrf=_grac_mw_admin_csrf())))
+
+@app.route('/admin/conexiones/middleware/abrir',methods=['POST'])
+@login_required
+def grac_middleware_open():
+    current=User.query.get(session.get('user_id'))
+    if not current or current.role!='admin':return abort(403)
+    _grac_mw_check_csrf()
+    try:
+        base=_grac_mw_base()
+        shared_key=_grac_mw_api_key()
+    except Exception as exc:
+        flash('No se puede abrir la consola SSO: '+str(exc)[:250]+' Configure primero la conexión en esta pantalla.','warning')
+        return redirect(url_for('grac_middleware_admin'))
+    payload={'user':str(getattr(current,'username',None) or current.id),'role':'admin',
+             'iat':int(_grac_mw_time.time()),'nonce':_grac_mw_secrets.token_urlsafe(24)}
+    part=_grac_mw_b64.urlsafe_b64encode(_grac_mw_json.dumps(payload,separators=(',',':')).encode()).decode().rstrip('=')
+    signature=_grac_mw_hmac.new(shared_key.encode(),part.encode(),_grac_mw_hashlib.sha256).hexdigest()
+    # One-use short lived POST assertion; not included in browser URL/query logs.
+    return render_template_string('''<html><body><form id="sso" method="POST" action="{{base}}/auth/sso">
+    <input type="hidden" name="ticket" value="{{ticket}}"></form><script>document.getElementById('sso').submit()</script>
+    <noscript><button form="sso">Continuar a Middleware</button></noscript></body></html>''',base=base,ticket=part+'.'+signature)
+
+@app.route('/admin/conexiones/middleware/probar',methods=['POST'])
+@login_required
+def grac_middleware_test():
+    current=User.query.get(session.get('user_id'))
+    if not current or current.role!='admin':return abort(403)
+    _grac_mw_check_csrf()
+    try:
+        resp=_grac_mw_requests.get(_grac_mw_base()+'/v1/providers',headers={'Authorization':'Bearer '+_grac_mw_api_key()},timeout=12)
+        resp.raise_for_status()
+        if not resp.json().get('ok'):raise RuntimeError('Middleware no respondió correctamente')
+        flash('Conexión GRAC ↔ Middleware validada.','success')
+    except Exception as exc:flash('No fue posible conectar: '+str(exc)[:220],'danger')
+    return redirect(url_for('grac_middleware_admin'))
+
+class _GracMWLDAPProxy:
+    """Small ldap3-compatible read-only proxy for legacy Active Directory sync."""
+    def __init__(self, connector):
+        self.connector=connector
+        # El conector Samba usa el proveedor real del perfil cifrado del
+        # Middleware. La selección antigua de directory en GRAC puede apuntar
+        # a active_directory y no debe contaminar estas solicitudes.
+        try:
+            self._grac_provider_override = ('samba' if str(connector['platform']).strip().upper() == 'SAMBA' else None)
+        except (KeyError, TypeError, IndexError):
+            self._grac_provider_override = 'samba'
+        self.result={'result':0,'message':''}
+        self.extend=type('MWExt',(),{})()
+        self.extend.standard=type('MWStandard',(),{})()
+        self.extend.standard.paged_search=self.paged_search
+    def search(self,search_base,search_filter,search_scope,attributes=None,**kw):
+        data=_grac_mw_execute('directory','search',{
+            'use_configured_base_dn':True,
+            'filter':search_filter,'attributes':attributes or []},
+            provider_override=self._grac_provider_override)
+        if not isinstance(data,dict):
+            raise RuntimeError('Middleware LDAP: se esperaba un objeto JSON con entries, se recibió '+type(data).__name__)
+        entries=data.get('entries')
+        if not isinstance(entries,list):
+            raise RuntimeError('Middleware LDAP: entries debe ser una lista, se recibió '+type(entries).__name__)
+        normalized=[]
+        for index,entry in enumerate(entries):
+            if isinstance(entry,str):
+                try:entry=_grac_mw_json.loads(entry)
+                except ValueError:
+                    raise RuntimeError('Middleware LDAP: entrada '+str(index)+' contiene texto, no un objeto LDAP')
+            if not isinstance(entry,dict):
+                raise RuntimeError('Middleware LDAP: entrada '+str(index)+' no es un objeto')
+            attrs=entry.get('attributes') or {}
+            if isinstance(attrs,str):
+                try:attrs=_grac_mw_json.loads(attrs)
+                except ValueError:
+                    raise RuntimeError('Middleware LDAP: atributos de entrada '+str(index)+' no son JSON')
+            if not isinstance(attrs,dict):
+                raise RuntimeError('Middleware LDAP: atributos de entrada '+str(index)+' no son diccionario')
+            normalized.append({'type':entry.get('type','searchResEntry'),
+                               'dn':str(entry.get('dn') or ''),
+                               'attributes':_grac_mw_decode_ldap(attrs)})
+        self.response=normalized
+        self.result={'result':0,'message':''}
+        return True
+    def paged_search(self,search_base,search_filter,search_scope,attributes=None,**kw):
+        self.search(search_base,search_filter,search_scope,attributes)
+        return self.response
+    def unbind(self):return True
+
+
+def _grac_mw_decode_ldap(value):
+    if isinstance(value,dict):
+        if set(value)=={'__bytes_b64'}:
+            return _grac_mw_b64.b64decode(value['__bytes_b64'])
+        return {key:_grac_mw_decode_ldap(val) for key,val in value.items()}
+    if isinstance(value,list):return [_grac_mw_decode_ldap(val) for val in value]
+    return value
+
+
+
+# ============================================================================
+# UNA INTERFAZ DE IA EN GRAC, TODOS LOS PROVEEDORES DETRÁS DEL MIDDLEWARE
+# Dejar todas las credenciales, modelos y llamadas de proveedores en Middleware.
+# Mantener función antigua únicamente para instalaciones que aún no migraron.
+# ============================================================================
+_grac_mw_original_ai_client_factory = get_openrouter_client
+_grac_mw_original_ai_provider_choice = get_ai_provider
+_grac_mw_original_openai_constructor = OpenAI
+
+def get_ai_provider():
+    # "openrouter" es solo la interfaz de compatibilidad esperada por los
+    # módulos existentes. El proveedor real (Ollama/OpenRouter/OpenAI/Claude)
+    # lo selecciona EXCLUSIVAMENTE el middleware.
+    return 'openrouter'
+
+def OpenAI(*args, **kwargs):
+    # Todos los clientes SDK creados por los módulos de GRAC se redirigen
+    # al middleware, incluso cuando una rutina antigua pide una URL directa.
+    # No enviar nunca GRAC_MIDDLEWARE_KEY a endpoints externos.
+    kwargs['base_url']=_grac_mw_openrouter_url()
+    kwargs['api_key']=_grac_mw_api_key()
+    kwargs['default_headers']={**(kwargs.get('default_headers') or {}),**_grac_mw_headers('ai')}
+    kwargs['max_retries']=0
+    kwargs.setdefault('timeout',620)
+    return _grac_mw_original_openai_constructor(*args, **kwargs)
+
+
+def get_openrouter_client():
+    from openai import OpenAI as _GracUnifiedAI
+    return {
+        'provider':'openrouter',  # interfaz OpenAI compatible, NO proveedor real
+        'client':_GracUnifiedAI(
+            api_key=_grac_mw_api_key(),
+            base_url=_grac_mw_base()+'/v1/compat/openai',
+            default_headers=_grac_mw_headers('ai'),
+            max_retries=0, timeout=600,
+        ),
+        'model':'grac-managed',   # Middleware resuelve proveedor y modelo.
+    }
+
+
+_GRAC_MW_SCAN_ENGLISH = False
+
+
+
+def _grac_mw_own_full_scan(run, run_dir, crear_vulns=True, crear_planes=True):
+    """Integra hallazgos de escaneadores propios con matriz y remediación existentes."""
+    try:tools=json.loads(run.herramientas or '[]')
+    except (ValueError,TypeError):tools=[]
+    if not isinstance(tools,list) or len(tools)!=1 or not str(tools[0]).startswith('own:'):
+        raise RuntimeError('No se identificó la herramienta propia del escaneo')
+    provider_spec=str(tools[0])[4:]
+    provider, _, scan_profile = provider_spec.partition('@')
+    scan_profile = scan_profile or provider  # Compatibilidad con historiales existentes.
+    if provider not in _GRAC_OWN_SCANNERS:raise RuntimeError('Escaneador propio no permitido')
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,70}', scan_profile):
+        raise RuntimeError('Perfil del escaneador propio inválido')
+    if scan_check_cancel(run.id):
+        scan_mark_stopped(run.id)
+        return {'ok':False,'stopped':True}
+    scan_set_progress(run.id, pct=10, stage='Consultando '+_GRAC_OWN_SCANNERS[provider]+' mediante Middleware',tool=provider)
+    response=_grac_mw_execute('scanner_own','fetch',
+                {'target':run.target,'authorized':True}, profile=scan_profile,provider_override=provider)
+    if not isinstance(response,dict) or not isinstance(response.get('findings'),list):
+        raise RuntimeError('Middleware devolvió un formato de hallazgos inválido')
+    findings=response['findings']
+    if len(findings)>250:raise RuntimeError('Middleware excedió el límite de 250 hallazgos por ejecución')
+    for h in findings:
+        if not isinstance(h,dict) or not (h.get('titulo') and h.get('fuente')):
+            raise RuntimeError('Hallazgo con formato inválido devuelto por '+provider)
+    if scan_check_cancel(run.id):
+        scan_mark_stopped(run.id)
+        return {'ok':False,'stopped':True}
+    scan_set_progress(run.id,pct=75,stage='Registrando hallazgos',tool=provider)
+    guardar_findings_y_sincronizar(run,findings,run_dir,crear_vulns,crear_planes)
+    log_path=scan_output_file(run_dir,'scan_log','txt')
+    notice=('Escaneo de imagen ejecutado localmente' if provider=='trivy' else
+            'Hallazgos preexistentes importados desde la plataforma; no se ha iniciado un nuevo escaneo remoto')
+    msg='Proveedor: '+_GRAC_OWN_SCANNERS[provider]+'\n'+notice+'\nHallazgos recibidos: '+str(len(findings))
+    if response.get('truncated'):msg+='\nAviso: máximo 250 hallazgos en esta ejecución; use filtros/paginación para el resto.'
+    with open(log_path,'w',encoding='utf-8') as fp:fp.write(msg)
+    db.session.refresh(run)
+    run.archivo_log=log_path
+    run.salida_consola=msg
+    run.estado='finalizado'
+    run.progress_pct=100
+    run.current_stage='Integración de escaneador propio finalizada'
+    run.current_tool=None
+    run.fecha_fin=datetime.utcnow()
+    resumir_hallazgos_run(run)
+    db.session.commit()
+    try:
+        run.archivo_reporte_pdf=build_vulnerability_scan_pdf(run.id)
+        db.session.commit()
+    except Exception as exc:
+        app.logger.warning('PDF de escaneador propio: %s',exc)
+    return {'ok':True,'findings':run.total_hallazgos or 0,
+            'vulns':run.created_vulns or 0,'planes':run.created_plans or 0}
+
+def _grac_mw_kali_full_scan(run,run_dir,crear_vulns=True,crear_planes=True,exclude_tools=None):
+    """Ejecuta escaneo Kali exclusivamente a través de /v1/execute.
+
+    No lee los parámetros de conexión SSH/Kali de GRAC y no usa subprocess.
+    El middleware valida el objetivo y la política de redes privadas.
+    """
+    target=str(run.target or '').strip()
+    if not target.startswith(('http://','https://')):
+        target='https://'+target
+    tools=json.loads(run.herramientas or '[]')
+    if not isinstance(tools,list):tools=[]
+    tools=[t for t in tools if t in ('nmap','nikto','nuclei','whatweb','testssl') and t not in (exclude_tools or ())]
+    if not tools:tools=['nmap']
+    _grac_mw_execute('scanner_kali','authorize',{'target':target})
+    logs=[]
+    errors=[]
+    for n,tool in enumerate(tools):
+        if scan_check_cancel(run.id):
+            scan_mark_stopped(run.id)
+            return {'ok':False,'stopped':True}
+        pct=5+int(82*n/max(1,len(tools)))
+        scan_set_progress(run.id,pct=pct,stage='Middleware Kali: '+tool,tool=tool)
+        try:
+            response=_grac_mw_execute('scanner_kali','run_tool',
+                                      {'tool':tool,'target':target,'scan_id':str(run.id)})
+        except Exception:
+            if scan_check_cancel(run.id):
+                scan_mark_stopped(run.id)
+                return {'ok':False,'stopped':True}
+            raise
+        if scan_check_cancel(run.id):
+            scan_mark_stopped(run.id)
+            return {'ok':False,'stopped':True}
+        output=str(response.get('output') or '')[:30000]
+        path=scan_output_file(run_dir,tool+'_scan','txt')
+        with open(path,'w',encoding='utf-8') as fp:fp.write(output)
+        logs.append('['+tool.upper()+']\n'+output)
+        code=int(response.get('exit_code') or 0)
+        if code!=0:
+            errors.append(tool+': exit_code='+str(code)+' - '+output.strip().replace('\n',' ')[-500:])
+            continue
+        # Utiliza el parser existente para herramientas de salida textual.
+        # El nmap estándar no genera XML y no debe inventar vulnerabilidades;
+        # su salida completa queda disponible en el registro del escaneo.
+        if tool in ('nikto','whatweb','testssl'):
+            findings=parse_txt_findings_generic(path,tool)
+            guardar_findings_y_sincronizar(run,findings,run_dir,crear_vulns,crear_planes)
+    log_path=scan_output_file(run_dir,'scan_log','txt')
+    with open(log_path,'w',encoding='utf-8') as fp:fp.write('\n\n'.join(logs))
+    run=VulnerabilityScanRun.query.get(run.id)
+    run.archivo_log=log_path
+    run.salida_consola='\n\n'.join(logs)[-20000:]
+    if errors:
+        run.estado='error'
+        run.error_detalle='Algunas herramientas del Middleware no terminaron correctamente: '+' | '.join(errors)
+        run.current_stage='Kali Middleware: ejecución parcial o fallida'
+    else:
+        run.estado='finalizado' if not _GRAC_MW_SCAN_ENGLISH else 'completed'
+        run.current_stage='Escaneo Kali Middleware finalizado' if not _GRAC_MW_SCAN_ENGLISH else 'Kali Middleware scan completed'
+    run.progress_pct=100
+    run.current_tool=None
+    run.active_pid=None
+    run.active_command=None
+    run.fecha_fin=datetime.utcnow()
+    resumir_hallazgos_run(run)
+    db.session.commit()
+    try:
+        run.archivo_reporte_pdf=build_vulnerability_scan_pdf(run.id)
+        db.session.commit()
+    except Exception as exc:
+        app.logger.warning('No se pudo generar PDF Kali Middleware: %s',exc)
+    return {'ok':not bool(errors),'findings':run.total_hallazgos or 0,
+            'vulns':run.created_vulns or 0,'planes':run.created_plans or 0,
+            'errors':errors}
 
 if __name__ == "__main__":
     print("🚀 Ejecutando en puerto 5002")
