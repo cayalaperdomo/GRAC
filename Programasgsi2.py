@@ -1,3 +1,4 @@
+# GRAC 2026-11-24: Transporte privado opcional Tailscale para API de Middleware; SSO conserva URL publica/local.
 # GRAC 2026-11-23: SAST IA por Middleware, error en popup, proveedor neutral.
 # 2026-11-23: Escaneadores propios (11 integraciones), reutiliza monitoreo y remediacion.
 # GRAC 2026-11-23: tipografia normal en tarjetas de analisis ejecutivo ISO 42001, conserva saltos de linea.
@@ -460,17 +461,6 @@ def calcular_riesgo(probabilidad_txt, impacto_txt):
 
 
 app = Flask(__name__)
-
-# FIX RENDER 2026-11-24: endpoint exacto para Health Check del servicio.
-# Respuesta minima, sin autenticacion, ni consultas a BD, ni salida HTML.
-# Render espera HTTP 200 al consultar /_grac_lowmem/health.
-@app.route('/_grac_lowmem/health', methods=['GET', 'HEAD'])
-def grac_lowmem_health():
-    return 'ok', 200, {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'no-store',
-    }
-
 # La cookie de autenticación termina con la sesión del navegador.
 app.config["SESSION_PERMANENT"] = False
 
@@ -2681,7 +2671,6 @@ def enforce_browser_session_lifecycle():
 
     if endpoint in {
         "static",
-        "grac_lowmem_health",
         "grac_browser_tab_resume",
         "grac_browser_tab_close",
         "logout"
@@ -89021,7 +89010,7 @@ def get_jira_config() -> JiraConfig:
 def jira_get_runtime_config():
     if _grac_mw_enabled('jira'):
         _meta=_grac_mw_execute('jira','metadata')
-        return {'base_url':_grac_mw_base()+'/v1/compat/jira','email':'middleware','token':'',
+        return {'base_url':_grac_mw_api_base()+'/v1/compat/jira','email':'middleware','token':'',
                 'project_key':_meta.get('project_key','SGSI'),'issue_type':_meta.get('issue_type','Task'),
                 'jira_site_url':_meta.get('base_url','')}
     cfg = get_jira_config()
@@ -200426,7 +200415,7 @@ def fwgov_api_get(device, endpoint, params=None):
     if not _grac_mw_enabled('firewall'):
         raise RuntimeError('Active Firewall en Administración → Middleware de Integraciones GRAC antes de sincronizar.')
     data = _grac_mw_execute('firewall','get',{'endpoint': endpoint,'query': params or {}})
-    return data, _grac_mw_base()+'/v1/execute'
+    return data, _grac_mw_api_base()+'/v1/execute'
 
 
 def fwgov_fetch_opnsense_rules(device, only_test=False):
@@ -202545,7 +202534,7 @@ def sast_ai_config():
     """
     is_en = bool(SAST_ENGLISH_UI)
     try:
-        _grac_mw_base()        # Comprueba una URL válida y accesible según las reglas locales.
+        _grac_mw_api_base()    # Valida el destino API, privado o normal; no realiza una llamada.
         _grac_mw_api_key()     # Valida la clave compartida sin exponer su valor.
     except Exception as exc:
         # Oculta detalles internos al usuario; deja solamente la clase del error en logs.
@@ -218289,7 +218278,7 @@ def _grac_mw_base():
             local_host=_grac_mw_urlsplit(request.host_url).hostname
         except RuntimeError:
             local_host=None
-        if local_host in ('127.0.0.1','localhost','::1'):
+        if not _grac_mw_os.getenv('RENDER') and local_host in ('127.0.0.1','localhost','::1'):
             raw='http://127.0.0.1:5055'
     p=_grac_mw_urlsplit(raw)
     if p.scheme not in ('http','https') or not p.hostname or p.username or p.password or p.query or p.fragment:
@@ -218298,13 +218287,92 @@ def _grac_mw_base():
         raise RuntimeError('El middleware remoto debe utilizar HTTPS y ser accesible desde GRAC.')
     return raw
 
-def _grac_mw_headers(service):
-    headers={'Authorization':'Bearer '+_grac_mw_api_key(),'X-GRAC-Provider':_grac_mw_provider(service),
-             'X-GRAC-Profile':_grac_mw_profile(service)}
-    if _grac_mw_os.getenv('CF_ACCESS_CLIENT_ID') and _grac_mw_os.getenv('CF_ACCESS_CLIENT_SECRET'):
-        headers['CF-Access-Client-Id']=_grac_mw_os.getenv('CF_ACCESS_CLIENT_ID')
-        headers['CF-Access-Client-Secret']=_grac_mw_os.getenv('CF_ACCESS_CLIENT_SECRET')
+def _grac_mw_private_transport():
+    """Opt-in por entorno, independiente de la URL visible/SSO y de la base de datos.
+
+    Sin variables TS: conserva el transporte existente. Si se configura solo una
+    o se configura mal, falla explícitamente; nunca vuelve a Cloudflare en silencio.
+    """
+    raw=(_grac_mw_os.getenv('TS_MIDDLEWARE_URL') or '').strip().rstrip('/')
+    proxy=(_grac_mw_os.getenv('TS_HTTP_PROXY') or '').strip().rstrip('/')
+    if not raw and not proxy:
+        return None
+    if not raw or not proxy:
+        raise RuntimeError('Tailscale: configure TS_MIDDLEWARE_URL y TS_HTTP_PROXY juntas.')
+    try:
+        p=_grac_mw_urlsplit(raw)
+        q=_grac_mw_urlsplit(proxy)
+        valid=(p.scheme=='https' and p.hostname and p.hostname.endswith('.ts.net')
+               and p.hostname != '.ts.net' and not p.username and not p.password
+               and not p.query and not p.fragment and not p.path
+               and 1 <= (p.port or 443) <= 65535
+               and q.scheme=='http' and q.hostname=='127.0.0.1' and q.port
+               and 1 <= q.port <= 65535 and not q.username and not q.password
+               and not q.path and not q.query and not q.fragment)
+    except ValueError:
+        valid=False
+    if not valid:
+        raise RuntimeError('Tailscale: use una URL HTTPS .ts.net sin ruta y un proxy HTTP en 127.0.0.1 con puerto.')
+    return raw,proxy
+
+
+def _grac_mw_api_base():
+    """Destino servidor a servidor; _grac_mw_base sigue siendo la URL SSO."""
+    private=_grac_mw_private_transport()
+    return private[0] if private else _grac_mw_base()
+
+
+def _grac_mw_api_auth_headers():
+    headers={'Authorization':'Bearer '+_grac_mw_api_key()}
+    if not _grac_mw_private_transport():
+        if _grac_mw_os.getenv('CF_ACCESS_CLIENT_ID') and _grac_mw_os.getenv('CF_ACCESS_CLIENT_SECRET'):
+            headers['CF-Access-Client-Id']=_grac_mw_os.getenv('CF_ACCESS_CLIENT_ID')
+            headers['CF-Access-Client-Secret']=_grac_mw_os.getenv('CF_ACCESS_CLIENT_SECRET')
     return headers
+
+
+def _grac_mw_headers(service):
+    return {**_grac_mw_api_auth_headers(),'X-GRAC-Provider':_grac_mw_provider(service),
+            'X-GRAC-Profile':_grac_mw_profile(service)}
+
+
+def _grac_mw_private_headers(headers):
+    return {k:v for k,v in (headers or {}).items()
+            if k.lower() not in ('cf-access-client-id','cf-access-client-secret')}
+
+
+def _grac_mw_api_request(method,url,*args,**kwargs):
+    """Aplica proxy exclusivamente a la API autenticada de Middleware."""
+    private=_grac_mw_private_transport()
+    base=private[0] if private else _grac_mw_base()
+    if not str(url).startswith(base+'/v1/'):
+        raise RuntimeError('La URL API no coincide con el Middleware configurado.')
+    kwargs['allow_redirects']=False
+    if private:
+        kwargs['headers']=_grac_mw_private_headers(kwargs.get('headers'))
+        kwargs['proxies']={'http':private[1],'https':private[1]}
+        kwargs['verify']=True
+        # Evita NO_PROXY, proxies globales, .netrc y credenciales ambientales.
+        with _grac_mw_requests.Session() as client:
+            client.trust_env=False
+            response=client.request(method,url,*args,**kwargs)
+    else:
+        response=_grac_mw_requests.request(method,url,*args,**kwargs)
+    if 300 <= response.status_code < 400:
+        response.close()
+        raise RuntimeError('Middleware devolvió una redirección HTTP no permitida.')
+    return response
+
+
+def _grac_mw_sdk_transport(kwargs):
+    private=_grac_mw_private_transport()
+    if private:
+        import httpx
+        kwargs['default_headers']=_grac_mw_private_headers(kwargs.get('default_headers'))
+        # El SDK recibe un cliente dedicado: no se modifica HTTP_PROXY/HTTPS_PROXY.
+        kwargs['http_client']=httpx.Client(proxy=private[1], trust_env=False,
+                                         verify=True, follow_redirects=False)
+    return kwargs
 
 _GRAC_OWN_SCANNERS = {'qualys_vmdr': 'Qualys VMDR', 'tenable_vm': 'Tenable Vulnerability Management', 'rapid7_insightvm': 'Rapid7 InsightVM / Nexpose', 'qualys_was': 'Qualys WAS', 'burp_dast': 'Burp Suite DAST', 'invicti_acunetix': 'Acunetix / Invicti', 'sonarqube': 'SonarQube', 'fortify': 'Fortify SSC', 'veracode': 'Veracode', 'snyk': 'Snyk', 'trivy': 'Trivy'}
 
@@ -218332,7 +218400,7 @@ def _grac_mw_execute(service, operation='test', params=None, profile=None, provi
     if ((service == 'scanner_kali' and operation == 'run_tool')
             or (service == 'scanner_zap' and operation == 'baseline')):
         timeout = None
-    res = _grac_mw_requests.post(_grac_mw_base()+'/v1/execute', json=payload,
+    res = _grac_mw_api_request('POST',_grac_mw_api_base()+'/v1/execute', json=payload,
                                  headers=headers, timeout=(8, timeout))
     # Leer PRIMERO el mensaje JSON; raise_for_status antes de json oculta el error real.
     try:
@@ -218390,10 +218458,10 @@ def _grac_mw_resolve_own_profile(target):
 
 
 def _grac_mw_ai_ollama_url():
-    return _grac_mw_base()+'/v1/compat/ollama'
+    return _grac_mw_api_base()+'/v1/compat/ollama'
 
 def _grac_mw_openrouter_url():
-    return _grac_mw_base()+'/v1/compat/openai'
+    return _grac_mw_api_base()+'/v1/compat/openai'
 
 def _grac_mw_openrouter_chat_url():
     return _grac_mw_openrouter_url().rstrip('/')+'/chat/completions'
@@ -218409,46 +218477,44 @@ def _grac_mw_ai_route(url):
     # Si ya apunta a una ruta de compatibilidad, conservarla.
     if path.startswith('/v1/compat/'):
         # Una URL que simule ser Middleware en otro host NUNCA debe recibir la clave.
-        if not raw.startswith(_grac_mw_base().rstrip('/')+'/v1/compat/'):
+        if not raw.startswith(_grac_mw_api_base().rstrip('/')+'/v1/compat/'):
             raise RuntimeError('IA: la ruta de compatibilidad no coincide con el Middleware configurado')
         return raw
     if path.endswith('/api/generate'):
-        return _grac_mw_base()+'/v1/compat/ollama/api/generate'
+        return _grac_mw_api_base()+'/v1/compat/ollama/api/generate'
     if path.endswith('/api/chat'):
-        return _grac_mw_base()+'/v1/compat/ollama/api/chat'
+        return _grac_mw_api_base()+'/v1/compat/ollama/api/chat'
     if path.endswith('/api/tags'):
-        return _grac_mw_base()+'/v1/compat/ollama/api/tags'
+        return _grac_mw_api_base()+'/v1/compat/ollama/api/tags'
     if path.endswith('/chat/completions'):
-        return _grac_mw_base()+'/v1/compat/openai/chat/completions'
+        return _grac_mw_api_base()+'/v1/compat/openai/chat/completions'
     return raw
 
-def _grac_mw_http_post(url,*args,**kwargs):
-    url=_grac_mw_ai_route(url)
+def _grac_mw_compat_request(method,url,*args,**kwargs):
     raw=str(url)
-    if raw.startswith(_grac_mw_base().rstrip('/')+'/v1/compat/openai/') or raw.startswith(_grac_mw_base().rstrip('/')+'/v1/compat/ollama/'):
-        kwargs['headers']={**(kwargs.get('headers') or {}),**_grac_mw_headers('ai')}
-        kwargs.pop('auth',None)
-    if raw.startswith(_grac_mw_base().rstrip('/')+'/v1/compat/jira/'):
-        kwargs['headers']={**(kwargs.get('headers') or {}),**_grac_mw_headers('jira')}
-        kwargs.pop('auth',None)
-    return _grac_mw_requests.post(url,*args,**kwargs)
+    path=_grac_mw_urlsplit(raw).path
+    if '/v1/compat/' not in path:
+        # OSINT y otras llamadas no relacionadas nunca utilizan el proxy Tailscale.
+        return _grac_mw_requests.request(method,url,*args,**kwargs)
+    base=_grac_mw_api_base().rstrip('/')
+    for prefix,service in (('/v1/compat/openai/','ai'),('/v1/compat/ollama/','ai'),('/v1/compat/jira/','jira')):
+        if raw.startswith(base+prefix):
+            kwargs['headers']={**(kwargs.get('headers') or {}),**_grac_mw_headers(service)}
+            kwargs.pop('auth',None)
+            return _grac_mw_api_request(method,url,*args,**kwargs)
+    raise RuntimeError('La ruta de compatibilidad no coincide con el Middleware configurado.')
+
+
+def _grac_mw_http_post(url,*args,**kwargs):
+    return _grac_mw_compat_request('POST',_grac_mw_ai_route(url),*args,**kwargs)
+
 
 def _grac_mw_http_put(url,*args,**kwargs):
-    if _grac_mw_enabled('jira') and str(url).startswith(_grac_mw_base()+'/v1/compat/jira/'):
-        kwargs['headers']={**kwargs.get('headers',{}),**_grac_mw_headers('jira')}
-        kwargs.pop('auth',None)
-    return _grac_mw_requests.put(url,*args,**kwargs)
+    return _grac_mw_compat_request('PUT',url,*args,**kwargs)
+
 
 def _grac_mw_http_get(url,*args,**kwargs):
-    url=_grac_mw_ai_route(url)
-    raw=str(url)
-    if raw.startswith(_grac_mw_base().rstrip('/')+'/v1/compat/openai/') or raw.startswith(_grac_mw_base().rstrip('/')+'/v1/compat/ollama/'):
-        kwargs['headers']={**(kwargs.get('headers') or {}),**_grac_mw_headers('ai')}
-        kwargs.pop('auth',None)
-    if raw.startswith(_grac_mw_base().rstrip('/')+'/v1/compat/jira/'):
-        kwargs['headers']={**(kwargs.get('headers') or {}),**_grac_mw_headers('jira')}
-        kwargs.pop('auth',None)
-    return _grac_mw_requests.get(url,*args,**kwargs)
+    return _grac_mw_compat_request('GET',_grac_mw_ai_route(url),*args,**kwargs)
 
 _grac_mw_original_ollama_url = get_ollama_base_url
 _grac_mw_original_openrouter_key = get_openrouter_api_key
@@ -218467,8 +218533,8 @@ def _grac_mw_catalog():
     provider_map={svc:list(vals) for svc,vals in _GRAC_MW_PROVIDERS.items()}
     label_map=dict(_GRAC_MW_LABELS)
     try:
-        resp=_grac_mw_requests.get(_grac_mw_base()+'/v1/providers',
-            headers={'Authorization':'Bearer '+_grac_mw_api_key()},timeout=(3,5))
+        resp=_grac_mw_api_request('GET',_grac_mw_api_base()+'/v1/providers',
+            headers=_grac_mw_api_auth_headers(),timeout=(3,5))
         resp.raise_for_status()
         payload=resp.json() or {}
         raw=payload.get('providers') or {}
@@ -218528,14 +218594,22 @@ def grac_middleware_admin():
     except Exception:
         base = ''
     key_configured = bool(_grac_mw_os.getenv('GRAC_MIDDLEWARE_KEY') or get_system_secret('GRAC_MIDDLEWARE_KEY'))
+    try:
+        private_transport = _grac_mw_private_transport()
+        api_mode = 'Tailscale privado' if private_transport else 'Conexión configurada (local o HTTPS)'
+        api_url = _grac_mw_api_base()
+    except Exception as exc:
+        api_mode = 'Configuración pendiente: '+str(exc)[:220]
+        api_url = ''
     page = '''<div class="container py-4"><h2>Middleware de Integraciones GRAC</h2>
     <p>La selección de proveedores, los perfiles, las herramientas y las credenciales se administran exclusivamente en la consola del Middleware. GRAC solo configura su canal de conexión.</p>
     <div class="card p-3 mb-3"><h4>Conexión y autenticación GRAC ↔ Middleware</h4>
     <p>Configure la URL y la clave compartida. Los ajustes existentes de cada integración se conservan sin cambios.</p>
     <form method="POST"><input type="hidden" name="grac_mw_csrf" value="{{csrf}}">
-    <label class="form-label">URL del Middleware</label>
+    <label class="form-label">URL del Middleware (consola / SSO)</label>
     <input class="form-control mb-2" type="url" name="middleware_url" value="{{ base }}" placeholder="http://127.0.0.1:5055" autocomplete="url">
-    <p class="small text-muted">En el mismo equipo use http://127.0.0.1:5055. En Render configure una URL HTTPS accesible desde GRAC y el navegador para el SSO.</p>
+    <p class="small text-muted">En el mismo equipo use http://127.0.0.1:5055. En Render conserve la URL HTTPS pública para el SSO. Si Tailscale está configurado por entorno, solo la API interna usa la ruta privada.</p>
+    <p class="small mb-2"><strong>Transporte API:</strong> {{ api_mode }}{% if api_url %} · {{ api_url }}{% endif %}</p>
     <label class="form-label">Clave compartida GRAC_MIDDLEWARE_KEY {% if key_configured %}<span class="text-success">· configurada</span>{% else %}<span class="text-danger">· pendiente</span>{% endif %}</label>
     <input class="form-control mb-2" type="password" name="middleware_key" value="" autocomplete="new-password" placeholder="Dejar vacío para conservar la clave existente">
     <p class="small text-muted">La clave compartida es distinta de las contraseñas de las herramientas. Mantenga las credenciales de cada proveedor en la consola del Middleware.</p>
@@ -218544,7 +218618,7 @@ def grac_middleware_admin():
     <p>Compruebe la conexión entre GRAC y el Middleware. Los proveedores y perfiles se administran desde la consola del Middleware.</p>
     <form method="POST" action="{{url_for('grac_middleware_test')}}" class="mt-2" data-no-progress="true"><input type="hidden" name="grac_mw_csrf" value="{{csrf}}"><button class="btn btn-outline-primary" type="submit">Probar conexión GRAC ↔ Middleware</button></form></div></div>'''
     return render_template_string(BASE, content=Markup(render_template_string(
-        page, base=base, key_configured=key_configured, csrf=_grac_mw_admin_csrf())))
+        page, base=base, api_mode=api_mode, api_url=api_url, key_configured=key_configured, csrf=_grac_mw_admin_csrf())))
 
 @app.route('/admin/conexiones/middleware/abrir',methods=['POST'])
 @login_required
@@ -218574,10 +218648,10 @@ def grac_middleware_test():
     if not current or current.role!='admin':return abort(403)
     _grac_mw_check_csrf()
     try:
-        resp=_grac_mw_requests.get(_grac_mw_base()+'/v1/providers',headers={'Authorization':'Bearer '+_grac_mw_api_key()},timeout=12)
+        resp=_grac_mw_api_request('GET',_grac_mw_api_base()+'/v1/providers',headers=_grac_mw_api_auth_headers(),timeout=(8,12))
         resp.raise_for_status()
         if not resp.json().get('ok'):raise RuntimeError('Middleware no respondió correctamente')
-        flash('Conexión GRAC ↔ Middleware validada.','success')
+        flash('Conexión GRAC ↔ Middleware validada ('+('Tailscale privado' if _grac_mw_private_transport() else 'conexión configurada')+').','success')
     except Exception as exc:flash('No fue posible conectar: '+str(exc)[:220],'danger')
     return redirect(url_for('grac_middleware_admin'))
 
@@ -218667,19 +218741,13 @@ def OpenAI(*args, **kwargs):
     kwargs['default_headers']={**(kwargs.get('default_headers') or {}),**_grac_mw_headers('ai')}
     kwargs['max_retries']=0
     kwargs.setdefault('timeout',620)
-    return _grac_mw_original_openai_constructor(*args, **kwargs)
+    return _grac_mw_original_openai_constructor(*args, **_grac_mw_sdk_transport(kwargs))
 
 
 def get_openrouter_client():
-    from openai import OpenAI as _GracUnifiedAI
     return {
         'provider':'openrouter',  # interfaz OpenAI compatible, NO proveedor real
-        'client':_GracUnifiedAI(
-            api_key=_grac_mw_api_key(),
-            base_url=_grac_mw_base()+'/v1/compat/openai',
-            default_headers=_grac_mw_headers('ai'),
-            max_retries=0, timeout=600,
-        ),
+        'client':OpenAI(timeout=600),
         'model':'grac-managed',   # Middleware resuelve proveedor y modelo.
     }
 
