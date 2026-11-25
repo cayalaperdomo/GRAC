@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
+# GRAC Web - Render: single gthread worker, avoid frequent forced recycling.
 set -euo pipefail
-# These defaults only affect this service. Environment values on Render win.
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 export GRAC_RENDER_LOW_MEMORY="${GRAC_RENDER_LOW_MEMORY:-1}"
-export GRAC_RENDER_STARTUP_GOV_SYNC="${GRAC_RENDER_STARTUP_GOV_SYNC:-0}"
-export GRAC_RENDER_ALERT_SCHEDULER="${GRAC_RENDER_ALERT_SCHEDULER:-0}"
-export GRAC_ALERTS_BACKGROUND="${GRAC_ALERTS_BACKGROUND:-0}"
-export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
-export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
-export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
-export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
-export MPLBACKEND="Agg"
-export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-2}"
+export WEB_CONCURRENCY=1
 export PYTHONUNBUFFERED=1
-export PYTHONDONTWRITEBYTECODE=1
-exec gunicorn --config gunicorn_render_lowmem.py Programasgsi2:app
+export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+# 0 disables automatic recycling for the diagnostic phase; monitor total RSS.
+MAX_REQUESTS="${GRAC_RENDER_MAX_REQUESTS:-0}"
+THREADS="${GRAC_RENDER_THREADS:-2}"
+PORT="${PORT:-10000}"
+if [[ ! "$MAX_REQUESTS" =~ ^[0-9]+$ || ! "$THREADS" =~ ^[1-9][0-9]*$ ]]; then
+    echo 'ERROR: invalid GRAC_RENDER_MAX_REQUESTS or GRAC_RENDER_THREADS' >&2
+    exit 1
+fi
+printf 'GRAC Gunicorn: workers=1 threads=%s max_requests=%s port=%s\n' "$THREADS" "$MAX_REQUESTS" "$PORT"
+exec python -m gunicorn \
+    --bind "0.0.0.0:$PORT" \
+    --workers 1 --worker-class gthread --threads "$THREADS" \
+    --timeout 180 --graceful-timeout 30 \
+    --max-requests "$MAX_REQUESTS" --max-requests-jitter 0 \
+    --access-logfile - --error-logfile - \
+    Programasgsi2:app
