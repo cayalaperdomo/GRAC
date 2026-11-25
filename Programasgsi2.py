@@ -464,6 +464,12 @@ app = Flask(__name__)
 # La cookie de autenticación termina con la sesión del navegador.
 app.config["SESSION_PERMANENT"] = False
 
+# Render readiness/liveness probe: intentionally independent of the Middleware,
+# Tailscale, Ollama, login, and database queries. Do not expose system details.
+@app.route("/_grac_lowmem/health", methods=["GET", "HEAD"])
+def _grac_lowmem_health():
+    return "OK\n", 200, {"Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store"}
+
 # ============================================================
 # BARRA DE PROGRESO GLOBAL SGSI - PARA TODOS LOS PROCESOS
 # CORREGIDA: NO BLOQUEA CUANDO SE CANCELA UN CONFIRM()
@@ -2673,6 +2679,7 @@ def enforce_browser_session_lifecycle():
         "static",
         "grac_browser_tab_resume",
         "grac_browser_tab_close",
+        "_grac_lowmem_health",
         "logout"
     }:
         return None
