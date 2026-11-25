@@ -218613,7 +218613,8 @@ def grac_middleware_admin():
     <label class="form-label">Clave compartida GRAC_MIDDLEWARE_KEY {% if key_configured %}<span class="text-success">· configurada</span>{% else %}<span class="text-danger">· pendiente</span>{% endif %}</label>
     <input class="form-control mb-2" type="password" name="middleware_key" value="" autocomplete="new-password" placeholder="Dejar vacío para conservar la clave existente">
     <p class="small text-muted">La clave compartida es distinta de las contraseñas de las herramientas. Mantenga las credenciales de cada proveedor en la consola del Middleware.</p>
-    <button class="btn btn-primary mt-2" type="submit">Guardar conexión</button></form></div>
+    <button class="btn btn-primary mt-2" type="submit">Guardar conexión</button></form>
+    <form method="POST" action="{{url_for('grac_middleware_open')}}" target="_blank" rel="noopener" class="mt-2" data-no-progress="true"><input type="hidden" name="grac_mw_csrf" value="{{csrf}}"><button class="btn btn-primary" type="submit" data-no-progress="true">Abrir configuración Middleware (SSO GRAC)</button></form></div>
     <div class="card p-3"><h4>Verificar conexión con Middleware</h4>
     <p>Compruebe la conexión entre GRAC y el Middleware. Los proveedores y perfiles se administran desde la consola del Middleware.</p>
     <form method="POST" action="{{url_for('grac_middleware_test')}}" class="mt-2" data-no-progress="true"><input type="hidden" name="grac_mw_csrf" value="{{csrf}}"><button class="btn btn-outline-primary" type="submit">Probar conexión GRAC ↔ Middleware</button></form></div></div>'''
