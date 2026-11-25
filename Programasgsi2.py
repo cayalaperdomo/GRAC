@@ -119792,19 +119792,12 @@ def mejora_delete(id):
 #                                                               Módulo ChatBox
 # ==========================================================================================================================================
 
-@app.route('/chatgpt_api', methods=['POST'])
-@login_required
-def chatgpt_api():
-    data = request.get_json(silent=True) or {}
-    user_msg = (data.get("message") or "").strip()
+_chat_jobs = {}
+_chat_jobs_lock = threading.Lock()
 
-    if not user_msg:
-        return jsonify({"error": "Mensaje vacío"}), 400
 
-    try:
-        print("[CHATGPT_API] Mensaje recibido:", user_msg)
-
-        prompt = f"""
+def _chat_answer(user_msg):
+    prompt = f"""
 Actúa como asistente experto del SGSI GRAC.
 
 Responde de forma clara, práctica y profesional.
@@ -119822,24 +119815,67 @@ Instrucciones:
 - Máximo 600 palabras.
 """
 
-        respuesta = chat_ai(
-            prompt=prompt,
-            model="openai/gpt-4o-mini"
-        )
 
-        print("[CHATGPT_API] Respuesta generada correctamente")
+    answer = chat_ai(prompt=prompt, model="openai/gpt-4o-mini")
+    if not answer or not str(answer).strip():
+        raise ValueError("Respuesta de IA vacía")
+    return {"reply": answer}
 
-        if not respuesta or not str(respuesta).strip():
-            respuesta = "No se recibió respuesta de la IA."
 
-        return jsonify({"reply": respuesta})
+def _chat_run(job_id, message, url_root):
+    try:
+        with app.test_request_context(base_url=url_root):
+            result = _chat_answer(message)
+        status = 200
+    except Exception as exc:
+        app.logger.warning("Consulta IA %s fallida (%s)", job_id, type(exc).__name__)
+        result = {"error": "Falló la consulta al middleware de IA. Revisa el registro del middleware y el proveedor activo."}
+        status = 502
+    with _chat_jobs_lock:
+        _chat_jobs[job_id].update(result=result, status=status, finished=time.monotonic())
 
-    except Exception as e:
-        print("[CHATGPT_API ERROR]:", repr(e))
 
-        return jsonify({
-            "error": "No fue posible consultar la IA en este momento. Detalle técnico: " + repr(e)
-        }), 500
+@app.route('/chatgpt_api', methods=['POST'])
+@login_required
+def chatgpt_api():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(error="Solicitud no válida."), 400
+    owner = session["user_id"]
+    if "job_id" in data:
+        with _chat_jobs_lock:
+            job = _chat_jobs.get(str(data["job_id"]))
+            if not job or job["owner"] != owner:
+                return jsonify(error="La consulta ya no está disponible. Vuelve a enviar la pregunta."), 404
+            return jsonify(job["result"]), job["status"]
+
+    message = data.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return jsonify(error="Mensaje vacío"), 400
+    if data.get("async") is not True:
+        try:
+            return jsonify(_chat_answer(message.strip()))
+        except Exception as exc:
+            app.logger.warning("Consulta IA fallida (%s)", type(exc).__name__)
+            return jsonify(error="Falló la consulta al middleware de IA."), 502
+
+    with _chat_jobs_lock:
+        now = time.monotonic()
+        for key, job in list(_chat_jobs.items()):
+            if job["finished"] is not None and now - job["finished"] > 900:
+                del _chat_jobs[key]
+        running = [job for job in _chat_jobs.values() if job["status"] == 202]
+        if len(running) >= 2 or any(job["owner"] == owner for job in running):
+            return jsonify(error="Ya hay consultas en curso. Inténtalo en unos momentos."), 429
+        job_id = uuid.uuid4().hex
+        pending = {"job_id": job_id}
+        _chat_jobs[job_id] = dict(owner=owner, result=pending, status=202, finished=None)
+        try:
+            threading.Thread(target=_chat_run, args=(job_id, message.strip(), request.url_root), daemon=True).start()
+        except RuntimeError:
+            del _chat_jobs[job_id]
+            return jsonify(error="No se pudo iniciar la consulta. Inténtalo de nuevo."), 503
+    return jsonify(pending), 202
 
 
 @app.route("/chatgpt_view", methods=["GET"])
@@ -119938,7 +119974,7 @@ def chatgpt_view():
         const chatBox = document.getElementById('chat-box');
 
         const text = (userInput.value || '').trim();
-        if (!text) return false;
+        if (!text || sendBtn.disabled) return false;
 
         appendMessage(text, 'user');
 
@@ -119959,52 +119995,27 @@ def chatgpt_view():
         chatBox.scrollTop = chatBox.scrollHeight;
 
         const controller = new AbortController();
-
-        // 300 segundos para evitar corte prematuro del chat
-        const timeoutId = setTimeout(function() {
-          controller.abort();
-        }, 300000);
+        const timeoutId = setTimeout(() => controller.abort(), 660000);
+        async function solicitar(payload) {
+          const resp = await fetch("{{ url_for('chatgpt_api') }}", {
+            method: "POST", credentials: "same-origin", signal: controller.signal,
+            headers: {"Content-Type": "application/json", "X-No-Loader": "1"},
+            body: JSON.stringify(payload)
+          });
+          if (resp.redirected) throw new Error("La sesión ha caducado. Inicia sesión de nuevo.");
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(data.error || ("El servidor devolvió HTTP " + resp.status));
+          return data;
+        }
 
         try {
-          const resp = await fetch("{{ url_for('chatgpt_api') }}", {
-            method: "POST",
-            credentials: "same-origin",
-            signal: controller.signal,
-            headers: {
-              "Content-Type": "application/json",
-              "X-No-Loader": "1"
-            },
-            body: JSON.stringify({
-              message: text
-            })
-          });
-
-          clearTimeout(timeoutId);
-
-          const raw = await resp.text();
-
-          let data = {};
-          try {
-            data = JSON.parse(raw);
-          } catch (e) {
-            data = {
-              error: "Respuesta no válida del servidor: " + raw.substring(0, 300)
-            };
+          let data = await solicitar({message: text, async: true});
+          while (data.job_id) {
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            data = await solicitar({job_id: data.job_id});
           }
-
-          const t = document.getElementById(thinkingId);
-          if (t) t.remove();
-
-          if (!resp.ok) {
-            appendMessage("⚠ Error HTTP " + resp.status + ": " + (data.error || raw), 'bot');
-          } else if (data.reply) {
-            appendMessage(data.reply, 'bot');
-          } else if (data.error) {
-            appendMessage("⚠ " + data.error, 'bot');
-          } else {
-            appendMessage("No se recibió una respuesta válida del asistente.", 'bot');
-          }
-
+          thinkingDiv.remove();
+          appendMessage(data.reply || "No se recibió una respuesta válida del asistente.", 'bot');
         } catch (err) {
           clearTimeout(timeoutId);
 
@@ -120020,6 +120031,7 @@ def chatgpt_view():
           console.error(err);
 
         } finally {
+          clearTimeout(timeoutId);
           sendBtn.disabled = false;
           sendBtn.innerText = 'Enviar';
           userInput.focus();
