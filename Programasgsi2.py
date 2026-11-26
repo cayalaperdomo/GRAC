@@ -15774,7 +15774,9 @@ BASE = """
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <style>.swal2-popup.grac-flash-message .swal2-deny,
-.swal2-popup.grac-flash-message .swal2-cancel{display:none!important}</style>
+.swal2-popup.grac-flash-message .swal2-cancel,
+.swal2-popup.grac-flash-message .swal2-close,
+.swal2-popup button[style*="display: none"]{display:none!important}</style>
 
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}
@@ -15808,7 +15810,7 @@ BASE = """
             showCancelButton: false,
             customClass: {popup: 'grac-flash-message'},
             didOpen: function(popup) {
-              popup.querySelectorAll('.swal2-deny, .swal2-cancel').forEach(function(el){el.remove();});
+              popup.querySelectorAll('.swal2-deny, .swal2-cancel, .swal2-close').forEach(el => el.remove());
             },
             backdrop: true,
             allowOutsideClick: false
@@ -204420,7 +204422,7 @@ SAST_INDEX_HTML = """
         title: "Error", text: detail, icon: 'error',
         confirmButtonText: "Aceptar", confirmButtonColor: '#0b4a8f',
         showConfirmButton: true, showDenyButton: false, showCancelButton: false,
-        allowOutsideClick: false, customClass: {popup: 'grac-flash-message'}
+        allowOutsideClick: false, showCloseButton: false, didOpen: popup => { popup.querySelectorAll('.swal2-deny, .swal2-cancel, .swal2-close').forEach(el => el.remove()); }, customClass: {popup: 'grac-flash-message'}
       });
     }else{
       window.alert(detail);
@@ -204534,6 +204536,7 @@ SAST_TRACK_HTML = """
       <div class="mt-3 fw-bold text-primary" id="sastTrackMsg">Iniciando…</div>
       <div class="mt-4">
         <a href="{{ url_for('sast_index') }}" class="btn btn-outline-secondary rounded-pill px-4">Cancelar / volver</a>
+        <a class="btn btn-outline-primary rounded-pill px-4" href="{{ url_for('sast_reports') }}">Ver informes</a>
       </div>
     </div>
   </div>
@@ -204563,37 +204566,49 @@ SAST_TRACK_HTML = """
       window.Swal.fire({title: "Error", text: detail, icon: 'error',
         confirmButtonText: "Aceptar", confirmButtonColor: '#0b4a8f',
         showConfirmButton: true, showDenyButton: false, showCancelButton: false,
-        allowOutsideClick: false, customClass: {popup: 'grac-flash-message'}});
+        allowOutsideClick: false, showCloseButton: false, didOpen: popup => { popup.querySelectorAll('.swal2-deny, .swal2-cancel, .swal2-close').forEach(el => el.remove()); }, customClass: {popup: 'grac-flash-message'}});
     }else{
       window.alert(detail);
     }
   }
 
-  const es = new EventSource("{{ url_for('sast_progress', job_id=job_id) }}");
-
-  es.onmessage = function(evt){
-    const p = JSON.parse(evt.data);
-    const pct = Math.max(0, Math.min(100, p.percent || 0));
-    if(bar) bar.style.width = pct + "%";
-    if(msg) msg.textContent = p.message || "Procesando…";
-
-    if(p.status === "error"){
-      es.close();
-      if(msg) msg.textContent = "Error: " + (p.error || "desconocido");
-      sastTrackFailure(p.error || "Ocurrió un error al iniciar el análisis SAST.");
+  async function checkProgress(){
+    let delay = 3000;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch("{{ url_for('sast_progress', job_id=job_id, format='json') }}", {
+        credentials: "same-origin", cache: "no-store", signal: controller.signal,
+        headers: {"Accept": "application/json", "X-No-Loader": "1"}
+      });
+      if(response.redirected){ window.location.assign(response.url); return; }
+      if(response.status === 403){ sastTrackFailure("No tienes acceso al seguimiento."); return; }
+      if(!response.ok && response.status !== 404) throw new Error();
+      const state = await response.json();
+      if(state.status === "unavailable"){
+        msg.textContent = "El seguimiento ya no está disponible. Consulta Ver informes.";
+        return;
+      }
+      if(!response.ok || typeof state.status !== "string") throw new Error();
+      bar.style.width = Math.max(0, Math.min(100, Number(state.percent) || 0)) + "%";
+      msg.textContent = state.message || "";
+      if(state.status === "error"){
+        sastTrackFailure(state.error || state.message || "El análisis falló.");
+        return;
+      }
+      if(state.done && state.status === "done"){
+        window.location.replace("{{ url_for('sast_result', job_id=job_id) }}");
+        return;
+      }
+    } catch {
+      msg.textContent = "Reconectando con el servidor para actualizar el progreso…";
+      delay = 5000;
+    } finally {
+      clearTimeout(timer);
     }
-
-    if(p.done && p.status === "done"){
-      es.close();
-      window.location.href = "{{ url_for('sast_result', job_id=job_id) }}";
-    }
-  };
-
-  es.onerror = function(){
-    es.close();
-    if(msg) msg.textContent = "Error recibiendo progreso del servidor.";
-    sastTrackFailure("Error recibiendo progreso del servidor.");
-  };
+    setTimeout(checkProgress, delay);
+  }
+  checkProgress();
 </script>
 """
 
@@ -205314,6 +205329,13 @@ def sast_progress(job_id):
     user, resp, read_only = sast_require_access(write=False)
     if resp:
         return resp
+
+    if request.args.get("format") == "json":
+        job = SAST_JOBS.get(job_id)
+        if job is None:
+            return jsonify(status="unavailable"), 404
+        fields = ("status", "percent", "message", "done", "error")
+        return jsonify({field: job.get(field) for field in fields}), 200, {"Cache-Control": "no-store"}
 
     def event_stream():
         last = None
@@ -218878,12 +218900,16 @@ def _grac_mw_kali_full_scan(run,run_dir,crear_vulns=True,crear_planes=True,exclu
             scan_mark_stopped(run.id)
             return {'ok':False,'stopped':True}
         pct=5+int(82*n/max(1,len(tools)))
-        scan_set_progress(run.id,pct=pct,stage='Middleware Kali: '+tool,tool=tool)
+        stage = f'Herramienta {n+1}/{len(tools)}: {tool}. Esperando el resultado del middleware.'
+        scan_set_progress(run.id,pct=pct,stage=stage,tool=tool)
         try:
             response=_grac_mw_execute('scanner_kali','run_tool',
                                       {'tool':tool,'target':target,'scan_id':str(run.id)})
-        except Exception:
-            if scan_check_cancel(run.id):
+        except Exception as exc:
+            # El middleware puede confirmar la cancelación antes de que se actualice el estado local.
+            reason = str(exc).removeprefix('RuntimeError: ').strip()
+            cancelled = reason == 'Kali: escaneo cancelado por el usuario desde GRAC.'
+            if cancelled or scan_check_cancel(run.id):
                 scan_mark_stopped(run.id)
                 return {'ok':False,'stopped':True}
             raise
