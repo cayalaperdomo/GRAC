@@ -204021,8 +204021,6 @@ SAST_INDEX_HTML = """
   </div>
 
   <div class="sast-actions">
-    <a class="btn btn-primary" href="{{ url_for('sast_index') }}">SAST con IA</a>
-    <a class="btn btn-primary" href="{{ url_for('sast_index', mode='own') }}">Herramienta propia</a>
     <a href="{{ url_for('vulnerabilidades_matriz') }}" class="btn btn-light rounded-pill px-4 fw-bold">
       ⬅ Volver a Vulnerabilidades
     </a>
