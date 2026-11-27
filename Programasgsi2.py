@@ -80324,11 +80324,15 @@ def vulnerabilidades_matriz():
             </div>
           </div>
 
-          <a href="{{ url_for('sast_index') }}"
-             class="btn btn-primary rounded-pill px-4 fw-semibold"
-             onclick="showLoader()">
-            Pruebas SAST
-          </a>
+          <div class="kali-dropdown-wrap grac-scans-menu">
+            <button type="button" class="btn btn-primary kali-main-btn rounded-pill px-4 fw-semibold" aria-expanded="false" aria-controls="sastToolsDropdown" onclick="toggleKaliMenu(event)">
+              <i class="bi bi-code-square me-1"></i> Pruebas SAST <span class="kali-caret">▾</span>
+            </button>
+            <div id="sastToolsDropdown" class="kali-vertical-dropdown grac-scans-dropdown">
+              <a class="sast-tool-option" href="{{ url_for('sast_index') }}"><i class="bi bi-stars"></i><span>SAST con IA</span><span aria-hidden="true">›</span></a>
+              <a class="sast-tool-option" href="{{ url_for('sast_index', mode='own') }}"><i class="bi bi-tools"></i><span>Herramienta propia</span><span aria-hidden="true">›</span></a>
+            </div>
+          </div>
 
         </div>
       </div>
@@ -80641,6 +80645,9 @@ def vulnerabilidades_matriz():
         background:linear-gradient(180deg,#4d98ec,#287bd9 55%,#1b69c8) !important;
         border-color:#1d67be !important;
       }
+      #sastToolsDropdown .sast-tool-option{display:flex;align-items:center;gap:.7rem;padding:.74rem .85rem;border:1px solid #dce7f4;border-radius:10px;background:#f7faff;color:#184879;text-decoration:none;font-weight:650;text-align:left}
+      #sastToolsDropdown .sast-tool-option:hover,#sastToolsDropdown .sast-tool-option:focus-visible{background:#eaf3ff;border-color:#8cb6ea}
+      #sastToolsDropdown .sast-tool-option span:last-child{margin-left:auto}
       .grac-scans-dropdown{min-width:265px;max-width:min(300px, 90vw);z-index:150;}
       .grac-scans-tool{border:1px solid #e1eaf6;border-radius:10px;overflow:hidden;margin:4px 0;background:#f8fbff;}
       .grac-scans-tool > summary{cursor:pointer;list-style:none;padding:11px 12px;
@@ -80864,24 +80871,28 @@ def vulnerabilidades_matriz():
     </style>
 
     <script>
-      function toggleKaliMenu(event){
-        event.stopPropagation();
-
-        const menu = document.getElementById('kaliVerticalDropdown');
-        if(!menu) return;
-
-        menu.classList.toggle('show');
+      function setScanMenu(button, open){
+        const menu = document.getElementById(button.getAttribute('aria-controls'));
+        menu.classList.toggle('show', open);
+        button.setAttribute('aria-expanded', String(open));
       }
-
-      document.addEventListener('click', function(e){
-        const wrap = document.querySelector('.kali-dropdown-wrap');
-        const menu = document.getElementById('kaliVerticalDropdown');
-
-        if(!wrap || !menu) return;
-
-        if(!wrap.contains(e.target)){
-          menu.classList.remove('show');
-        }
+      function scanMenuButtons(){
+        return document.querySelectorAll('.grac-scans-menu > button[aria-controls]');
+      }
+      function toggleKaliMenu(event){
+        const selected = event.currentTarget;
+        const open = selected.getAttribute('aria-expanded') !== 'true';
+        scanMenuButtons().forEach(button => setScanMenu(button, button === selected && open));
+      }
+      document.addEventListener('click', event => {
+        scanMenuButtons().forEach(button => {
+          if (!button.parentElement.contains(event.target)) setScanMenu(button, false);
+        });
+      });
+      document.addEventListener('keydown', event => {
+        if(event.key === 'Escape') scanMenuButtons().forEach(button => {
+          if(button.getAttribute('aria-expanded') === 'true'){ setScanMenu(button, false); button.focus(); }
+        });
       });
 
       function confirmarEliminarVulnerabilidad(){
@@ -82940,7 +82951,7 @@ def vuln_scan_new():
             if scanner_type == 'own':
                 # El proveedor/perfil SOLO se determina consultando la configuración
                 # habilitada en el Middleware. No confiar en un campo del navegador.
-                own_provider, own_profile = _grac_mw_resolve_own_profile(target)
+                own_provider, own_profile = _grac_own_selection(target, False)
                 herramientas = ['own:'+own_provider+'@'+own_profile]
             else:
                 normalized = target if target.startswith(('http://','https://')) else 'https://'+target
@@ -83011,10 +83022,8 @@ def vuln_scan_new():
           </div>
           {% if selected_scanner == 'own' %}
           <div class="col-12">
-            <div class="form-text">
-              GRAC utiliza automáticamente el único perfil activo de escaneadores propios configurado en Middleware.
-              Si hay varios perfiles activos, debe dejar uno solo habilitado para evitar seleccionar una herramienta diferente sin autorización.
-            </div>
+            <label class="form-label">Herramienta propia<select class="form-select" name="own_provider" required>{% for key,label in own_scanners.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+              <label class="form-label">Perfil del middleware<input class="form-control" name="own_profile" placeholder="default" maxlength="70" pattern="[A-Za-z0-9_-]+"></label>
           </div>
           {% endif %}
           {% if selected_scanner == 'kali' %}
@@ -83168,7 +83177,7 @@ def vuln_scan_new():
             body,
             cfg=cfg,
             current_user=current_user,
-            own_scanners=_GRAC_OWN_SCANNERS,
+            own_scanners={p:v for p,v in _GRAC_OWN_SCANNERS.items() if p not in _GRAC_SAST_PROVIDERS},
             selected_scanner=selected_scanner
         )
     )
@@ -202269,6 +202278,7 @@ _sast_history_lock = threading.Lock()
 # Registro de análisis SAST en curso. Requerido por /pruebas_sast/start y el monitor.
 # Se conserva en memoria del proceso GRAC; no guarda contraseñas ni credenciales.
 SAST_JOBS = {}
+_sast_sonar_admission_lock = threading.Lock()
 # Limita la ejecución concurrente para proteger la memoria del equipo y el modelo IA.
 _sast_job_sem = threading.BoundedSemaphore(1)
 
@@ -203227,6 +203237,21 @@ def sast_reconcile_cvss_risk(analysis):
         'puntaje /100. Las estimaciones no equivalen a un vector CVSS validado '
         'ni a riesgo empresarial.'
     )
+    if analysis.get('import_provider'):
+        source = _GRAC_OWN_SCANNERS.get(analysis['import_provider'], analysis['import_provider'])
+        overview = (f"{source}: {len(findings)} findings imported; {unscored} without CVSS." if en else
+                    f"{source}: {len(findings)} hallazgos importados; {unscored} sin CVSS.")
+        sonar = analysis.get('sonarqube') or {}
+        if sonar.get('project'):
+            overview += (f" Project: {sonar['project']}. Last analysis: {sonar['date']}. Issues: {sonar['total']}." if en else
+                         f" Proyecto: {sonar['project']}. Último análisis: {sonar['date']}. Incidencias: {sonar['total']}.")
+        if analysis.get('truncated'):
+            overview += " Partial import." if en else " Importación parcial."
+        ex['risk_calculation_method'] = ("Provider severity when CVSS is unavailable." if en else
+                                         "Se utiliza la severidad del proveedor cuando falta CVSS.")
+        for item in findings:
+            if item.get('severity_provisional'):
+                item['severity_source'] = 'provider_no_cvss'
     ex['management_overview'] = overview
     return analysis
 
@@ -203370,7 +203395,7 @@ def sast_finding_to_vulnerability_description(finding, meta):
         f"Impacto: {rr.get('impact', 'N/A')} | Probabilidad: {rr.get('likelihood', 'N/A')}",
         f"Evidencia: {finding.get('evidence_snippet', 'N/A')}",
         f"Recomendación / acción correctiva: {rem.get('recommendation', 'N/A')}",
-        f"Origen: Pruebas SAST con el proveedor IA de GRAC. Proyecto: {meta.get('project_name', 'N/A')} | Archivo: {meta.get('filename', 'N/A')} | Modelo: {meta.get('model', 'N/A')}",
+        f"Origen: Pruebas SAST ({meta.get('provider') or 'IA'}). Proyecto: {meta.get('project_name', 'N/A')} | Archivo: {meta.get('filename', 'N/A')} | Modelo: {meta.get('model', 'N/A')}",
     ]
     return "\n".join([str(p) for p in parts if p])
 
@@ -203892,9 +203917,12 @@ def sast_run_analysis_job(job_id, payload):
                     "provider": provider,
                 }
 
-                sast_job_update(job_id, 20, "Ejecutando análisis SAST mediante Middleware GRAC…")
+                sast_job_update(job_id, 20, 'Ejecutando o importando hallazgos…' if "own_profile" in payload else "Ejecutando análisis SAST mediante Middleware GRAC…")
 
-                analysis = sast_analyze_code_with_ai(code_text, artifact_type, language, filename, model=model, provider=provider)
+                if 'own_profile' in payload:
+                    analysis = _grac_sast_import(payload, job_id=job_id)
+                else:
+                    analysis = sast_analyze_code_with_ai(code_text, artifact_type, language, filename, model=model, provider=provider)
                 if not isinstance(analysis, dict):
                     raise RuntimeError("El análisis no devolvió un objeto válido.")
 
@@ -203985,14 +204013,16 @@ SAST_INDEX_HTML = """
   <div class="grac-module-heading sast-page-heading" style="display:flex!important;align-items:center!important;justify-content:flex-start!important;text-align:left!important;width:100%!important;margin:6px 0 18px!important;">
     <span class="grac-module-icon" aria-hidden="true"><i class="bi bi-code-slash"></i></span>
     <div style="text-align:left!important;">
-      <h2 class="sast-title" style="text-align:left!important;margin:0!important;transform:none!important;">Pruebas SAST con IA</h2>
-      <div class="sast-subtitle">
+      <h2 class="sast-title" style="text-align:left!important;margin:0!important;transform:none!important;">{% if own %}SAST · Herramienta propia{% else %}Pruebas SAST con IA{% endif %}</h2>
+      <div class="sast-subtitle">{% if own %}SonarQube ejecuta un nuevo análisis del código cargado (un archivo UTF-8, hasta 10 MiB) mediante el Middleware. Las demás herramientas importan hallazgos existentes. El nuevo análisis reemplaza el último análisis del proyecto SonarQube configurado.{% else %}
         Revisión de código fuente mediante IA del Middleware GRAC, orientada a OWASP, CERT Secure Coding y SANS Top 25.
-      </div>
+      {% endif %}</div>
     </div>
   </div>
 
   <div class="sast-actions">
+    <a class="btn btn-primary" href="{{ url_for('sast_index') }}">SAST con IA</a>
+    <a class="btn btn-primary" href="{{ url_for('sast_index', mode='own') }}">Herramienta propia</a>
     <a href="{{ url_for('vulnerabilidades_matriz') }}" class="btn btn-light rounded-pill px-4 fw-bold">
       ⬅ Volver a Vulnerabilidades
     </a>
@@ -204003,7 +204033,7 @@ SAST_INDEX_HTML = """
   <div class="sast-card">
     <div class="sast-card-body">
 
-      <div class="sast-status-grid mb-3">
+      {% if not own %}<div class="sast-status-grid mb-3">
         <div class="sast-status-box"><div class="sast-status-label">Conexión de IA</div>
           <div class="sast-status-value">Middleware GRAC</div></div>
         <div class="sast-status-box"><div class="sast-status-label">Configuración de conexión</div>
@@ -204011,7 +204041,7 @@ SAST_INDEX_HTML = """
       </div>
       <p class="sast-help">El proveedor y el modelo de IA se administran exclusivamente en el Middleware. La conectividad se verifica al iniciar el análisis.</p>
 
-      {% if read_only %}
+      {% endif %}{% if read_only %}
         <div class="alert alert-warning rounded-4">
           El rol Auditor puede consultar el módulo, pero no puede ejecutar nuevos análisis.
         </div>
@@ -204019,6 +204049,11 @@ SAST_INDEX_HTML = """
 
       <form id="sastAnalyzeForm" method="POST" action="{{ url_for('sast_start') }}" enctype="multipart/form-data" data-no-progress="true">
         <div class="row g-3">
+          {% if own %}<input type="hidden" name="mode" value="own"><div class="col-12"><label class="form-label">Herramienta propia<select class="form-select" name="own_provider" required>{% for key,label in own_scanners.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+              <label class="form-label">Perfil del middleware<input class="form-control" name="own_profile" placeholder="default" maxlength="70" pattern="[A-Za-z0-9_-]+"></label>
+          <label class="form-label">Clave del proyecto (Project Key en SonarQube)<input class="form-control" required name="project_ref" maxlength="500"></label>
+          <label class="d-block mt-2"><input type="checkbox" name="sonar_import_only" value="1"> SonarQube: solo importar resultados existentes (sin ejecutar un análisis nuevo)</label>
+          <label><input type="checkbox" name="own_authorized" value="1" required> Confirmo que tengo autorización para analizar el código e importar resultados.</label></div>{% endif %}
           <div class="col-md-6">
             <label class="form-label">Nombre del proyecto</label>
             <input class="form-control" name="project_name" placeholder="Ej: API Clientes v2">
@@ -204053,12 +204088,12 @@ SAST_INDEX_HTML = """
             </select>
           </div>
 
-          <div class="col-md-6">
+          {% if not own %}<div class="col-md-6">
             <label class="form-label">Configuración de IA</label>
             <div class="sast-ext-box">El proveedor y el modelo de IA se seleccionan en Administración → Configuración de Inteligencia Artificial.</div>
           </div>
 
-          <div class="col-md-6">
+          {% endif %}<div class="col-md-6">
             <label class="form-label">Extensiones permitidas</label>
             <div class="sast-ext-box">{{ allowed_ext }}</div>
           </div>
@@ -204124,18 +204159,18 @@ SAST_INDEX_HTML = """
           <div class="col-12 d-flex justify-content-center gap-2 flex-wrap mt-3">
             {% if read_only %}
               <button type="button" class="btn btn-secondary rounded-pill px-5 fw-bold" disabled>
-                Analizar y generar PDF
+                {{ "Ejecutar / importar y generar PDF" if own else "Analizar y generar PDF" }}
               </button>
             {% else %}
-              <button id="sastSubmitBtn" class="btn btn-primary rounded-pill px-5 fw-bold" type="submit" {% if not cfg.ok %}disabled{% endif %}>
-                🛡️ Analizar y generar PDF
+              <button id="sastSubmitBtn" class="btn btn-primary rounded-pill px-5 fw-bold" type="submit" {% if not own and not cfg.ok %}disabled{% endif %}>
+                🛡️ {{ "Ejecutar / importar y generar PDF" if own else "Analizar y generar PDF" }}
               </button>
             {% endif %}
           </div>
 
           <div class="col-12">
             <div class="sast-progress d-none" id="sastProgressBox">
-              <div class="sast-progress-label" id="sastProgressText">Enviando código al servidor…</div>
+              <div class="sast-progress-label" id="sastProgressText">{% if own %}Ejecutando o consultando análisis en el Middleware…{% else %}Enviando código al servidor…{% endif %}</div>
               <div class="progress">
                 <div class="progress-bar" id="sastProgressBar" role="progressbar" style="width:20%;"></div>
               </div>
@@ -204522,7 +204557,7 @@ SAST_INDEX_HTML = """
       const submitBtn = document.getElementById("sastSubmitBtn");
 
       if(progressBox) progressBox.classList.remove("d-none");
-      if(progressText) progressText.textContent = "Enviando código al servidor…";
+      if(progressText) progressText.textContent = "{% if own %}Ejecutando o consultando análisis en el Middleware…{% else %}Enviando código al servidor…{% endif %}";
       if(progressBar) progressBar.style.width = "20%";
       if(submitBtn) submitBtn.disabled = true;
 
@@ -204567,13 +204602,13 @@ SAST_TRACK_HTML = """
   <div class="sast-card">
     <div class="sast-card-body text-center">
       <h4 class="fw-bold text-primary mb-2">Procesando análisis SAST…</h4>
-      <div class="text-muted mb-3">No cierre esta ventana mientras el proveedor de IA analiza el código.</div>
+      <div class="text-muted mb-3">Mantenga esta ventana abierta mientras se procesa el análisis.</div>
       <div class="progress" style="height:16px; border-radius:999px;">
         <div id="sastTrackBar" class="progress-bar" role="progressbar" style="width:5%;"></div>
       </div>
       <div class="mt-3 fw-bold text-primary" id="sastTrackMsg">Iniciando…</div>
       <div class="mt-4">
-        <a href="{{ url_for('sast_index') }}" class="btn btn-outline-secondary rounded-pill px-4">Cancelar / volver</a>
+        <a href="{{ url_for('sast_index') }}" class="btn btn-outline-secondary rounded-pill px-4">Volver (no cancela el análisis)</a>
         <a class="btn btn-outline-primary rounded-pill px-4" href="{{ url_for('sast_reports') }}">Ver informes</a>
       </div>
     </div>
@@ -204659,7 +204694,7 @@ SAST_RESULT_HTML = """
     <div>
       <h2 class="sast-title">Resultado del análisis SAST</h2>
       <div class="sast-subtitle">
-        Informe generado con el proveedor de IA configurado en Administración, clasificado por severidad, CWE/CVE y recomendaciones de remediación.
+        Informe generado con {{ meta.get("model", "SAST") }}, clasificado por severidad, CWE/CVE y recomendaciones de remediación.
       </div>
     </div>
   </div>
@@ -205037,12 +205072,14 @@ def sast_index():
     if resp:
         return resp
 
-    cfg = sast_ai_config()
+    cfg = {"ok": True} if request.args.get("mode") == "own" else sast_ai_config()
     if not cfg["ok"]:
         flash(cfg["message"], "danger")  # Popup GRAC: solo Aceptar; nunca muestra traceback.
 
     inner = render_template_string(
         SAST_INDEX_HTML,
+        own=request.args.get("mode") == "own",
+        own_scanners={p:v for p,v in _GRAC_OWN_SCANNERS.items() if p in _GRAC_SAST_PROVIDERS},
         cfg=cfg,
         allowed_ext=", ".join(sorted(SAST_ALLOWED_EXT)),
         read_only=read_only,
@@ -205263,63 +205300,115 @@ def sast_start():
     pasted_code = (request.form.get("pasted_code") or "").strip()
     uploaded = request.files.get("file")
 
-    artifact_norm = artifact_type.strip().lower()
-    is_partial = artifact_norm in ("parte de código", "parte de codigo")
-
-    if is_partial:
-        if not pasted_code:
-            return jsonify({"ok": False, "error": 'Para "Parte de Código" debe pegar el fragmento en la caja de texto.'}), 400
-        uploaded = None
-
-    if not pasted_code and (not uploaded or not uploaded.filename or uploaded.filename.strip() == ""):
-        return jsonify({"ok": False, "error": "Debe pegar código o cargar un archivo."}), 400
-
-    filename = "codigo_pegado.txt"
-    code_text = ""
-    language = (request.form.get("language") or "").strip()
-
-    if uploaded and uploaded.filename and not pasted_code:
-        original_name = uploaded.filename
-        if not sast_ext_ok(original_name):
-            return jsonify({"ok": False, "error": f"Extensión no permitida: {os.path.splitext(original_name)[1]}"}), 400
-
-        filename = sast_safe_filename(original_name)
-        stored_name = f"{uuid.uuid4().hex}_{filename}"
-        path = os.path.join(SAST_UPLOAD_DIR, stored_name)
-        uploaded.save(path)
-        code_text = sast_read_text_file(path)
-
-        if not language:
-            language = sast_detect_language_from_filename(filename)
+    own = request.form.get("mode") == "own"
+    if own:
+        project_ref = (request.form.get("project_ref") or "").strip()
+        if request.form.get("own_authorized") != "1" or not project_ref or len(project_ref) > 500:
+            return jsonify(ok=False, error="Revisa la referencia del proyecto y la autorización."), 400
+        try:
+            provider, profile = _grac_own_selection(project_ref, True)
+        except (ValueError, RuntimeError) as exc:
+            return jsonify(ok=False, error=str(exc)), 400
+        model = _GRAC_OWN_SCANNERS[provider]
+        language = (request.form.get("language") or "").strip()
+        filename = project_ref
+        code_text = ""
+        fingerprint = None
+        sonar_source_b64 = None
+        sonar_new_scan = provider == 'sonarqube' and request.form.get('sonar_import_only') != '1'
+        if sonar_new_scan:
+            if uploaded and uploaded.filename and pasted_code:
+                return jsonify(ok=False, error="Seleccione un archivo O pegue código, no ambos."), 400
+            if uploaded and uploaded.filename:
+                filename = sast_safe_filename(os.path.basename(uploaded.filename))
+                raw_source = uploaded.stream.read(10 * 1024 * 1024 + 1)
+                language = language or sast_detect_language_from_filename(filename)
+            elif pasted_code:
+                extensions = {'python':'.py','javascript':'.js','typescript':'.ts','java':'.java','csharp':'.cs','go':'.go','php':'.php','ruby':'.rb','c':'.c','cpp':'.cpp','sql':'.sql'}
+                if language not in extensions:
+                    return jsonify(ok=False,error="Seleccione el lenguaje del código pegado."),400
+                filename = 'snippet'+extensions[language]
+                raw_source = pasted_code.encode('utf-8')
+            else:
+                return jsonify(ok=False,error="Cargue un archivo o pegue código para ejecutar SonarQube."),400
+            if not raw_source or len(raw_source)>10*1024*1024 or os.path.splitext(filename.lower())[1] not in {".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".cs", ".go", ".php", ".rb", ".c", ".cpp", ".h", ".json", ".yml", ".yaml", ".xml", ".html", ".sql", ".css", ".sh"}:
+                return jsonify(ok=False,error="Código no admitido o supera el máximo de 10 MiB."),400
+            fingerprint = hashlib.sha256(raw_source).hexdigest()
+            sonar_source_b64 = base64.b64encode(raw_source).decode('ascii')
+            del raw_source
+        if not sonar_new_scan and uploaded and uploaded.filename and not pasted_code:
+            if not sast_ext_ok(uploaded.filename):
+                return jsonify(ok=False, error="Extensión no permitida."), 400
+            filename = sast_safe_filename(uploaded.filename)
+            digest = hashlib.sha256()
+            for block in iter(lambda: uploaded.stream.read(65536), b""):
+                digest.update(block)
+            fingerprint = digest.hexdigest()
+            language = language or sast_detect_language_from_filename(filename)
+        elif not sonar_new_scan and pasted_code:
+            filename = "snippet"
+            fingerprint = hashlib.sha256(pasted_code.encode()).hexdigest()
     else:
-        code_text = pasted_code
-        if not language:
-            language = "unknown"
+        artifact_norm = artifact_type.strip().lower()
+        is_partial = artifact_norm in ("parte de código", "parte de codigo")
 
-    if not code_text.strip():
-        return jsonify({"ok": False, "error": "El código está vacío."}), 400
+        if is_partial:
+            if not pasted_code:
+                return jsonify({"ok": False, "error": 'Para "Parte de Código" debe pegar el fragmento en la caja de texto.'}), 400
+            uploaded = None
 
-    try:
-        current_ai = sast_ai_config()
-        if not current_ai["ok"]:
-            raise RuntimeError(current_ai["message"])
-        model = current_ai["model"]
-        provider = current_ai["provider"]
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
+        if not pasted_code and (not uploaded or not uploaded.filename or uploaded.filename.strip() == ""):
+            return jsonify({"ok": False, "error": "Debe pegar código o cargar un archivo."}), 400
+
+        filename = "codigo_pegado.txt"
+        code_text = ""
+        language = (request.form.get("language") or "").strip()
+
+        if uploaded and uploaded.filename and not pasted_code:
+            original_name = uploaded.filename
+            if not sast_ext_ok(original_name):
+                return jsonify({"ok": False, "error": f"Extensión no permitida: {os.path.splitext(original_name)[1]}"}), 400
+
+            filename = sast_safe_filename(original_name)
+            stored_name = f"{uuid.uuid4().hex}_{filename}"
+            path = os.path.join(SAST_UPLOAD_DIR, stored_name)
+            uploaded.save(path)
+            code_text = sast_read_text_file(path)
+
+            if not language:
+                language = sast_detect_language_from_filename(filename)
+        else:
+            code_text = pasted_code
+            if not language:
+                language = "unknown"
+
+        if not code_text.strip():
+            return jsonify({"ok": False, "error": "El código está vacío."}), 400
+
+        try:
+            current_ai = sast_ai_config()
+            if not current_ai["ok"]:
+                raise RuntimeError(current_ai["message"])
+            model = current_ai["model"]
+            provider = current_ai["provider"]
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
 
     report_id = uuid.uuid4().hex[:12]
     job_id = uuid.uuid4().hex
 
-    SAST_JOBS[job_id] = {
-        "status": "queued",
-        "percent": 0,
-        "message": "En cola…",
-        "done": False,
-        "error": None,
-        "result": None,
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-    }
+    with _sast_sonar_admission_lock:
+        if own and sonar_new_scan and any(not j.get("done") for j in SAST_JOBS.values()):
+            return jsonify(ok=False,error="Ya hay un trabajo SAST en ejecución. Intente cuando termine."),409
+        SAST_JOBS[job_id] = {
+            "status": "queued",
+            "percent": 0,
+            "message": "En cola…",
+            "done": False,
+            "error": None,
+            "result": None,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
 
     username = getattr(user, "username", None) or session.get("username") or "Seguridad de la Información"
 
@@ -205339,6 +205428,9 @@ def sast_start():
         "username": username,
         "responsable": username,
     }
+
+    if own:
+        payload.update(own_profile=profile, project_ref=project_ref, reference_sha256=fingerprint, sonar_source_b64=sonar_source_b64)
 
     t = threading.Thread(target=sast_run_analysis_job, args=(job_id, payload), daemon=True)
     t.start()
@@ -218513,7 +218605,69 @@ def _grac_mw_execute(service, operation='test', params=None, profile=None, provi
         raise RuntimeError(str(detail)[:6000 if service in ('scanner_zap','scanner_kali') else 500])
     return parsed.get('data') if isinstance(parsed, dict) else parsed
 
-def _grac_mw_resolve_own_profile(target):
+
+_GRAC_SAST_PROVIDERS = frozenset(('sonarqube', 'fortify', 'veracode', 'snyk'))
+
+
+def _grac_own_selection(target, static_analysis):
+    allowed = {p for p in _GRAC_OWN_SCANNERS if (p in _GRAC_SAST_PROVIDERS) == static_analysis}
+    provider = request.form.get('own_provider', '').strip()
+    profile = request.form.get('own_profile', '').strip()
+    if (static_analysis or provider) and provider not in allowed:
+        raise ValueError('Proveedor fuera de esta sección.')
+    if profile:
+        if provider not in allowed or not re.fullmatch(r'[A-Za-z0-9_-]{1,70}', profile):
+            raise ValueError('Revisa el perfil seleccionado.')
+        _grac_mw_execute('scanner_own', 'validate', {'target':target}, profile=profile, provider_override=provider)
+        return provider, profile
+    return _grac_mw_resolve_own_profile(target, [provider] if provider else sorted(allowed))
+
+
+def _grac_sast_import(payload, job_id=None):
+    provider = payload['provider']
+    params = {'target':payload['project_ref'], 'authorized':True}
+    def call(operation, values):
+        return _grac_mw_execute('scanner_own', operation, values, profile=payload['own_profile'], provider_override=provider)
+    encoded = payload.pop('sonar_source_b64', None)
+    if provider == 'sonarqube' and encoded is not None:
+        if job_id: sast_job_update(job_id, 25, 'Submitting source to SonarQube' if SAST_ENGLISH_UI else 'Enviando código a SonarQube')
+        submitted = call('scan_start',dict(params,source_b64=encoded,filename=payload['filename'],sha256=payload['reference_sha256']))
+        del encoded
+        remote_id = submitted.get('job_id') if isinstance(submitted,dict) else None
+        if not remote_id: raise RuntimeError('SonarQube: no job ID returned.')
+        deadline = time.monotonic()+1650
+        result = None
+        while time.monotonic()<deadline:
+            state = call('scan_status',dict(params,job_id=remote_id))
+            if not isinstance(state,dict): raise RuntimeError('SonarQube: invalid job status.')
+            if state.get('status')=='error': raise RuntimeError(state.get('error') or 'SonarQube: analysis failed.')
+            if state.get('status')=='done':
+                result=state.get('result'); break
+            if job_id:
+                percent=25+int(state.get('percent',0))*30//100
+                msg=('SonarQube analysis in progress' if SAST_ENGLISH_UI else state.get('message','Analizando con SonarQube'))
+                sast_job_update(job_id,percent,msg)
+            time.sleep(3)
+        if not isinstance(result,dict) or result.get('mode')!='new-source-scan':
+            raise RuntimeError('SonarQube: no new analysis confirmed.')
+    else:
+        result = call('fetch',params)
+    rows = result.get('findings') if isinstance(result, dict) else None
+    if not isinstance(rows, list) or len(rows) > 250:
+        raise ValueError('Respuesta de hallazgos inválida.')
+    findings = []
+    for n, item in enumerate(rows, 1):
+        if not isinstance(item, dict) or not item.get('titulo'):
+            raise ValueError('Respuesta de hallazgos inválida.')
+        findings.append({'id':str(n), 'title':item['titulo'], 'description':item.get('descripcion') or '',
+                         'severity':item.get('severidad'), 'cvss_score':item.get('cvss'), 'cve':item.get('cve'),
+                         'category':_GRAC_OWN_SCANNERS[provider], 'evidence_snippet':item.get('evidencia') or '',
+                         'location':{}, 'remediation':{'recommendation':item.get('recomendacion_base') or ''}})
+    return sast_reconcile_cvss_risk({'findings':findings, 'import_provider':provider,
+                                     'profile':payload['own_profile'], 'project_reference':payload['project_ref'],
+                                     'sonarqube':result.get('sonarqube'), 'reference_sha256':payload.get('reference_sha256'), 'truncated':bool(result.get('truncated'))})
+
+def _grac_mw_resolve_own_profile(target, providers):
     """Discover the one enabled profile at Middleware, without duplicating settings in GRAC.
 
     The existing middleware intentionally has no public endpoint listing enabled
@@ -218522,7 +218676,7 @@ def _grac_mw_resolve_own_profile(target):
     """
     found = {}
     problems = []
-    for provider in _GRAC_OWN_SCANNERS:
+    for provider in providers:
         # Current middleware convention: profile ID matches the provider ID.
         # Also accept a single legacy 'default' profile configured there.
         for profile in (provider, 'default'):
